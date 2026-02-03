@@ -1,0 +1,853 @@
+{
+  "records": [
+    {
+      "groupID": "2026-01",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 1: Terms",
+      "score": 75,
+      "date": "2026-01-27",
+      "phase": "Assessment",
+      "cycle": "New Onboard",
+      "link": "Digital-Assessment"
+    },
+    {
+      "groupID": "2026-01",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 1: Terms",
+      "score": 75,
+      "date": "2026-01-28",
+      "phase": "Assessment",
+      "cycle": "New Onboard",
+      "link": "Digital-Assessment"
+    }
+  ],
+  "users": [
+    {
+      "user": "admin",
+      "pass": "Pass0525@",
+      "role": "admin",
+      "theme": {
+        "primaryColor": "#e00000",
+        "wallpaper": "https://wallpapercave.com/wp/wp3931484.jpg"
+      }
+    },
+    {
+      "user": "Jaco Prince",
+      "pass": "Pass0525@",
+      "role": "trainee",
+      "traineeData": {
+        "contact": "071 055 8851",
+        "knowledge": "i know all",
+        "completedDate": "2026-01-28T08:13:11.855Z"
+      },
+      "theme": {
+        "primaryColor": "#00f028",
+        "wallpaper": ""
+      },
+      "hasFilledQuestionnaire": true
+    },
+    {
+      "user": "test",
+      "pass": "zi8cILZ@F14y",
+      "role": "trainee",
+      "theme": {
+        "primaryColor": "",
+        "wallpaper": ""
+      }
+    }
+  ],
+  "assessments": [
+    {
+      "name": "Course 1: Terms",
+      "video": false,
+      "live": false
+    },
+    {
+      "name": "Course 3: Core",
+      "video": false,
+      "live": false
+    },
+    {
+      "name": "Course 7: Fibre Slow Speed Flow Chart Training",
+      "video": false,
+      "live": false
+    },
+    {
+      "name": "Course 6: Wireless No Internet Flow Chart Training",
+      "video": false,
+      "live": false
+    },
+    {
+      "name": "Course 9: VoIP Troubleshooting Flow Chart Training",
+      "video": false,
+      "live": false
+    },
+    {
+      "name": "Course 2: Programs & Websites - Q-Contact",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 2: Programs & Websites - Corteza",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 2: Programs & Websites - Radius Server",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 2: Programs & Websites - HeroTill",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 2: Programs & Websites - Microsoft Teams",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 2: Programs & Websites - 3CX",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 2: Programs & Websites - One Drive",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 2: Programs & Websites - Dialing/Dispo",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Trenched/Ariel/Last Mile/ONT/Router",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Vumatel",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Openserve",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Frogfoot",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Octotel",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - MFN",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Link Africa",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Balwin",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Clear Access",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Evotel",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - DNATel",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Lightstruck",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - TTM",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Zoom",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Vodacom",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Century City",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Mitsol",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 4: Fibre - Vuma Reach",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 5: Wireless - Dish/Router/Cable",
+      "video": true,
+      "live": true
+    },
+    {
+      "name": "Course 8: Wireless Slow Speed Flow Chart Training",
+      "video": false,
+      "live": false
+    },
+    {
+      "name": "Course 10: Email Flow Chart Training",
+      "video": false,
+      "live": false
+    },
+    {
+      "name": "1st Vetting Test",
+      "video": false,
+      "live": true
+    },
+    {
+      "name": "Final Vetting Test",
+      "video": false,
+      "live": true
+    }
+  ],
+  "rosters": {
+    "2026-01": [
+      "Jaco Prince"
+    ]
+  },
+  "accessControl": {
+    "enabled": false,
+    "whitelist": [
+      "102.66.15.0/24",
+      "102.66.15.79"
+    ]
+  },
+  "trainingData": {},
+  "vettingTopics": [
+    "General Knowledge",
+    "Fibre Troubleshooting",
+    "Wireless Troubleshooting",
+    "VoIP",
+    "Escalation Procedures"
+  ],
+  "schedules": {
+    "A": {
+      "items": [
+        {
+          "dateRange": "2026/01/28",
+          "courseName": "Test Course ",
+          "materialLink": "www.google.com",
+          "dueDate": "2026/01/28",
+          "openTime": "08:00",
+          "closeTime": "17:00",
+          "assessmentLink": "",
+          "linkedTestId": "1769524020482"
+        },
+        {
+          "dateRange": "2026/01/29",
+          "courseName": "test course 2",
+          "materialLink": "https://www.youtube.com",
+          "dueDate": "2026/01/29",
+          "openTime": "08:00",
+          "closeTime": "17:00",
+          "assessmentLink": ""
+        }
+      ],
+      "assigned": "2026-01"
+    },
+    "B": {
+      "items": [],
+      "assigned": null
+    }
+  },
+  "liveBookings": [
+    {
+      "id": "1769524118850",
+      "date": "2026-01-27",
+      "time": "2:00 PM",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 2: Programs & Websites - Dialing/Dispo",
+      "status": "Cancelled",
+      "cancelledBy": "admin",
+      "cancelledAt": "2026-01-27T14:35:42.105Z"
+    },
+    {
+      "id": "1769581808049",
+      "date": "2026-01-27",
+      "time": "2:00 PM",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 2: Programs & Websites - Radius Server",
+      "status": "Cancelled",
+      "cancelledBy": "Jaco Prince",
+      "cancelledAt": "2026-01-28T06:30:12.475Z"
+    },
+    {
+      "id": "1769581818259",
+      "date": "2026-01-27",
+      "time": "2:00 PM",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 2: Programs & Websites - Q-Contact",
+      "status": "Booked"
+    },
+    {
+      "id": "1769583167750",
+      "date": "2026-01-28",
+      "time": "2:00 PM",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 2: Programs & Websites - 3CX",
+      "status": "Booked"
+    },
+    {
+      "id": "1769585179921",
+      "date": "2026-01-27",
+      "time": "4:00 PM",
+      "trainer": "Trainer 2",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 4: Fibre - Frogfoot",
+      "status": "Cancelled",
+      "cancelledBy": "admin",
+      "cancelledAt": "2026-01-29T06:23:34.107Z"
+    },
+    {
+      "id": "1769587005432",
+      "date": "2026-01-27",
+      "time": "1:00 PM",
+      "trainer": "Trainer 1",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 2: Programs & Websites - Q-Contact",
+      "status": "Cancelled",
+      "cancelledBy": "admin",
+      "cancelledAt": "2026-01-29T06:23:27.057Z"
+    },
+    {
+      "id": "1769587016276",
+      "date": "2026-01-27",
+      "time": "2:00 PM",
+      "trainer": "Trainer 2",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 2: Programs & Websites - Corteza",
+      "status": "Cancelled",
+      "cancelledBy": "admin",
+      "cancelledAt": "2026-01-29T06:23:29.394Z"
+    },
+    {
+      "id": "1769587020649",
+      "date": "2026-01-27",
+      "time": "3:00 PM",
+      "trainer": "Trainer 1",
+      "trainee": "Jaco Prince",
+      "assessment": "Course 2: Programs & Websites - Dialing/Dispo",
+      "status": "Cancelled",
+      "cancelledBy": "admin",
+      "cancelledAt": "2026-01-29T06:23:31.800Z"
+    }
+  ],
+  "cancellationCounts": {
+    "Jaco Prince": 1
+  },
+  "liveScheduleSettings": {
+    "startDate": "2026-01-27",
+    "days": "7"
+  },
+  "tests": [
+    {
+      "id": "1769524020482",
+      "title": "Course 1: Terms",
+      "type": "standard",
+      "duration": null,
+      "questions": [
+        {
+          "id": 1769523781133.0962,
+          "type": "multiple_choice",
+          "text": "Multiple Choice",
+          "points": 1,
+          "options": [
+            "1",
+            "2"
+          ],
+          "correct": 0
+        },
+        {
+          "id": 1769523806326.6506,
+          "type": "multi_select",
+          "text": "multiple awnser test ",
+          "points": 3,
+          "options": [
+            "yup",
+            "yup",
+            "yup yup",
+            "lolz"
+          ],
+          "correct": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "id": 1769523848816.4954,
+          "type": "text",
+          "text": "this is just a test for text awnser ",
+          "points": 1,
+          "modelAnswer": "copy "
+        },
+        {
+          "id": 1769523871087.0981,
+          "type": "matching",
+          "text": "match the pairs question style ",
+          "points": 2,
+          "pairs": [
+            {
+              "left": "twat",
+              "right": "waffel"
+            },
+            {
+              "left": "num",
+              "right": "nuts"
+            }
+          ]
+        },
+        {
+          "id": 1769523930761.0593,
+          "type": "drag_drop",
+          "text": "ordering ",
+          "points": 4,
+          "items": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "id": 1769523958797.8782,
+          "type": "ranking",
+          "text": "ranking order ",
+          "points": 4,
+          "items": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "id": 1769523978174.7043,
+          "type": "matrix",
+          "text": "matrix grid question ",
+          "points": 1,
+          "rows": [
+            "twat",
+            "num"
+          ],
+          "cols": [
+            "waffel",
+            "nuts"
+          ],
+          "correct": {
+            "0": "0",
+            "1": "1"
+          }
+        }
+      ]
+    }
+  ],
+  "submissions": [
+    {
+      "id": "1769526020722",
+      "testId": "1769524020482",
+      "testTitle": "Course 1: Terms",
+      "trainee": "Jaco Prince",
+      "date": "2026-01-27",
+      "answers": {
+        "0": 0,
+        "1": [
+          0,
+          1,
+          2
+        ],
+        "2": "copy",
+        "3": [
+          "waffel",
+          "nuts"
+        ],
+        "4": [
+          "3",
+          "2",
+          "4",
+          "1"
+        ],
+        "5": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "6": {
+          "0": 0,
+          "1": 1
+        }
+      },
+      "status": "retake_allowed",
+      "score": 75,
+      "archived": true
+    },
+    {
+      "id": "1769581742346",
+      "testId": "1769524020482",
+      "testTitle": "Course 1: Terms",
+      "trainee": "Jaco Prince",
+      "date": "2026-01-28",
+      "answers": {
+        "0": 0,
+        "1": [
+          0,
+          1,
+          2
+        ],
+        "2": "yup",
+        "3": [
+          "waffel",
+          "nuts"
+        ],
+        "4": [
+          "3",
+          "2",
+          "1",
+          "4"
+        ],
+        "5": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "6": {
+          "0": 0,
+          "1": 1
+        }
+      },
+      "status": "completed",
+      "score": 75
+    }
+  ],
+  "savedReports": [
+    {
+      "id": 1769588155973,
+      "date": "1/28/2026",
+      "trainee": "Jaco Prince",
+      "savedBy": "admin",
+      "html": "\n                <div class=\"report-header\"><div class=\"report-logo\">1st Line Training</div><div class=\"report-title\">Trainee Review Report</div></div>\n                <div class=\"report-row dynamic-section\"><div class=\"report-field half\"><label><span class=\"rep-num\"></span>Onboard Name</label><div id=\"repName\" class=\"report-input-display\">Jaco Prince</div></div><div class=\"report-field half\"><label>Training Period</label><div id=\"repPeriod\" class=\"report-input-display\">January 2026 to February 2026</div></div></div>\n                <div class=\"report-row dynamic-section\"><div class=\"report-field half\"><label><span class=\"rep-num\"></span>Contact Information</label><div id=\"repContact\" class=\"report-input-display\" style=\"min-height:40px;\">071 055 8851</div></div><div class=\"report-field half\"><label><span class=\"rep-num\"></span>Knowledge Present Before Training</label><div id=\"repKnowledge\" class=\"report-input-display\" style=\"min-height:40px;\">i know all</div></div></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-section-title\"><span class=\"rep-num\"></span>Training Goal Feedback</div><table class=\"report-table\"><thead><tr><th style=\"width:60%\">Course / Assessment</th><th class=\"center\">Pass</th><th class=\"center\">Improvement</th><th class=\"center\">Failed</th></tr></thead><tbody id=\"repGoalBody\"><tr><td>Course 1: Terms</td><td class=\"center report-check\"></td><td class=\"center report-check\">•</td><td class=\"center report-check\"></td></tr><tr><td>Course 3: Core</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 7: Fibre Slow Speed Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 6: Wireless No Internet Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 9: VoIP Troubleshooting Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Q-Contact</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Corteza</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Radius Server</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - HeroTill</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Microsoft Teams</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - 3CX</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - One Drive</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Dialing/Dispo</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Trenched/Ariel/Last Mile/ONT/Router</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Vumatel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Openserve</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Frogfoot</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Octotel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - MFN</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Link Africa</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Balwin</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Clear Access</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Evotel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - DNATel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Lightstruck</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - TTM</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Zoom</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Vodacom</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Century City</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Mitsol</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Vuma Reach</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 5: Wireless - Dish/Router/Cable</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 8: Wireless Slow Speed Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 10: Email Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr></tbody></table></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-section-title\"><span class=\"rep-num\"></span>Assessment Scores (Percentage Ranges)</div><table class=\"report-table\"><thead><tr><th style=\"width:60%\">Course / Assessment</th><th class=\"center\">0-59%</th><th class=\"center\">60-89%</th><th class=\"center\">90-100%</th></tr></thead><tbody id=\"repScoreBody\"><tr><td>Course 1: Terms</td><td class=\"center report-check\"></td><td class=\"center report-check\">•</td><td class=\"center report-check\"></td></tr><tr><td>Course 3: Core</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 7: Fibre Slow Speed Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 6: Wireless No Internet Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 9: VoIP Troubleshooting Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Q-Contact</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Corteza</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Radius Server</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - HeroTill</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Microsoft Teams</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - 3CX</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - One Drive</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 2: Programs &amp; Websites - Dialing/Dispo</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Trenched/Ariel/Last Mile/ONT/Router</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Vumatel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Openserve</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Frogfoot</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Octotel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - MFN</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Link Africa</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Balwin</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Clear Access</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Evotel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - DNATel</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Lightstruck</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - TTM</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Zoom</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Vodacom</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Century City</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Mitsol</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 4: Fibre - Vuma Reach</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 5: Wireless - Dish/Router/Cable</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 8: Wireless Slow Speed Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Course 10: Email Flow Chart Training</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr></tbody></table></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-field full\"><label><span class=\"rep-num\"></span>Were any behavioral problems noticed?</label><div class=\"check-group\"><label><input type=\"radio\" name=\"repBehavior\" value=\"Yes\" onchange=\"toggleReportDetails('behavior', true)\"> Yes</label><label><input type=\"radio\" name=\"repBehavior\" value=\"No\" checked=\"\" onchange=\"toggleReportDetails('behavior', false)\"> No</label></div></div></div>\n                <div id=\"behaviorDetails\" class=\"hidden-print-field\"><div class=\"report-block dynamic-section\"><label class=\"bold-label\"><span class=\"rep-num\"></span>What was the problem &amp; how was it addressed?</label><div class=\"report-text-area\" contenteditable=\"true\" id=\"repProbText\"></div></div><div class=\"report-block dynamic-section\"><label class=\"bold-label\"><span class=\"rep-num\"></span>Proof of problem addressed (Hyperlink)</label><div class=\"report-input-display\" contenteditable=\"true\" placeholder=\"Paste full URL here...\" id=\"repProbLink\"></div></div></div>\n                <div class=\"report-block top-margin dynamic-section\"><div class=\"report-field full\"><label><span class=\"rep-num\"></span>Were any training observations made?</label><div class=\"check-group\"><label><input type=\"radio\" name=\"repObserve\" value=\"Yes\" onchange=\"toggleReportDetails('observe', true)\"> Yes</label><label><input type=\"radio\" name=\"repObserve\" value=\"No\" checked=\"\" onchange=\"toggleReportDetails('observe', false)\"> No</label></div></div></div>\n                <div id=\"observeDetails\" class=\"hidden-print-field\"><div class=\"report-block dynamic-section\"><label class=\"bold-label\"><span class=\"rep-num\"></span>What was the observation &amp; how was it addressed?</label><div class=\"report-text-area\" contenteditable=\"true\" id=\"repObsText\"></div></div><div class=\"report-block dynamic-section\"><label class=\"bold-label\"><span class=\"rep-num\"></span>Proof of observation addressed (Hyperlink)</label><div class=\"report-input-display\" contenteditable=\"true\" placeholder=\"Paste full URL here...\" id=\"repObsLink\"></div></div></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-section-title\"><span class=\"rep-num\"></span>Vetting Test Scores (Test 1)</div><table class=\"report-table\"><thead><tr><th>Topic</th><th>0-59%</th><th>60-79%</th><th>80-99%</th><th>100%</th></tr></thead><tbody id=\"repVetting1Body\"><tr><td>General Knowledge</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Fibre Troubleshooting</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Wireless Troubleshooting</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>VoIP</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Escalation Procedures</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr></tbody></table></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-section-title\"><span class=\"rep-num\"></span>Vetting Test Scores (Test 2 / Final)</div><table class=\"report-table\"><thead><tr><th>Topic</th><th>0-59%</th><th>60-79%</th><th>80-99%</th><th>100%</th></tr></thead><tbody id=\"repVetting2Body\"><tr><td>General Knowledge</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Fibre Troubleshooting</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Wireless Troubleshooting</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>VoIP</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr><tr><td>Escalation Procedures</td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td><td class=\"center report-check\"></td></tr></tbody></table></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-section-title\"><span class=\"rep-num\"></span>Pre-Production Feedback (Team Leader)</div><div class=\"report-text-area\" contenteditable=\"true\" id=\"repFeedback\">test</div></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-section-title\"><span class=\"rep-num\"></span>Pass-Mark Met</div><div class=\"report-row\"><div class=\"check-group-block\"><label><input type=\"checkbox\" id=\"repPass1\"> Team Leader Feedback Positive</label><label><input type=\"checkbox\" id=\"repPass2\"> Assessment Score Average Pass</label><label><input type=\"checkbox\" id=\"repPass3\"> Vetting Test PassMark Positive</label></div></div></div>\n                <div class=\"report-block dynamic-section\"><div class=\"report-section-title\"><span class=\"rep-num\"></span>Deployment Status</div><div class=\"report-text-area\" contenteditable=\"true\" style=\"height:50px;\" id=\"repDeploy\">test</div></div>\n                <div class=\"report-footer\">Generated via 1st Line Training Portal | Date: <span id=\"printDate\">1/28/2026</span></div>\n            ",
+      "behaviorYes": false,
+      "observeYes": false,
+      "probText": "",
+      "probLink": "",
+      "obsText": "",
+      "obsLink": "",
+      "feedback": "test",
+      "deploy": "test",
+      "checks": [
+        true,
+        true,
+        true
+      ]
+    }
+  ],
+  "insightReviews": [],
+  "exemptions": [
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 3: Core"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 7: Fibre Slow Speed Flow Chart Training"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 6: Wireless No Internet Flow Chart Training"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 9: VoIP Troubleshooting Flow Chart Training"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - Q-Contact"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - Corteza"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - Radius Server"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - HeroTill"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - Microsoft Teams"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - 3CX"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - One Drive"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 2: Programs & Websites - Dialing/Dispo"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Trenched/Ariel/Last Mile/ONT/Router"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Vumatel"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Openserve"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Frogfoot"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Octotel"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - MFN"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Link Africa"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Balwin"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Clear Access"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Evotel"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - DNATel"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Lightstruck"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - TTM"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Zoom"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Vodacom"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Century City"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Mitsol"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 4: Fibre - Vuma Reach"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 5: Wireless - Dish/Router/Cable"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 8: Wireless Slow Speed Flow Chart Training"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Course 10: Email Flow Chart Training"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "1st Vetting - General Knowledge"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Final Vetting - General Knowledge"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "1st Vetting - Fibre Troubleshooting"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Final Vetting - Fibre Troubleshooting"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "1st Vetting - Wireless Troubleshooting"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Final Vetting - Wireless Troubleshooting"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "1st Vetting - VoIP"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Final Vetting - VoIP"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "1st Vetting - Escalation Procedures"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Final Vetting - Escalation Procedures"
+    },
+    {
+      "trainee": "Jaco Prince",
+      "groupID": "2026-01",
+      "item": "Insight Review"
+    }
+  ],
+  "notices": [
+    {
+      "id": "1769524585099",
+      "message": "This is just a standard test announcement ",
+      "targetRole": "all",
+      "type": "standard",
+      "active": true,
+      "date": "2026-01-27",
+      "acks": [
+        "Jaco Prince"
+      ]
+    },
+    {
+      "id": "1769524613442",
+      "message": "This is just a urgent test announcement ",
+      "targetRole": "trainee",
+      "type": "critical",
+      "active": true,
+      "date": "2026-01-27",
+      "acks": [
+        "Jaco Prince"
+      ]
+    },
+    {
+      "id": "1769524645975",
+      "message": "this is multiiple annoucement test",
+      "targetRole": "all",
+      "type": "standard",
+      "active": true,
+      "date": "2026-01-27",
+      "acks": [
+        "Jaco Prince"
+      ]
+    },
+    {
+      "id": "1769524651837",
+      "message": "and again ",
+      "targetRole": "all",
+      "type": "critical",
+      "active": true,
+      "date": "2026-01-27",
+      "acks": [
+        "Jaco Prince"
+      ]
+    }
+  ]
+}

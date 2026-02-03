@@ -1,0 +1,43 @@
+{
+  "name": "1st-line-training-portal",
+  "version": "2.0.0",
+  "description": "Training Portal Cloud Edition",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME"
+  },
+  "author": "Admin",
+  "license": "ISC",
+  "dependencies": {
+    "env-paths": "^2.2.1",
+    "fs-extra": "^11.2.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.1stline.trainingportal",
+    "productName": "1st Line Training Portal",
+    "publish": [
+      "github"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "files": [
+      "**/*",
+      "!database.json",
+      "!backups/**/*",
+      "!save_data.php",
+      "!server.js"
+    ]
+  }
+}
