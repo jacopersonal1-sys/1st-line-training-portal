@@ -285,8 +285,9 @@
 
             <div class="control-bubble">
                 <div class="bubble-content">
-                    <button class="icon-btn admin-only" onclick="showTab('admin-panel')" title="Admin Tools"><i class="fas fa-cogs"></i></button>
+                    <button id="btn-admin-tools" class="icon-btn admin-only" onclick="showTab('admin-panel')" title="Admin Tools"><i class="fas fa-cogs"></i></button>
                     <button class="icon-btn" onclick="toggleTheme()" title="Toggle Theme"><i class="fas fa-moon"></i></button>
+                    <button class="icon-btn" onclick="triggerUpdateCheck()" title="Check for Updates"><i class="fas fa-cloud-download-alt"></i></button>
                     <button class="icon-btn" onclick="refreshApp()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
                     <button class="icon-btn logout" onclick="logout()" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
                 </div>

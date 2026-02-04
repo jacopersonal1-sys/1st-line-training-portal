@@ -220,7 +220,7 @@ function applyRolePermissions() {
   const filterContainer = document.getElementById('filterContainer');
   const sections = document.querySelectorAll('.admin-only-section');
   const myTestsNav = document.getElementById('nav-my-tests');
-  const adminPanelBtn = document.querySelector('button[onclick="showTab(\'admin-panel\')"]');
+  const adminPanelBtn = document.getElementById('btn-admin-tools');
 
   // Reset visibility
   adminElems.forEach(e => e.classList.add('hidden'));

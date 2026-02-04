@@ -401,6 +401,18 @@ function refreshApp() {
     location.reload();
 }
 
+function triggerUpdateCheck() {
+    try {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.send('manual-update-check');
+        if(typeof showToast === 'function') showToast("Checking for updates...", "info");
+        else alert("Checking for updates...");
+    } catch(e) {
+        console.error("Update check failed:", e);
+        alert("Update check failed. Ensure you are running the app in desktop mode.");
+    }
+}
+
 function toggleTheme() {
     document.body.classList.toggle('light-mode');
     // Save preference
