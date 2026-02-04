@@ -164,6 +164,9 @@ async function autoLogin() {
   // NEW: Trigger Urgent Notices Update
   if (typeof updateNotices === 'function') updateNotices(CURRENT_USER.role);
 
+  // CHECK FOR SAVED WORK (Inactivity Recovery)
+  if (typeof checkForDrafts === 'function') checkForDrafts();
+
   // RESTART SYNC ENGINE (To apply role-based polling rates)
   if (typeof startRealtimeSync === 'function') startRealtimeSync();
 
@@ -277,7 +280,7 @@ function applyRolePermissions() {
     if(subBtnData) subBtnData.classList.add('hidden');
     if(subBtnAccess) subBtnAccess.classList.add('hidden');
     if(subBtnStatus) subBtnStatus.classList.add('hidden');
-    if(subBtnUpdates) subBtnUpdates.classList.add('hidden');
+    if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');
 
     // Role Specifics
     if (CURRENT_USER.role === 'teamleader') {

@@ -522,6 +522,10 @@ function openTestTaker(testId) {
     const titleEl = document.getElementById('takingTitle');
     if(titleEl) titleEl.innerText = window.CURRENT_TEST.title;
 
+    renderTestPaper();
+}
+
+function renderTestPaper() {
     const content = document.getElementById('takingQuestions');
     content.innerHTML = ''; 
 
@@ -553,6 +557,33 @@ function openTestTaker(testId) {
     </div>`;
     
     content.innerHTML = html;
+}
+
+// --- DRAFT HANDLING (INACTIVITY) ---
+function saveAssessmentDraft() {
+    if (!window.CURRENT_TEST) return;
+    const draft = {
+        test: window.CURRENT_TEST,
+        answers: window.USER_ANSWERS,
+        timestamp: Date.now()
+    };
+    localStorage.setItem('draft_assessment', JSON.stringify(draft));
+    console.log("Assessment draft saved.");
+}
+
+function restoreAssessmentDraft() {
+    const draftStr = localStorage.getItem('draft_assessment');
+    if (!draftStr) return;
+    
+    const draft = JSON.parse(draftStr);
+    window.CURRENT_TEST = draft.test;
+    window.USER_ANSWERS = draft.answers || {};
+    
+    if(typeof showTab === 'function') showTab('test-take-view');
+    const titleEl = document.getElementById('takingTitle');
+    if(titleEl) titleEl.innerText = window.CURRENT_TEST.title;
+    
+    renderTestPaper();
 }
 
 function renderQuestionInput(q, idx) {
@@ -750,6 +781,9 @@ async function submitTest() {
 
     subs.push(submission);
     localStorage.setItem('submissions', JSON.stringify(subs));
+
+    // Clear Draft on successful submit
+    localStorage.removeItem('draft_assessment');
 
     if (finalStatus === 'completed') {
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');

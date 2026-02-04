@@ -202,6 +202,42 @@ function renderBuilder() {
     document.getElementById('builderTotalScore').innerText = totalPoints;
 }
 
+// --- DRAFT HANDLING (INACTIVITY) ---
+function saveBuilderDraft() {
+    if (BUILDER_QUESTIONS.length === 0) return;
+    
+    const draft = {
+        questions: BUILDER_QUESTIONS,
+        id: EDITING_TEST_ID,
+        title: document.getElementById('builderAssessmentSelect').value,
+        type: document.getElementById('builderTestType').value,
+        duration: document.getElementById('builderDuration').value
+    };
+    localStorage.setItem('draft_builder', JSON.stringify(draft));
+    console.log("Builder draft saved.");
+}
+
+function restoreBuilderDraft() {
+    const draftStr = localStorage.getItem('draft_builder');
+    if (!draftStr) return;
+
+    const draft = JSON.parse(draftStr);
+    BUILDER_QUESTIONS = draft.questions || [];
+    EDITING_TEST_ID = draft.id;
+
+    // Restore UI
+    showTab('test-builder');
+    
+    document.getElementById('builderAssessmentSelect').value = draft.title;
+    document.getElementById('builderTestType').value = draft.type;
+    document.getElementById('builderDuration').value = draft.duration;
+    
+    // Trigger type change to show/hide duration
+    document.getElementById('builderTestType').onchange();
+
+    renderBuilder();
+}
+
 // --- BUILDER UPDATERS ---
 function updateQText(idx, val) { BUILDER_QUESTIONS[idx].text = val; }
 function updatePoints(idx, val) { BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; renderBuilder(); }
@@ -318,6 +354,9 @@ async function saveTest() {
     
     // Refresh Dropdowns to reflect changes
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+
+    // Clear Draft
+    localStorage.removeItem('draft_builder');
 
     alert("Test Saved.");
     EDITING_TEST_ID = null; // Reset

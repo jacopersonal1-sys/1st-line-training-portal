@@ -611,6 +611,15 @@ function startRealtimeSync() {
     // 2. HEARTBEAT: Poll every 15 seconds
     // Fast updates for "Active User" dashboard status
     HEARTBEAT_INTERVAL_ID = setInterval(() => {
+        // --- INACTIVITY CHECK (AUTO-LOGOUT) ---
+        const now = Date.now();
+        if (now - window.LAST_INTERACTION > LOGOUT_THRESHOLD) {
+            clearInterval(SYNC_INTERVAL);
+            clearInterval(HEARTBEAT_INTERVAL_ID);
+            if (typeof cacheAndLogout === 'function') cacheAndLogout();
+            return;
+        }
+
         sendHeartbeat();
         
         if(CURRENT_USER && CURRENT_USER.role === 'admin') {

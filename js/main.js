@@ -584,3 +584,46 @@ if (typeof require !== 'undefined') {
         }
     });
 }
+
+/* ================= INACTIVITY & DRAFT HANDLING ================= */
+
+window.cacheAndLogout = function() {
+    console.log("Inactivity detected. Caching and logging out...");
+    
+    // 1. Cache Assessment (If taking a test)
+    const takingView = document.getElementById('test-take-view');
+    if (takingView && takingView.classList.contains('active')) {
+        if (typeof saveAssessmentDraft === 'function') saveAssessmentDraft();
+    }
+    
+    // 2. Cache Test Builder (If creating a test)
+    const builderView = document.getElementById('test-builder');
+    if (builderView && builderView.classList.contains('active')) {
+        if (typeof saveBuilderDraft === 'function') saveBuilderDraft();
+    }
+
+    alert("You have been logged out due to inactivity (20 mins).\n\nYour current work has been cached locally and will be restored when you log back in.");
+    logout();
+};
+
+function checkForDrafts() {
+    // 1. Check Assessment Draft
+    const draftAssess = localStorage.getItem('draft_assessment');
+    if (draftAssess) {
+        if (confirm("⚠️ Unfinished Assessment Found!\n\nYou were logged out while taking a test. Do you want to resume where you left off?")) {
+            if (typeof restoreAssessmentDraft === 'function') restoreAssessmentDraft();
+        } else {
+            localStorage.removeItem('draft_assessment');
+        }
+    }
+
+    // 2. Check Builder Draft
+    const draftBuilder = localStorage.getItem('draft_builder');
+    if (draftBuilder && CURRENT_USER.role === 'admin') {
+        if (confirm("⚠️ Unsaved Test Draft Found!\n\nYou were logged out while building a test. Do you want to restore your draft?")) {
+            if (typeof restoreBuilderDraft === 'function') restoreBuilderDraft();
+        } else {
+            localStorage.removeItem('draft_builder');
+        }
+    }
+}
