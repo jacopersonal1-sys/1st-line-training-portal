@@ -45,7 +45,7 @@ function restrictTraineeMenu() {
     btns.forEach(btn => {
         const txt = btn.innerText;
         if(isTrainee) {
-            if (txt.includes("Manage Users") || txt.includes("Theme Settings")) {
+            if (txt.includes("Manage Users") || txt.includes("Theme Settings") || txt.includes("System Updates")) {
                 btn.style.display = ''; 
             } else {
                 btn.style.display = 'none'; 

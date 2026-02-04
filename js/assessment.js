@@ -200,6 +200,10 @@ function openAdminMarking(subId) {
     const modal = document.getElementById('markingModal');
     const container = document.getElementById('markingContainer');
     modal.classList.remove('hidden');
+    
+    // Check if locked (Completed)
+    const isLocked = sub.status === 'completed';
+    const lockAttr = isLocked ? 'disabled' : '';
 
     container.innerHTML = `
         <div style="margin-bottom:20px; border-bottom:2px solid var(--border-color); padding-bottom:10px;">
@@ -226,7 +230,7 @@ function openAdminMarking(subId) {
                     
                     <div style="display:flex; align-items:center; gap:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
                         <label style="font-weight:bold;">Score (Max ${pointsMax}):</label>
-                        <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="0" style="width:80px; padding:5px;">
+                        <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="0" style="width:80px; padding:5px;" ${lockAttr}>
                     </div>
                 </div>`;
         } 
@@ -256,18 +260,39 @@ function openAdminMarking(subId) {
                 if (correctRows === (q.rows || []).length) autoScore = pointsMax;
             }
             else if (q.type === 'multi_select') {
-               const correctArr = (q.correct || []).sort().toString();
-               const userArr = (userAns || []).map(Number).sort().toString();
-               if(correctArr === userArr) autoScore = pointsMax;
+               // UPDATED: Partial Credit Logic
+               const correctArr = (q.correct || []).map(Number);
+               const userArr = (userAns || []).map(Number);
+               let match = 0;
+               userArr.forEach(a => { if(correctArr.includes(a)) match++; });
+               
+               // Score = (Matches / Total Correct Options) * Points
+               if(correctArr.length > 0) {
+                   autoScore = (match / correctArr.length) * pointsMax;
+                   // Round to 1 decimal
+                   autoScore = Math.round(autoScore * 10) / 10;
+               }
             }
             else {
                 if (userAns == q.correct) autoScore = pointsMax;
             }
+            
+            // VISUALIZE ANSWER
+            let answerDisplay = "";
+            if(q.type === 'multiple_choice') answerDisplay = (q.options && userAns !== undefined) ? q.options[userAns] : "No Selection";
+            else if(q.type === 'multi_select') answerDisplay = (q.options && userAns) ? userAns.map(i => q.options[i]).join(", ") : "No Selection";
+            else if(q.type === 'matching') answerDisplay = (userAns || []).map((a, i) => `${q.pairs[i].left} -> ${a}`).join(" | ");
+            else if(q.type === 'matrix') answerDisplay = "Matrix Completed";
+            else answerDisplay = JSON.stringify(userAns);
 
             markHtml = `
-                <div style="margin-top:10px; font-size:0.9rem;">
-                    Type: ${q.type || 'multiple_choice'} | Auto-Result: ${autoScore > 0 ? '<b style="color:green;">Correct</b>' : '<b style="color:red;">Incorrect</b>'}
-                    <input type="hidden" class="q-mark" data-idx="${idx}" value="${autoScore}">
+                <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px;">
+                    <div style="font-size:0.8rem; color:var(--text-muted);">AGENT SELECTION:</div>
+                    <div style="font-weight:500; margin-bottom:5px;">${answerDisplay}</div>
+                    <div style="font-size:0.85rem; border-top:1px solid var(--border-color); padding-top:5px;">
+                        Auto-Score: <strong>${autoScore} / ${pointsMax}</strong>
+                        <input type="hidden" class="q-mark" data-idx="${idx}" value="${autoScore}">
+                    </div>
                 </div>`;
         }
 
@@ -278,10 +303,15 @@ function openAdminMarking(subId) {
             </div>`;
     });
 
+    // If locked, hide submit button
     const submitBtn = document.getElementById('markingSubmitBtn');
-    submitBtn.style.display = 'inline-block';
-    submitBtn.innerText = "Finalize Score & Push to Records";
-    submitBtn.onclick = () => finalizeAdminMarking(subId);
+    if(isLocked) {
+        submitBtn.style.display = 'none';
+    } else {
+        submitBtn.style.display = 'inline-block';
+        submitBtn.innerText = "Finalize Score & Push to Records";
+        submitBtn.onclick = () => finalizeAdminMarking(subId);
+    }
 }
 
 // Function to View Completed Tests (Called from Test Records)
@@ -408,7 +438,13 @@ function loadTraineeTests() {
                 statusHtml = '<span class="status-badge status-semi">Pending Review</span>';
                 actionBtn = `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">In Review</button>`;
             } else {
-                statusHtml = `<span class="status-badge status-pass">Score: ${sub.score}%</span>`;
+                // UPDATED: Show Pass/Fail Status
+                let passLabel = "Fail";
+                let passClass = "status-fail";
+                if(sub.score >= (typeof PASS !== 'undefined' ? PASS : 90)) { passLabel = "Pass"; passClass = "status-pass"; }
+                else if(sub.score >= (typeof IMPROVE !== 'undefined' ? IMPROVE : 60)) { passLabel = "Improve"; passClass = "status-improve"; }
+                
+                statusHtml = `<span class="status-badge ${passClass}">${passLabel} (${sub.score}%)</span>`;
                 actionBtn = `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">Completed</button>`;
             }
         }
@@ -656,9 +692,15 @@ async function submitTest() {
                 if (correctRows === (q.rows || []).length) score += pts;
             }
             else if (q.type === 'multi_select') {
-               const correctArr = (q.correct || []).sort().toString();
-               const userArr = (ans || []).map(Number).sort().toString();
-               if(correctArr === userArr) score += pts;
+               // UPDATED: Partial Credit Logic
+               const correctArr = (q.correct || []).map(Number);
+               const userArr = (ans || []).map(Number);
+               let match = 0;
+               userArr.forEach(a => { if(correctArr.includes(a)) match++; });
+               
+               if(correctArr.length > 0) {
+                   score += (match / correctArr.length) * pts;
+               }
             }
             else {
                 if (ans == q.correct) score += pts;

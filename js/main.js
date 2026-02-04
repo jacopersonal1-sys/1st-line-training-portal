@@ -393,6 +393,9 @@ function showAdminSub(viewName, btn) {
   if(viewName === 'status' && typeof refreshSystemStatus === 'function') {
       refreshSystemStatus();
   }
+  if(viewName === 'updates' && typeof loadAdminUpdates === 'function') {
+      loadAdminUpdates();
+  }
 }
 
 /* ================= HEADER BUTTONS ================= */
@@ -401,16 +404,7 @@ function refreshApp() {
     location.reload();
 }
 
-function triggerUpdateCheck() {
-    try {
-        const { ipcRenderer } = require('electron');
-        ipcRenderer.send('manual-update-check');
-        // We removed the manual toast here. The main process will send a 'checking-for-update' event immediately.
-    } catch(e) {
-        console.error("Update check failed:", e);
-        alert("Update check failed. Ensure you are running the app in desktop mode.");
-    }
-}
+// triggerUpdateCheck removed - moved to admin_updates.js
 
 function restartAndInstall() {
     try {

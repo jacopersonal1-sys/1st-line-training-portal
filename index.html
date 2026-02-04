@@ -287,8 +287,6 @@
                 <div class="bubble-content">
                     <button id="btn-admin-tools" class="icon-btn admin-only" onclick="showTab('admin-panel')" title="Admin Tools"><i class="fas fa-cogs"></i></button>
                     <button class="icon-btn" onclick="toggleTheme()" title="Toggle Theme"><i class="fas fa-moon"></i></button>
-                    <button id="btn-check-update" class="icon-btn" onclick="triggerUpdateCheck()" title="Check for Updates"><i class="fas fa-cloud-download-alt"></i></button>
-                    <button id="btn-restart-update" class="icon-btn hidden" onclick="restartAndInstall()" title="Restart & Install Update" style="color:#2ecc71;"><i class="fas fa-arrow-circle-up"></i></button>
                     <button class="icon-btn" onclick="refreshApp()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
                     <button class="icon-btn logout" onclick="logout()" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
                 </div>
@@ -468,7 +466,7 @@
                 <button class="btn-secondary" onclick="showTab('my-tests')">Cancel / Exit</button>
                 <h3 id="takingTitle" style="margin:0;">Assessment</h3>
             </div>
-            <div id="takingQuestions" style="max-width: 800px; margin: 0 auto;"></div>
+            <div id="takingQuestions" style="width: 100%; margin: 0;"></div>
             </section>
 
         <section id="report-card">
@@ -536,6 +534,7 @@
             <button class="sub-tab-btn" id="btn-sub-data" onclick="showAdminSub('data', this)">Database</button>
             <button class="sub-tab-btn" id="btn-sub-access" onclick="showAdminSub('access', this)">Access Control</button>
             <button class="sub-tab-btn" id="btn-sub-status" onclick="showAdminSub('status', this)">System Status</button>
+            <button class="sub-tab-btn" id="btn-sub-updates" onclick="showAdminSub('updates', this)">System Updates</button>
             <button class="sub-tab-btn" id="btn-sub-theme" onclick="showAdminSub('theme', this)">Theme Settings</button> 
         </div>
         
@@ -697,6 +696,34 @@
             </div>
         </div>
 
+        <div id="admin-view-updates" class="admin-view">
+            <div class="card">
+                <h3>System Updates</h3>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:20px; border-bottom:1px solid var(--border-color);">
+                    <div>
+                        <div style="font-size:0.9rem; color:var(--text-muted);">Current Version</div>
+                        <div id="currentVersionDisplay" style="font-size:1.5rem; font-weight:bold; color:var(--primary);">Loading...</div>
+                    </div>
+                    <div>
+                        <button id="btnCheckUpdates" class="btn-primary" onclick="triggerManualUpdate()"><i class="fas fa-sync"></i> Check for Updates</button>
+                        <button id="btnInstallUpdate" class="btn-success hidden" onclick="restartAndInstall()"><i class="fas fa-arrow-circle-up"></i> Restart & Install</button>
+                    </div>
+                </div>
+
+                <div id="updateProgressContainer" class="hidden" style="margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                        <span id="updateStatusText">Downloading...</span>
+                        <span id="updateProgressText">0%</span>
+                    </div>
+                    <div style="height:10px; background:var(--bg-input); border-radius:5px; overflow:hidden;">
+                        <div id="updateProgressBar" style="height:100%; width:0%; background:var(--primary); transition:width 0.3s;"></div>
+                    </div>
+                </div>
+
+                <div style="background:var(--bg-input); padding:15px; border-radius:8px; height:200px; overflow-y:auto; border:1px solid var(--border-color);" id="updateLog"></div>
+            </div>
+        </div>
+
         <div id="admin-view-theme" class="admin-view">
             <div class="card">
                 <h3>Personalization</h3>
@@ -733,6 +760,7 @@
 <script src="js/data.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/dashboard.js"></script> 
+<script src="js/admin_updates.js"></script>
 
 <script src="js/admin_sys.js"></script>
 <script src="js/admin_users.js"></script>

@@ -83,6 +83,11 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
+// IPC Listener for Version
+ipcMain.handle('get-app-version', () => {
+    return app.getVersion();
+});
+
 // IPC Listener for Manual Update Check
 ipcMain.on('manual-update-check', () => {
     if (!app.isPackaged) {

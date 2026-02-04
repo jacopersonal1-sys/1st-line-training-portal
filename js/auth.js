@@ -240,6 +240,7 @@ function applyRolePermissions() {
   const subBtnData = document.getElementById('btn-sub-data');
   const subBtnAccess = document.getElementById('btn-sub-access');
   const subBtnStatus = document.getElementById('btn-sub-status');
+  const subBtnUpdates = document.getElementById('btn-sub-updates');
 
   if (CURRENT_USER.role === 'admin') {
     adminElems.forEach(e => e.classList.remove('hidden'));
@@ -258,6 +259,7 @@ function applyRolePermissions() {
     if(subBtnData) subBtnData.classList.remove('hidden');
     if(subBtnAccess) subBtnAccess.classList.remove('hidden');
     if(subBtnStatus) subBtnStatus.classList.remove('hidden');
+    if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');
 
     document.getElementById('admin-create-user-card')?.classList.remove('hidden');
     document.getElementById('admin-user-controls')?.classList.remove('hidden');
@@ -275,6 +277,7 @@ function applyRolePermissions() {
     if(subBtnData) subBtnData.classList.add('hidden');
     if(subBtnAccess) subBtnAccess.classList.add('hidden');
     if(subBtnStatus) subBtnStatus.classList.add('hidden');
+    if(subBtnUpdates) subBtnUpdates.classList.add('hidden');
 
     // Role Specifics
     if (CURRENT_USER.role === 'teamleader') {

@@ -185,7 +185,7 @@ function buildTimeline(items, isAdmin) {
                 if (item.linkedTestId) {
                     if (status === 'upcoming') actions = `<button class="btn-start-test disabled" aria-label="Locked"><i class="fas fa-lock"></i> Locked</button>`;
                     else if (status === 'past') actions = `<button class="btn-start-test disabled" aria-label="Closed"><i class="fas fa-history"></i> Closed</button>`;
-                    else actions = `<button class="btn-start-test" onclick="goToTest(${item.linkedTestId})" aria-label="Take Test">Take Assessment</button>`;
+                    else actions = `<button class="btn-start-test" onclick="goToTest('${item.linkedTestId}')" aria-label="Take Test">Take Assessment</button>`;
                 } else if (item.assessmentLink) {
                     if (status === 'upcoming') {
                            actions = `<span class="btn-link-external disabled" style="opacity:0.5; cursor:not-allowed;">Locked <i class="fas fa-lock"></i></span>`;
