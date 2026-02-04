@@ -300,9 +300,6 @@ async function fetchSystemStatus() {
     try {
         if (!window.supabaseClient) return;
 
-        const end = Date.now();
-        const latency = end - start;
-
         const localData = {};
         Object.keys(DB_SCHEMA).forEach(k => {
             localData[k] = JSON.parse(localStorage.getItem(k)) || DB_SCHEMA[k];
@@ -315,10 +312,17 @@ async function fetchSystemStatus() {
             .select('*')
             .gte('lastSeen', twoMinutesAgo);
 
+        const end = Date.now();
+        const latency = end - start;
+
         if (!error) {
             const storageEl = document.getElementById('statusStorage');
             const latencyEl = document.getElementById('statusLatency');
             const activeTable = document.getElementById('activeUsersTable');
+
+            const memoryEl = document.getElementById('statusMemory');
+            const connEl = document.getElementById('statusConnection');
+            const platformEl = document.getElementById('statusPlatform');
 
             if (storageEl && typeof formatBytes === 'function') {
                 storageEl.innerText = formatBytes(storageSize);
@@ -327,6 +331,23 @@ async function fetchSystemStatus() {
             if (latencyEl) {
                 latencyEl.innerText = latency + " ms";
                 latencyEl.style.color = latency < 200 ? "#2ecc71" : (latency < 500 ? "orange" : "#ff5252");
+            }
+
+            // --- NEW DIAGNOSTICS ---
+            if (memoryEl && performance && performance.memory) {
+                const used = performance.memory.usedJSHeapSize;
+                memoryEl.innerText = formatBytes(used);
+            }
+            
+            if (connEl && navigator.connection) {
+                connEl.innerText = navigator.connection.effectiveType.toUpperCase();
+            } else if (connEl) {
+                connEl.innerText = navigator.onLine ? "ONLINE" : "OFFLINE";
+            }
+            
+            if (platformEl) {
+                const os = (navigator.userAgentData && navigator.userAgentData.platform) ? navigator.userAgentData.platform : navigator.platform;
+                platformEl.innerText = os;
             }
 
             if (activeTable) {

@@ -236,13 +236,20 @@ async function scanAndGenerateUsers() {
     }); 
     
     let createdCount = 0; 
+    let resurrectedCount = 0;
     
     allNames.forEach(name => { 
         // Case-insensitive check
         const exists = users.find(u => u.user.toLowerCase() === name.toLowerCase());
-        const isRevoked = revoked.some(r => r.toLowerCase() === name.toLowerCase());
+        const revokedIdx = revoked.findIndex(r => r.toLowerCase() === name.toLowerCase());
 
-        if(!exists && !isRevoked) { 
+        if(!exists) { 
+            // If user is in the roster but was previously revoked/deleted, un-revoke them
+            if (revokedIdx > -1) {
+                revoked.splice(revokedIdx, 1);
+                resurrectedCount++;
+            }
+
             users.push({ user: name, pass: Math.floor(1000+Math.random()*9000).toString(), role: 'trainee' }); 
             createdCount++; 
         } 
@@ -250,9 +257,11 @@ async function scanAndGenerateUsers() {
     
     if(createdCount > 0) { 
         localStorage.setItem('users', JSON.stringify(users)); 
+        if (resurrectedCount > 0) localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+
         // FIX: Ensure cloud sync happens immediately
         await secureUserSave();
-        alert(`Generated ${createdCount} missing accounts.`); 
+        alert(`Generated ${createdCount} missing accounts (${resurrectedCount} restored from deletion).`); 
         loadAdminUsers(); 
         populateTraineeDropdown(); 
     } else {
