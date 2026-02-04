@@ -217,7 +217,7 @@ function populateTraineeDropdown() {
 
 // --- USER & TRAINEE MANAGEMENT ---
 
-function scanAndGenerateUsers() { 
+async function scanAndGenerateUsers() { 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
     const records = JSON.parse(localStorage.getItem('records') || '[]'); 
@@ -250,9 +250,13 @@ function scanAndGenerateUsers() {
     
     if(createdCount > 0) { 
         localStorage.setItem('users', JSON.stringify(users)); 
+        // FIX: Ensure cloud sync happens immediately
+        await secureUserSave();
         alert(`Generated ${createdCount} missing accounts.`); 
         loadAdminUsers(); 
         populateTraineeDropdown(); 
+    } else {
+        alert("No missing users found based on current Rosters/Records.");
     }
 }
 
@@ -299,18 +303,20 @@ function loadAdminUsers() {
     if(userList) {
         userList.innerHTML = displayUsers.map((u,i) => {
             let actions = '';
+            // Escape single quotes for onclick handler safety
+            const safeUser = u.user.replace(/'/g, "\\'");
             
             if (CURRENT_USER.role === 'admin' && u.user !== 'admin') {
                 const hasReport = savedReports.some(r => r.trainee.toLowerCase() === u.user.toLowerCase());
                 const moveBtn = hasReport 
-                    ? `<button class="btn-warning btn-sm" onclick="openMoveUserModal('${u.user}')" title="Move to another group"><i class="fas fa-exchange-alt"></i></button>`
+                    ? `<button class="btn-warning btn-sm" onclick="openMoveUserModal('${safeUser}')" title="Move to another group"><i class="fas fa-exchange-alt"></i></button>`
                     : `<button class="btn-secondary btn-sm" disabled title="Onboard Report Required to Move"><i class="fas fa-exchange-alt" style="opacity:0.5;"></i></button>`;
 
-                actions = `${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit(${i})"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser(${i})"><i class="fas fa-trash"></i></button>`;
+                // FIX: Pass username instead of index to prevent deleting wrong user when sorted
+                actions = `${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')"><i class="fas fa-trash"></i></button>`;
             } 
             else if (u.user === CURRENT_USER.user) {
-                const realIndex = users.findIndex(x => x.user === u.user);
-                actions = `<button class="btn-secondary btn-sm" onclick="openUserEdit(${realIndex})"><i class="fas fa-pen"></i> Edit Password</button>`;
+                actions = `<button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i> Edit Password</button>`;
             }
             
             let passDisplay = '';
@@ -441,10 +447,12 @@ async function addUser() {
 }
 
 // FIXED: Now uses Tombstone (Blacklist) and Instant Save
-async function remUser(i) { 
-    if(confirm("Permanently delete this user?")) { 
+async function remUser(username) { 
+    if(confirm(`Permanently delete user '${username}'?`)) { 
         // 1. Get User
         const users = JSON.parse(localStorage.getItem('users') || '[]');
+        // FIX: Find index by username, not table row index
+        const i = users.findIndex(u => u.user === username);
         const targetUser = users[i];
 
         if(!targetUser) return;
@@ -468,9 +476,13 @@ async function remUser(i) {
     } 
 }
 
-function openUserEdit(index) {
-    editTargetIndex = index;
+function openUserEdit(username) {
     const users = JSON.parse(localStorage.getItem('users')); 
+    // FIX: Find index by username
+    const index = users.findIndex(u => u.user === username);
+    if(index === -1) return;
+
+    editTargetIndex = index;
     const u = users[index];
     
     document.getElementById('adminEditTitle').innerText = `Edit User: ${u.user}`;

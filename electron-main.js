@@ -2,6 +2,9 @@ const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
+// Enable logging for the auto-updater (helps debug "nothing happening")
+autoUpdater.logger = console;
+
 let mainWindow; // Define globally so updater events can access it
 
 function createWindow() {
@@ -82,7 +85,13 @@ app.on('window-all-closed', () => {
 
 // IPC Listener for Manual Update Check
 ipcMain.on('manual-update-check', () => {
-    autoUpdater.checkForUpdatesAndNotify();
+    if (!app.isPackaged) {
+        // In Dev Mode, just show a message so we know the button works
+        if(mainWindow) mainWindow.webContents.send('update-message', { text: '[DEV] Update check triggered', type: 'info' });
+    } else {
+        // In Production, trigger the actual check
+        autoUpdater.checkForUpdates();
+    }
 });
 
 // IPC Listener for Restart
