@@ -1,0 +1,31 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2c2c2c;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1A1410;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Main Container -->
+  <rect x="32" y="32" width="448" height="448" rx="100" ry="100" fill="url(#bgGrad)" stroke="#333" stroke-width="4" />
+  
+  <!-- Orange Accent Border -->
+  <rect x="48" y="48" width="416" height="416" rx="90" ry="90" fill="none" stroke="#F37021" stroke-width="12" opacity="0.9" />
+
+  <!-- "1st" Text -->
+  <text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="240" fill="#F37021" style="filter:url(#glow);">
+    1st
+  </text>
+  
+  <!-- "Line" Text (Small) -->
+  <text x="50%" y="78%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="50" fill="#e0e0e0" letter-spacing="4">
+    LINE
+  </text>
+</svg>

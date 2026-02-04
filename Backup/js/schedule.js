@@ -39,7 +39,7 @@ async function secureScheduleSave() {
 
         try {
             // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(['schedules', 'liveBookings', 'cancellationCounts'], true); 
+            await saveToServer(true); 
         } catch(e) {
             console.error("Schedule Cloud Sync Error:", e);
         } finally {
@@ -77,7 +77,7 @@ function renderSchedule() {
         }
         localStorage.setItem('schedules', JSON.stringify(schedules));
         // Initial save uses standard sync to establish baseline
-        if(typeof saveToServer === 'function') saveToServer(['schedules'], true);
+        if(typeof saveToServer === 'function') saveToServer();
     }
 
     if (!schedules[ACTIVE_SCHED_ID]) {

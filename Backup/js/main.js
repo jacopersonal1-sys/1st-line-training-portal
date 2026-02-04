@@ -7,7 +7,7 @@ async function secureInitSave() {
     // We attempt to sync immediately.
     if (typeof saveToServer === 'function') {
         try {
-            await saveToServer(['users'], true);
+            await saveToServer();
         } catch(e) {
             console.error("Init Cloud Sync Error:", e);
         }

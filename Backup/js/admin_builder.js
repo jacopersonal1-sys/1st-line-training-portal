@@ -308,7 +308,7 @@ async function saveTest() {
     }
 
     // Push new test definition to Supabase immediately (Force)
-    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
+    if(typeof saveToServer === 'function') await saveToServer(true);
     
     if(btn && btn.tagName === 'BUTTON') {
         btn.innerText = originalText;
@@ -354,7 +354,7 @@ async function deleteTest(id) {
     localStorage.setItem('tests', JSON.stringify(tests));
     
     // UPDATED: Ensure deletion syncs immediately via Supabase (Force)
-    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
+    if(typeof saveToServer === 'function') await saveToServer(true);
     
     loadManageTests();
 }

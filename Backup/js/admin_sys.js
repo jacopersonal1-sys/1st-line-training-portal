@@ -17,7 +17,7 @@ async function secureSysSave() {
 
         try {
             // PARAMETER 'true' = FORCE OVERWRITE (Instant / No Pull)
-            await saveToServer(['assessments', 'vettingTopics', 'accessControl', 'records'], true); 
+            await saveToServer(true); 
         } catch(e) {
             console.error("System Save Error:", e);
         } finally {
@@ -250,7 +250,7 @@ async function syncGroupsFromRecords() {
     
     localStorage.setItem('rosters', JSON.stringify(rosters)); 
     
-    if(typeof saveToServer === 'function') await saveToServer(['rosters'], true);
+    await secureSysSave();
     
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
     alert(`Sync Complete! Added ${updatedCount} trainees to their respective groups.`); 
@@ -429,7 +429,7 @@ async function saveThemeSettings() {
     
     if (typeof applyUserTheme === 'function') applyUserTheme();
     
-    if(typeof saveToServer === 'function') await saveToServer(['users'], true);
+    await secureSysSave();
     
     alert("Theme Saved!");
 }

@@ -23,7 +23,7 @@ async function secureAssessmentSave() {
 
         try {
             // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(['submissions', 'records', 'tests'], true); 
+            await saveToServer(true); 
         } catch(e) {
             console.error("Assessment Cloud Sync Error:", e);
             alert("Warning: Could not sync to cloud. Data saved locally.");
@@ -177,8 +177,7 @@ async function approveSubmission(subId) {
     localStorage.setItem('records', JSON.stringify(recs));
     
     // --- CLOUD SYNC ---
-    // secureAssessmentSave handles the specific keys
-    await secureAssessmentSave(); 
+    await secureAssessmentSave();
     
     alert("Approved & Recorded.");
     loadMarkingQueue();
@@ -404,7 +403,7 @@ async function finalizeAdminMarking(subId) {
     localStorage.setItem('records', JSON.stringify(records));
 
     // --- SECURE SAVE ---
-    await secureAssessmentSave(); // Saves submissions, records, tests
+    await secureAssessmentSave();
 
     alert(`Marking Finalized! Trainee scored ${percentage}%`);
     document.getElementById('markingModal').classList.add('hidden');
@@ -793,7 +792,7 @@ async function submitTest() {
     }
 
     // --- CLOUD SYNC ---
-    await secureAssessmentSave(); // Saves submissions, records
+    await secureAssessmentSave();
 
     if (finalStatus === 'completed') {
         alert(`Assessment Complete! You scored: ${finalPercent}%`);

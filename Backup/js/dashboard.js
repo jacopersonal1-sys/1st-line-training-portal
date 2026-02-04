@@ -8,7 +8,7 @@ async function secureDashboardSave() {
     if (typeof saveToServer === 'function') {
         try {
             // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(['notices'], true);
+            await saveToServer(true);
         } catch(e) {
             console.error("Dashboard Save Error:", e);
         }

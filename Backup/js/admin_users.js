@@ -21,7 +21,7 @@ async function secureUserSave() {
 
         try {
             // Force Overwrite (true)
-            await saveToServer(['users', 'rosters', 'revokedUsers'], true); 
+            await saveToServer(true); 
         } catch(e) {
             console.error("User Save Error:", e);
         } finally {
@@ -127,7 +127,7 @@ async function saveRoster() {
     localStorage.setItem('rosters', JSON.stringify(rosters));
     
     // 1. Generate Users (Safely)
-    await scanAndGenerateUsers(); 
+    scanAndGenerateUsers(); 
     
     // 2. INSTANT SAVE
     await secureUserSave();

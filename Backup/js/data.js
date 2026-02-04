@@ -41,77 +41,63 @@ function isUserTyping() {
     return (tag === 'input' || tag === 'textarea' || tag === 'select');
 }
 
-// 2. Load Data (UPDATED: SMART SPLIT SYNC)
-// Only downloads keys that have changed on the server.
+// 2. Load Data (UPDATED: STRICT CLOUD MIRROR)
+// We treat Supabase as the single source of truth.
+// LocalStorage is just a cache that gets overwritten by the cloud on load.
 async function loadFromServer(silent = false) {
     try {
+        if(!silent) console.log("Connecting to Supabase...");
+        
+        // VISUAL FEEDBACK: Show sync status even for background polls
         if (window.supabaseClient) updateSyncUI('syncing');
+
+        // Ensure client exists
         if (!window.supabaseClient) return;
 
-        // A. Fetch Metadata (Timestamps) for all keys
-        const { data: meta, error } = await supabaseClient
-            .from('app_documents')
-            .select('key, updated_at');
+        const { data, error } = await supabaseClient
+            .from('app_data')
+            .select('content')
+            .eq('id', 1)
+            .single();
         
-        if (error) throw error;
-
-        // B. Migration Check: If new table is empty, try to migrate from old table
-        if (!meta || meta.length === 0) {
-            await migrateToSplitSchema();
-            return;
+        if (error && error.code !== 'PGRST116') {
+            throw error;
         }
 
-        // C. Identify Stale Keys
-        const keysToFetch = [];
-        meta.forEach(row => {
-            const localTs = localStorage.getItem('sync_ts_' + row.key);
-            // If we don't have it, or server is newer, fetch it
-            if (!localTs || new Date(row.updated_at) > new Date(localTs)) {
-                keysToFetch.push(row.key);
-            }
-        });
-
-        // D. Fetch Content for Stale Keys Only
-        if (keysToFetch.length > 0) {
-            if(!silent) console.log(`Syncing updates for: ${keysToFetch.join(', ')}`);
+        if (data && data.content) {
+            const serverContent = data.content;
             
-            const { data: docs, error: fetchErr } = await supabaseClient
-                .from('app_documents')
-                .select('key, content, updated_at')
-                .in('key', keysToFetch);
-            
-            if (fetchErr) throw fetchErr;
-
-            docs.forEach(doc => {
-                localStorage.setItem(doc.key, JSON.stringify(doc.content));
-                localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
+            // STRICT MODE: Overwrite Local with Server. No Merging.
+            // This ensures that if the server is wiped, the client wipes too.
+            Object.keys(DB_SCHEMA).forEach(k => {
+                // If key exists in server, use it. Else use default schema.
+                const val = (serverContent[k] !== undefined) ? serverContent[k] : DB_SCHEMA[k];
+                localStorage.setItem(k, JSON.stringify(val));
             });
             
-            // Refresh UI if needed
+            localStorage.setItem('lastSyncTimestamp', Date.now().toString());
+            
+            updateSyncUI('success');
+
+            if(!silent) console.log("System loaded from Supabase (Strict Mirror).");
+            
+            // FIX: Only refresh visual dropdowns/lists if the user is NOT typing.
+            // This prevents inputs from freezing or losing focus during auto-sync.
             if(silent && typeof refreshAllDropdowns === 'function') {
+                // NEW: Check interaction time (5 seconds buffer)
                 const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
                 if (!isUserTyping() && timeSinceInteraction > 5000) {
                     refreshAllDropdowns();
                 }
             }
-            updateSyncUI('success');
+            
         } else {
-            if(!silent) console.log("System up to date.");
-            updateSyncUI('success');
+            if(!silent) console.log("No existing cloud data found (New Setup).");
         }
-
     } catch (err) { 
         updateSyncUI('error');
         if(!silent) console.error("Supabase Load Error:", err);
     }
-}
-
-// MIGRATION: One-time move from 'app_data' (Blob) to 'app_documents' (Split)
-async function migrateToSplitSchema() {
-    console.log("Migrating to Split Schema...");
-    // Save all current local keys to the new table
-    await saveToServer(null, true); 
-    console.log("Migration Complete.");
 }
 
 // --- SYNC STATUS UI ---
@@ -142,15 +128,9 @@ function updateSyncUI(status) {
 }
 
 // 3. SMART SAVE (Using supabaseClient)
-// UPDATED: Accepts 'targetKeys' array to save only specific parts (e.g. ['users'])
-async function saveToServer(targetKeys = null, force = false) {
+// Added 'force' parameter to skip fetching if you want an instant overwrite
+async function saveToServer(force = false) {
     try {
-        // Legacy support: if first arg is boolean, treat as force for ALL keys
-        if (typeof targetKeys === 'boolean') {
-            force = targetKeys;
-            targetKeys = null; // Save all
-        }
-
         if (!window.supabaseClient) {
             console.warn("Supabase client not ready. Offline?");
             updateSyncUI('error');
@@ -158,57 +138,58 @@ async function saveToServer(targetKeys = null, force = false) {
         }
 
         // A. Get Local Data
-        // If targetKeys is null, we save EVERYTHING (Heavy, use sparingly)
-        const keysToSave = targetKeys || Object.keys(DB_SCHEMA);
+        const localData = {};
+        Object.keys(DB_SCHEMA).forEach(k => {
+            localData[k] = JSON.parse(localStorage.getItem(k)) || DB_SCHEMA[k];
+        });
 
         updateSyncUI('busy');
 
-        for (const key of keysToSave) {
-            const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
-            let finalContent = localContent;
+        let mergedData = localData;
 
-            // B. Optimistic Lock / Merge (Per Key)
-            if (!force) {
-                const { data: remoteRow } = await supabaseClient
-                    .from('app_documents')
-                    .select('content')
-                    .eq('key', key)
-                    .single();
-                
-                if (remoteRow && remoteRow.content) {
-                    // Merge just this key's data
-                    // We wrap in objects to reuse existing merge logic
-                    const serverObj = { [key]: remoteRow.content };
-                    const localObj = { [key]: localContent };
-                    const mergedObj = performSmartMerge(serverObj, localObj);
-                    finalContent = mergedObj[key];
-                }
-            }
+        // B. Get Server Data (Optimistic Lock)
+        // Unless 'force' is true, we fetch first to merge changes from other admins/users.
+        if (!force) {
+            const { data: remoteRecord, error: fetchErr } = await supabaseClient
+                .from('app_data')
+                .select('content')
+                .eq('id', 1)
+                .single();
 
-            // C. Push to Supabase
-            const { error: saveErr } = await supabaseClient
-                .from('app_documents')
-                .upsert({ 
-                    key: key, 
-                    content: finalContent,
-                    updated_at: new Date().toISOString()
-                });
+            let serverData = (remoteRecord && remoteRecord.content) ? remoteRecord.content : {};
 
-            if (saveErr) throw saveErr;
-            
-            // Update Local Cache Timestamp
-            localStorage.setItem(key, JSON.stringify(finalContent));
-            localStorage.setItem('sync_ts_' + key, new Date().toISOString());
+            // C. PERFORM MERGE (Local changes overlay Server data)
+            mergedData = performSmartMerge(serverData, localData);
         }
 
-        console.log(`Synced keys: ${keysToSave.join(', ')}`);
-        updateSyncUI('success');
-        if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        // D. Push Merged Data
+        const { error: saveErr } = await supabaseClient
+            .from('app_data')
+            .upsert({ id: 1, content: mergedData });
+        
+        if(saveErr) {
+            updateSyncUI('error');
+            if(typeof showToast === 'function') showToast("Cloud Save Failed: " + saveErr.message, 'error');
+            else alert("Cloud Save Failed: " + saveErr.message);
+            
+            console.error("Supabase Save Failed:", saveErr.message);
+        } else {
+            console.log("Supabase Smart Sync successful.");
+            
+            updateSyncUI('success');
+            // Update local storage with the confirmed merged state
+            Object.keys(mergedData).forEach(k => {
+                localStorage.setItem(k, JSON.stringify(mergedData[k]));
+            });
 
+            localStorage.setItem('lastSyncTimestamp', Date.now().toString());
+            
+            // We ALWAYS refresh after a manual save (Button click), as user action is complete.
+            if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        }
     } catch (err) {
         updateSyncUI('error');
         console.error("Cloud Sync Error:", err);
-        if(typeof showToast === 'function') showToast("Save Failed: " + err.message, 'error');
     }
 }
 
@@ -319,12 +300,12 @@ async function fetchSystemStatus() {
     try {
         if (!window.supabaseClient) return;
 
-        // Estimate storage size from LocalStorage
-        let storageSize = 0;
-        for(let key in localStorage) {
-            if(localStorage.hasOwnProperty(key)) storageSize += localStorage[key].length;
-        }
-        
+        const localData = {};
+        Object.keys(DB_SCHEMA).forEach(k => {
+            localData[k] = JSON.parse(localStorage.getItem(k)) || DB_SCHEMA[k];
+        });
+        const storageSize = new TextEncoder().encode(JSON.stringify(localData)).length;
+
         const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
         const { data: activeUsers, error } = await supabaseClient
             .from('sessions')
@@ -386,11 +367,11 @@ async function fetchSystemStatus() {
                         const rowClass = u.isIdle ? 'user-idle' : '';
 
                         html += `
-                            <tr class="">
+                            <tr class="${rowClass}">
                                 <td><strong>${u.user}</strong></td>
                                 <td>${u.role}</td>
-                                <td></td>
-                                <td></td>
+                                <td>${statusBadge}</td>
+                                <td>${idleStr}</td>
                             </tr>
                         `;
                     });
@@ -498,7 +479,7 @@ function importDatabase(input) {
             });
 
             console.log("Restoring backup to cloud...");
-            await saveToServer(null, true); // Force save ALL keys
+            await saveToServer();
 
             alert("Database restored successfully.");
             location.reload();
@@ -533,7 +514,7 @@ function exportDatabase() {
 function handleAutoBackup() {
     const enabled = localStorage.getItem('autoBackup') === 'true';
     if(enabled) {
-        // Auto-backup is risky with split schema, usually better to rely on targeted saves
+        saveToServer();
     }
 }
 
@@ -646,16 +627,21 @@ async function executeFactoryReset() {
 
         // 2. Overwrite Supabase Data & Sessions
         if (window.supabaseClient) {
-            // A. Wipe documents table
+            // A. Wipe main data table (Delete ALL rows first to be absolutely sure)
             const { error: deleteErr } = await window.supabaseClient
-                .from('app_documents')
-                .delete().neq('key', 'placeholder'); 
+                .from('app_data')
+                .delete()
+                .neq('id', 0); // Deletes all rows where ID is not 0
             
             if (deleteErr) throw deleteErr;
 
-            // B. Re-initialize Admin User
-            await saveToServer(['users'], true);
-            console.log("Cloud tables wiped.");
+            // B. Insert Clean State (with Default Admin)
+            const { error: insertErr } = await window.supabaseClient
+                .from('app_data')
+                .insert({ id: 1, content: cleanState });
+            
+            if (insertErr) throw insertErr;
+            console.log("Cloud 'app_data' table wiped and reset.");
 
             // C. Wipe sessions table to clear active user monitor
             const { error: sessionErr } = await window.supabaseClient
