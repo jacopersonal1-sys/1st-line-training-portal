@@ -20,8 +20,8 @@ async function secureUserSave() {
         }
 
         try {
-            // Force Overwrite (true)
-            await saveToServer(['users', 'rosters', 'revokedUsers'], true); 
+            // Safe Merge (false) - Blacklist handles deletions safely
+            await saveToServer(['users', 'rosters', 'revokedUsers'], false); 
         } catch(e) {
             console.error("User Save Error:", e);
         } finally {

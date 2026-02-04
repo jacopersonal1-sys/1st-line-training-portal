@@ -307,8 +307,8 @@ async function saveTest() {
         btn.disabled = true;
     }
 
-    // Push new test definition to Supabase immediately (Force)
-    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
+    // Push new test definition to Supabase (Safe Merge)
+    if(typeof saveToServer === 'function') await saveToServer(['tests'], false);
     
     if(btn && btn.tagName === 'BUTTON') {
         btn.innerText = originalText;

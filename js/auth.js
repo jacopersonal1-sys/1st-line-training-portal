@@ -8,8 +8,8 @@ async function secureAuthSave() {
     // UPDATED: Uses force=true to ensure authoritative overwrite (Instant Save).
     if (typeof saveToServer === 'function') {
         try {
-            // PARAMETER 'true' = FORCE OVERWRITE
-            await saveToServer(['users'], true);
+            // PARAMETER 'false' = SAFE MERGE
+            await saveToServer(['users'], false);
         } catch(e) {
             console.error("Auth Save Error:", e);
         }

@@ -61,7 +61,7 @@ async function addAssessment() {
     a.push({name:n, video:v, live:l}); 
     localStorage.setItem('assessments', JSON.stringify(a)); 
     
-    await secureSysSave();
+    if(typeof saveToServer === 'function') await saveToServer(['assessments'], false);
     
     document.getElementById('newAssessName').value = '';
     loadAdminAssessments(); 
@@ -107,7 +107,7 @@ async function addVettingTopic() {
     topics.push(t); 
     localStorage.setItem('vettingTopics', JSON.stringify(topics)); 
     
-    await secureSysSave();
+    if(typeof saveToServer === 'function') await saveToServer(['vettingTopics'], false);
     
     document.getElementById('newVettingTopic').value = ''; 
     loadAdminVetting(); 

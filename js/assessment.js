@@ -22,8 +22,8 @@ async function secureAssessmentSave() {
         }
 
         try {
-            // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(['submissions', 'records', 'tests'], true); 
+            // PARAMETER 'false' = SAFE MERGE (Prevents overwriting other trainees)
+            await saveToServer(['submissions', 'records', 'tests'], false); 
         } catch(e) {
             console.error("Assessment Cloud Sync Error:", e);
             alert("Warning: Could not sync to cloud. Data saved locally.");

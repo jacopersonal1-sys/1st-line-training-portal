@@ -146,7 +146,7 @@ async function saveScores() {
     // --- CLOUD SYNC START ---
     // OPTIMISTIC SAVE: Don't block the UI. Sync in background.
     if(typeof saveToServer === 'function') {
-        saveToServer(['records'], true).catch(err => console.error("Background Sync Failed:", err));
+        saveToServer(['records'], false).catch(err => console.error("Background Sync Failed:", err));
         if(typeof showToast === 'function') showToast("Scores saved. Syncing to cloud...", "info");
     }
     // --- CLOUD SYNC END ---
@@ -237,7 +237,7 @@ async function allowRetake(subId) {
         localStorage.setItem('submissions', JSON.stringify(subs));
         
         // --- CLOUD SYNC (Instant) ---
-        if(typeof saveToServer === 'function') await saveToServer(['submissions'], true);
+        if(typeof saveToServer === 'function') await saveToServer(['submissions'], false);
         
         alert("Retake granted.");
         loadTestRecords();

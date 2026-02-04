@@ -341,7 +341,7 @@ async function fetchSystemStatus() {
 
             const memoryEl = document.getElementById('statusMemory');
             const connEl = document.getElementById('statusConnection');
-            const platformEl = document.getElementById('statusPlatform');
+            const gatewayEl = document.getElementById('statusGateway');
 
             if (storageEl && typeof formatBytes === 'function') {
                 storageEl.innerText = formatBytes(storageSize);
@@ -358,15 +358,45 @@ async function fetchSystemStatus() {
                 memoryEl.innerText = formatBytes(used);
             }
             
-            if (connEl && navigator.connection) {
-                connEl.innerText = navigator.connection.effectiveType.toUpperCase();
-            } else if (connEl) {
-                connEl.innerText = navigator.onLine ? "ONLINE" : "OFFLINE";
+            // --- NETWORK TYPE DETECTION (Node.js) ---
+            if (connEl && typeof require !== 'undefined') {
+                try {
+                    const os = require('os');
+                    const ifaces = os.networkInterfaces();
+                    let type = "Ethernet"; // Default assumption
+                    
+                    Object.keys(ifaces).forEach(ifname => {
+                        ifaces[ifname].forEach(iface => {
+                            if (!iface.internal && iface.family === 'IPv4') {
+                                const name = ifname.toLowerCase();
+                                if (name.includes('wi-fi') || name.includes('wlan') || name.includes('wireless')) {
+                                    type = "Wi-Fi";
+                                }
+                            }
+                        });
+                    });
+                    connEl.innerText = type;
+                } catch(e) { connEl.innerText = "Unknown"; }
             }
             
-            if (platformEl) {
-                const os = (navigator.userAgentData && navigator.userAgentData.platform) ? navigator.userAgentData.platform : navigator.platform;
-                platformEl.innerText = os;
+            // --- LATENCY TEST (Ping) ---
+            if (gatewayEl && typeof require !== 'undefined') {
+                const { exec } = require('child_process');
+                // Ping Google DNS (8.8.8.8) once
+                exec('ping -n 1 8.8.8.8', (err, stdout, stderr) => {
+                    if (err) {
+                        gatewayEl.innerText = "Timeout";
+                        gatewayEl.style.color = "#ff5252";
+                        logSystemEvent("Ping failed: " + err.message, 'error');
+                    } else {
+                        // Extract time=XXms
+                        const match = stdout.match(/time[=<](\d+)ms/);
+                        const ms = match ? match[1] : '?';
+                        gatewayEl.innerText = ms + " ms";
+                        gatewayEl.style.color = ms < 50 ? "#2ecc71" : (ms < 150 ? "orange" : "#ff5252");
+                        logSystemEvent(`Network Check: ${ms}ms latency via ${connEl.innerText}`, 'info');
+                    }
+                });
             }
 
             if (activeTable) {
@@ -401,6 +431,17 @@ async function fetchSystemStatus() {
     } catch (e) {
         console.error("Supabase Status fetch error", e);
     }
+}
+
+function logSystemEvent(msg, type='info') {
+    const log = document.getElementById('systemLogList');
+    if(!log) return;
+    
+    const time = new Date().toLocaleTimeString();
+    const color = type === 'error' ? '#ff5252' : '#2ecc71';
+    
+    log.innerHTML += `<div style="margin-bottom:4px;"><span style="color:var(--text-muted);">[${time}]</span> <span style="color:${color};">${type.toUpperCase()}</span>: ${msg}</div>`;
+    log.scrollTop = log.scrollHeight;
 }
 
 // 5. SUPABASE: Send Heartbeat
@@ -546,13 +587,13 @@ function startRealtimeSync() {
 
     // Default Rates (Trainee/Guest)
     let syncRate = 60000; // 1 Minute
-    let beatRate = 30000; // 30 Seconds
+    let beatRate = 60000; // 1 Minute (Optimized for Bandwidth)
 
     // Role-Based Adjustment
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
         if (CURRENT_USER.role === 'admin') {
             syncRate = 10000; // 10 Seconds (High Speed for Admin)
-            beatRate = 15000;
+            beatRate = 30000; // 30 Seconds (Optimized for Bandwidth)
         } else if (CURRENT_USER.role === 'teamleader') {
             syncRate = 300000; // 5 Minutes (Save Bandwidth)
             beatRate = 60000;  // 1 Minute
@@ -576,6 +617,12 @@ function startRealtimeSync() {
             const statusView = document.getElementById('admin-view-status');
             if(statusView && statusView.offsetParent !== null) {
                 fetchSystemStatus();
+            }
+
+            // NEW: Refresh Dashboard Widget if visible
+            const dashView = document.getElementById('dashboard-view');
+            if(dashView && dashView.classList.contains('active')) {
+                if(typeof updateDashboardHealth === 'function') updateDashboardHealth();
             }
         }
     }, beatRate);

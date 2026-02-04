@@ -38,8 +38,8 @@ async function secureScheduleSave() {
         }
 
         try {
-            // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(['schedules', 'liveBookings', 'cancellationCounts'], true); 
+            // PARAMETER 'false' = SAFE MERGE (Prevents booking conflicts)
+            await saveToServer(['schedules', 'liveBookings', 'cancellationCounts'], false); 
         } catch(e) {
             console.error("Schedule Cloud Sync Error:", e);
         } finally {
