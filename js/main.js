@@ -405,11 +405,19 @@ function triggerUpdateCheck() {
     try {
         const { ipcRenderer } = require('electron');
         ipcRenderer.send('manual-update-check');
-        if(typeof showToast === 'function') showToast("Checking for updates...", "info");
-        else alert("Checking for updates...");
+        // We removed the manual toast here. The main process will send a 'checking-for-update' event immediately.
     } catch(e) {
         console.error("Update check failed:", e);
         alert("Update check failed. Ensure you are running the app in desktop mode.");
+    }
+}
+
+function restartAndInstall() {
+    try {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.send('restart-app');
+    } catch(e) {
+        console.error("Restart failed:", e);
     }
 }
 
@@ -524,4 +532,10 @@ function populateFetchFilters() {
     });
     
     if(currentVal && names.has(currentVal)) select.value = currentVal;
+}
+
+// --- GLOBAL UTILS ---
+function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
 }

@@ -245,7 +245,7 @@ function applyRolePermissions() {
     adminElems.forEach(e => e.classList.remove('hidden'));
     tlElems.forEach(e => e.classList.remove('hidden'));
     filterContainer.classList.remove('hidden');
-    document.getElementById('overviewTitle').innerText = "Fetch Records";
+    document.getElementById('overviewTitle').innerText = "Assessment Records";
     if(document.getElementById('filterTraineeDiv')) document.getElementById('filterTraineeDiv').classList.remove('hidden');
     if(document.getElementById('filterMonthDiv')) document.getElementById('filterMonthDiv').classList.remove('hidden');
     
@@ -280,7 +280,7 @@ function applyRolePermissions() {
     if (CURRENT_USER.role === 'teamleader') {
         tlElems.forEach(e => e.classList.remove('hidden'));
         filterContainer.classList.remove('hidden');
-        document.getElementById('overviewTitle').innerText = "Fetch Records";
+        document.getElementById('overviewTitle').innerText = "Assessment Records";
         if(document.getElementById('filterTraineeDiv')) document.getElementById('filterTraineeDiv').classList.remove('hidden');
         if(document.getElementById('filterMonthDiv')) document.getElementById('filterMonthDiv').classList.remove('hidden');
         

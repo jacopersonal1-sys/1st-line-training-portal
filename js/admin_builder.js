@@ -188,7 +188,7 @@ function renderBuilder() {
                 <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})"><i class="fas fa-times"></i></button>
             </div>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
-                <input type="text" placeholder="Enter Question Text" class="q-text-input" value="${q.text}" onchange="updateQText(${idx}, this.value)" style="flex:3;">
+                <textarea placeholder="Enter Question Text" class="q-text-input auto-expand" oninput="autoResize(this)" onchange="updateQText(${idx}, this.value)" style="flex:3;">${q.text || ''}</textarea>
                 <div style="flex:1;">
                     <input type="number" placeholder="Points" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>

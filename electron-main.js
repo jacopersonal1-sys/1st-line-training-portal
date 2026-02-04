@@ -2,9 +2,11 @@ const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
+let mainWindow; // Define globally so updater events can access it
+
 function createWindow() {
     // Create the browser window.
-    const mainWindow = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 1920,
         height: 1080,
         title: "1st Line Training Portal",
@@ -81,4 +83,38 @@ app.on('window-all-closed', () => {
 // IPC Listener for Manual Update Check
 ipcMain.on('manual-update-check', () => {
     autoUpdater.checkForUpdatesAndNotify();
+});
+
+// IPC Listener for Restart
+ipcMain.on('restart-app', () => {
+    autoUpdater.quitAndInstall();
+});
+
+// --- AUTO-UPDATER EVENTS ---
+// Send status updates to the renderer to show in Toasts
+
+autoUpdater.on('checking-for-update', () => {
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Checking for updates...', type: 'info' });
+});
+
+autoUpdater.on('update-available', (info) => {
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Update available. Downloading...', type: 'info' });
+});
+
+autoUpdater.on('update-not-available', (info) => {
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'You are on the latest version.', type: 'success' });
+});
+
+autoUpdater.on('error', (err) => {
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Update error: ' + (err.message || err), type: 'error' });
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+    const log_message = `Downloading update: ${Math.round(progressObj.percent)}%`;
+    // Send progress periodically (optional: throttle this if too frequent)
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: log_message, type: 'info' });
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+    if(mainWindow) mainWindow.webContents.send('update-downloaded');
 });

@@ -234,8 +234,8 @@
         <button class="nav-item admin-only" onclick="showTab('capture')" title="Capture Scores">
             <i class="fas fa-edit"></i><span class="nav-text">Capture Scores</span>
         </button>
-        <button class="nav-item" onclick="showTab('monthly')" title="Fetch Records">
-            <i class="fas fa-table"></i><span class="nav-text">Fetch Records</span>
+        <button class="nav-item" onclick="showTab('monthly')" title="Assessment Records">
+            <i class="fas fa-table"></i><span class="nav-text">Assessment Records</span>
         </button>
         
         <button class="nav-item admin-only" onclick="showTab('test-records')" title="Test Records">
@@ -257,8 +257,8 @@
         <button class="nav-item admin-only" onclick="showTab('test-manage')" title="Test Manager">
             <i class="fas fa-clipboard-check"></i><span class="nav-text">Test Manager</span>
         </button>
-        <button class="nav-item" id="nav-my-tests" onclick="showTab('my-tests')" title="My Tests">
-            <i class="fas fa-pen-fancy"></i><span class="nav-text">My Tests</span>
+        <button class="nav-item" id="nav-my-tests" onclick="showTab('my-tests')" title="My Assessments">
+            <i class="fas fa-pen-fancy"></i><span class="nav-text">My Assessments</span>
         </button>
         
     </div>
@@ -287,7 +287,8 @@
                 <div class="bubble-content">
                     <button id="btn-admin-tools" class="icon-btn admin-only" onclick="showTab('admin-panel')" title="Admin Tools"><i class="fas fa-cogs"></i></button>
                     <button class="icon-btn" onclick="toggleTheme()" title="Toggle Theme"><i class="fas fa-moon"></i></button>
-                    <button class="icon-btn" onclick="triggerUpdateCheck()" title="Check for Updates"><i class="fas fa-cloud-download-alt"></i></button>
+                    <button id="btn-check-update" class="icon-btn" onclick="triggerUpdateCheck()" title="Check for Updates"><i class="fas fa-cloud-download-alt"></i></button>
+                    <button id="btn-restart-update" class="icon-btn hidden" onclick="restartAndInstall()" title="Restart & Install Update" style="color:#2ecc71;"><i class="fas fa-arrow-circle-up"></i></button>
                     <button class="icon-btn" onclick="refreshApp()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
                     <button class="icon-btn logout" onclick="logout()" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
                 </div>
