@@ -168,6 +168,7 @@ async function saveScores() {
 
 function loadTestRecords() {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     
     // Filters
     const nameFilter = document.getElementById('filterTestName').value;
@@ -177,7 +178,6 @@ function loadTestRecords() {
     // Populate Name Dropdown if empty
     const nameSelect = document.getElementById('filterTestName');
     if (nameSelect && nameSelect.options.length === 1) {
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
         tests.forEach(t => nameSelect.add(new Option(t.title, t.title)));
     }
 
@@ -189,6 +189,12 @@ function loadTestRecords() {
             if(nameFilter && s.testTitle !== nameFilter) return false;
             if(statusFilter && s.status !== statusFilter) return false;
             if(traineeFilter && !s.trainee.toLowerCase().includes(traineeFilter)) return false;
+            
+            // VETTING ONLY FILTER (As requested)
+            const testDef = tests.find(t => t.id == s.testId || t.title === s.testTitle);
+            if (testDef && testDef.type !== 'vetting') return false;
+            if (!testDef && !s.testTitle.toLowerCase().includes('vetting')) return false; // Fallback
+            
             return true;
         });
 

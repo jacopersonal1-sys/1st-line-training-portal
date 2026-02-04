@@ -472,6 +472,31 @@ function openTestTaker(testId) {
     if (!test) return;
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    
+    // --- SCHEDULE ENFORCEMENT ---
+    // Check if this test is linked to a schedule and if that schedule is active
+    if (typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee') {
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        let myGroupId = null;
+        
+        // Find user's group
+        for (const [gid, members] of Object.entries(rosters)) {
+            if (members.includes(CURRENT_USER.user)) { myGroupId = gid; break; }
+        }
+
+        if (myGroupId) {
+            const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
+            if (schedKey) {
+                const item = schedules[schedKey].items.find(i => i.linkedTestId == testId);
+                if (item) {
+                    const status = getScheduleStatus(item.dateRange, item.openTime, item.closeTime);
+                    if (status !== 'active') return alert("This assessment is currently locked by the schedule.");
+                }
+            }
+        }
+    }
+
     const existing = subs.find(s => s.testId == testId && s.trainee === CURRENT_USER.user);
     
     if (existing && !existing.archived) {
@@ -559,7 +584,7 @@ function renderQuestionInput(q, idx) {
     }
 
     if (q.type === 'matrix') {
-        let html = '<table class="matrix-table" style="width:100%; text-align:center;"><thead><tr><th></th>';
+        let html = '<div class="table-responsive"><table class="matrix-table" style="width:100%; text-align:center;"><thead><tr><th></th>';
         (q.cols || []).forEach(c => { html += `<th>${c}</th>`; });
         html += '</tr></thead><tbody>';
         
@@ -570,7 +595,7 @@ function renderQuestionInput(q, idx) {
             });
             html += `</tr>`;
         });
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         return html;
     }
 

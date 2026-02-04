@@ -57,7 +57,11 @@ if (typeof require !== 'undefined') {
                 document.getElementById('updateStatusText').innerText = "Downloading Update...";
             }
         } else {
-            appendUpdateLog(message.text, message.type);
+            let msg = message.text;
+            if (msg.includes("No published versions")) {
+                msg = "⚠️ No published releases found.\n(Drafts are invisible. Go to GitHub > Releases and click 'Publish'.)";
+            }
+            appendUpdateLog(msg, message.type);
         }
     });
 

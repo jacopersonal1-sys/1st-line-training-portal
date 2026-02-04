@@ -240,7 +240,7 @@ async function scanAndGenerateUsers() {
     allNames.forEach(name => { 
         // Case-insensitive check
         const exists = users.find(u => u.user.toLowerCase() === name.toLowerCase());
-        const isRevoked = revoked.includes(name);
+        const isRevoked = revoked.some(r => r.toLowerCase() === name.toLowerCase());
 
         if(!exists && !isRevoked) { 
             users.push({ user: name, pass: Math.floor(1000+Math.random()*9000).toString(), role: 'trainee' }); 

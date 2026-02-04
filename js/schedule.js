@@ -825,13 +825,17 @@ function isDateInRange(dateRangeStr, specificDateStr) {
 
 function getScheduleStatus(dateRangeStr, openStr, closeStr) {
     if (dateRangeStr === "Always Available") return 'active';
-    const today = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+    
+    // Normalize dates to YYYY/MM/DD for consistent string comparison
+    const normalize = (d) => d.replace(/-/g, '/').trim();
+    const today = normalize(new Date().toISOString().split('T')[0]);
+    
     let start = "", end = "";
-    if (dateRangeStr.includes('-')) {
-        const parts = dateRangeStr.split('-').map(s => s.trim());
+    if (dateRangeStr.includes('-') && dateRangeStr.length > 11) {
+        const parts = dateRangeStr.split('-').map(s => normalize(s));
         start = parts[0]; end = parts[1];
     } else {
-        start = dateRangeStr.trim(); end = dateRangeStr.trim();
+        start = normalize(dateRangeStr); end = normalize(dateRangeStr);
     }
 
     if (today < start) return 'upcoming';

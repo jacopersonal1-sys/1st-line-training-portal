@@ -255,7 +255,7 @@
         </button>
         
         <button class="nav-item admin-only" onclick="showTab('test-manage')" title="Test Manager">
-            <i class="fas fa-clipboard-check"></i><span class="nav-text">Test Manager</span>
+            <i class="fas fa-clipboard-check"></i><span class="nav-text">Assessment/Vetting Test Engine</span>
         </button>
         <button class="nav-item" id="nav-my-tests" onclick="showTab('my-tests')" title="My Assessments">
             <i class="fas fa-pen-fancy"></i><span class="nav-text">My Assessments</span>
@@ -383,7 +383,7 @@
         </section>
 
         <section id="test-records" class="admin-only-section">
-        <div style="display:flex; justify-content:space-between;"><h2>Saved Test Submissions</h2></div>
+        <div style="display:flex; justify-content:space-between;"><h2>Vetting Test Submissions</h2></div>
         <div class="card">
             <div class="grid-4">
                 <div><label for="filterTestName">Test Name</label><select id="filterTestName" onchange="loadTestRecords()"><option value="">All Tests</option></select></div>
@@ -401,7 +401,7 @@
 
         <section id="test-manage" class="admin-only-section">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h2>Assessment Manager</h2>
+                <h2>Assessment/Vetting Test Engine</h2>
                 <button class="btn-primary" onclick="loadTestBuilder(); showTab('test-builder')">+ Create New Assessment</button>
             </div>
             <div class="card">
@@ -449,7 +449,6 @@
                     <button class="btn-secondary" onclick="addQuestion('multi_select')"><i class="fas fa-check-square"></i> Multiple Answer (Checkbox)</button>
                     <button class="btn-secondary" onclick="addQuestion('text')"><i class="fas fa-font"></i> Text Answer</button>
                     <button class="btn-secondary" onclick="addQuestion('matching')"><i class="fas fa-exchange-alt"></i> Matching / Pairs</button>
-                    <button class="btn-secondary" onclick="addQuestion('drag_drop')"><i class="fas fa-sort-amount-down"></i> Ordering (Drag & Drop)</button>
                     <button class="btn-secondary" onclick="addQuestion('ranking')"><i class="fas fa-list-ol"></i> Ranking Order</button>
                     <button class="btn-secondary" onclick="addQuestion('matrix')"><i class="fas fa-th"></i> Matrix / Grid</button>
                 </div>

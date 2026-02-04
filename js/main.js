@@ -554,3 +554,33 @@ function showToast(message, type = 'info') {
         setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
+
+// --- GLOBAL UPDATE LISTENERS ---
+if (typeof require !== 'undefined') {
+    const { ipcRenderer } = require('electron');
+
+    ipcRenderer.on('update-message', (event, message) => {
+        // Notify when an update is found and starting download
+        if (message.text && message.text.includes('Update available')) {
+            if(typeof showToast === 'function') showToast("New update found! Downloading...", "info");
+        }
+    });
+
+    ipcRenderer.on('update-downloaded', (event) => {
+        if(typeof showToast === 'function') showToast("Update downloaded. Restart to apply.", "success");
+        
+        // Add a restart button to the footer for easy access
+        const footer = document.getElementById('user-footer');
+        if (footer) {
+            if (!document.getElementById('btn-footer-restart')) {
+                const btn = document.createElement('button');
+                btn.id = 'btn-footer-restart';
+                btn.className = 'btn-success btn-sm';
+                btn.style.marginLeft = '15px';
+                btn.innerHTML = '<i class="fas fa-arrow-circle-up"></i> Restart Now';
+                btn.onclick = restartAndInstall;
+                footer.appendChild(btn);
+            }
+        }
+    });
+}
