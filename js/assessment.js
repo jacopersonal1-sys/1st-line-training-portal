@@ -204,7 +204,7 @@ function openAdminMarking(subId) {
     
     // Check if locked (Completed)
     const isLocked = sub.status === 'completed';
-    const lockAttr = isLocked ? 'disabled' : '';
+    const lockAttr = 'disabled'; // Always disabled in view mode unless we add an edit mode later
 
     container.innerHTML = `
         <div style="margin-bottom:20px; border-bottom:2px solid var(--border-color); padding-bottom:10px;">
@@ -222,7 +222,7 @@ function openAdminMarking(subId) {
         // --- SCORING LOGIC ---
         if (q.type === 'text') {
             markHtml = `
-                <div style="background:var(--bg-input); padding:15px; border-radius:8px; margin-top:10px; border:1px solid var(--border-color);">
+                <div style="background:var(--bg-input); padding:15px; border-radius:8px; margin-top:10px; border:1px solid var(--border-color); text-align:left;">
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:5px;">MODEL ANSWER:</div>
                     <div style="margin-bottom:10px; font-style:italic; opacity:0.8;">${q.modelAnswer || 'N/A'}</div>
                     
@@ -231,7 +231,7 @@ function openAdminMarking(subId) {
                     
                     <div style="display:flex; align-items:center; gap:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
                         <label style="font-weight:bold;">Score (Max ${pointsMax}):</label>
-                        <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="0" style="width:80px; padding:5px;" ${lockAttr}>
+                        <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${sub.score ? (sub.score/100)*pointsMax : 0}" style="width:80px; padding:5px;" ${isLocked ? 'disabled' : ''}>
                     </div>
                 </div>`;
         } 
@@ -279,18 +279,57 @@ function openAdminMarking(subId) {
             }
             
             // VISUALIZE ANSWER
-            let answerDisplay = "";
-            if(q.type === 'multiple_choice') answerDisplay = (q.options && userAns !== undefined) ? q.options[userAns] : "No Selection";
-            else if(q.type === 'multi_select') answerDisplay = (q.options && userAns) ? userAns.map(i => q.options[i]).join(", ") : "No Selection";
-            else if(q.type === 'matching') answerDisplay = (userAns || []).map((a, i) => `${q.pairs[i].left} -> ${a}`).join(" | ");
-            else if(q.type === 'matrix') answerDisplay = "Matrix Completed";
-            else answerDisplay = JSON.stringify(userAns);
+            let answerDisplay = `<div style="font-style:italic; color:var(--text-muted);">No Answer</div>`;
+            
+            if (q.type === 'matrix') {
+                answerDisplay = '<div class="table-responsive"><table class="matrix-table" style="width:100%; text-align:center;"><thead><tr><th></th>';
+                (q.cols || []).forEach(c => { answerDisplay += `<th>${c}</th>`; });
+                answerDisplay += '</tr></thead><tbody>';
+                (q.rows || []).forEach((r, rIdx) => {
+                    answerDisplay += `<tr><td style="text-align:left; font-weight:bold;">${r}</td>`;
+                    (q.cols || []).forEach((c, cIdx) => {
+                        const isChecked = (userAns && userAns[rIdx] == cIdx) ? 'checked' : '';
+                        answerDisplay += `<td><input type="radio" disabled ${isChecked}></td>`;
+                    });
+                    answerDisplay += `</tr>`;
+                });
+                answerDisplay += '</tbody></table></div>';
+            }
+            else if (q.type === 'matching') {
+                answerDisplay = '<div style="display:grid; gap:5px;">';
+                (q.pairs || []).forEach((p, pIdx) => {
+                    const uAns = (userAns && userAns[pIdx]) ? userAns[pIdx] : '---';
+                    const isCorrect = uAns === p.right;
+                    const color = isCorrect ? 'green' : 'red';
+                    answerDisplay += `<div style="display:flex; justify-content:space-between; background:var(--bg-card); padding:5px; border-radius:4px;"><span>${p.left}</span> <span style="color:${color}; font-weight:bold;">${uAns}</span></div>`;
+                });
+                answerDisplay += '</div>';
+            }
+            else if (q.type === 'multiple_choice') {
+                answerDisplay = (q.options || []).map((opt, oIdx) => {
+                    const isSelected = userAns == oIdx;
+                    const isCorrect = q.correct == oIdx;
+                    let style = "";
+                    if(isSelected) style = "font-weight:bold; color:var(--primary);";
+                    if(isCorrect) style += " border:1px solid green;";
+                    return `<div style="padding:5px; ${style}">${isSelected ? '●' : '○'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
+                }).join('');
+            }
+            else if (q.type === 'multi_select') {
+                answerDisplay = (q.options || []).map((opt, oIdx) => {
+                    const isSelected = userAns && userAns.includes(oIdx);
+                    const isCorrect = q.correct && q.correct.includes(oIdx);
+                    return `<div style="padding:5px; ${isSelected ? 'color:var(--primary); font-weight:bold;' : ''}">${isSelected ? '☑' : '☐'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
+                }).join('');
+            }
+            else {
+                answerDisplay = JSON.stringify(userAns);
+            }
 
             markHtml = `
-                <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px;">
-                    <div style="font-size:0.8rem; color:var(--text-muted);">AGENT SELECTION:</div>
-                    <div style="font-weight:500; margin-bottom:5px;">${answerDisplay}</div>
-                    <div style="font-size:0.85rem; border-top:1px solid var(--border-color); padding-top:5px;">
+                <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
+                    <div style="margin-bottom:10px;">${answerDisplay}</div>
+                    <div style="font-size:0.9rem; border-top:1px solid var(--border-color); padding-top:5px; font-weight:bold;">
                         Auto-Score: <strong>${autoScore} / ${pointsMax}</strong>
                         <input type="hidden" class="q-mark" data-idx="${idx}" value="${autoScore}">
                     </div>
@@ -424,12 +463,37 @@ function loadTraineeTests() {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
 
-    if (tests.length === 0) {
+    // --- SCHEDULE FILTERING ---
+    // Only show tests that are relevant to the trainee's assigned schedule
+    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    let myGroupId = null;
+    
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (members.includes(CURRENT_USER.user)) { myGroupId = gid; break; }
+    }
+
+    let allowedTestIds = new Set();
+    if (myGroupId) {
+        const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
+        if (schedKey && schedules[schedKey].items) {
+            schedules[schedKey].items.forEach(item => {
+                if (item.linkedTestId) allowedTestIds.add(item.linkedTestId.toString());
+            });
+        }
+    }
+
+    // Filter tests: Must be in allowed list OR not linked to any schedule (Global)
+    // Actually, user requested strict filtering: "only relevent to group assigned"
+    // So we only show tests that are explicitly in the schedule.
+    const visibleTests = tests.filter(t => allowedTestIds.has(t.id.toString()));
+
+    if (visibleTests.length === 0) {
         container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No assessments available.</div>';
         return;
     }
 
-    container.innerHTML = tests.map(t => {
+    container.innerHTML = visibleTests.map(t => {
         const sub = submissions.find(s => s.testId == t.id && s.trainee === CURRENT_USER.user && !s.archived);
         let statusHtml = '<span class="status-badge status-improve">Not Started</span>';
         let actionBtn = `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}')">Start Assessment</button>`;
@@ -593,7 +657,7 @@ function renderQuestionInput(q, idx) {
     
     if (q.type === 'matching') {
         const rightOptions = (q.pairs || []).map(p => p.right);
-        const shuffledRight = shuffleArray([...rightOptions]);
+        const shuffledRight = shuffleArray([...rightOptions]); // Randomize right side
         
         let html = '<div style="display:grid; gap:10px;">';
         (q.pairs || []).forEach((p, rowIdx) => {
@@ -623,7 +687,7 @@ function renderQuestionInput(q, idx) {
         (q.rows || []).forEach((r, rIdx) => {
             html += `<tr><td style="text-align:left; font-weight:bold;">${r}</td>`;
             (q.cols || []).forEach((c, cIdx) => {
-                html += `<td><input type="radio" name="mx_${idx}_${rIdx}" value="${cIdx}" onchange="updateMatrixAnswer(${idx}, ${rIdx}, ${cIdx})"></td>`;
+                html += `<td><input type="radio" style="cursor:pointer;" name="mx_${idx}_${rIdx}" value="${cIdx}" onchange="updateMatrixAnswer(${idx}, ${rIdx}, ${cIdx})"></td>`;
             });
             html += `</tr>`;
         });

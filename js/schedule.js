@@ -158,7 +158,7 @@ function buildToolbar(scheduleData, isAdmin) {
     }
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')">Completed / Clear</button></div>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')">Completed / Clear</button></div></div>`;
     } else {
         return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span><select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button></div>`;
     }
@@ -170,7 +170,7 @@ function buildTimeline(items, isAdmin) {
         timelineHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted);">No timeline items yet.</div>`;
     } else {
         timelineHTML = items.map((item, index) => {
-            const status = getScheduleStatus(item.dateRange, item.openTime, item.closeTime);
+            const status = getScheduleStatus(item.dateRange, item.openTime, item.closeTime, item.ignoreTime);
             let timelineClass = 'schedule-upcoming';
             if (status === 'active') timelineClass = 'schedule-active';
             else if (status === 'past') timelineClass = 'schedule-past';
@@ -211,7 +211,7 @@ function buildTimeline(items, isAdmin) {
             // -------------------------------------
 
             return `<div class="timeline-item ${timelineClass}" style="position:relative; padding-left:20px; border-left:2px solid var(--border-color); margin-bottom:20px;">
-                <div class="timeline-marker"></div> 
+                <div class="timeline-marker"></div>
                 <div class="timeline-content" style="background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div><span class="timeline-date" style="font-size:0.8rem; font-weight:bold; color:var(--primary);">${item.dateRange}</span><h4 style="margin:5px 0;">${item.courseName}</h4>${timeInfo}</div>
@@ -762,6 +762,7 @@ function editTimelineItem(index) {
     document.getElementById('editAssessmentLink').value = item.assessmentLink || "";
     document.getElementById('editStartTime').value = item.openTime || "";
     document.getElementById('editEndTime').value = item.closeTime || "";
+    document.getElementById('editIgnoreTime').checked = item.ignoreTime || false;
 
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const select = document.getElementById('editLinkedTest');
@@ -785,6 +786,7 @@ async function saveScheduleItem() {
     item.assessmentLink = document.getElementById('editAssessmentLink').value;
     item.openTime = document.getElementById('editStartTime').value;
     item.closeTime = document.getElementById('editEndTime').value;
+    item.ignoreTime = document.getElementById('editIgnoreTime').checked;
     
     const linked = document.getElementById('editLinkedTest').value;
     if (linked) item.linkedTestId = linked; else delete item.linkedTestId;
@@ -823,7 +825,7 @@ function isDateInRange(dateRangeStr, specificDateStr) {
     return false;
 }
 
-function getScheduleStatus(dateRangeStr, openStr, closeStr) {
+function getScheduleStatus(dateRangeStr, openStr, closeStr, ignoreTime) {
     if (dateRangeStr === "Always Available") return 'active';
     
     // Normalize dates to YYYY/MM/DD for consistent string comparison
@@ -841,7 +843,7 @@ function getScheduleStatus(dateRangeStr, openStr, closeStr) {
     if (today < start) return 'upcoming';
     if (today > end) return 'past';
     
-    if (openStr && closeStr) {
+    if (openStr && closeStr && !ignoreTime) {
         const now = new Date();
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
         const [openH, openM] = openStr.split(':').map(Number);

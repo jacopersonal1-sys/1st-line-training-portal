@@ -169,6 +169,7 @@ async function saveScores() {
 function loadTestRecords() {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     
     // Filters
     const nameFilter = document.getElementById('filterTestName').value;
@@ -203,6 +204,28 @@ function loadTestRecords() {
         } else {
             filtered.sort((a,b) => b.id - a.id); // Newest first
             filtered.forEach(s => {
+                // Find Group
+                let groupID = "Unknown";
+                for (const [gid, members] of Object.entries(rosters)) {
+                    if (members.some(m => m.toLowerCase() === s.trainee.toLowerCase())) { 
+                        groupID = gid; 
+                        break; 
+                    }
+                }
+                
+                // Format Group
+                let groupDisplay = groupID;
+                if (groupID.includes('-')) {
+                    const parts = groupID.split('-');
+                    if (parts.length >= 2) {
+                        const y = parseInt(parts[0]);
+                        const m = parseInt(parts[1]);
+                        const date = new Date(y, m - 1);
+                        groupDisplay = date.toLocaleString('default', { month: 'long', year: 'numeric' });
+                        if (parts.length > 2) groupDisplay += ` (Group ${parts[2]})`;
+                    }
+                }
+
                 const scoreDisplay = s.status === 'completed' ? `<span style="font-weight:bold; color:green;">${s.score}%</span>` : '<span style="color:orange;">Pending</span>';
                 
                 // Link to 'assessment.js' viewer
@@ -217,7 +240,7 @@ function loadTestRecords() {
                     actionBtn += `<button class="btn-warning btn-sm" style="margin-left:5px;" onclick="allowRetake('${s.id}')" title="Allow Retake"><i class="fas fa-redo"></i></button>`;
                 }
 
-                tbody.innerHTML += `<tr><td>${s.date}</td><td>${s.trainee}</td><td>${s.testTitle}</td><td>${scoreDisplay}</td><td>${s.status}</td><td>${actionBtn}</td></tr>`;
+                tbody.innerHTML += `<tr><td>${s.date}</td><td>${groupDisplay}</td><td>${s.trainee}</td><td>${s.testTitle}</td><td>${scoreDisplay}</td><td>${s.status}</td><td>${actionBtn}</td></tr>`;
             });
         }
     }

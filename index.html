@@ -108,6 +108,10 @@
             <input type="time" id="editEndTime">
         </div>
     </div>
+    
+    <div style="margin-bottom:10px;">
+        <label style="cursor:pointer; display:flex; align-items:center;"><input type="checkbox" id="editIgnoreTime" style="width:auto; margin-right:10px;"> Disable Time Restrictions (Open/Close)</label>
+    </div>
 
     <label for="editDueDate">Due Date (YYYY/MM/DD)</label>
     <input type="text" id="editDueDate" placeholder="e.g. 2026/01/07">
@@ -257,6 +261,9 @@
         <button class="nav-item admin-only" onclick="showTab('test-manage')" title="Test Manager">
             <i class="fas fa-clipboard-check"></i><span class="nav-text">Test Engine</span>
         </button>
+        <button class="nav-item admin-only" onclick="showTab('vetting-arena')" title="Vetting Test Arena">
+            <i class="fas fa-dungeon"></i><span class="nav-text">Vetting Test Arena</span>
+        </button>
         <button class="nav-item" id="nav-my-tests" onclick="showTab('my-tests')" title="My Assessments">
             <i class="fas fa-pen-fancy"></i><span class="nav-text">My Assessments</span>
         </button>
@@ -392,7 +399,7 @@
             </div>
             <div class="table-responsive">
             <table id="testRecordsTable">
-                <thead><tr><th>Date</th><th>Trainee</th><th>Test</th><th>Score</th><th>Status</th><th>Action</th></tr></thead>
+                <thead><tr><th>Date</th><th>Group</th><th>Trainee</th><th>Test</th><th>Score</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody></tbody>
             </table>
             </div>
@@ -452,6 +459,17 @@
                     <button class="btn-secondary" onclick="addQuestion('ranking')"><i class="fas fa-list-ol"></i> Ranking Order</button>
                     <button class="btn-secondary" onclick="addQuestion('matrix')"><i class="fas fa-th"></i> Matrix / Grid</button>
                 </div>
+            </div>
+        </section>
+
+        <section id="vetting-arena" class="admin-only-section">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>Vetting Test Arena</h2>
+            </div>
+            <div class="card" style="text-align:center; padding:50px;">
+                <i class="fas fa-hard-hat" style="font-size:4rem; color:var(--primary); margin-bottom:20px;"></i>
+                <h3>Under Construction</h3>
+                <p style="color:var(--text-muted);">This module is currently being built.</p>
             </div>
         </section>
 

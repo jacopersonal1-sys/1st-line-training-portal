@@ -74,6 +74,14 @@ function renderMonthly() {
   // We allow updates while typing to filter results, but ensure we don't clear the input.
   
   if (CURRENT_USER.role === 'admin') {
+      // Fix Alignment: Add Checkbox Header
+      if (!theadRow.querySelector('.check-col')) {
+          const th = document.createElement('th');
+          th.className = 'check-col';
+          th.innerHTML = '<input type="checkbox" id="selectAllDel" onclick="toggleSelectAll(this)">';
+          theadRow.insertBefore(th, theadRow.firstChild);
+      }
+      
       if (!theadRow.querySelector('.action-col')) {
           const th = document.createElement('th');
           th.className = 'action-col';
@@ -83,6 +91,8 @@ function renderMonthly() {
   } else {
       const th = theadRow.querySelector('.action-col');
       if(th) th.remove();
+      const thCheck = theadRow.querySelector('.check-col');
+      if(thCheck) thCheck.remove();
   }
   
   if (CURRENT_USER.role !== 'trainee') {
@@ -128,7 +138,20 @@ function renderMonthly() {
         }
     }
       
-    const groupDisplay = (typeof getGroupLabel === 'function') ? getGroupLabel(r.groupID, 0).split('(')[0] : r.groupID;
+    // FIX: Clean Group Display (Month Year only)
+    let groupDisplay = r.groupID;
+    if (r.groupID && r.groupID.includes('-')) {
+        const parts = r.groupID.split('-');
+        if (parts.length >= 2) {
+            const y = parseInt(parts[0]);
+            const m = parseInt(parts[1]);
+            if (!isNaN(y) && !isNaN(m)) {
+                const date = new Date(y, m - 1);
+                groupDisplay = date.toLocaleString('default', { month: 'long', year: 'numeric' });
+                if (parts.length > 2) groupDisplay += ` (Group ${parts[2]})`;
+            }
+        }
+    }
 
     html += `<tr>${checkHtml}<td>${groupDisplay}</td><td><span style="font-weight:600; color:var(--primary);">${r.trainee}</span></td><td>${r.assessment}</td><td>${r.phase}</td><td>${r.score}%</td><td class="status-badge status-${s}">${t}</td>${actionHtml}</tr>`;
   });
