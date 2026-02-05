@@ -514,6 +514,11 @@ function updateNotifications() {
     } else {
         badge.classList.add('hidden');
     }
+    
+    // NEW: Trigger Invasive Popup Check
+    if (typeof checkUrgentNoticesPopup === 'function') {
+        checkUrgentNoticesPopup();
+    }
 }
 
 // --- FETCH RECORDS FILTER POPULATION ---

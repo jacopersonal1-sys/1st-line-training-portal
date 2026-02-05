@@ -26,6 +26,11 @@ function renderDashboard() {
     // 1. URGENT NOTICES SECTION
     const noticeHtml = buildNoticeBanners(role);
     container.innerHTML += noticeHtml;
+    
+    // NEW: Invasive Modal Check for Trainees
+    if (role === 'trainee') {
+        if (typeof checkUrgentNoticesPopup === 'function') checkUrgentNoticesPopup();
+    }
 
     // 2. GREETING HEADER
     const header = document.createElement('div');
@@ -374,6 +379,60 @@ async function acknowledgeNotice(id) {
 
             renderDashboard(); // Re-render to hide the banner
         }
+    }
+}
+
+// --- INVASIVE NOTICE POPUP (TRAINEE) ---
+window.checkUrgentNoticesPopup = function() {
+    if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
+    
+    const notices = JSON.parse(localStorage.getItem('notices') || '[]');
+    // Filter: Active AND (Target Role Matches OR Target is All) AND Not Acknowledged
+    const unread = notices.filter(n => 
+        n.active && 
+        (n.targetRole === 'all' || n.targetRole === 'trainee') &&
+        (!n.acks || !n.acks.includes(CURRENT_USER.user))
+    );
+
+    if (unread.length > 0) {
+        // Prioritize Critical notices, then by date
+        unread.sort((a,b) => {
+            if (a.type === 'critical' && b.type !== 'critical') return -1;
+            if (a.type !== 'critical' && b.type === 'critical') return 1;
+            return new Date(b.date) - new Date(a.date);
+        });
+
+        const notice = unread[0];
+        const modal = document.getElementById('urgentNoticeModal');
+        
+        // Prevent re-opening if already viewing this specific notice
+        if (modal && !modal.classList.contains('hidden') && modal.dataset.noticeId === notice.id) {
+            return;
+        }
+        
+        showUrgentModal(notice);
+    }
+};
+
+function showUrgentModal(notice) {
+    const modal = document.getElementById('urgentNoticeModal');
+    const content = document.getElementById('urgentNoticeContent');
+    const btn = document.getElementById('btnAckNotice');
+    
+    if(modal && content && btn) {
+        modal.dataset.noticeId = notice.id;
+        content.innerHTML = `
+            <div style="font-weight:bold; margin-bottom:10px; color:${notice.type === 'critical' ? '#ff5252' : '#f39c12'}">${notice.type.toUpperCase()}</div>
+            <div>${notice.message}</div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:15px; border-top:1px solid var(--border-color); padding-top:10px;">Posted: ${notice.date}</div>
+        `;
+        
+        btn.onclick = async function() {
+            modal.classList.add('hidden'); // Hide immediately to prevent flicker
+            await acknowledgeNotice(notice.id); // This triggers renderDashboard -> checkUrgentNoticesPopup -> shows next notice if any
+        };
+        
+        modal.classList.remove('hidden');
     }
 }
 

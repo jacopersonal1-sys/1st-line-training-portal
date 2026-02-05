@@ -604,7 +604,7 @@ function startRealtimeSync() {
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
         if (CURRENT_USER.role === 'admin') {
             syncRate = 10000; // 10 Seconds (High Speed for Admin)
-            beatRate = 30000; // 30 Seconds (Optimized for Bandwidth)
+            beatRate = 5000; // 5 Seconds (Real-time Monitor)
         } else if (CURRENT_USER.role === 'teamleader') {
             syncRate = 300000; // 5 Minutes (Save Bandwidth)
             beatRate = 60000;  // 1 Minute
