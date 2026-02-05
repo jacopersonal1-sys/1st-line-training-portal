@@ -208,8 +208,9 @@ function buildTimeline(items, isAdmin) {
             // --- MATERIAL LINK LOGIC (UPDATED) ---
             let materialLinkHtml = '';
             if (item.materialLink) {
-                // Material is available if date range is valid, ignoring specific time of day
-                if (!isDateInRange(item.dateRange) && !isAdmin) {
+                // Material is available if date range is valid OR always open flag is set
+                const isMaterialOpen = item.materialAlways || isDateInRange(item.dateRange);
+                if (!isMaterialOpen && !isAdmin) {
                     // Render as disabled non-clickable text for Trainees
                     materialLinkHtml = `<div style="margin-top:10px;"><span class="btn-link" style="font-size:0.9rem; cursor:not-allowed; opacity:0.5; color:var(--text-muted);"><i class="fas fa-lock"></i> Study Material (Locked)</span></div>`;
                 } else {
@@ -767,6 +768,7 @@ function editTimelineItem(index) {
     document.getElementById('editDateRange').value = item.dateRange;
     document.getElementById('editCourseName').value = item.courseName;
     document.getElementById('editMaterialLink').value = item.materialLink;
+    document.getElementById('editMaterialAlways').checked = item.materialAlways || false;
     document.getElementById('editDueDate').value = item.dueDate;
     document.getElementById('editAssessmentLink').value = item.assessmentLink || "";
     document.getElementById('editStartTime').value = item.openTime || "";
@@ -791,6 +793,7 @@ async function saveScheduleItem() {
     item.dateRange = document.getElementById('editDateRange').value;
     item.courseName = document.getElementById('editCourseName').value;
     item.materialLink = document.getElementById('editMaterialLink').value;
+    item.materialAlways = document.getElementById('editMaterialAlways').checked;
     item.dueDate = document.getElementById('editDueDate').value;
     item.assessmentLink = document.getElementById('editAssessmentLink').value;
     item.openTime = document.getElementById('editStartTime').value;

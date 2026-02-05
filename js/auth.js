@@ -158,6 +158,9 @@ async function autoLogin() {
   // LOG LOGIN
   if(typeof logAccessEvent === 'function') logAccessEvent(CURRENT_USER.user, 'Login');
   
+  // Apply Theme Immediately
+  if (typeof applyUserTheme === 'function') applyUserTheme();
+  
   applyRolePermissions();
   checkFirstTimeLogin();
   
@@ -175,7 +178,7 @@ async function autoLogin() {
 
   // Redirect based on role
   if(CURRENT_USER.role === 'admin') showTab('dashboard-view'); 
-  else if(CURRENT_USER.role === 'trainee') showTab('assessment-schedule');
+  else if(CURRENT_USER.role === 'trainee') showTab('dashboard-view');
   else showTab('monthly'); // Team Leader
 }
 
