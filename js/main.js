@@ -19,6 +19,14 @@ window.onload = async function() {
     const loader = document.getElementById('global-loader');
     if(loader) loader.classList.remove('hidden');
 
+    // GET APP VERSION
+    if (typeof require !== 'undefined') {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.invoke('get-app-version').then(ver => {
+            window.APP_VERSION = ver;
+        });
+    }
+
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
@@ -425,6 +433,13 @@ function restartAndInstall() {
     } catch(e) {
         console.error("Restart failed:", e);
     }
+}
+
+function triggerForceRestart() {
+    try {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.send('force-restart');
+    } catch(e) { location.reload(); }
 }
 
 function toggleTheme() {

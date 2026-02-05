@@ -24,7 +24,8 @@ function createWindow() {
         },
         webPreferences: {
             nodeIntegration: true,
-            contextIsolation: false // Needed for some legacy JS interactions
+            contextIsolation: false, // Needed for some legacy JS interactions
+            devTools: !app.isPackaged // Disable DevTools in production (.exe)
         }
     });
 
@@ -111,6 +112,12 @@ ipcMain.on('manual-update-check', () => {
 // IPC Listener for Restart
 ipcMain.on('restart-app', () => {
     autoUpdater.quitAndInstall();
+});
+
+// IPC Listener for Force Restart (Remote Command)
+ipcMain.on('force-restart', () => {
+    app.relaunch();
+    app.exit(0);
 });
 
 // --- AUTO-UPDATER EVENTS ---

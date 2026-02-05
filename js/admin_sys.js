@@ -437,6 +437,20 @@ function refreshSystemStatus() {
     }
 }
 
+async function sendRemoteCommand(username, action) {
+    if(!confirm(`Are you sure you want to remote ${action} for ${username}?`)) return;
+    
+    if (window.supabaseClient) {
+        const { error } = await window.supabaseClient
+            .from('sessions')
+            .update({ pending_action: action })
+            .eq('user', username);
+            
+        if(error) alert("Command failed: " + error.message);
+        else alert(`Command '${action}' sent to ${username}. It will execute on their next heartbeat.`);
+    }
+}
+
 async function confirmFactoryReset() {
     if (!confirm("CRITICAL WARNING: This will wipe all data, users, and records. The system will reset to factory defaults.\n\nAre you sure?")) return;
     if (!confirm("Final Confirmation: This action cannot be undone. Do you really want to proceed?")) return;
