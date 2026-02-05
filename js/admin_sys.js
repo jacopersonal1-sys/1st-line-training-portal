@@ -129,10 +129,6 @@ async function remVetting(i) {
 // --- SECTION 2: DATABASE MANAGEMENT (Raw Data) ---
 
 function loadAdminDatabase() { 
-    // --- FOCUS PROTECTION ---
-    // If user is searching the database, do not refresh the table and kill focus
-    if (document.activeElement && document.activeElement.id === 'dbSearch') return;
-
     const term = document.getElementById('dbSearch') ? document.getElementById('dbSearch').value.toLowerCase() : '';
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const users = JSON.parse(localStorage.getItem('users') || '[]');
@@ -395,43 +391,35 @@ function loadAdminTheme() {
     // Depend on admin_users.js for menu restriction
     if(typeof restrictTraineeMenu === 'function') restrictTraineeMenu();
 
-    if(!CURRENT_USER) return;
-    if (!CURRENT_USER.theme) CURRENT_USER.theme = {};
+    // Load from Local Storage (PC specific)
+    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
     
     const colorInput = document.getElementById('themeColor');
     const wallInput = document.getElementById('themeWallpaper');
     
-    if (colorInput) colorInput.value = CURRENT_USER.theme.primaryColor || '#F37021';
-    if (wallInput) wallInput.value = CURRENT_USER.theme.wallpaper || '';
+    if (colorInput) colorInput.value = localTheme.primaryColor || '#F37021';
+    if (wallInput) wallInput.value = localTheme.wallpaper || '';
     
     const cb = document.getElementById('autoBackupToggle');
     if(cb) cb.checked = (localStorage.getItem('autoBackup') === 'true');
 }
 
 async function saveThemeSettings() {
-    if(!CURRENT_USER) return;
     
     const color = document.getElementById('themeColor').value;
     const wallpaper = document.getElementById('themeWallpaper').value;
     
-    if (!CURRENT_USER.theme) CURRENT_USER.theme = {};
-    CURRENT_USER.theme.primaryColor = color;
-    CURRENT_USER.theme.wallpaper = wallpaper;
+    const themeConfig = {
+        primaryColor: color,
+        wallpaper: wallpaper
+    };
     
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const idx = users.findIndex(u => u.user === CURRENT_USER.user);
-    if (idx > -1) {
-        users[idx].theme = CURRENT_USER.theme;
-        localStorage.setItem('users', JSON.stringify(users));
-    }
-    
-    sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
+    // Save locally only
+    localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));
     
     if (typeof applyUserTheme === 'function') applyUserTheme();
     
-    if(typeof saveToServer === 'function') await saveToServer(['users'], true);
-    
-    alert("Theme Saved!");
+    alert("Theme Saved (Local PC Only)!");
 }
 
 // --- SECTION 6: SYSTEM HEALTH & RESET ---

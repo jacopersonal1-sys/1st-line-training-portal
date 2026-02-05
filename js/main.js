@@ -166,20 +166,21 @@ window.onload = async function() {
 
 // --- NEW: THEME APPLICATION LOGIC ---
 function applyUserTheme() {
-    if (!CURRENT_USER || !CURRENT_USER.theme) return; // Fallback to CSS defaults
+    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || 'null');
+    if (!localTheme) return; // Fallback to CSS defaults
 
     const root = document.documentElement;
     
     // 1. Primary Color
-    if (CURRENT_USER.theme.primaryColor) {
-        root.style.setProperty('--primary', CURRENT_USER.theme.primaryColor);
+    if (localTheme.primaryColor) {
+        root.style.setProperty('--primary', localTheme.primaryColor);
         // Calculate a softer version for backgrounds
-        root.style.setProperty('--primary-soft', adjustOpacity(CURRENT_USER.theme.primaryColor, 0.15));
+        root.style.setProperty('--primary-soft', adjustOpacity(localTheme.primaryColor, 0.15));
     }
 
     // 2. Wallpaper / Background
-    if (CURRENT_USER.theme.wallpaper) {
-        document.body.style.backgroundImage = `url('${CURRENT_USER.theme.wallpaper}')`;
+    if (localTheme.wallpaper) {
+        document.body.style.backgroundImage = `url('${localTheme.wallpaper}')`;
         document.body.style.backgroundSize = 'cover';
         document.body.style.backgroundPosition = 'center';
         document.body.style.backgroundAttachment = 'fixed';

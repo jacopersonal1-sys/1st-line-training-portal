@@ -158,9 +158,9 @@ function buildToolbar(scheduleData, isAdmin) {
     }
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')">Completed / Clear</button></div></div>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')">Completed / Clear</button></div></div>`;
     } else {
-        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span><select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button></div>`;
+        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span><select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button></div>`;
     }
 }
 
@@ -195,12 +195,15 @@ function buildTimeline(items, isAdmin) {
                 }
             }
 
-            const timeInfo = (item.openTime || item.closeTime) ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;"><i class="fas fa-clock"></i> Access: ${item.openTime || '00:00'} - ${item.closeTime || '23:59'}</div>` : '';
+            // Hide access time if restrictions are disabled
+            const timeInfo = ((item.openTime || item.closeTime) && !item.ignoreTime) ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;"><i class="fas fa-clock"></i> Access: ${item.openTime || '00:00'} - ${item.closeTime || '23:59'}</div>` : '';
+            const dueInfo = item.dueDate ? `<span style="font-size:0.75rem; color:#e74c3c; margin-left:10px;">Due: ${item.dueDate}</span>` : '';
 
             // --- MATERIAL LINK LOGIC (UPDATED) ---
             let materialLinkHtml = '';
             if (item.materialLink) {
-                if (status === 'upcoming' && !isAdmin) {
+                // Material is available if date range is valid, ignoring specific time of day
+                if (!isDateInRange(item.dateRange) && !isAdmin) {
                     // Render as disabled non-clickable text for Trainees
                     materialLinkHtml = `<div style="margin-top:10px;"><span class="btn-link" style="font-size:0.9rem; cursor:not-allowed; opacity:0.5; color:var(--text-muted);"><i class="fas fa-lock"></i> Study Material (Locked)</span></div>`;
                 } else {
@@ -214,7 +217,7 @@ function buildTimeline(items, isAdmin) {
                 <div class="timeline-marker"></div>
                 <div class="timeline-content" style="background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div><span class="timeline-date" style="font-size:0.8rem; font-weight:bold; color:var(--primary);">${item.dateRange}</span><h4 style="margin:5px 0;">${item.courseName}</h4>${timeInfo}</div>
+                        <div><span class="timeline-date" style="font-size:0.8rem; font-weight:bold; color:var(--primary);">${item.dateRange} ${dueInfo}</span><h4 style="margin:5px 0;">${item.courseName}</h4>${timeInfo}</div>
                         <div>${actions}</div>
                     </div>
                     ${materialLinkHtml}
@@ -813,6 +816,20 @@ async function cloneSchedule(targetId) {
     }
 }
 
+async function duplicateCurrentSchedule() {
+    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const keys = Object.keys(schedules).sort();
+    const lastKey = keys[keys.length - 1];
+    const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
+
+    if(confirm(`Duplicate Schedule ${ACTIVE_SCHED_ID} to new Schedule ${nextKey}?`)) {
+        schedules[nextKey] = { items: JSON.parse(JSON.stringify(schedules[ACTIVE_SCHED_ID].items)), assigned: null };
+        localStorage.setItem('schedules', JSON.stringify(schedules));
+        await secureScheduleSave();
+        switchScheduleTab(nextKey);
+    }
+}
+
 function isDateInRange(dateRangeStr, specificDateStr) {
     if (dateRangeStr === "Always Available") return true;
     const today = new Date().toISOString().split('T')[0].replace(/-/g, '/');
@@ -820,7 +837,10 @@ function isDateInRange(dateRangeStr, specificDateStr) {
         const parts = dateRangeStr.split('-').map(s => s.trim());
         if(parts.length === 2) { return today >= parts[0] && today <= parts[1]; }
     } else if (dateRangeStr.trim()) {
-        return dateRangeStr.trim() === today || specificDateStr === today;
+        // Normalize for comparison
+        const d1 = dateRangeStr.trim().replace(/-/g, '/');
+        const d2 = specificDateStr ? specificDateStr.replace(/-/g, '/') : today;
+        return d1 === d2;
     }
     return false;
 }
