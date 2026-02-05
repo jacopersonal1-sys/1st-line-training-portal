@@ -19,7 +19,9 @@ const DB_SCHEMA = {
     insightReviews: [], 
     exemptions: [], 
     notices: [],
-    revokedUsers: [] // Added to ensure blacklist syncs
+    revokedUsers: [], // Added to ensure blacklist syncs
+    accessLogs: [], // Login/Logout/Timeout History
+    vettingSession: { active: false, testId: null, trainees: {} } // Vetting Arena State
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -93,6 +95,10 @@ async function loadFromServer(silent = false) {
                 if (!isUserTyping() && timeSinceInteraction > 5000) {
                     refreshAllDropdowns();
                 }
+            }
+            // STABILITY FIX: Re-apply permissions to show/hide dynamic tabs like Vetting Arena
+            if (silent && typeof applyRolePermissions === 'function') {
+                applyRolePermissions();
             }
             updateSyncUI('success');
         } else {
@@ -341,7 +347,7 @@ async function fetchSystemStatus() {
 
             const memoryEl = document.getElementById('statusMemory');
             const connEl = document.getElementById('statusConnection');
-            const gatewayEl = document.getElementById('statusGateway');
+            const platformEl = document.getElementById('statusPlatform');
 
             if (storageEl && typeof formatBytes === 'function') {
                 storageEl.innerText = formatBytes(storageSize);
@@ -358,45 +364,15 @@ async function fetchSystemStatus() {
                 memoryEl.innerText = formatBytes(used);
             }
             
-            // --- NETWORK TYPE DETECTION (Node.js) ---
-            if (connEl && typeof require !== 'undefined') {
-                try {
-                    const os = require('os');
-                    const ifaces = os.networkInterfaces();
-                    let type = "Ethernet"; // Default assumption
-                    
-                    Object.keys(ifaces).forEach(ifname => {
-                        ifaces[ifname].forEach(iface => {
-                            if (!iface.internal && iface.family === 'IPv4') {
-                                const name = ifname.toLowerCase();
-                                if (name.includes('wi-fi') || name.includes('wlan') || name.includes('wireless')) {
-                                    type = "Wi-Fi";
-                                }
-                            }
-                        });
-                    });
-                    connEl.innerText = type;
-                } catch(e) { connEl.innerText = "Unknown"; }
+            if (connEl && navigator.connection) {
+                connEl.innerText = navigator.connection.effectiveType.toUpperCase();
+            } else if (connEl) {
+                connEl.innerText = navigator.onLine ? "ONLINE" : "OFFLINE";
             }
             
-            // --- LATENCY TEST (Ping) ---
-            if (gatewayEl && typeof require !== 'undefined') {
-                const { exec } = require('child_process');
-                // Ping Google DNS (8.8.8.8) once
-                exec('ping -n 1 8.8.8.8', (err, stdout, stderr) => {
-                    if (err) {
-                        gatewayEl.innerText = "Timeout";
-                        gatewayEl.style.color = "#ff5252";
-                        logSystemEvent("Ping failed: " + err.message, 'error');
-                    } else {
-                        // Extract time=XXms
-                        const match = stdout.match(/time[=<](\d+)ms/);
-                        const ms = match ? match[1] : '?';
-                        gatewayEl.innerText = ms + " ms";
-                        gatewayEl.style.color = ms < 50 ? "#2ecc71" : (ms < 150 ? "orange" : "#ff5252");
-                        logSystemEvent(`Network Check: ${ms}ms latency via ${connEl.innerText}`, 'info');
-                    }
-                });
+            if (platformEl) {
+                const os = (navigator.userAgentData && navigator.userAgentData.platform) ? navigator.userAgentData.platform : navigator.platform;
+                platformEl.innerText = os;
             }
 
             if (activeTable) {
@@ -433,15 +409,50 @@ async function fetchSystemStatus() {
     }
 }
 
-function logSystemEvent(msg, type='info') {
-    const log = document.getElementById('systemLogList');
-    if(!log) return;
+// --- ACCESS LOGGING (Login/Logout/Timeout) ---
+async function logAccessEvent(username, type) {
+    if (!username) return;
     
-    const time = new Date().toLocaleTimeString();
-    const color = type === 'error' ? '#ff5252' : '#2ecc71';
+    // 1. Load current logs (Local cache is fine, we merge later)
+    const logs = JSON.parse(localStorage.getItem('accessLogs') || '[]');
     
-    log.innerHTML += `<div style="margin-bottom:4px;"><span style="color:var(--text-muted);">[${time}]</span> <span style="color:${color};">${type.toUpperCase()}</span>: ${msg}</div>`;
-    log.scrollTop = log.scrollHeight;
+    const newLog = {
+        id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+        user: username,
+        type: type, // 'Login', 'Logout', 'Timeout'
+        date: new Date().toISOString()
+    };
+    
+    // 2. Prune > 14 days (2 Weeks)
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    
+    const filteredLogs = logs.filter(l => new Date(l.date) > twoWeeksAgo);
+    filteredLogs.push(newLog);
+    
+    localStorage.setItem('accessLogs', JSON.stringify(filteredLogs));
+    
+    // 3. Sync to Cloud (Safe Merge)
+    if(typeof saveToServer === 'function') {
+        await saveToServer(['accessLogs'], false);
+    }
+}
+
+async function refreshAccessLogs() {
+    const container = document.getElementById('accessLogTable');
+    if (!container) return;
+
+    // Pull latest logs from server to ensure we see other users' activity
+    await loadFromServer(true);
+    
+    const logs = JSON.parse(localStorage.getItem('accessLogs') || '[]');
+    // Sort newest first
+    logs.sort((a,b) => new Date(b.date) - new Date(a.date));
+    
+    container.innerHTML = logs.map(l => {
+        const dateStr = new Date(l.date).toLocaleString();
+        return `<tr><td>${dateStr}</td><td>${l.user}</td><td>${l.type}</td></tr>`;
+    }).join('');
 }
 
 // 5. SUPABASE: Send Heartbeat
@@ -611,15 +622,6 @@ function startRealtimeSync() {
     // 2. HEARTBEAT: Poll every 15 seconds
     // Fast updates for "Active User" dashboard status
     HEARTBEAT_INTERVAL_ID = setInterval(() => {
-        // --- INACTIVITY CHECK (AUTO-LOGOUT) ---
-        const now = Date.now();
-        if (now - window.LAST_INTERACTION > LOGOUT_THRESHOLD) {
-            clearInterval(SYNC_INTERVAL);
-            clearInterval(HEARTBEAT_INTERVAL_ID);
-            if (typeof cacheAndLogout === 'function') cacheAndLogout();
-            return;
-        }
-
         sendHeartbeat();
         
         if(CURRENT_USER && CURRENT_USER.role === 'admin') {

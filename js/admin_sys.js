@@ -432,6 +432,9 @@ function refreshSystemStatus() {
         document.getElementById('statusStorage').innerText = "Active";
         document.getElementById('statusLatency').innerText = "OK";
     }
+    if(typeof refreshAccessLogs === 'function') {
+        refreshAccessLogs();
+    }
 }
 
 async function confirmFactoryReset() {

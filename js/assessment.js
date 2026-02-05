@@ -531,7 +531,7 @@ function loadTraineeTests() {
 /**
  * 4. TEST TAKER: UI RENDERING & SUBMISSION
  */
-function openTestTaker(testId) {
+function openTestTaker(testId, isArenaMode = false) {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == testId);
     if (!test) return;
@@ -581,16 +581,21 @@ function openTestTaker(testId) {
         if(q.type === 'multi_select') window.USER_ANSWERS[idx] = [];
     });
 
-    if(typeof showTab === 'function') showTab('test-take-view');
-
-    const titleEl = document.getElementById('takingTitle');
-    if(titleEl) titleEl.innerText = window.CURRENT_TEST.title;
-
-    renderTestPaper();
+    if (isArenaMode) {
+        // Render inside the Arena Container
+        renderTestPaper('arenaTestContainer');
+    } else {
+        // Standard View
+        if(typeof showTab === 'function') showTab('test-take-view');
+        const titleEl = document.getElementById('takingTitle');
+        if(titleEl) titleEl.innerText = window.CURRENT_TEST.title;
+        renderTestPaper('takingQuestions');
+    }
 }
 
-function renderTestPaper() {
-    const content = document.getElementById('takingQuestions');
+function renderTestPaper(containerId = 'takingQuestions') {
+    const content = document.getElementById(containerId);
+    if (!content) return;
     content.innerHTML = ''; 
 
     if (window.CURRENT_TEST.type === 'vetting' && window.CURRENT_TEST.duration) {
@@ -892,6 +897,11 @@ async function submitTest() {
 
     // --- CLOUD SYNC ---
     await secureAssessmentSave(); // Saves submissions, records
+
+    // --- ARENA EXIT ---
+    if (typeof exitArena === 'function') {
+        await exitArena();
+    }
 
     if (finalStatus === 'completed') {
         alert(`Assessment Complete! You scored: ${finalPercent}%`);

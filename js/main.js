@@ -242,7 +242,14 @@ function updateSidebarVisibility() {
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
             const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'monthly', 'insights', 'test-manage', 'test-records', 'live-assessment'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment'];
+            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena'];
+            
+            // Special Check for Arena
+            if (targetTab === 'vetting-arena') {
+                const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
+                if (!session.active) btn.classList.add('hidden');
+                return;
+            }
             
             if (!visibleForTrainee.includes(targetTab)) btn.classList.add('hidden');
         } 
@@ -381,6 +388,10 @@ function showTab(id, btn) {
   
   if(id === 'test-records') {
       if(typeof loadTestRecords === 'function') loadTestRecords();
+  }
+  
+  if(id === 'vetting-arena') {
+      if(typeof loadVettingArena === 'function') loadVettingArena();
   }
 }
 
@@ -588,8 +599,12 @@ if (typeof require !== 'undefined') {
 
 /* ================= INACTIVITY & DRAFT HANDLING ================= */
 
-window.cacheAndLogout = function() {
+window.cacheAndLogout = async function() {
     console.log("Inactivity detected. Caching and logging out...");
+    
+    if (CURRENT_USER && typeof logAccessEvent === 'function') {
+        await logAccessEvent(CURRENT_USER.user, 'Timeout');
+    }
     
     // 1. Cache Assessment (If taking a test)
     const takingView = document.getElementById('test-take-view');
@@ -604,7 +619,9 @@ window.cacheAndLogout = function() {
     }
 
     alert("You have been logged out due to inactivity (20 mins).\n\nYour current work has been cached locally and will be restored when you log back in.");
-    logout();
+    
+    sessionStorage.removeItem('currentUser');
+    window.location.reload();
 };
 
 function checkForDrafts() {

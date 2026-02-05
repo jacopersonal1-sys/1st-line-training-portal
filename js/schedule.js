@@ -170,7 +170,7 @@ function buildTimeline(items, isAdmin) {
         timelineHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted);">No timeline items yet.</div>`;
     } else {
         timelineHTML = items.map((item, index) => {
-            const status = getScheduleStatus(item.dateRange, item.openTime, item.closeTime, item.ignoreTime);
+            const status = getScheduleStatus(item.dateRange);
             let timelineClass = 'schedule-upcoming';
             if (status === 'active') timelineClass = 'schedule-active';
             else if (status === 'past') timelineClass = 'schedule-past';
@@ -183,14 +183,20 @@ function buildTimeline(items, isAdmin) {
                 `;
             } else {
                 if (item.linkedTestId) {
+                    const isTimeOpen = checkTimeAccess(item.openTime, item.closeTime, item.ignoreTime);
+                    
                     if (status === 'upcoming') actions = `<button class="btn-start-test disabled" aria-label="Locked"><i class="fas fa-lock"></i> Locked</button>`;
                     else if (status === 'past') actions = `<button class="btn-start-test disabled" aria-label="Closed"><i class="fas fa-history"></i> Closed</button>`;
+                    else if (!isTimeOpen) actions = `<button class="btn-start-test disabled" aria-label="Time Locked"><i class="fas fa-clock"></i> ${item.openTime} - ${item.closeTime}</button>`;
                     else actions = `<button class="btn-start-test" onclick="goToTest('${item.linkedTestId}')" aria-label="Take Test">Take Assessment</button>`;
                 } else if (item.assessmentLink) {
+                    const isTimeOpen = checkTimeAccess(item.openTime, item.closeTime, item.ignoreTime);
+
                     if (status === 'upcoming') {
                            actions = `<span class="btn-link-external disabled" style="opacity:0.5; cursor:not-allowed;">Locked <i class="fas fa-lock"></i></span>`;
                     } else {
-                           actions = `<a href="${item.assessmentLink}" target="_blank" class="btn-link-external" aria-label="External Link">Open Link <i class="fas fa-external-link-alt"></i></a>`;
+                           if (!isTimeOpen && status === 'active') actions = `<span class="btn-link-external disabled" style="opacity:0.5; cursor:not-allowed;"><i class="fas fa-clock"></i> ${item.openTime} - ${item.closeTime}</span>`;
+                           else actions = `<a href="${item.assessmentLink}" target="_blank" class="btn-link-external" aria-label="External Link">Open Link <i class="fas fa-external-link-alt"></i></a>`;
                     }
                 }
             }
@@ -832,20 +838,25 @@ async function duplicateCurrentSchedule() {
 
 function isDateInRange(dateRangeStr, specificDateStr) {
     if (dateRangeStr === "Always Available") return true;
-    const today = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+    
+    // Determine target date: specificDateStr if provided (Calendar), else today (Timeline)
+    let target = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+    if (specificDateStr) {
+        target = specificDateStr.replace(/-/g, '/');
+    }
+
     if (dateRangeStr.includes('-')) {
         const parts = dateRangeStr.split('-').map(s => s.trim());
-        if(parts.length === 2) { return today >= parts[0] && today <= parts[1]; }
+        if(parts.length === 2) { return target >= parts[0] && target <= parts[1]; }
     } else if (dateRangeStr.trim()) {
         // Normalize for comparison
         const d1 = dateRangeStr.trim().replace(/-/g, '/');
-        const d2 = specificDateStr ? specificDateStr.replace(/-/g, '/') : today;
-        return d1 === d2;
+        return d1 === target;
     }
     return false;
 }
 
-function getScheduleStatus(dateRangeStr, openStr, closeStr, ignoreTime) {
+function getScheduleStatus(dateRangeStr) {
     if (dateRangeStr === "Always Available") return 'active';
     
     // Normalize dates to YYYY/MM/DD for consistent string comparison
@@ -863,6 +874,10 @@ function getScheduleStatus(dateRangeStr, openStr, closeStr, ignoreTime) {
     if (today < start) return 'upcoming';
     if (today > end) return 'past';
     
+    return 'active';
+}
+
+function checkTimeAccess(openStr, closeStr, ignoreTime) {
     if (openStr && closeStr && !ignoreTime) {
         const now = new Date();
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -870,11 +885,9 @@ function getScheduleStatus(dateRangeStr, openStr, closeStr, ignoreTime) {
         const [closeH, closeM] = closeStr.split(':').map(Number);
         const openMinutes = openH * 60 + openM;
         const closeMinutes = closeH * 60 + closeM;
-
-        if (currentMinutes < openMinutes) return 'upcoming';
-        if (currentMinutes > closeMinutes) return 'past';
+        if (currentMinutes < openMinutes || currentMinutes > closeMinutes) return false;
     }
-    return 'active';
+    return true;
 }
 
 function goToTest(testId) {

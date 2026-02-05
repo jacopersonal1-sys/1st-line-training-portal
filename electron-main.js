@@ -1,10 +1,12 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, screen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const { exec } = require('child_process');
 
 // Enable logging for the auto-updater (helps debug "nothing happening")
 autoUpdater.logger = console;
 
+let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
 
 function createWindow() {
@@ -53,6 +55,13 @@ function createWindow() {
     // AUTO-UPDATE: Check for updates when the window is ready to show
     mainWindow.once('ready-to-show', () => {
         autoUpdater.checkForUpdatesAndNotify();
+    });
+
+    // SECURITY: Prevent closing during Vetting Lockdown
+    mainWindow.on('close', (e) => {
+        if (vettingLockdown) {
+            e.preventDefault(); // Block closing
+        }
     });
 }
 
@@ -131,4 +140,67 @@ autoUpdater.on('download-progress', (progressObj) => {
 
 autoUpdater.on('update-downloaded', (info) => {
     if(mainWindow) mainWindow.webContents.send('update-downloaded');
+});
+
+// --- VETTING ARENA SECURITY IPC ---
+
+ipcMain.handle('get-screen-count', () => {
+    const displays = screen.getAllDisplays();
+    return displays.length;
+});
+
+ipcMain.handle('set-kiosk-mode', (event, enable) => {
+    vettingLockdown = enable; // Set lock state
+    if (mainWindow) {
+        mainWindow.setKiosk(enable);
+        mainWindow.setAlwaysOnTop(enable, 'screen-saver'); // Force top
+        mainWindow.setClosable(!enable); // Disable close button
+    }
+    return true;
+});
+
+ipcMain.handle('set-content-protection', (event, enable) => {
+    if (mainWindow) {
+        // Prevents screenshots/recording on Windows/macOS
+        mainWindow.setContentProtection(enable);
+    }
+    return true;
+});
+
+ipcMain.handle('get-process-list', async () => {
+    return new Promise((resolve) => {
+        // Windows command to list running apps
+        const cmd = process.platform === 'win32' 
+            ? 'tasklist /fi "STATUS eq RUNNING" /fo csv /nh' 
+            : 'ps -e -o comm='; // Linux/Mac fallback
+
+        exec(cmd, (err, stdout, stderr) => {
+            if (err) {
+                resolve(["Error fetching processes"]);
+                return;
+            }
+            // Simple parsing for Windows CSV
+            const targets = ['chrome', 'msedge', 'firefox', 'brave', 'opera', 'whatsapp'];
+            const counts = {};
+            
+            const lines = stdout.split('\r\n')
+                .map(l => l.split(',')[0].replace(/"/g, ''))
+                .filter(l => l);
+            
+            lines.forEach(proc => {
+                const lower = proc.toLowerCase();
+                targets.forEach(t => {
+                    if (lower.includes(t)) {
+                        counts[t] = (counts[t] || 0) + 1;
+                    }
+                });
+            });
+
+            const result = Object.keys(counts).map(k => {
+                return `${k} (${counts[k]})`;
+            });
+            
+            resolve(result);
+        });
+    });
 });

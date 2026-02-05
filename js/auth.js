@@ -155,6 +155,9 @@ async function autoLogin() {
   document.getElementById('app').style.display = 'flex';
   document.getElementById('user-footer').innerHTML = `Logged in as: <strong>${CURRENT_USER.user}</strong> (${CURRENT_USER.role}) <span id="sync-indicator" style="margin-left:15px; transition: opacity 0.5s; font-size: 0.9em;"></span>`;
   
+  // LOG LOGIN
+  if(typeof logAccessEvent === 'function') logAccessEvent(CURRENT_USER.user, 'Login');
+  
   applyRolePermissions();
   checkFirstTimeLogin();
   
@@ -282,6 +285,26 @@ function applyRolePermissions() {
     if(subBtnStatus) subBtnStatus.classList.add('hidden');
     if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');
 
+    // --- VETTING ARENA VISIBILITY ---
+    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
+    const arenaBtn = document.querySelector('button[onclick="showTab(\'vetting-arena\')"]');
+    
+    if (arenaBtn) {
+        let show = false;
+        if (CURRENT_USER.role === 'admin') show = true;
+        else if (session.active) {
+            if (!session.targetGroup || session.targetGroup === 'all') show = true;
+            else {
+                const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+                const members = rosters[session.targetGroup] || [];
+                if (members.includes(CURRENT_USER.user)) show = true;
+            }
+        }
+        
+        if (show) arenaBtn.classList.remove('hidden');
+        else arenaBtn.classList.add('hidden');
+    }
+
     // Role Specifics
     if (CURRENT_USER.role === 'teamleader') {
         tlElems.forEach(e => e.classList.remove('hidden'));
@@ -329,7 +352,10 @@ function applyRolePermissions() {
   }
 }
 
-function logout() { 
+async function logout() { 
+  if (CURRENT_USER && typeof logAccessEvent === 'function') {
+      await logAccessEvent(CURRENT_USER.user, 'Logout');
+  }
   sessionStorage.removeItem('currentUser');
   // localStorage.removeItem('rememberedUser'); // Keep credentials for pre-fill
   location.reload(); 

@@ -67,6 +67,13 @@ function renderMonthly() {
   const fPhase = document.getElementById('filterPhase').value;
   const fTrainee = document.getElementById('filterTrainee').value.toLowerCase();
   
+  // Filter records to only show 'Assessment' phase, not vetting tests.
+  const filteredRecs = recs.filter(r => {
+      // Keep records where phase is 'Assessment' or if phase is not defined (legacy/default)
+      const phase = r.phase || 'assessment';
+      return phase.toLowerCase() === 'assessment';
+  });
+
   const tbody = document.querySelector('#monthlyTableMain tbody');
   const theadRow = document.querySelector('#monthlyTableMain thead tr');
 
@@ -103,7 +110,7 @@ function renderMonthly() {
   }
     
   let html = '';
-  recs.forEach((r, originalIndex) => {
+  filteredRecs.forEach((r, originalIndex) => {
     // SAFETY CHECK: Skip corrupted records without trainee names
     if (!r.trainee) return;
 

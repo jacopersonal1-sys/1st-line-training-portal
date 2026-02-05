@@ -476,7 +476,10 @@ function buildAdminWidgets() {
         </div>
 
         <div class="dash-panel full-width">
-            <h4><i class="fas fa-user-clock"></i> Active Users Monitor</h4>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h4><i class="fas fa-user-clock"></i> Active Users Monitor</h4>
+                <button class="btn-secondary btn-sm" onclick="updateDashboardHealth()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
             <div class="table-responsive" style="max-height:250px; overflow-y:auto; margin-top:10px;">
                 <table class="admin-table">
                     <thead>

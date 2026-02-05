@@ -447,8 +447,9 @@
                 </div>
 
                 <div style="margin-bottom:20px;">
-                    <label for="builderAssessmentSelect">Link to Assessment / Subject</label>
+                    <label id="lblBuilderLink" for="builderAssessmentSelect">Link to Assessment / Subject</label>
                     <select id="builderAssessmentSelect" style="width:100%; padding:10px; font-size:1rem; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;"></select>
+                    <input type="text" id="builderCustomTitle" class="hidden" placeholder="Enter Vetting Test Name (e.g. 1st Vetting - Topic)" style="width:100%;">
                 </div>
                 <div id="questionContainer"></div>
                 <div style="margin-top:20px; padding-top:20px; border-top:1px dashed var(--border-color); display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
@@ -462,15 +463,11 @@
             </div>
         </section>
 
-        <section id="vetting-arena" class="admin-only-section">
+        <section id="vetting-arena">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <h2>Vetting Test Arena</h2>
             </div>
-            <div class="card" style="text-align:center; padding:50px;">
-                <i class="fas fa-hard-hat" style="font-size:4rem; color:var(--primary); margin-bottom:20px;"></i>
-                <h3>Under Construction</h3>
-                <p style="color:var(--text-muted);">This module is currently being built.</p>
-            </div>
+            <div id="vetting-arena-content"></div>
         </section>
 
         <section id="my-tests">
@@ -714,6 +711,16 @@
                         </div>
                     </div>
 
+                    <div style="margin-bottom:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="margin:0; color:var(--text-muted); font-size:0.9rem;">Access Logs (Last 14 Days)</h4>
+                            <button class="btn-secondary btn-sm" onclick="refreshAccessLogs()"><i class="fas fa-sync"></i> Refresh Logs</button>
+                        </div>
+                        <div style="max-height:200px; overflow-y:auto; border:1px solid var(--border-color); border-radius:8px;">
+                            <table class="admin-table"><thead><tr><th>Date/Time</th><th>User</th><th>Event</th></tr></thead><tbody id="accessLogTable"></tbody></table>
+                        </div>
+                    </div>
+
                     <button class="btn-primary" onclick="refreshSystemStatus()">Refresh Status</button>
                 </div>
 
@@ -721,6 +728,7 @@
                     <h3>Active Users Monitor</h3>
                     <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:10px;">Real-time view of logged-in users and their activity status.</p>
                     <div class="table-responsive" style="max-height:300px; overflow-y:auto;">
+                        <div style="text-align:right; margin-bottom:5px;"><button class="btn-secondary btn-sm" onclick="fetchSystemStatus()"><i class="fas fa-sync"></i> Refresh Monitor</button></div>
                         <table class="admin-table">
                             <thead>
                                 <tr>
@@ -808,6 +816,7 @@
 <script src="js/admin_sys.js"></script>
 <script src="js/admin_users.js"></script>
 <script src="js/admin_builder.js"></script> 
+<script src="js/vetting_arena.js"></script>
 <script src="js/admin_grading.js"></script> <script src="js/schedule.js"></script>
 <script src="js/reporting.js"></script>
 <script src="js/forms.js"></script> 

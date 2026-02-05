@@ -18,11 +18,25 @@ function loadTestBuilder(existingId = null) {
     if (typeSelect) {
         typeSelect.value = 'standard'; // Default
         typeSelect.onchange = function() {
-            const wrap = document.getElementById('durationWrapper');
-            if(this.value === 'vetting') wrap.classList.remove('hidden');
-            else wrap.classList.add('hidden');
+            const val = this.value;
+            const durWrap = document.getElementById('durationWrapper');
+            const lbl = document.getElementById('lblBuilderLink');
+            const sel = document.getElementById('builderAssessmentSelect');
+            const inp = document.getElementById('builderCustomTitle');
+
+            if(val === 'vetting') {
+                durWrap.classList.remove('hidden');
+                if(lbl) lbl.innerText = "Vetting Test Name";
+                if(sel) sel.classList.add('hidden');
+                if(inp) inp.classList.remove('hidden');
+            } else {
+                durWrap.classList.add('hidden');
+                if(lbl) lbl.innerText = "Link to Assessment / Subject";
+                if(sel) sel.classList.remove('hidden');
+                if(inp) inp.classList.add('hidden');
+            }
         };
-        typeSelect.onchange(); 
+        // Don't trigger onchange yet, wait until we know if editing
     }
     
     document.getElementById('builderDuration').value = '30';
@@ -39,11 +53,17 @@ function loadTestBuilder(existingId = null) {
         const test = tests.find(t => t.id == existingId);
         
         if(test) {
-            select.value = test.title;
             if(typeSelect) {
                 typeSelect.value = test.type || 'standard';
                 typeSelect.onchange(); // Trigger UI update
             }
+            
+            if (test.type === 'vetting') {
+                document.getElementById('builderCustomTitle').value = test.title;
+            } else {
+                select.value = test.title;
+            }
+            
             if(test.duration) document.getElementById('builderDuration').value = test.duration;
             
             // Load Questions
@@ -52,6 +72,10 @@ function loadTestBuilder(existingId = null) {
         } else {
             console.warn("Editing test ID not found:", existingId);
         }
+    } else {
+        // New Test
+        if(typeSelect) typeSelect.onchange(); // Trigger default
+        document.getElementById('builderCustomTitle').value = '';
     }
 }
 
@@ -281,12 +305,19 @@ function updateMatrixCorrect(qIdx, rIdx, val) {
 function removeQuestion(idx) { BUILDER_QUESTIONS.splice(idx, 1); renderBuilder(); }
 
 async function saveTest() {
-    const linked = document.getElementById('builderAssessmentSelect').value;
     const type = document.getElementById('builderTestType').value;
+    let linked = "";
+    
+    if (type === 'vetting') {
+        linked = document.getElementById('builderCustomTitle').value.trim();
+    } else {
+        linked = document.getElementById('builderAssessmentSelect').value;
+    }
+    
     const dur = document.getElementById('builderDuration').value;
 
     if (BUILDER_QUESTIONS.length === 0) return alert("Add questions.");
-    if (!linked) return alert("Select assessment.");
+    if (!linked) return alert("Enter/Select test name.");
 
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
 

@@ -40,7 +40,7 @@ let AUTO_BACKUP = false;
 // System Status & Heartbeat Constants
 const HEARTBEAT_INTERVAL = 15000; 
 const IDLE_THRESHOLD = 60000;       
-const LOGOUT_THRESHOLD = 20 * 60 * 1000; // 20 Minutes
+const LOGOUT_THRESHOLD = 10 * 60 * 1000; // 10 Minutes
 
 // --- NODE.JS / ELECTRON COMPATIBILITY ---
 if (typeof module !== 'undefined' && module.exports) {
