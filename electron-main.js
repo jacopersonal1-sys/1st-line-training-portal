@@ -187,7 +187,11 @@ ipcMain.handle('get-process-list', async () => {
                 return;
             }
             // Simple parsing for Windows CSV
-            const targets = ['chrome', 'msedge', 'firefox', 'brave', 'opera', 'whatsapp', 'discord', 'slack'];
+            const targets = [
+                'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'safari', 
+                'waterfox', 'tor', 'duckduckgo', 'arc', 'maxthon', 'seamonkey', 'avast', 'yandex',
+                'whatsapp', 'discord', 'slack'
+            ];
             const counts = {};
             
             const lines = stdout.split('\r\n')
@@ -196,6 +200,10 @@ ipcMain.handle('get-process-list', async () => {
             
             lines.forEach(proc => {
                 const lower = proc.toLowerCase();
+                
+                // EXCEPTION: Allow WebView2 (Teams) and Updaters
+                if (lower.includes('webview') || lower.includes('update')) return;
+
                 targets.forEach(t => {
                     if (lower.includes(t)) {
                         counts[t] = (counts[t] || 0) + 1;

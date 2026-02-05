@@ -19,7 +19,10 @@ const DB_SCHEMA = {
     insightReviews: [], 
     exemptions: [], 
     notices: [],
-    revokedUsers: [] // Added to ensure blacklist syncs
+    revokedUsers: [], // Added to ensure blacklist syncs
+    accessLogs: [], // Login/Logout/Timeout History
+    vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
+    linkRequests: [] // Requests from TLs for assessment links
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -93,6 +96,10 @@ async function loadFromServer(silent = false) {
                 if (!isUserTyping() && timeSinceInteraction > 5000) {
                     refreshAllDropdowns();
                 }
+            }
+            // STABILITY FIX: Re-apply permissions to show/hide dynamic tabs like Vetting Arena
+            if (silent && typeof applyRolePermissions === 'function') {
+                applyRolePermissions();
             }
             updateSyncUI('success');
         } else {
@@ -372,13 +379,12 @@ async function fetchSystemStatus() {
             if (activeTable) {
                 let html = '';
                 if(!activeUsers || activeUsers.length === 0) {
-                      html = '<tr><td colspan="6" class="text-center">No active users detected.</td></tr>';
+                      html = '<tr><td colspan="4" class="text-center">No active users detected.</td></tr>';
                 } else {
                     activeUsers.forEach(u => {
                         const idleStr = typeof formatDuration === 'function' 
                             ? formatDuration(u.idleTime) 
                             : (u.idleTime/1000).toFixed(0) + 's';
-                        const verStr = u.version || '-';
                         
                         const statusBadge = u.isIdle
                             ? '<span class="status-badge status-fail">Idle</span>'
@@ -387,16 +393,11 @@ async function fetchSystemStatus() {
                         const rowClass = u.isIdle ? 'user-idle' : '';
 
                         html += `
-                            <tr class="${rowClass}">
+                            <tr class="">
                                 <td><strong>${u.user}</strong></td>
-                                <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
                                 <td>${u.role}</td>
-                                <td>${statusBadge}</td>
-                                <td>${idleStr}</td>
-                                <td>
-                                    <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${u.user}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
-                                    <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${u.user}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
-                                </td>
+                                <td></td>
+                                <td></td>
                             </tr>
                         `;
                     });
@@ -407,6 +408,52 @@ async function fetchSystemStatus() {
     } catch (e) {
         console.error("Supabase Status fetch error", e);
     }
+}
+
+// --- ACCESS LOGGING (Login/Logout/Timeout) ---
+async function logAccessEvent(username, type) {
+    if (!username) return;
+    
+    // 1. Load current logs (Local cache is fine, we merge later)
+    const logs = JSON.parse(localStorage.getItem('accessLogs') || '[]');
+    
+    const newLog = {
+        id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+        user: username,
+        type: type, // 'Login', 'Logout', 'Timeout'
+        date: new Date().toISOString()
+    };
+    
+    // 2. Prune > 14 days (2 Weeks)
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    
+    const filteredLogs = logs.filter(l => new Date(l.date) > twoWeeksAgo);
+    filteredLogs.push(newLog);
+    
+    localStorage.setItem('accessLogs', JSON.stringify(filteredLogs));
+    
+    // 3. Sync to Cloud (Safe Merge)
+    if(typeof saveToServer === 'function') {
+        await saveToServer(['accessLogs'], false);
+    }
+}
+
+async function refreshAccessLogs() {
+    const container = document.getElementById('accessLogTable');
+    if (!container) return;
+
+    // Pull latest logs from server to ensure we see other users' activity
+    await loadFromServer(true);
+    
+    const logs = JSON.parse(localStorage.getItem('accessLogs') || '[]');
+    // Sort newest first
+    logs.sort((a,b) => new Date(b.date) - new Date(a.date));
+    
+    container.innerHTML = logs.map(l => {
+        const dateStr = new Date(l.date).toLocaleString();
+        return `<tr><td>${dateStr}</td><td>${l.user}</td><td>${l.type}</td></tr>`;
+    }).join('');
 }
 
 // 5. SUPABASE: Send Heartbeat
@@ -420,35 +467,15 @@ async function sendHeartbeat() {
     const isIdle = diff > limit;
 
     try {
-        // 1. Send Heartbeat with Version
-        const { error } = await supabaseClient
+        await supabaseClient
             .from('sessions')
             .upsert({
                 user: CURRENT_USER.user,
                 role: CURRENT_USER.role,
-                version: window.APP_VERSION || 'Unknown',
                 idleTime: diff,
                 isIdle: isIdle,
                 lastSeen: new Date().toISOString()
             });
-            
-        // 2. Check for Remote Commands (Pending Actions)
-        const { data: sessionData } = await supabaseClient
-            .from('sessions')
-            .select('pending_action')
-            .eq('user', CURRENT_USER.user)
-            .single();
-            
-        if (sessionData && sessionData.pending_action) {
-            // Clear command first to prevent loops
-            await supabaseClient.from('sessions').update({ pending_action: null }).eq('user', CURRENT_USER.user);
-            
-            if (sessionData.pending_action === 'logout') {
-                if (typeof logout === 'function') logout();
-            } else if (sessionData.pending_action === 'restart') {
-                if (typeof triggerForceRestart === 'function') triggerForceRestart();
-            }
-        }
     } catch (e) { /* Silent fail */ }
 }
 
@@ -524,7 +551,7 @@ function importDatabase(input) {
             });
 
             console.log("Restoring backup to cloud...");
-            await saveToServer();
+            await saveToServer(null, true); // Force save ALL keys
 
             alert("Database restored successfully.");
             location.reload();
@@ -572,13 +599,13 @@ function startRealtimeSync() {
 
     // Default Rates (Trainee/Guest)
     let syncRate = 60000; // 1 Minute
-    let beatRate = 30000; // 30 Seconds
+    let beatRate = 60000; // 1 Minute (Optimized for Bandwidth)
 
     // Role-Based Adjustment
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
         if (CURRENT_USER.role === 'admin') {
             syncRate = 10000; // 10 Seconds (High Speed for Admin)
-            beatRate = 15000;
+            beatRate = 5000; // 5 Seconds (Real-time Monitor)
         } else if (CURRENT_USER.role === 'teamleader') {
             syncRate = 300000; // 5 Minutes (Save Bandwidth)
             beatRate = 60000;  // 1 Minute
@@ -602,6 +629,12 @@ function startRealtimeSync() {
             const statusView = document.getElementById('admin-view-status');
             if(statusView && statusView.offsetParent !== null) {
                 fetchSystemStatus();
+            }
+
+            // NEW: Refresh Dashboard Widget if visible
+            const dashView = document.getElementById('dashboard-view');
+            if(dashView && dashView.classList.contains('active')) {
+                if(typeof updateDashboardHealth === 'function') updateDashboardHealth();
             }
         }
     }, beatRate);

@@ -49,6 +49,7 @@ function renderDashboard() {
     
     if (role === 'admin') {
         content.innerHTML = buildAdminWidgets();
+        content.innerHTML += buildLinkRequestsWidget(); // Add Link Requests Widget
         // Append Notice Manager for Admins
         const manager = document.createElement('div');
         manager.className = 'dash-panel full-width';
@@ -558,6 +559,39 @@ function buildAdminWidgets() {
     `;
 }
 
+function buildLinkRequestsWidget() {
+    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    const pending = requests.filter(r => r.status === 'pending');
+    
+    if (pending.length === 0) return '';
+    
+    let html = `<div class="dash-panel full-width" style="border-left: 4px solid #f39c12;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h4 style="margin:0;"><i class="fas fa-link"></i> Pending Link Requests</h4>
+            <span class="badge-count" style="position:static; background:#f39c12;">${pending.length}</span>
+        </div>
+        <div class="table-responsive" style="max-height:200px; overflow-y:auto;">
+            <table class="admin-table">
+                <thead><tr><th>Date</th><th>Requester</th><th>Trainee</th><th>Assessment</th><th>Action</th></tr></thead>
+                <tbody>`;
+                
+    pending.forEach(req => {
+        html += `<tr>
+            <td>${new Date(req.date).toLocaleDateString()}</td>
+            <td>${req.requestedBy}</td>
+            <td>${req.trainee}</td>
+            <td>${req.assessment}</td>
+            <td>
+                <button class="btn-primary btn-sm" onclick="fulfillLinkRequest('${req.recordId}')">Add Link</button>
+                <button class="btn-danger btn-sm" onclick="dismissLinkRequest('${req.id}')"><i class="fas fa-times"></i></button>
+            </td>
+        </tr>`;
+    });
+    
+    html += `</tbody></table></div></div>`;
+    return html;
+}
+
 // --- TEAM LEADER DASHBOARD ---
 function buildTLWidgets() {
     const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
@@ -602,6 +636,49 @@ function buildTLWidgets() {
         </div>
     `;
 }
+
+// --- ADMIN ACTIONS FOR REQUESTS ---
+
+window.fulfillLinkRequest = async function(recordId) {
+    // Find record index
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const idx = records.findIndex(r => r.id === recordId);
+    
+    if (idx === -1) {
+        // Fallback: Try to find by composite key if ID fails (legacy support)
+        // This is tricky from dashboard, so we might just alert.
+        // But updateRecordLink handles the request logic if we pass the index.
+        alert("Record not found. It might have been deleted.");
+        return;
+    }
+    
+    // Reuse the reporting.js function if available, else replicate logic
+    if (typeof updateRecordLink === 'function') {
+        await updateRecordLink(idx);
+        renderDashboard(); // Refresh dashboard to remove the request row
+    }
+};
+
+window.dismissLinkRequest = async function(requestId) {
+    if(!confirm("Dismiss this request without adding a link?")) return;
+    
+    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    const idx = requests.findIndex(r => r.id === requestId);
+    
+    if (idx > -1) {
+        requests[idx].status = 'dismissed';
+        requests[idx].completedBy = CURRENT_USER.user;
+        requests[idx].completedDate = new Date().toISOString();
+        
+        localStorage.setItem('linkRequests', JSON.stringify(requests));
+        
+        if (typeof saveToServer === 'function') {
+            await saveToServer(['linkRequests'], false);
+        }
+        
+        renderDashboard();
+    }
+};
 
 // --- TRAINEE DASHBOARD ---
 function buildTraineeWidgets() {

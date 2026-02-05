@@ -17,6 +17,18 @@ async function secureReportSave() {
     }
 }
 
+// --- HELPER: ASYNC REQUEST SAVE ---
+async function secureRequestSave() {
+    if (typeof saveToServer === 'function') {
+        try {
+            // Save requests and records (if admin fulfilled one)
+            await saveToServer(['linkRequests', 'records'], false);
+        } catch(e) {
+            console.error("Request Sync Error:", e);
+        }
+    }
+}
+
 function loadAllDataViews() { 
     populateMonthlyFilters(); 
     renderMonthly(); 
@@ -62,6 +74,7 @@ function populateMonthlyFilters() {
 
 function renderMonthly() {
   const recs = JSON.parse(localStorage.getItem('records')||'[]');
+  const requests = JSON.parse(localStorage.getItem('linkRequests')||'[]');
   const fMonth = document.getElementById('filterMonth').value;
   const fAssess = document.getElementById('filterAssessment').value;
   const fPhase = document.getElementById('filterPhase').value;
@@ -80,7 +93,7 @@ function renderMonthly() {
   // FOCUS PROTECTION for the Trainee Search Input in the Monthly View
   // We allow updates while typing to filter results, but ensure we don't clear the input.
   
-  if (CURRENT_USER.role === 'admin') {
+  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader') {
       // Fix Alignment: Add Checkbox Header
       if (!theadRow.querySelector('.check-col')) {
           const th = document.createElement('th');
@@ -131,18 +144,37 @@ function renderMonthly() {
       ? `<td class="admin-only" style="text-align:center;"><input type="checkbox" class="del-check" value="${originalIndex}" aria-label="Select Record for Deletion"></td>` 
       : '';
     
+    // --- ACTION COLUMN LOGIC ---
     let actionHtml = '';
-    if(CURRENT_USER.role === 'admin') {
+    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader') {
+        actionHtml = '<td class="action-cell">';
+        
         if(r.link === 'Digital-Assessment') {
              // Check if function exists to avoid reference errors
              const clickAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function') 
                 ? `onclick="viewCompletedTest('${r.trainee}', '${r.assessment}')"` 
                 : `onclick="alert('Assessment viewer not loaded.')"`;
              
-             actionHtml = `<td><button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button></td>`;
+             actionHtml += `<button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button>`;
+        } 
+        else if (r.link && r.link.startsWith('http')) {
+             actionHtml += `<a href="${r.link}" target="_blank" class="btn-secondary btn-sm" style="text-decoration:none; display:inline-block; margin-right:5px;" title="Open Link"><i class="fas fa-external-link-alt"></i> Open</a>`;
+             if (CURRENT_USER.role === 'admin') {
+                 actionHtml += `<button class="btn-secondary btn-sm" onclick="updateRecordLink(${originalIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
+             }
         } else {
-             actionHtml = `<td><span style="color:#ccc; font-size:0.8rem;">-</span></td>`;
+             // No Link Present
+             if (CURRENT_USER.role === 'admin') {
+                 actionHtml += `<button class="btn-primary btn-sm" onclick="updateRecordLink(${originalIndex})"><i class="fas fa-link"></i> Add Link</button>`;
+             } else {
+                 // Team Leader: Request Link
+                 // Check if already requested
+                 const pending = requests.find(req => req.recordId === r.id && req.status === 'pending');
+                 if (pending) actionHtml += `<button class="btn-secondary btn-sm" disabled style="opacity:0.6; cursor:not-allowed;">Requested</button>`;
+                 else actionHtml += `<button class="btn-warning btn-sm" onclick="requestRecordLink('${r.id}', '${r.trainee}', '${r.assessment}')">Request Link</button>`;
+             }
         }
+        actionHtml += '</td>';
     }
       
     // FIX: Clean Group Display (Month Year only)
@@ -378,4 +410,68 @@ function viewSavedReport(id) {
         if(report.checks[2]) container.querySelector('#repPass3').checked = true;
     }
     document.getElementById('savedReportModal').classList.remove('hidden');
+}
+
+// --- LINK MANAGEMENT (TL & ADMIN) ---
+
+async function requestRecordLink(recordId, trainee, assessment) {
+    if (!confirm(`Request Admin to upload a link for ${trainee}'s ${assessment}?`)) return;
+    
+    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    
+    // Deduplicate
+    if (requests.some(r => r.recordId === recordId && r.status === 'pending')) return alert("Request already pending.");
+
+    requests.push({
+        id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+        recordId: recordId,
+        trainee: trainee,
+        assessment: assessment,
+        requestedBy: CURRENT_USER.user,
+        status: 'pending',
+        date: new Date().toISOString()
+    });
+    
+    localStorage.setItem('linkRequests', JSON.stringify(requests));
+    await secureRequestSave();
+    
+    renderMonthly(); // Refresh UI
+    alert("Request sent to Admin dashboard.");
+}
+
+async function updateRecordLink(index) {
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const r = records[index];
+    if (!r) return;
+
+    const newLink = prompt("Enter URL for Assessment (e.g. SharePoint/OneDrive link):", r.link && r.link.startsWith('http') ? r.link : "");
+    if (newLink === null) return; // Cancelled
+
+    r.link = newLink.trim();
+    localStorage.setItem('records', JSON.stringify(records));
+    
+    // Check if this fulfills a request
+    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    let reqUpdated = false;
+    
+    // Find pending request for this record (by ID or composite key if ID missing)
+    const pendingIdx = requests.findIndex(req => 
+        req.status === 'pending' && 
+        (req.recordId === r.id || (req.trainee === r.trainee && req.assessment === r.assessment))
+    );
+
+    if (pendingIdx > -1) {
+        requests[pendingIdx].status = 'completed';
+        requests[pendingIdx].completedBy = CURRENT_USER.user;
+        requests[pendingIdx].completedDate = new Date().toISOString();
+        localStorage.setItem('linkRequests', JSON.stringify(requests));
+        reqUpdated = true;
+    }
+
+    // Save
+    if (typeof saveToServer === 'function') {
+        await saveToServer(reqUpdated ? ['records', 'linkRequests'] : ['records'], false);
+    }
+    
+    renderMonthly();
 }
