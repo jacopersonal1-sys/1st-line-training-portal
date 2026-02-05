@@ -550,15 +550,28 @@ function openTestTaker(testId, isArenaMode = false) {
             if (members.includes(CURRENT_USER.user)) { myGroupId = gid; break; }
         }
 
+        let isScheduled = false;
         if (myGroupId) {
             const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
             if (schedKey) {
                 const item = schedules[schedKey].items.find(i => i.linkedTestId == testId);
                 if (item) {
+                    isScheduled = true;
                     const status = getScheduleStatus(item.dateRange, item.openTime, item.closeTime);
                     if (status !== 'active') return alert("This assessment is currently locked by the schedule.");
+                    
+                    // Double Check Time Access
+                    if (typeof checkTimeAccess === 'function') {
+                         const isTimeOpen = checkTimeAccess(item.openTime, item.closeTime, item.ignoreTime);
+                         if (!isTimeOpen) return alert(`This assessment is only available between ${item.openTime} and ${item.closeTime}.`);
+                    }
                 }
             }
+        }
+        
+        // STRICT ENFORCEMENT: If not found in schedule, BLOCK IT.
+        if (!isScheduled) {
+            return alert("This assessment is not assigned to your schedule.");
         }
     }
 
@@ -900,7 +913,11 @@ async function submitTest() {
 
     // --- ARENA EXIT ---
     if (typeof exitArena === 'function') {
-        await exitArena();
+        try {
+            await exitArena();
+        } catch(e) {
+            console.error("Failed to exit arena cleanly:", e);
+        }
     }
 
     if (finalStatus === 'completed') {

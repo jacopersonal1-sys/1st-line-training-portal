@@ -161,7 +161,7 @@ ipcMain.handle('set-kiosk-mode', (event, enable) => {
     if (mainWindow) {
         mainWindow.setKiosk(enable);
         mainWindow.setAlwaysOnTop(enable, 'screen-saver'); // Force top
-        mainWindow.setClosable(!enable); // Disable close button
+        mainWindow.setClosable(!enable); // Disable close button if enabled
     }
     return true;
 });
@@ -187,7 +187,7 @@ ipcMain.handle('get-process-list', async () => {
                 return;
             }
             // Simple parsing for Windows CSV
-            const targets = ['chrome', 'msedge', 'firefox', 'brave', 'opera', 'whatsapp'];
+            const targets = ['chrome', 'msedge', 'firefox', 'brave', 'opera', 'whatsapp', 'discord', 'slack'];
             const counts = {};
             
             const lines = stdout.split('\r\n')

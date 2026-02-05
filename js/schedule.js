@@ -494,10 +494,22 @@ function openBookingModal(date, time, trainer) {
     const assessSelect = document.getElementById('bookingAssessment');
     assessSelect.innerHTML = '';
     const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
-    const liveAssessments = assessments.filter(a => a.live); 
+    let liveAssessments = assessments.filter(a => a.live); 
+    
+    // FILTER FOR TRAINEES: Only show assessments that match their schedule
+    if (CURRENT_USER.role === 'trainee') {
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const schedId = getTraineeScheduleId(CURRENT_USER.user, schedules);
+        if (schedId && schedules[schedId]) {
+            const allowedNames = new Set(schedules[schedId].items.map(i => i.courseName));
+            liveAssessments = liveAssessments.filter(a => allowedNames.has(a.name));
+        } else {
+            liveAssessments = []; // No schedule = no bookings
+        }
+    }
     
     if(liveAssessments.length === 0) {
-        assessSelect.innerHTML = '<option>No Live Assessments Configured</option>';
+        assessSelect.innerHTML = '<option>No Available Assessments</option>';
     } else {
         liveAssessments.forEach(a => {
             assessSelect.add(new Option(a.name, a.name));

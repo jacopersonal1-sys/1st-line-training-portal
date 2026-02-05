@@ -4,6 +4,8 @@
 // --- ADMIN CONTROLS ---
 
 let ADMIN_MONITOR_INTERVAL = null;
+let TRAINEE_NET_POLLER = null;
+let TRAINEE_LOCAL_POLLER = null;
 
 function loadVettingArena() {
     if (CURRENT_USER.role === 'admin') {
@@ -164,11 +166,15 @@ async function endVettingSession() {
 
 // --- TRAINEE CONTROLS ---
 
-let SECURITY_INTERVAL = null;
+let SECURITY_MONITOR_INTERVAL = null; // Runs DURING test
 
 function renderTraineeArena() {
+    // Clear previous pollers to prevent dupes
+    stopTraineePollers();
+
     const container = document.getElementById('vetting-arena-content');
-    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
+    // Initial load from local cache, then poller takes over
+    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}'); 
     
     if (!session.active) {
         container.innerHTML = `
@@ -177,6 +183,9 @@ function renderTraineeArena() {
                 <h3>Arena Closed</h3>
                 <p style="color:var(--text-muted);">There is no active vetting session at this moment.</p>
             </div>`;
+            
+        // Start Polling for Session Start (5s)
+        TRAINEE_NET_POLLER = setInterval(pollVettingSession, 5000);
         return;
     }
 
@@ -214,7 +223,7 @@ function renderTraineeArena() {
         container.innerHTML = `<div id="arenaTestContainer"></div>`;
         // Trigger the test engine in "Arena Mode"
         openTestTaker(session.testId, true); 
-        startSecurityMonitoring();
+        startActiveTestMonitoring();
         return;
     }
 
@@ -238,24 +247,99 @@ function renderTraineeArena() {
                 </ul>
             </div>
 
-            <button class="btn-primary btn-lg" onclick="enterArena('${session.testId}')">ENTER ARENA & START</button>
+            <div id="securityCheckLog" class="security-log-box">
+                <div><i class="fas fa-spinner fa-spin"></i> Checking System Requirements...</div>
+            </div>
+
+            <button id="btnEnterArena" class="btn-primary btn-lg" disabled onclick="enterArena('${session.testId}')" style="margin-top:15px; opacity:0.5; cursor:not-allowed;">ENTER ARENA & START</button>
         </div>
     `;
+
+    // Start Pre-Flight Checks
+    startTraineePreFlight();
 }
 
-async function enterArena(testId) {
-    // 1. Enforce Security
+function stopTraineePollers() {
+    if (TRAINEE_NET_POLLER) clearInterval(TRAINEE_NET_POLLER);
+    if (TRAINEE_LOCAL_POLLER) clearInterval(TRAINEE_LOCAL_POLLER);
+}
+
+function startTraineePreFlight() {
+    // 1. Network Poll (5s) - Check if session is still active
+    TRAINEE_NET_POLLER = setInterval(pollVettingSession, 5000);
+
+    // 2. Local Security Poll (2s) - Check Screens/Apps
+    // This prevents the "Stuck" issue by constantly re-evaluating
+    TRAINEE_LOCAL_POLLER = setInterval(checkSystemCompliance, 2000);
+    checkSystemCompliance(); // Run immediately
+}
+
+// Lightweight Poller for Session State
+async function pollVettingSession() {
+    if (!window.supabaseClient) return;
+    
+    // Fetch ONLY the vettingSession row to save bandwidth
+    const { data, error } = await supabaseClient
+        .from('app_documents')
+        .select('content')
+        .eq('key', 'vettingSession')
+        .single();
+        
+    if (data && data.content) {
+        const currentLocal = localStorage.getItem('vettingSession');
+        const newStr = JSON.stringify(data.content);
+        
+        // Only re-render if state changed
+        if (currentLocal !== newStr) {
+            localStorage.setItem('vettingSession', newStr);
+            // If we are NOT currently taking the test, refresh the view
+            if (!document.getElementById('arenaTestContainer')) {
+                renderTraineeArena();
+            }
+        }
+    }
+}
+
+async function checkSystemCompliance() {
+    const logBox = document.getElementById('securityCheckLog');
+    const btn = document.getElementById('btnEnterArena');
+    if (!logBox || !btn) return;
+
+    let errors = [];
+    
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         
         // Check Screens
         const screenCount = await ipcRenderer.invoke('get-screen-count');
-        if (screenCount > 1) {
-            alert(`Security Violation: ${screenCount} monitors detected.\nPlease disconnect external monitors to proceed.`);
-            return;
-        }
+        if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
+        
+        // Check Apps
+        const apps = await ipcRenderer.invoke('get-process-list');
+        if (apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
+    }
 
-        // Enable Kiosk & Protection
+    // Update UI
+    if (errors.length === 0) {
+        logBox.innerHTML = `<div class="sec-pass"><i class="fas fa-check"></i> System Secure. Ready to start.</div>`;
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    } else {
+        logBox.innerHTML = errors.map(e => `<div class="sec-fail"><i class="fas fa-times"></i> ${e}</div>`).join('');
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+    }
+}
+
+async function enterArena(testId) {
+    // Stop pre-flight polling
+    stopTraineePollers();
+
+    // 1. Enforce Security
+    if (typeof require !== 'undefined') {
+        const { ipcRenderer } = require('electron');
         await ipcRenderer.invoke('set-kiosk-mode', true);
         await ipcRenderer.invoke('set-content-protection', true);
     }
@@ -294,11 +378,11 @@ async function updateTraineeStatus(status, timerStr = "") {
     if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], false);
 }
 
-function startSecurityMonitoring() {
-    if (SECURITY_INTERVAL) clearInterval(SECURITY_INTERVAL);
+function startActiveTestMonitoring() {
+    if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
     
     // Update status every 30 seconds
-    SECURITY_INTERVAL = setInterval(() => {
+    SECURITY_MONITOR_INTERVAL = setInterval(() => {
         const timerEl = document.getElementById('test-timer-bar');
         const timeStr = timerEl ? timerEl.innerText.replace('TIME: ', '') : '';
         updateTraineeStatus('started', timeStr);
@@ -307,12 +391,15 @@ function startSecurityMonitoring() {
 
 // Called by assessment.js when submitting
 async function exitArena() {
-    if (SECURITY_INTERVAL) clearInterval(SECURITY_INTERVAL);
+    stopTraineePollers();
+    if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
     
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
-        await ipcRenderer.invoke('set-kiosk-mode', false);
-        await ipcRenderer.invoke('set-content-protection', false);
+        try {
+            await ipcRenderer.invoke('set-kiosk-mode', false);
+            await ipcRenderer.invoke('set-content-protection', false);
+        } catch(e) { console.error("Exit Kiosk Error", e); }
     }
     
     await updateTraineeStatus('completed');

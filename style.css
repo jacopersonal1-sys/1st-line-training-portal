@@ -742,3 +742,20 @@ textarea.auto-expand {
     white-space: pre-wrap;
     text-align: left;
 }
+
+/* ================= VETTING SECURITY LOG ================= */
+.security-log-box {
+    background: rgba(0,0,0,0.2);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    margin-top: 15px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    text-align: left;
+    max-height: 150px;
+    overflow-y: auto;
+}
+.sec-pass { color: #2ecc71; }
+.sec-fail { color: #ff5252; }
+.sec-warn { color: #f1c40f; }
