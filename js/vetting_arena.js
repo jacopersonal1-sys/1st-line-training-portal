@@ -106,6 +106,8 @@ function renderTraineeRows(trainees) {
         let statusBadge = '<span class="status-badge status-improve">Waiting</span>';
         if (data.status === 'started') statusBadge = '<span class="status-badge status-semi">In Progress</span>';
         if (data.status === 'completed') statusBadge = '<span class="status-badge status-pass">Completed</span>';
+        if (data.status === 'blocked') statusBadge = '<span class="status-badge status-fail">Blocked</span>';
+        if (data.status === 'ready') statusBadge = '<span class="status-badge status-pass">Ready</span>';
         
         let securityAlert = '';
         if (data.security) {
@@ -116,6 +118,13 @@ function renderTraineeRows(trainees) {
             if (badApps.length > 0) securityAlert += ` <i class="fas fa-exclamation-triangle" style="color:#ff5252;" title="Forbidden Apps Detected"></i>`;
         }
 
+        let actions = '-';
+        if (data.status === 'started') {
+            actions = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${user}')">Force Stop</button>`;
+        } else if (data.status === 'blocked') {
+            actions = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${user}')">Allow / Override</button>`;
+        }
+
         return `
             <tr>
                 <td><strong>${user}</strong></td>
@@ -124,7 +133,7 @@ function renderTraineeRows(trainees) {
                 <td>${data.security ? data.security.screens : '-'} ${securityAlert}</td>
                 <td><small style="color:#e74c3c;">${data.security && data.security.apps.length > 0 ? data.security.apps.join(', ') : ''}</small></td>
                 <td>
-                    ${data.status === 'started' ? `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${user}')">Force Stop</button>` : '-'}
+                    ${actions}
                 </td>
             </tr>
         `;
@@ -271,6 +280,7 @@ function startTraineePreFlight() {
 
     // 2. Local Security Poll (2s) - Check Screens/Apps
     // This prevents the "Stuck" issue by constantly re-evaluating
+    LAST_REPORTED_STATUS = null; // Reset so we report presence immediately
     TRAINEE_LOCAL_POLLER = setInterval(checkSystemCompliance, 2000);
     checkSystemCompliance(); // Run immediately
 }
@@ -301,10 +311,17 @@ async function pollVettingSession() {
     }
 }
 
+let LAST_REPORTED_STATUS = null;
+
 async function checkSystemCompliance() {
     const logBox = document.getElementById('securityCheckLog');
     const btn = document.getElementById('btnEnterArena');
     if (!logBox || !btn) return;
+
+    // 1. Check Override
+    const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+    const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
+    const isOverridden = myData && myData.override;
 
     let errors = [];
     
@@ -320,9 +337,21 @@ async function checkSystemCompliance() {
         if (apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
     }
 
+    // Determine Status
+    let currentStatus = 'ready';
+    if (errors.length > 0 && !isOverridden) {
+        currentStatus = 'blocked';
+    }
+
     // Update UI
     if (errors.length === 0) {
         logBox.innerHTML = `<div class="sec-pass"><i class="fas fa-check"></i> System Secure. Ready to start.</div>`;
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    } else if (isOverridden) {
+        logBox.innerHTML = `<div class="sec-warn"><i class="fas fa-exclamation-triangle"></i> <strong>Admin Override Active.</strong> Security checks bypassed.</div>` + 
+                           errors.map(e => `<div class="sec-fail" style="opacity:0.7;"><i class="fas fa-times"></i> ${e} (Ignored)</div>`).join('');
         btn.disabled = false;
         btn.style.opacity = '1';
         btn.style.cursor = 'pointer';
@@ -331,6 +360,12 @@ async function checkSystemCompliance() {
         btn.disabled = true;
         btn.style.opacity = '0.5';
         btn.style.cursor = 'not-allowed';
+    }
+
+    // Report to Server if Status Changed (e.g. Waiting -> Blocked or Waiting -> Ready)
+    if (currentStatus !== LAST_REPORTED_STATUS) {
+        LAST_REPORTED_STATUS = currentStatus;
+        await updateTraineeStatus(currentStatus);
     }
 }
 
