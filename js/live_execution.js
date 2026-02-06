@@ -130,9 +130,9 @@ function renderAdminLivePanel(container) {
                 </div>
                 
                 <div class="card admin-interaction-active" style="display:flex; flex-direction:column; gap:15px;">
-                    <div style="background:#000; color:#0f0; padding:10px; border-radius:4px; font-family:monospace; min-height:60px;">
+                    <div id="live-admin-answer-box" style="background:#000; color:#0f0; padding:10px; border-radius:4px; font-family:monospace; min-height:60px;">
                         <strong>TRAINEE ANSWER:</strong><br>
-                        ${traineeAns}
+                        ${typeof session.answers[currentQ] === 'string' ? session.answers[currentQ] : traineeAns}
                     </div>
                     
                     <div>
@@ -177,10 +177,11 @@ function updateAdminLiveView() {
     const session = JSON.parse(localStorage.getItem('liveSession'));
     if (!session.active || session.currentQ === -1) return;
     
-    const ansBox = document.querySelector('.admin-interaction-active div[style*="background:#000"]');
+    const ansBox = document.getElementById('live-admin-answer-box');
     if (ansBox) {
         const ans = session.answers[session.currentQ];
-        const html = `<strong>TRAINEE ANSWER:</strong><br>${ans ? JSON.stringify(ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>'}`;
+        const displayAns = (typeof ans === 'string') ? ans : (ans ? JSON.stringify(ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>');
+        const html = `<strong>TRAINEE ANSWER:</strong><br>${displayAns}`;
         if (ansBox.innerHTML !== html) ansBox.innerHTML = html;
     }
 }
@@ -231,6 +232,8 @@ function renderTraineeLivePanel(container) {
         inputHtml = '<p>Error: Input renderer not loaded.</p>';
     }
 
+    const isSubmitted = (session.answers[session.currentQ] !== undefined && session.answers[session.currentQ] !== null && session.answers[session.currentQ] !== "");
+
     container.innerHTML = `
         <div style="max-width:800px; margin:0 auto; padding:20px;">
             <div class="progress-track" style="margin-bottom:20px;">
@@ -244,8 +247,9 @@ function renderTraineeLivePanel(container) {
                     ${inputHtml}
                 </div>
 
-                <div style="margin-top:40px; text-align:right;">
-                    <button class="btn-primary btn-lg" onclick="submitLiveAnswer(${session.currentQ})">Submit Answer</button>
+                <div style="margin-top:40px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:15px;">
+                    ${isSubmitted ? '<span id="submit-status" style="color:#2ecc71; font-weight:bold; font-size:1.1rem;"><i class="fas fa-check-circle"></i> Answer Submitted</span>' : '<span id="submit-status"></span>'}
+                    <button class="btn-primary btn-lg" onclick="submitLiveAnswer(${session.currentQ})">${isSubmitted ? 'Update Answer' : 'Submit Answer'}</button>
                 </div>
             </div>
         </div>`;
@@ -335,7 +339,16 @@ async function submitLiveAnswer(qIdx) {
     
     if (typeof saveToServer === 'function') await saveToServer(['liveSession'], true);
     
-    if(btn) { btn.innerText = "Sent!"; }
+    if(btn) { 
+        btn.innerText = "Update Answer"; 
+        const statusSpan = document.getElementById('submit-status');
+        if(statusSpan) {
+            statusSpan.innerHTML = '<i class="fas fa-check-circle"></i> Answer Submitted';
+            statusSpan.style.color = '#2ecc71';
+            statusSpan.style.fontWeight = 'bold';
+            statusSpan.style.fontSize = '1.1rem';
+        }
+    }
 }
 
 async function finishLiveSession() {
