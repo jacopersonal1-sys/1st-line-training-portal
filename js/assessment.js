@@ -679,7 +679,7 @@ function renderQuestionInput(q, idx) {
     }
     
     if (q.type === 'live_practical') {
-        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Perform the instruction above. Type 'Done' or add notes here when finished..."></textarea>`;
+        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Notes (Optional)..."></textarea>`;
     }
     
     if (q.type === 'matching') {

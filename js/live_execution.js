@@ -255,6 +255,8 @@ function renderTraineeLivePanel(container) {
 
     const isSubmitted = (session.answers[session.currentQ] !== undefined && session.answers[session.currentQ] !== null && session.answers[session.currentQ] !== "");
 
+    const btnText = (q.type === 'live_practical') ? 'Done' : (isSubmitted ? 'Update Answer' : 'Submit Answer');
+
     container.innerHTML = `
         <div style="max-width:800px; margin:0 auto; padding:20px;">
             <div class="progress-track" style="margin-bottom:20px;">
@@ -270,7 +272,7 @@ function renderTraineeLivePanel(container) {
 
                 <div style="margin-top:40px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:15px;">
                     ${isSubmitted ? '<span id="submit-status" style="color:#2ecc71; font-weight:bold; font-size:1.1rem;"><i class="fas fa-check-circle"></i> Answer Submitted</span>' : '<span id="submit-status"></span>'}
-                    <button class="btn-primary btn-lg" onclick="submitLiveAnswer(${session.currentQ})">${isSubmitted ? 'Update Answer' : 'Submit Answer'}</button>
+                    <button class="btn-primary btn-lg" onclick="submitLiveAnswer(${session.currentQ})">${btnText}</button>
                 </div>
             </div>
         </div>`;
@@ -373,65 +375,90 @@ async function submitLiveAnswer(qIdx) {
 }
 
 async function finishLiveSession() {
-    // 1. Calculate Summary & Show Overview
+    // 1. Build Editable Summary View
     const session = JSON.parse(localStorage.getItem('liveSession'));
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
 
     let totalScore = 0;
     let maxScore = 0;
-    let summaryHtml = '<table class="admin-table"><thead><tr><th>Q</th><th>Answer Preview</th><th>Score</th><th>Comment</th></tr></thead><tbody>';
-
-    test.questions.forEach((q, idx) => {
+    
+    let itemsHtml = test.questions.map((q, idx) => {
         const pts = parseFloat(q.points || 1);
-        const score = parseFloat(session.scores[idx] || 0);
+        const currentScore = parseFloat(session.scores[idx] || 0);
+        const currentComment = session.comments[idx] || '';
+        const ans = session.answers[idx];
+        
         maxScore += pts;
-        totalScore += score;
-        
-        const ans = session.answers[idx] ? (typeof session.answers[idx] === 'object' ? JSON.stringify(session.answers[idx]) : session.answers[idx]) : '-';
-        const comment = session.comments[idx] || '';
-        
-        summaryHtml += `<tr>
-            <td>${idx+1}</td>
-            <td><div style="max-height:50px; overflow:hidden; font-size:0.8rem;">${ans}</div></td>
-            <td>${score} / ${pts}</td>
-            <td>${comment}</td>
-        </tr>`;
-    });
-    summaryHtml += '</tbody></table>';
+        totalScore += currentScore;
 
-    const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+        let answerDisplay = '';
+        if (q.type === 'live_practical') {
+             answerDisplay = `<div style="font-style:italic; color:var(--text-muted);">Practical Task - See Notes below</div>`;
+             if(ans) answerDisplay += `<div style="margin-top:5px; padding:5px; background:rgba(255,255,255,0.05);">${ans}</div>`;
+        } else {
+             answerDisplay = (ans && typeof ans === 'object') ? JSON.stringify(ans) : (ans || '-');
+        }
+
+        return `
+        <div class="marking-item" style="background:var(--bg-input); padding:15px; margin-bottom:15px; border-radius:8px; border:1px solid var(--border-color);">
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                <strong>Q${idx+1}: ${q.text}</strong>
+                <span style="font-size:0.8rem; color:var(--text-muted);">Max: ${pts}</span>
+            </div>
+            
+            <div style="margin-bottom:15px; padding:10px; background:var(--bg-card); border-radius:4px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:5px;">TRAINEE ANSWER:</div>
+                <div style="font-size:0.9rem;">${answerDisplay}</div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 2fr; gap:15px;">
+                <div>
+                    <label style="font-size:0.8rem;">Score</label>
+                    <input type="number" class="live-final-score" value="${currentScore}" max="${pts}" min="0" step="0.5" onchange="saveLiveScore(${idx}, this.value)">
+                </div>
+                <div>
+                    <label style="font-size:0.8rem;">Comment</label>
+                    <input type="text" class="live-final-comment" value="${currentComment}" placeholder="Feedback..." onchange="saveLiveComment(${idx}, this.value)">
+                </div>
+            </div>
+        </div>`;
+    }).join('');
 
     // 2. Inject Summary View (Replaces the Question View)
     const container = document.getElementById('live-execution-content');
     container.innerHTML = `
-        <div class="card" style="max-width:900px; margin:20px auto; height:calc(100vh - 200px); display:flex; flex-direction:column;">
+        <div class="card" style="max-width:900px; margin:20px auto; height:calc(100vh - 150px); display:flex; flex-direction:column;">
             <div style="border-bottom:1px solid var(--border-color); padding-bottom:15px; margin-bottom:15px;">
-                <h2 style="margin:0;">Assessment Summary</h2>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
-                    <div style="font-size:1.1rem;">Trainee: <strong>${session.trainee}</strong></div>
-                    <div style="font-size:1.5rem; font-weight:bold; color:${percentage >= 80 ? '#2ecc71' : '#ff5252'};">
-                        Final Score: ${percentage}% <span style="font-size:1rem; color:var(--text-muted);">(${totalScore}/${maxScore})</span>
-                    </div>
-                </div>
+                <h2 style="margin:0;">Assessment Summary: ${session.trainee}</h2>
+                <div style="margin-top:5px; color:var(--text-muted);">Review and finalize scores before submitting.</div>
             </div>
             
-            <div style="flex:1; overflow-y:auto; margin-bottom:20px; border:1px solid var(--border-color); border-radius:6px;">
-                ${summaryHtml}
+            <div style="flex:1; overflow-y:auto; padding-right:5px;">
+                ${itemsHtml}
             </div>
             
-            <div style="display:flex; justify-content:flex-end; gap:15px;">
+            <div style="border-top:1px solid var(--border-color); padding-top:15px; margin-top:15px; display:flex; justify-content:space-between; align-items:center;">
                 <button class="btn-secondary" onclick="loadLiveExecution()">Back to Grading</button>
-                <button class="btn-success" onclick="confirmAndSaveLiveSession(${percentage})">Confirm & Submit</button>
+                <button class="btn-success" onclick="confirmAndSaveLiveSession()">Confirm & Submit</button>
             </div>
         </div>
     `;
 }
 
-async function confirmAndSaveLiveSession(percentage) {
+async function confirmAndSaveLiveSession() {
     const session = JSON.parse(localStorage.getItem('liveSession'));
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
+
+    // Recalculate Score (in case edits were made in summary view)
+    let totalScore = 0;
+    let maxScore = 0;
+    test.questions.forEach((q, idx) => {
+        maxScore += parseFloat(q.points || 1);
+        totalScore += parseFloat(session.scores[idx] || 0);
+    });
+    const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
 
     // 1. Create Full Submission Record (For "View Completed Test" & Marking Queue)
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
@@ -468,7 +495,7 @@ async function confirmAndSaveLiveSession(percentage) {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     let groupId = "Live-Session";
     for (const [gid, members] of Object.entries(rosters)) {
-        if (members.some(m => m.toLowerCase() === session.trainee.toLowerCase())) { 
+        if (members.some(m => m.trim().toLowerCase() === session.trainee.trim().toLowerCase())) { 
             groupId = gid; 
             break; 
         }
