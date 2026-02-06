@@ -94,6 +94,7 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
     backdrop-filter: blur(5px); z-index: 2000;
     pointer-events: none;
 }
+.user-footer button { pointer-events: auto; }
 
 /* ================= LOGIN SCREEN ================= */
 .login-page {

@@ -540,7 +540,7 @@ function openTestTaker(testId, isArenaMode = false) {
     
     // --- SCHEDULE ENFORCEMENT ---
     // Check if this test is linked to a schedule and if that schedule is active
-    if (typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee') {
+    if (typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee' && !isArenaMode) {
         const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         let myGroupId = null;
