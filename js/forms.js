@@ -86,7 +86,7 @@ async function saveQuestionnaire() {
         }
         // --- SECURE SAVE END ---
         
-        alert("Profile saved. You may now start your assessments.");
+        if(typeof showToast === 'function') showToast("Profile saved. You may now start your assessments.", "success");
         document.getElementById('questionnaireModal').classList.add('hidden');
     }
 }
@@ -129,7 +129,7 @@ async function toggleExemption(traineeName, assessmentName) {
     // Wait for save to ensure data consistency
     await secureFormSave();
     
-    alert(msg);
+    if(typeof showToast === 'function') showToast(msg, "info");
     
     // Refresh the reporting table to show changes
     if (typeof renderMonthly === 'function') renderMonthly();

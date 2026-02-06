@@ -452,7 +452,7 @@ async function finalizeAdminMarking(subId) {
     // --- SECURE SAVE ---
     await secureAssessmentSave(); // Saves submissions, records, tests
 
-    alert(`Marking Finalized! Trainee scored ${percentage}%`);
+    if(typeof showToast === 'function') showToast(`Marking Finalized! Trainee scored ${percentage}%`, "success");
     document.getElementById('markingModal').classList.add('hidden');
     
     loadMarkingQueue();
@@ -967,9 +967,9 @@ async function submitTest() {
     }
 
     if (finalStatus === 'completed') {
-        alert(`Assessment Complete! You scored: ${finalPercent}%`);
+        if(typeof showToast === 'function') showToast(`Assessment Complete! You scored: ${finalPercent}%`, "success");
     } else {
-        alert("Submitted Successfully! Results pending Admin review.");
+        if(typeof showToast === 'function') showToast("Submitted Successfully! Results pending Admin review.", "info");
     }
     
     if(typeof showTab === 'function') showTab('my-tests');

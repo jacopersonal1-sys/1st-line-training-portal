@@ -550,7 +550,7 @@ async function confirmAndSaveLiveSession() {
     // 5. Sync All
     if (typeof saveToServer === 'function') await saveToServer(['liveSession', 'liveBookings', 'records', 'submissions'], true);
 
-    alert(`Session Completed. Score: ${percentage}%`);
+    if(typeof showToast === 'function') showToast(`Session Completed. Score: ${percentage}%`, "success");
     showTab('live-assessment');
 }
 

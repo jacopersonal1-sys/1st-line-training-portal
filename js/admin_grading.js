@@ -165,10 +165,11 @@ async function saveScores() {
     
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns(); 
     
-    alert(`Saved/Updated ${savedCount} scores successfully.`); 
+    if(typeof showToast === 'function') showToast(`Saved/Updated ${savedCount} scores successfully.`, "success");
     
     // Cleanup UI
-    loadGroupMembers(); // Re-render table to fix "untypable" input glitch and clear fields
+    // FIX: Use setTimeout to allow DOM to settle and prevent "untypable" glitch
+    setTimeout(() => loadGroupMembers(), 50); 
 }
 
 // --- SECTION 2: DIGITAL MARKING QUEUE ---

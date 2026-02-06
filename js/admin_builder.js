@@ -436,7 +436,7 @@ async function saveTest() {
         return;
     }
 
-    alert("Test Saved.");
+    if(typeof showToast === 'function') showToast("Test Saved Successfully", "success");
     EDITING_TEST_ID = null; // Reset
     showTab('test-manage');
     loadManageTests();
