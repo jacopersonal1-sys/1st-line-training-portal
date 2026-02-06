@@ -262,6 +262,10 @@
             <i class="fas fa-file-invoice"></i><span class="nav-text">Onboard Report</span>
         </button>
         
+        <button class="nav-item admin-only tl-access" onclick="showTab('agent-search')" title="Agent Search">
+            <i class="fas fa-search"></i><span class="nav-text">Agent Search</span>
+        </button>
+        
         <button class="nav-item" id="nav-live-assessment" onclick="showTab('live-assessment')" title="Live Assessment Booking">
             <i class="fas fa-calendar-check"></i><span class="nav-text">Live Assessment Booking</span>
         </button>
@@ -377,7 +381,7 @@
         <div class="card grid-4">
             <div><label for="selectedGroup">Group</label><select id="selectedGroup" onchange="loadGroupMembers()"></select></div>
             <div><label for="cycle">Cycle</label><select id="cycle"><option>New Onboard</option><option>Retrain 1</option><option>Retrain 2</option></select></div>
-            <div><label for="phase">Phase</label><select id="phase"><option>Assessment</option><option>1st Vetting</option><option>Final Vetting</option></select></div>
+            <div><label for="phase">Phase</label><select id="phase" onchange="handlePhaseChange()"><option>Assessment</option><option>1st Vetting</option><option>Final Vetting</option></select></div>
             <div><label for="assessment">Assessment</label><select id="assessment" onchange="handleAssessmentChange()"></select></div>
             <div id="vettingOptions" class="hidden" style="grid-column: span 4;"><label for="vettingTopic">Vetting Topic</label><select id="vettingTopic"></select></div>
         </div>
@@ -403,6 +407,23 @@
             </table>
             </div>
         </div>
+        </section>
+
+        <section id="agent-search" class="admin-only-section">
+            <div style="display:flex; justify-content:space-between;"><h2>Agent Search & Overview</h2></div>
+            
+            <div class="card" style="text-align:center; padding:40px;">
+                <i class="fas fa-user-circle" style="font-size:3rem; color:var(--primary); margin-bottom:15px;"></i>
+                <div style="max-width:500px; margin:0 auto;">
+                    <input type="text" id="agentSearchInput" list="agentSearchList" placeholder="Type Agent Name..." style="font-size:1.2rem; padding:15px; text-align:center; border-radius:30px; border:2px solid var(--border-color);" onchange="performAgentSearch(this.value)">
+                    <datalist id="agentSearchList"></datalist>
+                    <button class="btn-primary btn-lg" style="margin-top:15px; border-radius:30px; width:200px;" onclick="performAgentSearch(document.getElementById('agentSearchInput').value)">Search</button>
+                </div>
+            </div>
+
+            <div id="agentSearchResults" class="hidden">
+                <!-- Dynamic Content Injected Here -->
+            </div>
         </section>
 
         <section id="test-records" class="admin-only-section">
@@ -860,6 +881,7 @@
 <script src="js/insight.js"></script>
 <script src="js/assessment.js"></script>
 <script src="js/live_execution.js"></script>
+<script src="js/agent_search.js"></script>
 
 <script src="js/main.js"></script>
 

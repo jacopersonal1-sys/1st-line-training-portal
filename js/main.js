@@ -367,6 +367,10 @@ function showTab(id, btn) {
           }, 50);
       }
   }
+
+  if(id === 'agent-search') {
+      if(typeof loadAgentSearch === 'function') loadAgentSearch();
+  }
   
   if(id === 'live-assessment') {
       if(typeof renderLiveTable === 'function') renderLiveTable();

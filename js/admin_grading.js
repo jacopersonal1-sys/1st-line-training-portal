@@ -47,6 +47,20 @@ function updateAssessmentDropdownLogic() {
     if(typeof handleAssessmentChange === 'function') handleAssessmentChange();
 }
 
+function handlePhaseChange() {
+    const phase = document.getElementById('phase').value;
+    const vettingDiv = document.getElementById('vettingOptions');
+    const vettingSelect = document.getElementById('vettingTopic');
+
+    if (phase === '1st Vetting' || phase === 'Final Vetting') {
+        vettingDiv.classList.remove('hidden');
+        const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
+        vettingSelect.innerHTML = '<option value="">-- Select Topic --</option>' + topics.map(t => `<option>${t}</option>`).join('');
+    } else {
+        vettingDiv.classList.add('hidden');
+    }
+}
+
 function handleAssessmentChange() { 
     const select = document.getElementById('assessment'); 
     if(!select) return;
@@ -55,19 +69,6 @@ function handleAssessmentChange() {
     const isVideoReq = select.selectedOptions[0]?.getAttribute('data-video') === 'true'; 
     
     document.querySelectorAll('.video-col').forEach(c => isVideoReq ? c.classList.remove('hidden') : c.classList.add('hidden')); 
-    
-    const vettingDiv = document.getElementById('vettingOptions'); 
-    const vettingSelect = document.getElementById('vettingTopic'); 
-    
-    if(selectedName && selectedName.includes("Vetting Test")) { 
-        vettingDiv.classList.remove('hidden'); 
-        const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]'); 
-        const currentTopic = vettingSelect.value;
-        vettingSelect.innerHTML = '<option value="">-- Select Topic --</option>' + topics.map(t => `<option>${t}</option>`).join(''); 
-        if(currentTopic) vettingSelect.value = currentTopic;
-    } else { 
-        vettingDiv.classList.add('hidden'); 
-    } 
 }
 
 // UPDATED: Async Save for Manual Scores with Deduplication
@@ -84,11 +85,11 @@ async function saveScores() {
     const phase = document.getElementById('phase').value; 
     let finalAssessName = assessName; 
     
-    const vettingDiv = document.getElementById('vettingOptions'); 
-    if(!vettingDiv.classList.contains('hidden')) { 
+    // If Phase is Vetting, construct name from Phase + Topic
+    if(phase === '1st Vetting' || phase === 'Final Vetting') { 
         const topic = document.getElementById('vettingTopic').value; 
         if(!topic) return alert("Please select a Vetting Topic."); 
-        finalAssessName = `${assessName} - ${topic}`; 
+        finalAssessName = `${phase} - ${topic}`; 
     } 
     
     const recs = JSON.parse(localStorage.getItem('records')||'[]'); 

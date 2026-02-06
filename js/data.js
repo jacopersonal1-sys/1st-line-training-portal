@@ -23,6 +23,7 @@ const DB_SCHEMA = {
     accessLogs: [], // Login/Logout/Timeout History
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
+    agentNotes: {}, // Private notes on agents { "username": "note content" }
     liveSession: { active: false, bookingId: null, testId: null, trainee: null, trainer: null, currentQ: -1, answers: {}, scores: {}, comments: {} }
 };
 

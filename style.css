@@ -779,3 +779,11 @@ textarea.auto-expand {
     border-radius: 8px;
     border: 1px solid var(--border-color);
 }
+
+/* ================= AGENT SEARCH ================= */
+#agentSearchInput:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 15px var(--primary-soft);
+    outline: none;
+    width: 100%;
+}
