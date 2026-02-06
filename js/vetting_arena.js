@@ -228,8 +228,21 @@ function renderTraineeArena() {
         container.innerHTML = `
             <div style="text-align:center; padding:50px;">
                 <i class="fas fa-check-circle" style="font-size:4rem; color:#2ecc71; margin-bottom:20px;"></i>
-                <h3>Test Completed</h3>
-                <p>You have submitted your assessment. You may leave the arena.</p>
+const targets = [
+    'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'safari', 
+    'waterfox', 'tor', 'duckduckgo', 'maxthon', 'seamonkey', 'avast', 'yandex',
+    'whatsapp'
+];
+// Sync Override flag specifically for current user
+if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
+    if (!localSession.trainees) localSession.trainees = {};
+    if (!localSession.trainees[CURRENT_USER.user]) localSession.trainees[CURRENT_USER.user] = {};
+
+    // Adopt override if present on server
+    localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
+}
+                <h3>Submitted Vetting</h3>
+                <p>Please wait for the next test to be pushed.</p>
             </div>`;
         return;
     }
@@ -335,6 +348,8 @@ async function pollVettingSession() {
             if (!document.getElementById('arenaTestContainer')) {
                 renderTraineeArena();
             }
+            // FIX: Update sidebar visibility immediately when session state changes
+            if (typeof applyRolePermissions === 'function') applyRolePermissions();
         }
     }
 }
@@ -397,6 +412,16 @@ async function checkSystemCompliance() {
     }
 }
 
+function toggleSidebar(show) {
+    const sidebar = document.querySelector('.sidebar');
+    const content = document.querySelector('.content-wrapper');
+    if (sidebar) sidebar.style.display = show ? '' : 'none';
+    if (content) {
+        content.style.marginLeft = show ? '' : '0';
+        content.style.width = show ? '' : '100%';
+    }
+}
+
 async function enterArena(testId) {
     // Stop pre-flight polling
     stopTraineePollers();
@@ -408,6 +433,9 @@ async function enterArena(testId) {
         await ipcRenderer.invoke('set-content-protection', true);
     }
 
+    // Hide Sidebar for Full Screen Focus
+    toggleSidebar(false);
+
     // 2. Update Status
     await updateTraineeStatus('started');
 
@@ -418,6 +446,14 @@ async function enterArena(testId) {
 async function updateTraineeStatus(status, timerStr = "") {
     // We need to fetch latest session to avoid overwriting others
     await loadFromServer(true); 
+    
+    // CHECK: Session Ended?
+    const currentSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+    if (!currentSession.active && status === 'started') {
+        if (typeof submitTest === 'function') await submitTest();
+        return;
+    }
+
     const session = JSON.parse(localStorage.getItem('vettingSession'));
     
     if (!session.trainees) session.trainees = {};
@@ -436,6 +472,13 @@ async function updateTraineeStatus(status, timerStr = "") {
             screens: screens,
             apps: apps
         };
+
+        // CHECK: Forbidden Apps during test?
+        if (apps.length > 0 && status === 'started') {
+            alert("Security Violation: Forbidden apps detected (" + apps.join(', ') + "). Test ending.");
+            if (typeof submitTest === 'function') await submitTest();
+            return; // Stop here, submitTest will handle the rest
+        }
     }
 
     localStorage.setItem('vettingSession', JSON.stringify(session));
@@ -466,6 +509,9 @@ async function exitArena() {
         } catch(e) { console.error("Exit Kiosk Error", e); }
     }
     
+    // Restore Sidebar
+    toggleSidebar(true);
+
     await updateTraineeStatus('completed');
     renderTraineeArena();
 }

@@ -304,6 +304,18 @@ function performSmartMerge(server, local) {
 
             merged[key] = combined;
         } 
+        // Case 2a: Vetting Session (Deep Merge Trainees)
+        else if (key === 'vettingSession') {
+            merged[key] = { ...sVal, ...lVal }; // Merge top level (active, testId)
+            
+            // Deep merge trainees to prevent overwrites
+            if (sVal.trainees || lVal.trainees) {
+                merged[key].trainees = {
+                    ...(sVal.trainees || {}),
+                    ...(lVal.trainees || {})
+                };
+            }
+        }
         // Case 2: Objects (Rosters, Schedules)
         else if (typeof sVal === 'object' && sVal !== null && typeof lVal === 'object' && lVal !== null) {
             merged[key] = { ...sVal, ...lVal };
