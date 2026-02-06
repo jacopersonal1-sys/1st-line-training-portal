@@ -28,7 +28,12 @@ function renderAdminArena() {
     
     if (!session.active) {
         // IDLE STATE
-        const options = vettingTests.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
+        let options = '<option value="">-- Select Vetting Test --</option>';
+        if (vettingTests.length > 0) {
+            options += vettingTests.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
+        } else {
+            options += '<option value="" disabled>No Vetting Tests Available (Create in Test Engine)</option>';
+        }
         
         let groupOptions = '<option value="all">All Groups</option>';
         Object.keys(rosters).sort().reverse().forEach(gid => {
@@ -42,7 +47,7 @@ function renderAdminArena() {
                 <h3>Start Vetting Session</h3>
                 <p style="color:var(--text-muted); margin-bottom:20px;">Select a test and target group. This will enable the Vetting Arena tab for them.</p>
                 <div style="max-width:500px; margin:0 auto; display:flex; flex-direction:column; gap:10px;">
-                    <label style="text-align:left; font-weight:bold;">1. Select Assessment</label>
+                    <label style="text-align:left; font-weight:bold;">1. Select Vetting Test</label>
                     <select id="vettingTestSelect" style="margin:0;">${options}</select>
                     <label style="text-align:left; font-weight:bold;">2. Select Target Group</label>
                     <select id="vettingGroupSelect" style="margin:0;" ${CURRENT_USER.role === 'special_viewer' ? 'disabled' : ''}>${groupOptions}</select>

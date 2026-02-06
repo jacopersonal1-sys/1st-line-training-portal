@@ -281,14 +281,16 @@ function loadTestRecords() {
                 
                 // Link to 'assessment.js' viewer
                 // Note: 'viewCompletedTest' calls 'openAdminMarking' in assessment.js
-                let actionBtn = CURRENT_USER.role === 'special_viewer' ? `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${s.trainee}', '${s.testTitle}')">View</button>` : `
-                    <button class="btn-secondary btn-sm" onclick="viewCompletedTest('${s.trainee}', '${s.testTitle}')">View</button>
-                    <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>
-                `;
+                let actionBtn = `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${s.trainee}', '${s.testTitle}')">View</button>`;
                 
-                // Allow Retake if not already archived
-                if (s.status === 'completed' || s.status === 'pending') {
-                    actionBtn += `<button class="btn-warning btn-sm" style="margin-left:5px;" onclick="allowRetake('${s.id}')" title="Allow Retake"><i class="fas fa-redo"></i></button>`;
+                // ADMIN ONLY ACTIONS
+                if (CURRENT_USER.role === 'admin') {
+                    actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;
+                    
+                    // Allow Retake if not already archived
+                    if (s.status === 'completed' || s.status === 'pending') {
+                        actionBtn += ` <button class="btn-warning btn-sm" onclick="allowRetake('${s.id}')" title="Allow Retake"><i class="fas fa-redo"></i></button>`;
+                    }
                 }
 
                 tbody.innerHTML += `<tr><td>${s.date}</td><td>${groupDisplay}</td><td>${s.trainee}</td><td>${s.testTitle}</td><td>${scoreDisplay}</td><td>${s.status}</td><td>${actionBtn}</td></tr>`;
