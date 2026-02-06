@@ -92,50 +92,6 @@ async function saveQuestionnaire() {
 }
 
 /**
- * 2. EXEMPTION LOGIC
- * Logic: Allows Admins to flag a course as "Not Applicable" for a specific agent.
- */
-
-// UPDATED: Async Save
-async function toggleExemption(traineeName, assessmentName) {
-    if (CURRENT_USER.role !== 'admin') return;
-
-    let exemptions = JSON.parse(localStorage.getItem('exemptions') || '[]');
-    
-    const existingIdx = exemptions.findIndex(e => 
-        e.trainee === traineeName && e.assessment === assessmentName
-    );
-
-    let msg = "";
-
-    if (existingIdx > -1) {
-        // Remove existing exemption
-        exemptions.splice(existingIdx, 1);
-        msg = `Exemption removed for ${traineeName}.`;
-    } else {
-        // Create new exemption with UNIQUE ID
-        exemptions.push({
-            id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
-            trainee: traineeName,
-            assessment: assessmentName,
-            grantedBy: CURRENT_USER.user,
-            date: new Date().toISOString()
-        });
-        msg = `${traineeName} is now EXEMPT from ${assessmentName}.`;
-    }
-
-    localStorage.setItem('exemptions', JSON.stringify(exemptions));
-    
-    // Wait for save to ensure data consistency
-    await secureFormSave();
-    
-    if(typeof showToast === 'function') showToast(msg, "info");
-    
-    // Refresh the reporting table to show changes
-    if (typeof renderMonthly === 'function') renderMonthly();
-}
-
-/**
  * 3. EXEMPTION STATUS CHECKER
  */
 function isExempt(traineeName, assessmentName) {

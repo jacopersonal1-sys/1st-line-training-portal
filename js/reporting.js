@@ -149,7 +149,7 @@ function renderMonthly() {
     if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
         actionHtml = '<td class="action-cell">';
         
-        if(r.link === 'Digital-Assessment') {
+        if(r.link === 'Digital-Assessment' || r.link === 'Live-Session') {
              // Check if function exists to avoid reference errors
              const clickAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function') 
                 ? `onclick="viewCompletedTest('${r.trainee}', '${r.assessment}')"` 

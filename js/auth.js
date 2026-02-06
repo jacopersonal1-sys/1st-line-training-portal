@@ -188,41 +188,6 @@ function checkFirstTimeLogin() {
     }
 }
 
-// UPDATED: Async Save for Profile Data
-async function saveQuestionnaire() {
-    const contact = document.getElementById('questContact').value.trim();
-    const knowledge = document.getElementById('questKnowledge').value.trim();
-    if(!contact || !knowledge) return alert("Please fill in all fields.");
-    
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const userIdx = users.findIndex(u => u.user === CURRENT_USER.user);
-    if(userIdx > -1) {
-        users[userIdx].hasFilledQuestionnaire = true;
-        users[userIdx].traineeData = { contact: contact, knowledge: knowledge };
-        localStorage.setItem('users', JSON.stringify(users));
-        CURRENT_USER = users[userIdx];
-        sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
-        
-        // --- SECURE SAVE START ---
-        const btn = document.activeElement;
-        const originalText = (btn && btn.tagName === 'BUTTON') ? btn.innerText : "";
-        if(btn && btn.tagName === 'BUTTON') {
-            btn.innerText = "Saving...";
-            btn.disabled = true;
-        }
-
-        await secureAuthSave(); 
-
-        if(btn && btn.tagName === 'BUTTON') {
-            btn.innerText = originalText;
-            btn.disabled = false;
-        }
-        // --- SECURE SAVE END ---
-        
-        document.getElementById('questionnaireModal').classList.add('hidden');
-    }
-}
-
 function applyRolePermissions() {
   const adminElems = document.querySelectorAll('.admin-only');
   const tlElems = document.querySelectorAll('.tl-access');

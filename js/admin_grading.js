@@ -188,6 +188,33 @@ async function saveScores() {
 // We deleted 'loadMarkingQueue' and 'approveSubmission' here to avoid 
 // conflicts with the more advanced grading engine in assessment.js.
 
+// Function to View Completed Tests (Called from Test Records)
+function viewCompletedTest(trainee, assessment) {
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    // Find all matches
+    const matches = subs.filter(s => s.trainee === trainee && s.testTitle === assessment);
+    
+    if(matches.length === 0) {
+        if(typeof showToast === 'function') showToast("Digital submission file not found.", "error");
+        else alert("Digital submission file not found.");
+        return;
+    }
+    
+    // Sort by ID (Timestamp) descending to get the latest
+    matches.sort((a,b) => b.id.localeCompare(a.id));
+    const sub = matches[0];
+    
+    if(typeof openAdminMarking === 'function') {
+        openAdminMarking(sub.id);
+        
+        // Hide the submit button since this is read-only view
+        setTimeout(() => {
+            const btn = document.getElementById('markingSubmitBtn');
+            if(btn) btn.style.display = 'none';
+        }, 50);
+    }
+}
+
 // --- SECTION 3: TEST RECORDS & HISTORY ---
 
 function loadTestRecords() {

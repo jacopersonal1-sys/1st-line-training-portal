@@ -460,6 +460,86 @@ async function finalizeAdminMarking(subId) {
     if (typeof renderMonthly === 'function') renderMonthly();
 }
 
+async function finalizeAdminMarking(subId) {
+    if (!confirm("Finalize these scores? This will update the trainee's records.")) return;
+
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const sub = subs.find(s => s.id === subId);
+    
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const test = tests.find(t => t.id == sub.testId);
+    let maxScore = 0;
+    if(test) test.questions.forEach(q => maxScore += parseFloat(q.points || 1));
+    else maxScore = document.querySelectorAll('.q-mark').length; 
+
+    const markInputs = document.querySelectorAll('.q-mark');
+    let earnedPoints = 0;
+    markInputs.forEach(input => earnedPoints += parseFloat(input.value));
+
+    const percentage = maxScore > 0 ? Math.round((earnedPoints / maxScore) * 100) : 0;
+
+    sub.score = percentage;
+    sub.status = 'completed';
+    localStorage.setItem('submissions', JSON.stringify(subs));
+
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    let groupId = "Unknown";
+    // UPDATED: Case-insensitive match for Group ID
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (members.some(m => m.toLowerCase() === sub.trainee.toLowerCase())) { 
+            groupId = gid; 
+            break; 
+        }
+    }
+    
+    let cycleVal = 'Digital Onboard';
+    if(typeof getTraineeCycle === 'function') cycleVal = getTraineeCycle(sub.trainee, groupId);
+    const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    
+    // DEDUPLICATION (Fix for Duplicates)
+    const existingIdx = records.findIndex(r => 
+        r.trainee === sub.trainee && 
+        r.assessment === sub.testTitle
+    );
+
+    const newRecord = {
+        id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+        groupID: groupId,
+        trainee: sub.trainee,
+        assessment: sub.testTitle,
+        score: percentage,
+        date: sub.date,
+        phase: phaseVal,
+        cycle: cycleVal,
+        link: 'Digital-Assessment',
+        docSaved: true
+    };
+
+    if (existingIdx > -1) {
+        records[existingIdx].score = percentage;
+        records[existingIdx].cycle = cycleVal;
+        records[existingIdx].docSaved = true;
+        // Preserve ID
+        if(!records[existingIdx].id) records[existingIdx].id = newRecord.id;
+    } else {
+        records.push(newRecord);
+    }
+    
+    localStorage.setItem('records', JSON.stringify(records));
+
+    // --- SECURE SAVE ---
+    await secureAssessmentSave(); // Saves submissions, records, tests
+
+    if(typeof showToast === 'function') showToast(`Marking Finalized! Trainee scored ${percentage}%`, "success");
+    document.getElementById('markingModal').classList.add('hidden');
+    
+    loadMarkingQueue();
+    loadAssessmentDashboard();
+    if (typeof renderMonthly === 'function') renderMonthly();
+}
+
 /**
  * 3. TRAINEE: VIEWING PERSONAL TEST STATUS
  */
@@ -982,35 +1062,6 @@ async function submitTest() {
     
     if(typeof showTab === 'function') showTab('my-tests');
     loadTraineeTests();
-}
-
-/**
- * 5. ADMIN: LIST MANAGEMENT
- */
-function loadManageTests() {
-    const container = document.getElementById('testListAdmin');
-    if (!container) return;
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    container.innerHTML = tests.map(t => `
-        <div class="test-card-row">
-            <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
-            <div>
-                <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
-                <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>
-            </div>
-        </div>
-    `).join('');
-}
-
-async function deleteTest(id) {
-    if (!confirm("Delete test permanently? Attempt history will be lost.")) return;
-    let tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    tests = tests.filter(t => t.id != id);
-    localStorage.setItem('tests', JSON.stringify(tests));
-    
-    await secureAssessmentSave();
-    
-    loadManageTests();
 }
 
 function startTestTimer(mins) {

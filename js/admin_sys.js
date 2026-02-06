@@ -198,7 +198,7 @@ function loadAdminDatabase() {
         const warning = isValid ? '' : '<i class="fas fa-exclamation-triangle" title="User mismatch"></i> ';
         
         let viewBtn = '';
-        if(d.link === 'Digital-Assessment') {
+        if(d.link === 'Digital-Assessment' || d.link === 'Live-Session') {
              // viewCompletedTest is in assessment.js
              viewBtn = `<button class="btn-secondary" style="padding:2px 6px;" onclick="viewCompletedTest('${d.trainee}', '${d.assessment}')" title="View Submission"><i class="fas fa-eye"></i></button>`;
         }
