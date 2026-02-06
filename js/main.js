@@ -231,6 +231,18 @@ function updateSidebarVisibility() {
     if (!CURRENT_USER) return;
 
     const role = CURRENT_USER.role;
+    
+    // --- DYNAMIC LABEL UPDATE ---
+    // Rename the hardcoded button based on role
+    const liveExecBtn = document.getElementById('btn-live-exec');
+    if (liveExecBtn) {
+        const span = liveExecBtn.querySelector('.nav-text');
+        if (span) {
+            span.innerText = (role === 'trainee') ? 'Take Live Assessment' : 'Live Session Arena';
+        }
+        liveExecBtn.setAttribute('title', (role === 'trainee') ? 'Take Live Assessment' : 'Live Session Arena');
+    }
+
     const allNavItems = document.querySelectorAll('.nav-item');
 
     allNavItems.forEach(btn => {
@@ -250,7 +262,7 @@ function updateSidebarVisibility() {
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
             const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'monthly', 'insights', 'test-manage', 'test-records', 'live-assessment'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena'];
+            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution'];
             
             // Special Check for Arena
             if (targetTab === 'vetting-arena') {
@@ -263,7 +275,7 @@ function updateSidebarVisibility() {
         } 
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
-            const hiddenForTL = ['admin-panel', 'test-manage', 'my-tests', 'live-assessment'];
+            const hiddenForTL = ['admin-panel', 'test-manage', 'my-tests', 'live-assessment', 'live-execution'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -362,6 +374,18 @@ function showTab(id, btn) {
   
   if(id === 'assessment-schedule') {
       if(typeof renderSchedule === 'function') renderSchedule(); 
+  }
+
+  if(id === 'live-execution') {
+      if(typeof loadLiveExecution === 'function') {
+          loadLiveExecution();
+      } else {
+          // Fallback if script is still loading
+          setTimeout(() => {
+              if(typeof loadLiveExecution === 'function') loadLiveExecution();
+              else alert("Error: Live Execution script not loaded. Please refresh.");
+          }, 500);
+      }
   }
   
   if(id === 'admin-panel') { 

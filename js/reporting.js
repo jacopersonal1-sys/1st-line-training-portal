@@ -93,7 +93,7 @@ function renderMonthly() {
   // FOCUS PROTECTION for the Trainee Search Input in the Monthly View
   // We allow updates while typing to filter results, but ensure we don't clear the input.
   
-  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader') {
+  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
       // Fix Alignment: Add Checkbox Header
       if (!theadRow.querySelector('.check-col')) {
           const th = document.createElement('th');
@@ -146,7 +146,7 @@ function renderMonthly() {
     
     // --- ACTION COLUMN LOGIC ---
     let actionHtml = '';
-    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader') {
+    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
         actionHtml = '<td class="action-cell">';
         
         if(r.link === 'Digital-Assessment') {
@@ -159,13 +159,13 @@ function renderMonthly() {
         } 
         else if (r.link && r.link.startsWith('http')) {
              actionHtml += `<a href="${r.link}" target="_blank" class="btn-secondary btn-sm" style="text-decoration:none; display:inline-block; margin-right:5px;" title="Open Link"><i class="fas fa-external-link-alt"></i> Open</a>`;
-             if (CURRENT_USER.role === 'admin') {
+             if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'special_viewer') {
                  actionHtml += `<button class="btn-secondary btn-sm" onclick="updateRecordLink(${originalIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
              }
         } else {
              // No Link Present
              if (CURRENT_USER.role === 'admin') {
-                 actionHtml += `<button class="btn-primary btn-sm" onclick="updateRecordLink(${originalIndex})"><i class="fas fa-link"></i> Add Link</button>`;
+                 if (CURRENT_USER.role !== 'special_viewer') actionHtml += `<button class="btn-primary btn-sm" onclick="updateRecordLink(${originalIndex})"><i class="fas fa-link"></i> Add Link</button>`;
              } else {
                  // Team Leader: Request Link
                  // Check if already requested

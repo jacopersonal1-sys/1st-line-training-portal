@@ -16,6 +16,11 @@ function loadTestBuilder(existingId = null) {
     // Reset Type Logic
     const typeSelect = document.getElementById('builderTestType');
     if (typeSelect) {
+        // Inject Live Option if missing
+        if (!typeSelect.querySelector('option[value="live"]')) {
+            const opt = new Option("Live Assessment (Interactive)", "live");
+            typeSelect.add(opt);
+        }
         typeSelect.value = 'standard'; // Default
         typeSelect.onchange = function() {
             const val = this.value;
@@ -29,6 +34,11 @@ function loadTestBuilder(existingId = null) {
                 if(lbl) lbl.innerText = "Vetting Test Name";
                 if(sel) sel.classList.add('hidden');
                 if(inp) inp.classList.remove('hidden');
+            } else if(val === 'live') {
+                durWrap.classList.add('hidden');
+                if(lbl) lbl.innerText = "Link to Live Assessment Booking";
+                if(sel) sel.classList.remove('hidden');
+                if(inp) inp.classList.add('hidden');
             } else {
                 durWrap.classList.add('hidden');
                 if(lbl) lbl.innerText = "Link to Assessment / Subject";

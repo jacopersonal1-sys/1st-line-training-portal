@@ -8,7 +8,7 @@ let TRAINEE_NET_POLLER = null;
 let TRAINEE_LOCAL_POLLER = null;
 
 function loadVettingArena() {
-    if (CURRENT_USER.role === 'admin') {
+    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
         renderAdminArena();
     } else {
         renderTraineeArena();
@@ -45,7 +45,7 @@ function renderAdminArena() {
                     <label style="text-align:left; font-weight:bold;">1. Select Assessment</label>
                     <select id="vettingTestSelect" style="margin:0;">${options}</select>
                     <label style="text-align:left; font-weight:bold;">2. Select Target Group</label>
-                    <select id="vettingGroupSelect" style="margin:0;">${groupOptions}</select>
+                    <select id="vettingGroupSelect" style="margin:0;" ${CURRENT_USER.role === 'special_viewer' ? 'disabled' : ''}>${groupOptions}</select>
                     <button class="btn-primary" style="margin-top:10px;" onclick="startVettingSession()">PUSH TEST</button>
                 </div>
             </div>
@@ -63,7 +63,7 @@ function renderAdminArena() {
                         <h3 style="margin:0; color:#2ecc71;">Session Active: ${title}</h3>
                         <p style="margin:5px 0 0 0; color:var(--text-muted);">Target: <strong>${targetGroup}</strong> | Monitoring Trainees...</p>
                     </div>
-                    <button class="btn-danger" onclick="endVettingSession()">END SESSION</button>
+                    ${CURRENT_USER.role === 'special_viewer' ? '' : `<button class="btn-danger" onclick="endVettingSession()">END SESSION</button>`}
                 </div>
             </div>
             
@@ -124,6 +124,8 @@ function renderTraineeRows(trainees) {
 
         let actions = '-';
         if (data.status === 'started') {
+            if (CURRENT_USER.role === 'special_viewer') actions = 'In Progress';
+            else
             actions = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${user}')">Force Stop</button>`;
         } else if (data.status === 'blocked') {
             if (data.override) {
@@ -131,6 +133,7 @@ function renderTraineeRows(trainees) {
             } else {
                 actions = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${user}')">Allow / Override</button>`;
             }
+            if (CURRENT_USER.role === 'special_viewer') actions = 'Blocked';
         }
 
         return `
@@ -149,6 +152,10 @@ function renderTraineeRows(trainees) {
 }
 
 async function startVettingSession() {
+    if (CURRENT_USER.role === 'special_viewer') {
+        alert("View Only Mode.");
+        return;
+    }
     const testId = document.getElementById('vettingTestSelect').value;
     const groupId = document.getElementById('vettingGroupSelect').value;
     if (!testId) return alert("Select a test.");

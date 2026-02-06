@@ -22,7 +22,8 @@ const DB_SCHEMA = {
     revokedUsers: [], // Added to ensure blacklist syncs
     accessLogs: [], // Login/Logout/Timeout History
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
-    linkRequests: [] // Requests from TLs for assessment links
+    linkRequests: [], // Requests from TLs for assessment links
+    liveSession: { active: false, bookingId: null, testId: null, trainee: null, trainer: null, currentQ: -1, answers: {}, scores: {}, comments: {} }
 };
 
 // --- GLOBAL INTERACTION TRACKER ---

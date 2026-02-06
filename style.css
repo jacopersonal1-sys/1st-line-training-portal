@@ -760,3 +760,22 @@ textarea.auto-expand {
 .sec-pass { color: #2ecc71; }
 .sec-fail { color: #ff5252; }
 .sec-warn { color: #f1c40f; }
+
+/* ================= LIVE ASSESSMENT ARENA ================= */
+.live-q-item {
+    transition: background 0.2s, color 0.2s;
+}
+.live-q-item:hover {
+    background: var(--bg-hover);
+}
+.live-q-item.active {
+    background: var(--primary-soft);
+    border-left: 3px solid var(--primary);
+    font-weight: 600;
+}
+.live-input-area {
+    background: var(--bg-input);
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}

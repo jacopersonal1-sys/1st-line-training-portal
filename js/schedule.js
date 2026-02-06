@@ -434,6 +434,7 @@ function renderLiveTable() {
                     if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'special_viewer') {
                         // Admin: Cancel OR Mark Complete
                         if(!isCompleted) {
+                            actions += `<button class="btn-primary btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="initiateLiveSession('${booking.id}', '${booking.assessment}', '${booking.trainee}')" title="Start Live Session"><i class="fas fa-play"></i> Start</button>`;
                             actions += `<button class="btn-success btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="markBookingComplete('${booking.id}')" title="Mark Complete"><i class="fas fa-check"></i></button>`;
                         }
                         actions += `<button class="btn-danger btn-sm" style="padding:2px 6px;" onclick="cancelBooking('${booking.id}')" title="Cancel"><i class="fas fa-times"></i></button>`;

@@ -47,7 +47,7 @@ function renderDashboard() {
     const content = document.createElement('div');
     content.className = 'dash-content-grid'; 
     
-    if (role === 'admin') {
+    if (role === 'admin' || role === 'special_viewer') {
         content.innerHTML = buildAdminWidgets();
         content.innerHTML += buildLinkRequestsWidget(); // Add Link Requests Widget
         // Append Notice Manager for Admins
@@ -194,6 +194,10 @@ function buildNoticeBanners(role) {
 }
 
 function buildNoticeManager() {
+    if (CURRENT_USER.role === 'special_viewer') {
+        return '<div style="color:var(--text-muted); text-align:center; padding:20px;">Notice Management Hidden (View Only)</div>';
+    }
+
     const notices = JSON.parse(localStorage.getItem('notices') || '[]');
     // Sort by date desc
     notices.sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -560,6 +564,10 @@ function buildAdminWidgets() {
 }
 
 function buildLinkRequestsWidget() {
+    if (CURRENT_USER.role === 'special_viewer') {
+        return ''; // Hide requests widget for viewer
+    }
+
     const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
     const pending = requests.filter(r => r.status === 'pending');
     

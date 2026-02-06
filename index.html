@@ -262,8 +262,12 @@
             <i class="fas fa-file-invoice"></i><span class="nav-text">Onboard Report</span>
         </button>
         
-        <button class="nav-item" id="nav-live-assessment" onclick="showTab('live-assessment')" title="Live Assessment">
-            <i class="fas fa-calendar-check"></i><span class="nav-text">Live Assessment</span>
+        <button class="nav-item" id="nav-live-assessment" onclick="showTab('live-assessment')" title="Live Assessment Booking">
+            <i class="fas fa-calendar-check"></i><span class="nav-text">Live Assessment Booking</span>
+        </button>
+
+        <button class="nav-item" id="btn-live-exec" onclick="showTab('live-execution')" title="Live Session Arena">
+            <i class="fas fa-satellite-dish"></i><span class="nav-text">Live Session Arena</span>
         </button>
 
         <button class="nav-item" onclick="showTab('assessment-schedule')" title="Schedule">
@@ -549,6 +553,14 @@
         </section>
 
         <section id="assessment-schedule"></section>
+
+        <section id="live-execution">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                <h2><i class="fas fa-satellite-dish" style="color:var(--primary);"></i> Live Assessment Arena</h2>
+                <button class="btn-secondary btn-sm" onclick="showTab('live-assessment')"><i class="fas fa-arrow-left"></i> Back to Booking</button>
+            </div>
+            <div id="live-execution-content" style="height: calc(100vh - 150px);"></div>
+        </section>
 
         <section id="admin-panel" class="admin-only-section">
         <div style="display:flex; justify-content:space-between;"><h2>Admin Tools</h2></div>
@@ -836,6 +848,7 @@
 <script src="js/forms.js"></script> 
 <script src="js/insight.js"></script>
 <script src="js/assessment.js"></script>
+<script src="js/live_execution.js"></script>
 
 <script src="js/main.js"></script>
 
