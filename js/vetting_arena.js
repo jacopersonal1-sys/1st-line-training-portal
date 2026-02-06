@@ -244,6 +244,7 @@ function renderTraineeArena() {
                     <li>Screenshots and Recording are disabled.</li>
                     <li>Only 1 Monitor is allowed.</li>
                     <li>Background applications are monitored.</li>
+                    <li>Your teams camera must stay on at all times during vetting test.</li>
                 </ul>
             </div>
 

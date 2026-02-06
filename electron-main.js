@@ -190,7 +190,7 @@ ipcMain.handle('get-process-list', async () => {
             const targets = [
                 'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'safari', 
                 'waterfox', 'tor', 'duckduckgo', 'arc', 'maxthon', 'seamonkey', 'avast', 'yandex',
-                'whatsapp', 'discord', 'slack'
+                'whatsapp'
             ];
             const counts = {};
             
