@@ -106,7 +106,11 @@ function renderTraineeRows(trainees) {
         let statusBadge = '<span class="status-badge status-improve">Waiting</span>';
         if (data.status === 'started') statusBadge = '<span class="status-badge status-semi">In Progress</span>';
         if (data.status === 'completed') statusBadge = '<span class="status-badge status-pass">Completed</span>';
-        if (data.status === 'blocked') statusBadge = '<span class="status-badge status-fail">Blocked</span>';
+        if (data.status === 'blocked') {
+            statusBadge = data.override 
+                ? '<span class="status-badge status-improve">Override Sent</span>' 
+                : '<span class="status-badge status-fail">Blocked</span>';
+        }
         if (data.status === 'ready') statusBadge = '<span class="status-badge status-pass">Ready</span>';
         
         let securityAlert = '';
@@ -122,7 +126,11 @@ function renderTraineeRows(trainees) {
         if (data.status === 'started') {
             actions = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${user}')">Force Stop</button>`;
         } else if (data.status === 'blocked') {
-            actions = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${user}')">Allow / Override</button>`;
+            if (data.override) {
+                actions = `<span style="font-size:0.8rem; color:var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Waiting for agent...</span>`;
+            } else {
+                actions = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${user}')">Allow / Override</button>`;
+            }
         }
 
         return `
@@ -257,8 +265,11 @@ function renderTraineeArena() {
                 </ul>
             </div>
 
-            <div id="securityCheckLog" class="security-log-box">
-                <div><i class="fas fa-spinner fa-spin"></i> Checking System Requirements...</div>
+            <div style="position:relative;">
+                <div id="securityCheckLog" class="security-log-box">
+                    <div><i class="fas fa-spinner fa-spin"></i> Checking System Requirements...</div>
+                </div>
+                <button class="btn-secondary btn-sm" style="position:absolute; top:5px; right:5px;" onclick="checkSystemCompliance()" title="Force Re-check"><i class="fas fa-sync"></i></button>
             </div>
 
             <button id="btnEnterArena" class="btn-primary btn-lg" disabled onclick="enterArena('${session.testId}')" style="margin-top:15px; opacity:0.5; cursor:not-allowed;">ENTER ARENA & START</button>
@@ -297,8 +308,25 @@ async function pollVettingSession() {
         .single();
         
     if (data && data.content) {
+        const serverSession = data.content;
+        const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        
+        // Merge Server State (Global) into Local
+        localSession.active = serverSession.active;
+        localSession.testId = serverSession.testId;
+        localSession.targetGroup = serverSession.targetGroup;
+        
+        // Sync Override flag specifically for current user
+        if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
+            if (!localSession.trainees) localSession.trainees = {};
+            if (!localSession.trainees[CURRENT_USER.user]) localSession.trainees[CURRENT_USER.user] = {};
+            
+            // Adopt override if present on server
+            localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
+        }
+
+        const newStr = JSON.stringify(localSession);
         const currentLocal = localStorage.getItem('vettingSession');
-        const newStr = JSON.stringify(data.content);
         
         // Only re-render if state changed
         if (currentLocal !== newStr) {

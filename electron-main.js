@@ -189,7 +189,7 @@ ipcMain.handle('get-process-list', async () => {
             // Simple parsing for Windows CSV
             const targets = [
                 'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'safari', 
-                'waterfox', 'tor', 'duckduckgo', 'arc', 'maxthon', 'seamonkey', 'avast', 'yandex',
+                'waterfox', 'tor', 'duckduckgo', 'maxthon', 'seamonkey', 'avast', 'yandex',
                 'whatsapp'
             ];
             const counts = {};
