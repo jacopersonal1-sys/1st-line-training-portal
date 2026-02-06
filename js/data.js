@@ -306,13 +306,16 @@ function performSmartMerge(server, local) {
         } 
         // Case 2a: Vetting Session (Deep Merge Trainees)
         else if (key === 'vettingSession') {
-            merged[key] = { ...sVal, ...lVal }; // Merge top level (active, testId)
+            const safeSVal = sVal || {};
+            const safeLVal = lVal || {};
+            
+            merged[key] = { ...safeSVal, ...safeLVal }; // Merge top level (active, testId)
             
             // Deep merge trainees to prevent overwrites
-            if (sVal.trainees || lVal.trainees) {
+            if (safeSVal.trainees || safeLVal.trainees) {
                 merged[key].trainees = {
-                    ...(sVal.trainees || {}),
-                    ...(lVal.trainees || {})
+                    ...(safeSVal.trainees || {}),
+                    ...(safeLVal.trainees || {})
                 };
             }
         }
@@ -391,12 +394,14 @@ async function fetchSystemStatus() {
             if (activeTable) {
                 let html = '';
                 if(!activeUsers || activeUsers.length === 0) {
-                      html = '<tr><td colspan="4" class="text-center">No active users detected.</td></tr>';
+                      html = '<tr><td colspan="6" class="text-center">No active users detected.</td></tr>';
                 } else {
                     activeUsers.forEach(u => {
                         const idleStr = typeof formatDuration === 'function' 
                             ? formatDuration(u.idleTime) 
                             : (u.idleTime/1000).toFixed(0) + 's';
+                        
+                        const verStr = u.version || '-';
                         
                         const statusBadge = u.isIdle
                             ? '<span class="status-badge status-fail">Idle</span>'
@@ -405,11 +410,16 @@ async function fetchSystemStatus() {
                         const rowClass = u.isIdle ? 'user-idle' : '';
 
                         html += `
-                            <tr class="">
+                            <tr class="${rowClass}">
                                 <td><strong>${u.user}</strong></td>
+                                <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
                                 <td>${u.role}</td>
-                                <td></td>
-                                <td></td>
+                                <td>${statusBadge}</td>
+                                <td>${idleStr}</td>
+                                <td>
+                                    <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${u.user}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
+                                    <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${u.user}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
+                                </td>
                             </tr>
                         `;
                     });
@@ -479,15 +489,35 @@ async function sendHeartbeat() {
     const isIdle = diff > limit;
 
     try {
+        // 1. Send Heartbeat with Version
         await supabaseClient
             .from('sessions')
             .upsert({
                 user: CURRENT_USER.user,
                 role: CURRENT_USER.role,
+                version: window.APP_VERSION || 'Unknown',
                 idleTime: diff,
                 isIdle: isIdle,
                 lastSeen: new Date().toISOString()
             });
+            
+        // 2. Check for Remote Commands (Pending Actions)
+        const { data: sessionData } = await supabaseClient
+            .from('sessions')
+            .select('pending_action')
+            .eq('user', CURRENT_USER.user)
+            .single();
+            
+        if (sessionData && sessionData.pending_action) {
+            // Clear command first to prevent loops
+            await supabaseClient.from('sessions').update({ pending_action: null }).eq('user', CURRENT_USER.user);
+            
+            if (sessionData.pending_action === 'logout') {
+                if (typeof logout === 'function') logout();
+            } else if (sessionData.pending_action === 'restart') {
+                if (typeof triggerForceRestart === 'function') triggerForceRestart();
+            }
+        }
     } catch (e) { /* Silent fail */ }
 }
 
