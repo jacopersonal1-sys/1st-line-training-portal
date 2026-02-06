@@ -2,6 +2,7 @@
 /* Handles real-time interaction between Trainer (Admin) and Trainee */
 
 let LIVE_POLLER = null;
+let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
 
 function loadLiveExecution() {
     if (LIVE_POLLER) clearInterval(LIVE_POLLER);
@@ -9,6 +10,7 @@ function loadLiveExecution() {
     const container = document.getElementById('live-execution-content');
     if (!container) return;
 
+    LAST_RENDERED_Q = -2; // Reset on load
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
         renderAdminLivePanel(container);
     } else {
@@ -20,17 +22,42 @@ function loadLiveExecution() {
 }
 
 async function syncLiveSessionState() {
-    // Pull latest state
-    if (typeof loadFromServer === 'function') {
-        // We use silent load to update local storage without UI disruption
-        // The render functions will react to localStorage changes
-        await loadFromServer(true); 
+    // TARGETED POLLING (Efficient & Stable)
+    // Matches Vetting Arena logic to prevent full re-renders wiping user input
+    if (!window.supabaseClient) return;
+
+    const { data, error } = await supabaseClient
+        .from('app_documents')
+        .select('content')
+        .eq('key', 'liveSession')
+        .single();
+
+    if (data && data.content) {
+        const serverSession = data.content;
+        const localSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
         
-        const container = document.getElementById('live-execution-content');
-        if (container && !document.querySelector('.admin-interaction-active')) {
-            // Only re-render if user isn't actively typing/interacting
-            if (CURRENT_USER.role !== 'admin') renderTraineeLivePanel(container);
-            else updateAdminLiveView(); // Partial update for Admin
+        // Only update if state actually changed
+        if (JSON.stringify(serverSession) !== JSON.stringify(localSession)) {
+            localStorage.setItem('liveSession', JSON.stringify(serverSession));
+            
+            const container = document.getElementById('live-execution-content');
+            if (container) {
+                if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+                    // Admin: Update view but try to preserve focus if typing
+                    if (!document.querySelector('.admin-interaction-active') || serverSession.currentQ !== localSession.currentQ) {
+                        renderAdminLivePanel(container);
+                    } else {
+                        updateAdminLiveView(); 
+                    }
+                } else {
+                    // Trainee: ONLY re-render if the question changed or session status changed
+                    // This fixes the "Selection Disappears" bug
+                    if (serverSession.currentQ !== LAST_RENDERED_Q || serverSession.active !== localSession.active) {
+                        renderTraineeLivePanel(container);
+                        LAST_RENDERED_Q = serverSession.currentQ;
+                    }
+                }
+            }
         }
     }
 }
@@ -161,6 +188,7 @@ function updateAdminLiveView() {
 // --- TRAINEE VIEW ---
 
 function renderTraineeLivePanel(container) {
+    // Note: This function wipes the container. Only call if question changed.
     const session = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
     
     if (!session.active || session.trainee !== CURRENT_USER.user) {

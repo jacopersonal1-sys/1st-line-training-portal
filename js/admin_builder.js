@@ -113,6 +113,9 @@ function addQuestion(type) {
         q.cols = ["", ""];
         q.correct = {}; 
     }
+    else if (type === 'live_practical') {
+        q.text = "Instruction for Trainee";
+    }
 
     BUILDER_QUESTIONS.push(q);
     renderBuilder();
@@ -211,6 +214,13 @@ function renderBuilder() {
                             </select>
                         </div>
                     `).join('')}
+                </div>
+            `;
+        }
+        else if (q.type === 'live_practical') {
+            innerHTML = `
+                <div style="padding:10px; background:var(--bg-input); border-left:3px solid var(--primary); color:var(--text-muted); font-size:0.9rem;">
+                    <i class="fas fa-info-circle"></i> <strong>Live Practical:</strong> The text above will be shown to the trainee as instructions. You (the Admin) will score their performance manually in the Live Arena.
                 </div>
             `;
         }

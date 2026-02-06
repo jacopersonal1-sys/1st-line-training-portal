@@ -678,6 +678,10 @@ function renderQuestionInput(q, idx) {
         return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Type your answer here..."></textarea>`;
     }
     
+    if (q.type === 'live_practical') {
+        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Perform the instruction above. Type 'Done' or add notes here when finished..."></textarea>`;
+    }
+    
     if (q.type === 'matching') {
         const rightOptions = (q.pairs || []).map(p => p.right);
         const shuffledRight = shuffleArray([...rightOptions]); // Randomize right side
