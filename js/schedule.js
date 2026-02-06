@@ -502,26 +502,33 @@ function openBookingModal(date, time, trainer) {
     // PULLS DYNAMICALLY FROM ADMIN-EDITABLE LIST
     const assessSelect = document.getElementById('bookingAssessment');
     assessSelect.innerHTML = '';
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
-    let liveAssessments = assessments.filter(a => a.live); 
     
-    // FILTER FOR TRAINEES: Only show assessments that match their schedule
+    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
+    
+    // 1. Gather all potential Live Assessments (From Definitions ONLY)
+    // Source: Admin Tools > Assessments > Live Flag
+    const liveNames = new Set();
+    assessments.forEach(a => { if(a.live) liveNames.add(a.name); });
+    
+    let availableList = Array.from(liveNames);
+    
+    // FILTER FOR TRAINEES
     if (CURRENT_USER.role === 'trainee') {
         const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
         const schedId = getTraineeScheduleId(CURRENT_USER.user, schedules);
-        if (schedId && schedules[schedId]) {
-            const allowedNames = new Set(schedules[schedId].items.map(i => i.courseName));
-            liveAssessments = liveAssessments.filter(a => allowedNames.has(a.name));
-        } else {
-            liveAssessments = []; // No schedule = no bookings
+        
+        // User must be assigned to a schedule to book, but we show all available live assessments
+        // This ensures generic schedule items (e.g. "Live Assessment") don't filter out specific tests.
+        if (!schedId || !schedules[schedId]) {
+            availableList = []; // No schedule = no bookings
         }
     }
     
-    if(liveAssessments.length === 0) {
+    if(availableList.length === 0) {
         assessSelect.innerHTML = '<option>No Available Assessments</option>';
     } else {
-        liveAssessments.forEach(a => {
-            assessSelect.add(new Option(a.name, a.name));
+        availableList.sort().forEach(name => {
+            assessSelect.add(new Option(name, name));
         });
     }
 
