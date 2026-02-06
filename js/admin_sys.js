@@ -43,9 +43,16 @@ function loadAdminAssessments() {
                 ${a.video ? '<span class="badge-secondary">Video</span>' : ''} 
                 ${a.live ? '<span class="badge-primary">Live</span>' : ''}
             </td>
-            <td><button class="btn-danger btn-sm" onclick="remAssess(${i})">X</button></td>
+            <td>${CURRENT_USER.role === 'admin' ? `<button class="btn-danger btn-sm" onclick="remAssess(${i})">X</button>` : ''}</td>
         </tr>
     `).join(''); 
+
+    // Hide Add Section for Special Viewer
+    const addSection = document.getElementById('newAssessName')?.parentElement;
+    if (addSection) {
+        if (CURRENT_USER.role === 'special_viewer') addSection.classList.add('hidden');
+        else addSection.classList.remove('hidden');
+    }
 }
 
 async function addAssessment() { 
@@ -90,9 +97,16 @@ function loadAdminVetting() {
         list.innerHTML = topics.map((t,i) => `
             <li>
                 ${t} 
-                <button class="btn-danger btn-sm" style="margin-left:10px;" onclick="remVetting(${i})">X</button>
+                ${CURRENT_USER.role === 'admin' ? `<button class="btn-danger btn-sm" style="margin-left:10px;" onclick="remVetting(${i})">X</button>` : ''}
             </li>
         `).join(''); 
+    }
+
+    // Hide Add Section for Special Viewer
+    const addSection = document.getElementById('newVettingTopic')?.parentElement;
+    if (addSection) {
+        if (CURRENT_USER.role === 'special_viewer') addSection.classList.add('hidden');
+        else addSection.classList.remove('hidden');
     }
 }
 
@@ -151,19 +165,37 @@ function loadAdminDatabase() {
              viewBtn = `<button class="btn-secondary" style="padding:2px 6px;" onclick="viewCompletedTest('${d.trainee}', '${d.assessment}')" title="View Submission"><i class="fas fa-eye"></i></button>`;
         }
 
+        let actions = viewBtn;
+        if (CURRENT_USER.role === 'admin') {
+            actions += `
+                <button class="btn-secondary" style="padding:2px 6px;" onclick="openRecordEdit(${i})"><i class="fas fa-pen"></i></button> 
+                <button class="btn-danger" style="padding:2px 6px;" onclick="delRec(${i})"><i class="fas fa-trash"></i></button>
+            `;
+        }
+
         return `
         <tr class="${rowClass}">
-            <td><input type="checkbox" class="db-check" value="${i}" id="db-chk-${i}"></td>
+            <td>${CURRENT_USER.role === 'admin' ? `<input type="checkbox" class="db-check" value="${i}" id="db-chk-${i}">` : ''}</td>
             <td>${warning}${d.trainee}</td>
             <td>${d.assessment}</td>
             <td>${d.score}%</td>
             <td>
-                ${viewBtn} 
-                <button class="btn-secondary" style="padding:2px 6px;" onclick="openRecordEdit(${i})"><i class="fas fa-pen"></i></button> 
-                <button class="btn-danger" style="padding:2px 6px;" onclick="delRec(${i})"><i class="fas fa-trash"></i></button>
+                ${actions}
             </td>
         </tr>`;
     }).join(''); 
+
+    // Hide Bulk Actions for Special Viewer
+    const bulkActions = document.querySelector('#admin-view-data .card h3')?.nextElementSibling;
+    if (bulkActions && bulkActions.tagName === 'DIV') {
+         if (CURRENT_USER.role === 'special_viewer') bulkActions.parentElement.classList.add('hidden'); // Hides the whole left panel actually
+         // Better: Hide specific buttons
+         const leftPanel = document.querySelector('#admin-view-data .grid-2 > div:first-child');
+         if (leftPanel) {
+             if (CURRENT_USER.role === 'special_viewer') leftPanel.classList.add('hidden');
+             else leftPanel.classList.remove('hidden');
+         }
+    }
 }
 
 async function deleteBulkRecords() {
@@ -324,6 +356,15 @@ async function loadAdminAccess() {
     const statusSpan = document.getElementById('acStatus');
     const toggleBtn = document.getElementById('btnToggleAC');
     const list = document.getElementById('ipList');
+    const addSection = document.getElementById('newIpInput')?.parentElement;
+
+    if (CURRENT_USER.role === 'special_viewer') {
+        if (toggleBtn) toggleBtn.classList.add('hidden');
+        if (addSection) addSection.classList.add('hidden');
+    } else {
+        if (toggleBtn) toggleBtn.classList.remove('hidden');
+        if (addSection) addSection.classList.remove('hidden');
+    }
     
     if(statusSpan) {
         statusSpan.innerHTML = ac.enabled ? '<span style="color:#27ae60; font-weight:bold;">ENABLED</span>' : '<span style="color:#888; font-weight:bold;">DISABLED</span>';
@@ -339,7 +380,7 @@ async function loadAdminAccess() {
             list.innerHTML = ac.whitelist.map((ip, i) => `
                 <li style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid #eee;">
                     <span>${ip}</span>
-                    <button class="btn-danger btn-sm" onclick="removeIpAddress(${i})"><i class="fas fa-trash"></i></button>
+                    ${CURRENT_USER.role === 'admin' ? `<button class="btn-danger btn-sm" onclick="removeIpAddress(${i})"><i class="fas fa-trash"></i></button>` : ''}
                 </li>
             `).join('');
         }

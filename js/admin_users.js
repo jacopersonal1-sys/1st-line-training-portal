@@ -296,6 +296,11 @@ function loadAdminUsers() {
         if(createContainer) createContainer.classList.remove('hidden');
         if(scanBtn) scanBtn.classList.remove('hidden');
         displayUsers = users.filter(u => u.user.toLowerCase().includes(search));
+    } else if (CURRENT_USER.role === 'special_viewer') {
+        if(createContainer) createContainer.classList.add('hidden');
+        if(scanBtn) scanBtn.classList.add('hidden');
+        // Special viewer sees all users but cannot edit
+        displayUsers = users.filter(u => u.user.toLowerCase().includes(search));
     } 
     else {
         if(createContainer) createContainer.classList.add('hidden');
@@ -304,7 +309,7 @@ function loadAdminUsers() {
     }
 
     displayUsers.sort((a,b) => {
-        const roles = { 'admin': 1, 'teamleader': 2, 'trainee': 3 };
+        const roles = { 'admin': 1, 'special_viewer': 1, 'teamleader': 2, 'trainee': 3 };
         return roles[a.role] - roles[b.role];
     });
 
@@ -324,7 +329,9 @@ function loadAdminUsers() {
                 // FIX: Pass username instead of index to prevent deleting wrong user when sorted
                 actions = `${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')"><i class="fas fa-trash"></i></button>`;
             } 
-            else if (u.user === CURRENT_USER.user) {
+            else if (CURRENT_USER.role === 'special_viewer') {
+                actions = `<span style="color:var(--text-muted); font-style:italic;">View Only</span>`;
+            } else if (u.user === CURRENT_USER.user) {
                 actions = `<button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i> Edit Password</button>`;
             }
             

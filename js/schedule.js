@@ -90,7 +90,7 @@ function renderSchedule() {
         }
     }
 
-    const isAdmin = (CURRENT_USER.role === 'admin');
+    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer');
     const isTL = (CURRENT_USER.role === 'teamleader');
     
     if (!isAdmin && !isTL) {
@@ -147,7 +147,7 @@ function buildTabs(schedules, isAdmin) {
             <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
         </button>`;
     }).join('');
-    if (isAdmin) html += `<button onclick="createNewSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Schedule Group"><i class="fas fa-plus"></i></button>`;
+    if (isAdmin && CURRENT_USER.role !== 'special_viewer') html += `<button onclick="createNewSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Schedule Group"><i class="fas fa-plus"></i></button>`;
     return html;
 }
 
@@ -158,9 +158,9 @@ function buildToolbar(scheduleData, isAdmin) {
     }
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')">Completed / Clear</button></div></div>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')">Completed / Clear</button>`}</div></div>`;
     } else {
-        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span><select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button></div>`;
+        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button>`}</div>`;
     }
 }
 
@@ -170,32 +170,40 @@ function buildTimeline(items, isAdmin) {
         timelineHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted);">No timeline items yet.</div>`;
     } else {
         timelineHTML = items.map((item, index) => {
-            const status = getScheduleStatus(item.dateRange);
+            const status = getScheduleStatus(item.dateRange, item.dueDate);
             let timelineClass = 'schedule-upcoming';
             if (status === 'active') timelineClass = 'schedule-active';
             else if (status === 'past') timelineClass = 'schedule-past';
 
             let actions = '';
             if (isAdmin) {
-                actions = `
-                    <button class="btn-edit-sched" onclick="editTimelineItem(${index})" aria-label="Edit Item"><i class="fas fa-pen"></i></button>
-                    <button class="btn-danger btn-sm" onclick="deleteTimelineItem(${index})" aria-label="Delete Item" style="margin-left:5px;"><i class="fas fa-trash"></i></button>
-                `;
+                if (CURRENT_USER.role === 'special_viewer') {
+                    actions = '';
+                } else {
+                    actions = `
+                        <button class="btn-edit-sched" onclick="editTimelineItem(${index})" aria-label="Edit Item"><i class="fas fa-pen"></i></button>
+                        <button class="btn-danger btn-sm" onclick="deleteTimelineItem(${index})" aria-label="Delete Item" style="margin-left:5px;"><i class="fas fa-trash"></i></button>
+                    `;
+                }
             } else {
                 if (item.linkedTestId) {
                     const isTimeOpen = checkTimeAccess(item.openTime, item.closeTime, item.ignoreTime);
+                    const isDayMatch = isAssessmentDay(item.dateRange, item.dueDate);
                     
                     if (status === 'upcoming') actions = `<button class="btn-start-test disabled" aria-label="Locked"><i class="fas fa-lock"></i> Locked</button>`;
                     else if (status === 'past') actions = `<button class="btn-start-test disabled" aria-label="Closed"><i class="fas fa-history"></i> Closed</button>`;
+                    else if (!isDayMatch) actions = `<button class="btn-start-test disabled" aria-label="Study Phase"><i class="fas fa-book-reader"></i> Study Phase</button>`;
                     else if (!isTimeOpen) actions = `<button class="btn-start-test disabled" aria-label="Time Locked"><i class="fas fa-clock"></i> ${item.openTime} - ${item.closeTime}</button>`;
                     else actions = `<button class="btn-start-test" onclick="goToTest('${item.linkedTestId}')" aria-label="Take Test">Take Assessment</button>`;
                 } else if (item.assessmentLink) {
                     const isTimeOpen = checkTimeAccess(item.openTime, item.closeTime, item.ignoreTime);
+                    const isDayMatch = isAssessmentDay(item.dateRange, item.dueDate);
 
                     if (status === 'upcoming') {
                            actions = `<span class="btn-link-external disabled" style="opacity:0.5; cursor:not-allowed;">Locked <i class="fas fa-lock"></i></span>`;
                     } else {
-                           if (!isTimeOpen && status === 'active') actions = `<span class="btn-link-external disabled" style="opacity:0.5; cursor:not-allowed;"><i class="fas fa-clock"></i> ${item.openTime} - ${item.closeTime}</span>`;
+                           if (!isDayMatch && status === 'active') actions = `<span class="btn-link-external disabled" style="opacity:0.5; cursor:not-allowed;">Study Phase <i class="fas fa-book-reader"></i></span>`;
+                           else if (!isTimeOpen && status === 'active') actions = `<span class="btn-link-external disabled" style="opacity:0.5; cursor:not-allowed;"><i class="fas fa-clock"></i> ${item.openTime} - ${item.closeTime}</span>`;
                            else actions = `<a href="${item.assessmentLink}" target="_blank" class="btn-link-external" aria-label="External Link">Open Link <i class="fas fa-external-link-alt"></i></a>`;
                     }
                 }
@@ -209,7 +217,7 @@ function buildTimeline(items, isAdmin) {
             let materialLinkHtml = '';
             if (item.materialLink) {
                 // Material is available if date range is valid OR always open flag is set
-                const isMaterialOpen = item.materialAlways || isDateInRange(item.dateRange);
+                const isMaterialOpen = item.materialAlways || isDateInRange(item.dateRange, item.dueDate);
                 if (!isMaterialOpen && !isAdmin) {
                     // Render as disabled non-clickable text for Trainees
                     materialLinkHtml = `<div style="margin-top:10px;"><span class="btn-link" style="font-size:0.9rem; cursor:not-allowed; opacity:0.5; color:var(--text-muted);"><i class="fas fa-lock"></i> Study Material (Locked)</span></div>`;
@@ -233,7 +241,7 @@ function buildTimeline(items, isAdmin) {
         }).join('');
     }
 
-    if (isAdmin) {
+    if (isAdmin && CURRENT_USER.role !== 'special_viewer') {
         timelineHTML += `<div style="text-align:center; margin-top:20px;"><button class="btn-secondary" onclick="addTimelineItem()">+ Add Timeline Item</button></div>`;
     }
 
@@ -291,7 +299,7 @@ function buildCalendar(items, isAdmin) {
         const isToday = dateStr === todayStr;
         
         // Find items for this day
-        const dayItems = items.filter(item => isDateInRange(item.dateRange, dateStr));
+        const dayItems = items.filter(item => isDateInRange(item.dateRange, item.dueDate, dateStr));
         
         let itemsHtml = dayItems.map(item => `
             <div style="font-size:0.7rem; background:var(--primary-soft); color:var(--primary); padding:2px 4px; border-radius:3px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.courseName}">
@@ -423,7 +431,7 @@ function renderLiveTable() {
 
                     // Actions
                     let actions = '';
-                    if (CURRENT_USER.role === 'admin') {
+                    if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'special_viewer') {
                         // Admin: Cancel OR Mark Complete
                         if(!isCompleted) {
                             actions += `<button class="btn-success btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="markBookingComplete('${booking.id}')" title="Mark Complete"><i class="fas fa-check"></i></button>`;
@@ -851,32 +859,48 @@ async function duplicateCurrentSchedule() {
     }
 }
 
-function isDateInRange(dateRangeStr, specificDateStr) {
+function isDateInRange(dateRangeStr, dueDateStr, specificDateStr) {
     if (dateRangeStr === "Always Available") return true;
     
     // Determine target date: specificDateStr if provided (Calendar), else today (Timeline)
-    let target = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+    let target = "";
     if (specificDateStr) {
         target = specificDateStr.replace(/-/g, '/');
+    } else {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        target = `${y}/${m}/${d}`;
     }
 
-    if (dateRangeStr.includes('-')) {
-        const parts = dateRangeStr.split('-').map(s => s.trim());
-        if(parts.length === 2) { return target >= parts[0] && target <= parts[1]; }
+    let start = "", end = "";
+    if (dateRangeStr.includes('-') && dateRangeStr.length > 11) {
+        const parts = dateRangeStr.split('-').map(s => s.trim().replace(/-/g, '/'));
+        start = parts[0]; end = parts[1];
     } else if (dateRangeStr.trim()) {
-        // Normalize for comparison
-        const d1 = dateRangeStr.trim().replace(/-/g, '/');
-        return d1 === target;
+        start = dateRangeStr.trim().replace(/-/g, '/');
+        end = start;
     }
-    return false;
+
+    if (dueDateStr) {
+        end = dueDateStr.trim().replace(/-/g, '/');
+    }
+
+    return target >= start && target <= end;
 }
 
-function getScheduleStatus(dateRangeStr) {
+function getScheduleStatus(dateRangeStr, dueDateStr) {
     if (dateRangeStr === "Always Available") return 'active';
     
     // Normalize dates to YYYY/MM/DD for consistent string comparison
-    const normalize = (d) => d.replace(/-/g, '/').trim();
-    const today = normalize(new Date().toISOString().split('T')[0]);
+    const normalize = (d) => d ? d.replace(/-/g, '/').trim() : '';
+    
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const today = `${y}/${m}/${d}`;
     
     let start = "", end = "";
     if (dateRangeStr.includes('-') && dateRangeStr.length > 11) {
@@ -886,10 +910,40 @@ function getScheduleStatus(dateRangeStr) {
         start = normalize(dateRangeStr); end = normalize(dateRangeStr);
     }
 
+    if (dueDateStr) {
+        end = normalize(dueDateStr);
+    }
+
     if (today < start) return 'upcoming';
     if (today > end) return 'past';
     
     return 'active';
+}
+
+function isAssessmentDay(dateRangeStr, dueDateStr) {
+    if (dateRangeStr === "Always Available") return true;
+    
+    const normalize = (d) => d ? d.replace(/-/g, '/').trim() : '';
+    
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const today = `${y}/${m}/${d}`;
+    
+    let end = "";
+    if (dateRangeStr.includes('-') && dateRangeStr.length > 11) {
+        const parts = dateRangeStr.split('-').map(s => normalize(s));
+        end = parts[1];
+    } else {
+        end = normalize(dateRangeStr);
+    }
+
+    if (dueDateStr) {
+        end = normalize(dueDateStr);
+    }
+    
+    return today === end;
 }
 
 function checkTimeAccess(openStr, closeStr, ignoreTime) {

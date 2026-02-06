@@ -557,8 +557,13 @@ function openTestTaker(testId, isArenaMode = false) {
                 const item = schedules[schedKey].items.find(i => i.linkedTestId == testId);
                 if (item) {
                     isScheduled = true;
-                    const status = getScheduleStatus(item.dateRange, item.openTime, item.closeTime);
+                    const status = getScheduleStatus(item.dateRange, item.dueDate);
                     if (status !== 'active') return alert("This assessment is currently locked by the schedule.");
+                    
+                    // Check Day Access (Multi-day items only open on last day)
+                    if (typeof isAssessmentDay === 'function' && !isAssessmentDay(item.dateRange, item.dueDate)) {
+                        return alert("This assessment is only available on the final day of the schedule item.");
+                    }
                     
                     // Double Check Time Access
                     if (typeof checkTimeAccess === 'function') {

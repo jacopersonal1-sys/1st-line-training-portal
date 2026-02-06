@@ -66,6 +66,11 @@ function handleAssessmentChange() {
 
 // UPDATED: Async Save for Manual Scores with Deduplication
 async function saveScores() { 
+    if (CURRENT_USER.role === 'special_viewer') {
+        alert("View Only Mode: Cannot save scores.");
+        return;
+    }
+
     const gid = document.getElementById('selectedGroup').value; 
     if(!gid) return alert("Select group"); 
     
@@ -230,7 +235,7 @@ function loadTestRecords() {
                 
                 // Link to 'assessment.js' viewer
                 // Note: 'viewCompletedTest' calls 'openAdminMarking' in assessment.js
-                let actionBtn = `
+                let actionBtn = CURRENT_USER.role === 'special_viewer' ? `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${s.trainee}', '${s.testTitle}')">View</button>` : `
                     <button class="btn-secondary btn-sm" onclick="viewCompletedTest('${s.trainee}', '${s.testTitle}')">View</button>
                     <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>
                 `;

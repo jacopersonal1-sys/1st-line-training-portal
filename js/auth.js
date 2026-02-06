@@ -251,7 +251,7 @@ function applyRolePermissions() {
   const subBtnStatus = document.getElementById('btn-sub-status');
   const subBtnUpdates = document.getElementById('btn-sub-updates');
 
-  if (CURRENT_USER.role === 'admin') {
+  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
     adminElems.forEach(e => e.classList.remove('hidden'));
     tlElems.forEach(e => e.classList.remove('hidden'));
     filterContainer.classList.remove('hidden');
@@ -270,8 +270,13 @@ function applyRolePermissions() {
     if(subBtnStatus) subBtnStatus.classList.remove('hidden');
     if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');
 
-    document.getElementById('admin-create-user-card')?.classList.remove('hidden');
-    document.getElementById('admin-user-controls')?.classList.remove('hidden');
+    if (CURRENT_USER.role === 'special_viewer') {
+        document.getElementById('admin-create-user-card')?.classList.add('hidden');
+        // Keep user controls visible for filtering, but actions will be hidden by admin_users.js
+    } else {
+        document.getElementById('admin-create-user-card')?.classList.remove('hidden');
+        document.getElementById('admin-user-controls')?.classList.remove('hidden');
+    }
     
   } 
   else {
@@ -294,7 +299,7 @@ function applyRolePermissions() {
     
     if (arenaBtn) {
         let show = false;
-        if (CURRENT_USER.role === 'admin') show = true;
+        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') show = true;
         else if (session.active) {
             if (!session.targetGroup || session.targetGroup === 'all') show = true;
             else {
@@ -438,6 +443,7 @@ function showAccessDeniedOverlay(ip) {
 function hasPermission(permission) {
     if (!CURRENT_USER) return false;
     if (CURRENT_USER.role === 'admin') return true;
+    if (CURRENT_USER.role === 'special_viewer') return false; // Read-only
     if (CURRENT_USER.role === 'teamleader') {
         const allowedPermissions = [
             'test.grade',

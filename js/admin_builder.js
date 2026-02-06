@@ -389,6 +389,12 @@ async function saveTest() {
     // Clear Draft
     localStorage.removeItem('draft_builder');
 
+    // Special Viewer Check
+    if (CURRENT_USER.role === 'special_viewer') {
+        alert("View Only Mode: Changes cannot be saved.");
+        return;
+    }
+
     alert("Test Saved.");
     EDITING_TEST_ID = null; // Reset
     showTab('test-manage');
@@ -410,8 +416,8 @@ function loadManageTests() {
         <div class="test-card-row">
             <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
             <div>
-                <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
-                <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>
+                ${CURRENT_USER.role === 'admin' ? `<button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
+                <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
             </div>
         </div>
     `).join('');

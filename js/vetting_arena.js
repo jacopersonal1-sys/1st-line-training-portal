@@ -228,19 +228,6 @@ function renderTraineeArena() {
         container.innerHTML = `
             <div style="text-align:center; padding:50px;">
                 <i class="fas fa-check-circle" style="font-size:4rem; color:#2ecc71; margin-bottom:20px;"></i>
-const targets = [
-    'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'safari', 
-    'waterfox', 'tor', 'duckduckgo', 'maxthon', 'seamonkey', 'avast', 'yandex',
-    'whatsapp'
-];
-// Sync Override flag specifically for current user
-if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
-    if (!localSession.trainees) localSession.trainees = {};
-    if (!localSession.trainees[CURRENT_USER.user]) localSession.trainees[CURRENT_USER.user] = {};
-
-    // Adopt override if present on server
-    localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
-}
                 <h3>Submitted Vetting</h3>
                 <p>Please wait for the next test to be pushed.</p>
             </div>`;
