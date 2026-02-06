@@ -465,6 +465,16 @@
                 <div style="margin-bottom:20px;">
                     <label id="lblBuilderLink" for="builderAssessmentSelect">Link to Assessment / Subject</label>
                     <select id="builderAssessmentSelect" style="width:100%; padding:10px; font-size:1rem; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;"></select>
+                    
+                    <div id="vettingWrapper" class="hidden">
+                        <div style="display:flex; gap:10px;">
+                            <select id="builderVettingPhase" style="flex:1; padding:10px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;">
+                                <option value="1st Vetting">1st Vetting</option>
+                                <option value="Final Vetting">Final Vetting</option>
+                            </select>
+                            <select id="builderVettingTopic" style="flex:1; padding:10px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;"><option value="">-- Select Topic --</option></select>
+                        </div>
+                    </div>
                     <input type="text" id="builderCustomTitle" class="hidden" placeholder="Enter Vetting Test Name (e.g. 1st Vetting - Topic)" style="width:100%;">
                 </div>
                 <div id="questionContainer"></div>

@@ -28,22 +28,31 @@ function loadTestBuilder(existingId = null) {
             const lbl = document.getElementById('lblBuilderLink');
             const sel = document.getElementById('builderAssessmentSelect');
             const inp = document.getElementById('builderCustomTitle');
+            const vetWrap = document.getElementById('vettingWrapper');
 
             if(val === 'vetting') {
                 durWrap.classList.remove('hidden');
-                if(lbl) lbl.innerText = "Vetting Test Name";
+                if(lbl) lbl.innerText = "Vetting Configuration";
                 if(sel) sel.classList.add('hidden');
-                if(inp) inp.classList.remove('hidden');
+                if(inp) inp.classList.add('hidden'); // Hide raw input, use wrapper
+                if(vetWrap) {
+                    vetWrap.classList.remove('hidden');
+                    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
+                    const vSel = document.getElementById('builderVettingTopic');
+                    vSel.innerHTML = '<option value="">-- Select Topic --</option>' + topics.map(t => `<option value="${t}">${t}</option>`).join('');
+                }
             } else if(val === 'live') {
                 durWrap.classList.add('hidden');
                 if(lbl) lbl.innerText = "Link to Live Assessment Booking";
                 if(sel) sel.classList.remove('hidden');
                 if(inp) inp.classList.add('hidden');
+                if(vetWrap) vetWrap.classList.add('hidden');
             } else {
                 durWrap.classList.add('hidden');
                 if(lbl) lbl.innerText = "Link to Assessment / Subject";
                 if(sel) sel.classList.remove('hidden');
                 if(inp) inp.classList.add('hidden');
+                if(vetWrap) vetWrap.classList.add('hidden');
             }
         };
         // Don't trigger onchange yet, wait until we know if editing
@@ -69,7 +78,16 @@ function loadTestBuilder(existingId = null) {
             }
             
             if (test.type === 'vetting') {
-                document.getElementById('builderCustomTitle').value = test.title;
+                // Try to parse existing title to populate dropdowns
+                const parts = test.title.split(' - ');
+                if(parts.length >= 2) {
+                    document.getElementById('builderVettingPhase').value = parts[0];
+                    // Wait for topics to populate then set value
+                    setTimeout(() => {
+                        document.getElementById('builderVettingTopic').value = parts.slice(1).join(' - ');
+                    }, 100);
+                }
+                document.getElementById('builderCustomTitle').value = test.title; // Fallback
             } else {
                 select.value = test.title;
             }
@@ -329,7 +347,10 @@ async function saveTest() {
     let linked = "";
     
     if (type === 'vetting') {
-        linked = document.getElementById('builderCustomTitle').value.trim();
+        const ph = document.getElementById('builderVettingPhase').value;
+        const tp = document.getElementById('builderVettingTopic').value;
+        if(!tp) return alert("Please select a Vetting Topic.");
+        linked = `${ph} - ${tp}`;
     } else {
         linked = document.getElementById('builderAssessmentSelect').value;
     }

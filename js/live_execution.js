@@ -114,7 +114,10 @@ function renderAdminLivePanel(container) {
                 <button class="btn-primary btn-lg" onclick="adminPushQuestion(0)">Push Question 1</button>
             </div>`;
     } else if (q) {
-        const traineeAns = session.answers[currentQ] ? JSON.stringify(session.answers[currentQ]) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
+        const rawAns = session.answers[currentQ];
+        // Robust check for 0 (index) which is falsy in JS
+        const hasAns = rawAns !== undefined && rawAns !== null && rawAns !== "";
+        const traineeAns = hasAns ? (typeof rawAns === 'object' ? JSON.stringify(rawAns) : rawAns) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
         const currentScore = session.scores[currentQ] || 0;
         const currentComment = session.comments[currentQ] || '';
 
@@ -132,7 +135,7 @@ function renderAdminLivePanel(container) {
                 <div class="card admin-interaction-active" style="display:flex; flex-direction:column; gap:15px;">
                     <div id="live-admin-answer-box" style="background:#000; color:#0f0; padding:10px; border-radius:4px; font-family:monospace; min-height:60px;">
                         <strong>TRAINEE ANSWER:</strong><br>
-                        ${typeof session.answers[currentQ] === 'string' ? session.answers[currentQ] : traineeAns}
+                        ${traineeAns}
                     </div>
                     
                     <div>
@@ -182,7 +185,8 @@ function updateAdminLiveView() {
         const ansBox = document.getElementById('live-admin-answer-box');
         if (ansBox) {
             const ans = session.answers[session.currentQ];
-            const displayAns = (typeof ans === 'string') ? ans : (ans ? JSON.stringify(ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>');
+            const hasAns = ans !== undefined && ans !== null && ans !== "";
+            const displayAns = hasAns ? ((typeof ans === 'object') ? JSON.stringify(ans) : ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
             const html = `<strong>TRAINEE ANSWER:</strong><br>${displayAns}`;
             if (ansBox.innerHTML !== html) ansBox.innerHTML = html;
         }
@@ -238,11 +242,26 @@ function renderTraineeLivePanel(container) {
     }
 
     const q = test.questions[session.currentQ];
-    const existingAns = session.answers[session.currentQ];
+    let existingAns = session.answers[session.currentQ];
+
+    // --- FIX: Initialize default answers for complex types if undefined ---
+    if (existingAns === undefined || existingAns === null) {
+        if (q.type === 'ranking' || q.type === 'drag_drop') {
+            existingAns = [...(q.items || [])];
+            // Try to shuffle if helper exists
+            if (typeof shuffleArray === 'function') existingAns = shuffleArray(existingAns);
+        } else if (q.type === 'matching') {
+            existingAns = new Array((q.pairs || []).length).fill("");
+        } else if (q.type === 'matrix') {
+            existingAns = {};
+        } else if (q.type === 'multi_select') {
+            existingAns = [];
+        }
+    }
+    // ---------------------------------------------------------------------
 
     // Reuse renderQuestionInput from assessment.js but wrap for Big UI
     // We need to ensure window.USER_ANSWERS is set for the helper to work or mock it
-    // Mocking window.USER_ANSWERS for the helper
     if (!window.USER_ANSWERS) window.USER_ANSWERS = {};
     window.USER_ANSWERS[session.currentQ] = existingAns;
 
@@ -363,7 +382,12 @@ async function submitLiveAnswer(qIdx) {
     if (typeof saveToServer === 'function') await saveToServer(['liveSession'], true);
     
     if(btn) { 
-        btn.innerText = "Update Answer"; 
+        // Check type to determine text
+        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const test = tests.find(t => t.id == session.testId);
+        const isPractical = test && test.questions[qIdx].type === 'live_practical';
+        
+        btn.innerText = isPractical ? "Done" : "Update Answer"; 
         const statusSpan = document.getElementById('submit-status');
         if(statusSpan) {
             statusSpan.innerHTML = '<i class="fas fa-check-circle"></i> Answer Submitted';
@@ -388,6 +412,7 @@ async function finishLiveSession() {
         const currentScore = parseFloat(session.scores[idx] || 0);
         const currentComment = session.comments[idx] || '';
         const ans = session.answers[idx];
+        const hasAns = ans !== undefined && ans !== null && ans !== "";
         
         maxScore += pts;
         totalScore += currentScore;
@@ -395,9 +420,9 @@ async function finishLiveSession() {
         let answerDisplay = '';
         if (q.type === 'live_practical') {
              answerDisplay = `<div style="font-style:italic; color:var(--text-muted);">Practical Task - See Notes below</div>`;
-             if(ans) answerDisplay += `<div style="margin-top:5px; padding:5px; background:rgba(255,255,255,0.05);">${ans}</div>`;
+             if(hasAns) answerDisplay += `<div style="margin-top:5px; padding:5px; background:rgba(255,255,255,0.05);">${ans}</div>`;
         } else {
-             answerDisplay = (ans && typeof ans === 'object') ? JSON.stringify(ans) : (ans || '-');
+             answerDisplay = hasAns ? ((typeof ans === 'object') ? JSON.stringify(ans) : ans) : '-';
         }
 
         return `

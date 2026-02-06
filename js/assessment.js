@@ -229,10 +229,17 @@ function openAdminMarking(subId) {
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:5px;">AGENT RESPONSE:</div>
                     <div style="white-space:pre-wrap; margin-bottom:15px; font-weight:500;">${userAns || '<i>(No response)</i>'}</div>
                     
+                    ${(() => {
+                        // Use specific score if available (Live Assessment), else calc proportional
+                        let val = 0;
+                        if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) val = sub.scores[idx];
+                        else val = sub.score ? (sub.score/100)*pointsMax : 0;
+                        return `
                     <div style="display:flex; align-items:center; gap:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
                         <label style="font-weight:bold;">Score (Max ${pointsMax}):</label>
-                        <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${sub.score ? (sub.score/100)*pointsMax : 0}" style="width:80px; padding:5px;" ${isLocked ? 'disabled' : ''}>
-                    </div>
+                        <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${val}" style="width:80px; padding:5px;" ${isLocked ? 'disabled' : ''}>
+                    </div>`;
+                    })()}
                 </div>`;
         } 
         else {
@@ -496,7 +503,29 @@ function loadTraineeTests() {
     container.innerHTML = visibleTests.map(t => {
         const sub = submissions.find(s => s.testId == t.id && s.trainee === CURRENT_USER.user && !s.archived);
         let statusHtml = '<span class="status-badge status-improve">Not Started</span>';
-        let actionBtn = `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}')">Start Assessment</button>`;
+        
+        // --- AVAILABILITY CHECK ---
+        let isLocked = false;
+        let lockReason = "Locked";
+        
+        // Find schedule item to check status
+        if (myGroupId) {
+            const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
+            if (schedKey) {
+                const item = schedules[schedKey].items.find(i => i.linkedTestId == t.id);
+                if (item && typeof getScheduleStatus === 'function') {
+                    const status = getScheduleStatus(item.dateRange, item.dueDate);
+                    if (status === 'upcoming') { isLocked = true; lockReason = "Upcoming"; }
+                    else if (status === 'past') { isLocked = true; lockReason = "Closed"; }
+                    else if (typeof isAssessmentDay === 'function' && !isAssessmentDay(item.dateRange, item.dueDate)) { isLocked = true; lockReason = "Study Phase"; }
+                    else if (typeof checkTimeAccess === 'function' && !checkTimeAccess(item.openTime, item.closeTime, item.ignoreTime)) { isLocked = true; lockReason = "Time Locked"; }
+                }
+            }
+        }
+
+        let actionBtn = isLocked 
+            ? `<button class="btn-secondary btn-sm" disabled style="opacity:0.6; cursor:not-allowed;"><i class="fas fa-lock"></i> ${lockReason}</button>`
+            : `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}')">Start Assessment</button>`;
 
         if (sub) {
             if (sub.status === 'pending') {
@@ -674,12 +703,14 @@ function restoreAssessmentDraft() {
 }
 
 function renderQuestionInput(q, idx) {
+    const savedAns = window.USER_ANSWERS[idx];
+
     if (q.type === 'text') {
-        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Type your answer here..."></textarea>`;
+        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Type your answer here...">${savedAns || ''}</textarea>`;
     }
     
     if (q.type === 'live_practical') {
-        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Notes (Optional)..."></textarea>`;
+        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Notes (Optional)...">${savedAns || ''}</textarea>`;
     }
     
     if (q.type === 'matching') {
@@ -688,12 +719,13 @@ function renderQuestionInput(q, idx) {
         
         let html = '<div style="display:grid; gap:10px;">';
         (q.pairs || []).forEach((p, rowIdx) => {
+            const currentVal = (savedAns && savedAns[rowIdx]) ? savedAns[rowIdx] : "";
             html += `
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; align-items:center; background:var(--bg-input); padding:10px; border-radius:4px;">
                 <div>${p.left}</div>
                 <select onchange="updateMatchingAnswer(${idx}, ${rowIdx}, this.value)" style="margin:0;">
                     <option value="">-- Match --</option>
-                    ${shuffledRight.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                    ${shuffledRight.map(opt => `<option value="${opt}" ${currentVal === opt ? 'selected' : ''}>${opt}</option>`).join('')}
                 </select>
             </div>`;
         });
@@ -714,7 +746,8 @@ function renderQuestionInput(q, idx) {
         (q.rows || []).forEach((r, rIdx) => {
             html += `<tr><td style="text-align:left; font-weight:bold;">${r}</td>`;
             (q.cols || []).forEach((c, cIdx) => {
-                html += `<td><input type="radio" style="cursor:pointer;" name="mx_${idx}_${rIdx}" value="${cIdx}" onchange="updateMatrixAnswer(${idx}, ${rIdx}, ${cIdx})"></td>`;
+                const isChecked = (savedAns && savedAns[rIdx] == cIdx) ? 'checked' : '';
+                html += `<td><input type="radio" style="cursor:pointer;" name="mx_${idx}_${rIdx}" value="${cIdx}" onchange="updateMatrixAnswer(${idx}, ${rIdx}, ${cIdx})" ${isChecked}></td>`;
             });
             html += `</tr>`;
         });
@@ -723,20 +756,24 @@ function renderQuestionInput(q, idx) {
     }
 
     if (q.type === 'multi_select') {
-        return (q.options || []).map((opt, oIdx) => `
+        return (q.options || []).map((opt, oIdx) => {
+            const isChecked = (savedAns && Array.isArray(savedAns) && savedAns.includes(oIdx)) ? 'checked' : '';
+            return `
             <label class="taking-radio opt-label-large">
-                <input type="checkbox" name="q_${idx}" value="${oIdx}" onchange="updateMultiSelect(${idx}, ${oIdx}, this.checked)">
+                <input type="checkbox" name="q_${idx}" value="${oIdx}" onchange="updateMultiSelect(${idx}, ${oIdx}, this.checked)" ${isChecked}>
                 <span style="margin-left:8px;">${opt}</span>
             </label>
-        `).join('');
+        `}).join('');
     }
 
-    return (q.options || []).map((opt, oIdx) => `
+    return (q.options || []).map((opt, oIdx) => {
+        const isChecked = (savedAns == oIdx) ? 'checked' : '';
+        return `
         <label class="taking-radio opt-label-large">
-            <input type="radio" name="q_${idx}" value="${oIdx}" onchange="recordAnswer(${idx}, ${oIdx})">
+            <input type="radio" name="q_${idx}" value="${oIdx}" onchange="recordAnswer(${idx}, ${oIdx})" ${isChecked}>
             <span style="margin-left:8px;">${opt}</span>
         </label>
-    `).join('');
+    `}).join('');
 }
 
 // --- HELPERS ---

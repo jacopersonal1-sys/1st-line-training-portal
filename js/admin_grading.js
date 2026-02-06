@@ -30,7 +30,13 @@ function updateAssessmentDropdown() {
     
     if(s) {
         const currentVal = s.value;
-        s.innerHTML = arr.map(a => `<option value="${a.name}" data-video="${a.video}">${a.name}</option>`).join(''); 
+        let html = arr.map(a => `<option value="${a.name}" data-video="${a.video}">${a.name}</option>`).join(''); 
+        
+        // ROBUSTNESS: Ensure Vetting options exist for manual capture
+        if(!arr.some(a => a.name === '1st Vetting Test')) html += `<option value="1st Vetting Test">1st Vetting Test</option>`;
+        if(!arr.some(a => a.name === 'Final Vetting Test')) html += `<option value="Final Vetting Test">Final Vetting Test</option>`;
+        
+        s.innerHTML = html;
         if(currentVal) s.value = currentVal;
         updateAssessmentDropdownLogic(); // Trigger change handler safely
     }
