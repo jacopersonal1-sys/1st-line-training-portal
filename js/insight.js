@@ -217,19 +217,15 @@ function renderProgressView(members, filter, grid, navHTML) {
     
     // 1. Standard Assessments
     assessments.forEach(a => {
-        if(!a.name.includes("Vetting")) requiredItems.push({ name: a.name, type: 'assessment' });
+        if(!a.name.toLowerCase().includes("vetting")) requiredItems.push({ name: a.name, type: 'assessment' });
     });
 
     // 2. Vetting Sub-Tests
-    if(topics.length > 0) {
-        topics.forEach(t => {
-            requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
-            requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
-        });
-    } else {
-        requiredItems.push({ name: "1st Vetting Test", type: 'vetting' });
-        requiredItems.push({ name: "Final Vetting Test", type: 'vetting' });
-    }
+    // STRICT DYNAMIC: Only use topics defined in Admin > Vetting Topics
+    topics.forEach(t => {
+        requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
+        requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
+    });
 
     // 3. Misc Items
     requiredItems.push({ name: "Onboard Report", type: 'report' });
@@ -372,17 +368,14 @@ function calculateAgentStats(traineeName, records) {
     
     let requiredItems = [];
     assessments.forEach(a => {
-        if(!a.name.includes("Vetting")) requiredItems.push({ name: a.name, type: 'assessment' });
+        if(!a.name.toLowerCase().includes("vetting")) requiredItems.push({ name: a.name, type: 'assessment' });
     });
-    if(topics.length > 0) {
-        topics.forEach(t => {
-            requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
-            requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
-        });
-    } else {
-        requiredItems.push({ name: "1st Vetting Test", type: 'vetting' });
-        requiredItems.push({ name: "Final Vetting Test", type: 'vetting' });
-    }
+    
+    topics.forEach(t => {
+        requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
+        requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
+    });
+    
     requiredItems.push({ name: "Onboard Report", type: 'report' });
     requiredItems.push({ name: "Insight Review", type: 'review' });
 
@@ -434,7 +427,11 @@ function calculateAgentStatus(records) {
     records.forEach(r => {
         if (r.score < limit) {
             const name = r.assessment;
-            if (typeof INSIGHT_CONFIG !== 'undefined') {
+            
+            // AUTO-DETECT VETTING FAILURES
+            if (name.toLowerCase().includes('vetting')) {
+                failedSemi.push(`${name} (${r.score}%)`);
+            } else if (typeof INSIGHT_CONFIG !== 'undefined') {
                 if (INSIGHT_CONFIG.CRITICAL.some(k => name.includes(k))) failedCritical.push(`${name} (${r.score}%)`);
                 else if (INSIGHT_CONFIG.SEMI_CRITICAL.some(k => name.includes(k))) failedSemi.push(`${name} (${r.score}%)`);
                 else failedImprove.push(`${name} (${r.score}%)`);

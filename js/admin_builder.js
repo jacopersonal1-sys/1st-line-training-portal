@@ -349,7 +349,10 @@ async function saveTest() {
     if (type === 'vetting') {
         const ph = document.getElementById('builderVettingPhase').value;
         const tp = document.getElementById('builderVettingTopic').value;
-        if(!tp) return alert("Please select a Vetting Topic.");
+        if(!tp) {
+            if(typeof showToast === 'function') showToast("Please select a Vetting Topic.", "warning");
+            return;
+        }
         linked = `${ph} - ${tp}`;
     } else {
         linked = document.getElementById('builderAssessmentSelect').value;
@@ -357,8 +360,14 @@ async function saveTest() {
     
     const dur = document.getElementById('builderDuration').value;
 
-    if (BUILDER_QUESTIONS.length === 0) return alert("Add questions.");
-    if (!linked) return alert("Enter/Select test name.");
+    if (BUILDER_QUESTIONS.length === 0) {
+        if(typeof showToast === 'function') showToast("Please add at least one question.", "warning");
+        return;
+    }
+    if (!linked) {
+        if(typeof showToast === 'function') showToast("Please enter or select a test name.", "warning");
+        return;
+    }
 
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
 
@@ -432,7 +441,7 @@ async function saveTest() {
 
     // Special Viewer Check
     if (CURRENT_USER.role === 'special_viewer') {
-        alert("View Only Mode: Changes cannot be saved.");
+        if(typeof showToast === 'function') showToast("View Only Mode: Changes cannot be saved.", "error");
         return;
     }
 

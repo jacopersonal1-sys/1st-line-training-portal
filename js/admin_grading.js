@@ -74,12 +74,15 @@ function handleAssessmentChange() {
 // UPDATED: Async Save for Manual Scores with Deduplication
 async function saveScores() { 
     if (CURRENT_USER.role === 'special_viewer') {
-        alert("View Only Mode: Cannot save scores.");
+        if(typeof showToast === 'function') showToast("View Only Mode: Cannot save scores.", "error");
         return;
     }
 
     const gid = document.getElementById('selectedGroup').value; 
-    if(!gid) return alert("Select group"); 
+    if(!gid) {
+        if(typeof showToast === 'function') showToast("Please select a group.", "warning");
+        return;
+    }
     
     const assessName = document.getElementById('assessment').value; 
     const phase = document.getElementById('phase').value; 
@@ -88,7 +91,10 @@ async function saveScores() {
     // If Phase is Vetting, construct name from Phase + Topic
     if(phase === '1st Vetting' || phase === 'Final Vetting') { 
         const topic = document.getElementById('vettingTopic').value; 
-        if(!topic) return alert("Please select a Vetting Topic."); 
+        if(!topic) {
+            if(typeof showToast === 'function') showToast("Please select a Vetting Topic.", "warning");
+            return;
+        }
         finalAssessName = `${phase} - ${topic}`; 
     } 
     
@@ -168,8 +174,13 @@ async function saveScores() {
     if(typeof showToast === 'function') showToast(`Saved/Updated ${savedCount} scores successfully.`, "success");
     
     // Cleanup UI
-    // FIX: Use setTimeout to allow DOM to settle and prevent "untypable" glitch
-    setTimeout(() => loadGroupMembers(), 50); 
+    // FIX: Blur active element to prevent Electron focus loss on DOM destruction
+    if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+    }
+    
+    // FIX: Increased timeout to 100ms to ensure DOM settles before rebuild
+    setTimeout(() => loadGroupMembers(), 100); 
 }
 
 // --- SECTION 2: DIGITAL MARKING QUEUE ---

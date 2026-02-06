@@ -587,17 +587,24 @@ function openTestTaker(testId, isArenaMode = false) {
                 if (item) {
                     isScheduled = true;
                     const status = getScheduleStatus(item.dateRange, item.dueDate);
-                    if (status !== 'active') return alert("This assessment is currently locked by the schedule.");
+                    if (status !== 'active') {
+                        if(typeof showToast === 'function') showToast("This assessment is currently locked by the schedule.", "warning");
+                        return;
+                    }
                     
                     // Check Day Access (Multi-day items only open on last day)
                     if (typeof isAssessmentDay === 'function' && !isAssessmentDay(item.dateRange, item.dueDate)) {
-                        return alert("This assessment is only available on the final day of the schedule item.");
+                        if(typeof showToast === 'function') showToast("This assessment is only available on the final day of the schedule item.", "warning");
+                        return;
                     }
                     
                     // Double Check Time Access
                     if (typeof checkTimeAccess === 'function') {
                          const isTimeOpen = checkTimeAccess(item.openTime, item.closeTime, item.ignoreTime);
-                         if (!isTimeOpen) return alert(`This assessment is only available between ${item.openTime} and ${item.closeTime}.`);
+                         if (!isTimeOpen) {
+                             if(typeof showToast === 'function') showToast(`This assessment is only available between ${item.openTime} and ${item.closeTime}.`, "warning");
+                             return;
+                         }
                     }
                 }
             }
@@ -605,14 +612,15 @@ function openTestTaker(testId, isArenaMode = false) {
         
         // STRICT ENFORCEMENT: If not found in schedule, BLOCK IT.
         if (!isScheduled) {
-            return alert("This assessment is not assigned to your schedule.");
+            if(typeof showToast === 'function') showToast("This assessment is not assigned to your schedule.", "error");
+            return;
         }
     }
 
     const existing = subs.find(s => s.testId == testId && s.trainee === CURRENT_USER.user);
     
     if (existing && !existing.archived) {
-        alert("You have already completed this assessment. Please contact your Admin if you require a retake.");
+        if(typeof showToast === 'function') showToast("You have already completed this assessment. Please contact your Admin if you require a retake.", "info");
         return;
     }
 

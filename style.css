@@ -16,8 +16,8 @@
   
   --border-radius: 12px;
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  --shadow-card: 0 4px 20px rgba(0,0,0,0.2);
-  --shadow-hover: 0 8px 30px rgba(0,0,0,0.3);
+  --shadow-card: 0 4px 20px rgba(0,0,0,0.25);
+  --shadow-hover: 0 12px 40px rgba(0,0,0,0.4);
   
   /* NEW: Focus Ring for inputs */
   --focus-ring: 0 0 0 3px rgba(243, 112, 33, 0.25);
@@ -69,7 +69,7 @@ body:not(.light-mode) {
 
 body {
   font-family: 'Inter', sans-serif;
-  background-color: var(--bg-app); font-size: 0.9rem; /* Compact Font Base */
+  background: radial-gradient(circle at top left, #25201d, var(--bg-app)); font-size: 0.9rem; /* Compact Font Base */
   color: var(--text-main);
   margin: 0; padding: 0; min-height: 100vh;
   transition: background-color 0.3s ease, color 0.3s ease;
@@ -118,6 +118,12 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
 .toggle-btn { cursor: pointer; padding: 10px 0; color: var(--text-muted); font-weight: 500; position: relative; transition: var(--transition); }
 .toggle-btn.active { color: var(--primary); font-weight: 700; }
 .toggle-btn.active::after { content: ''; position: absolute; bottom: -11px; left: 0; width: 100%; height: 2px; background: var(--primary); }
+
+/* ANIMATIONS */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(15px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 
 .login-form-plain { display: flex; flex-direction: column; gap: 30px; }
 .plain-input {
@@ -197,7 +203,7 @@ section.active { display: block; animation: swipeInRight 0.4s cubic-bezier(0.2, 
 
 /* ================= UI ELEMENTS ================= */
 .btn-primary { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%); color: white; padding: 10px 20px; width: 100%; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; transition: var(--transition); }
-.btn-primary:hover { background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary) 100%); transform: translateY(-1px); box-shadow: 0 4px 15px rgba(243, 112, 33, 0.4); }
+.btn-primary:hover { background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary) 100%); transform: translateY(-2px) scale(1.02); box-shadow: 0 6px 20px rgba(243, 112, 33, 0.4); }
 /* IMPROVEMENT: Active Click State */
 .btn-primary:active { transform: translateY(0); }
 
@@ -342,8 +348,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 
 /* Cards & Tables */
 .card { background: var(--bg-card); border-radius: var(--border-radius); padding: 25px; margin-bottom: 25px; border: 1px solid var(--border-color); box-shadow: var(--shadow-card); }
-/* IMPROVEMENT: Card Lift Effect */
-.card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); border-color: rgba(243, 112, 33, 0.3); }
+/* IMPROVEMENT: Card Lift Effect & Animation */
+.card { animation: fadeInUp 0.4s ease-out forwards; }
+.card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); border-color: rgba(243, 112, 33, 0.3); }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
@@ -364,7 +371,8 @@ tr:hover { background-color: var(--bg-hover); }
 /* NEW: Idle User Style (System Status) */
 tr.user-idle td { color: var(--text-muted); font-style: italic; }
 
-.status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+.status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; transition: transform 0.2s; display: inline-block; }
+.status-badge:hover { transform: scale(1.1) rotate(2deg); }
 .status-pass { background: rgba(76, 175, 80, 0.15); color: #4caf50; }
 .status-fail { background: rgba(244, 67, 54, 0.15); color: #f44336; }
 .status-improve { background: rgba(255, 152, 0, 0.15); color: #ff9800; } 
@@ -423,7 +431,7 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
 .opt-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
 
 /* Test List Cards */
-.test-card-row { 
+.test-card-row { animation: fadeInUp 0.3s ease-out forwards;
     display: flex; justify-content: space-between; padding: 15px; 
     background: var(--bg-input); margin-bottom: 10px; border-radius: 8px; 
     border-left: 4px solid var(--primary); align-items: center; 
@@ -479,7 +487,7 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
     background: var(--bg-card); border: 1px solid var(--border-color);
     border-radius: 12px; padding: 20px; position: relative;
     border-left: 5px solid transparent; /* Status indicator */
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: transform 0.2s, box-shadow 0.2s; animation: fadeInUp 0.4s ease-out forwards;
 }
 .insight-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-hover); }
 
