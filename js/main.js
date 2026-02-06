@@ -107,6 +107,11 @@ window.onload = async function() {
                     CURRENT_USER = JSON.parse(savedSession);
                     // --- NEW: Apply User Specific Theme Immediately ---
                     applyUserTheme(); 
+                    
+                    // Check for experimental theme
+                    const expTheme = localStorage.getItem('experimental_theme');
+                    if (expTheme) applyExperimentalTheme(expTheme);
+                    
                     // --------------------------------------------------
                     // Update Sidebar based on Role
                     updateSidebarVisibility();
@@ -120,6 +125,11 @@ window.onload = async function() {
             // Fallback if IP check isn't loaded
              CURRENT_USER = JSON.parse(savedSession);
              applyUserTheme();
+             
+             // Check for experimental theme
+             const expTheme = localStorage.getItem('experimental_theme');
+             if (expTheme) applyExperimentalTheme(expTheme);
+
              updateSidebarVisibility();
              if (typeof autoLogin === 'function') autoLogin();
         }
@@ -225,6 +235,23 @@ function adjustOpacity(hex, alpha) {
     return hex; // Return original if not hex
 }
 // ------------------------------------
+
+// --- EXPERIMENTAL THEME LOGIC ---
+function applyExperimentalTheme(themeName) {
+    // 1. Remove all experimental classes
+    document.body.classList.remove('theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
+    
+    if (themeName) {
+        // 2. Apply new theme
+        document.body.classList.add(themeName);
+        localStorage.setItem('experimental_theme', themeName);
+    } else {
+        // 3. Reset
+        localStorage.removeItem('experimental_theme');
+        // Re-apply user theme to ensure we go back to normal
+        if (typeof applyUserTheme === 'function') applyUserTheme();
+    }
+}
 
 // --- SIDEBAR VISIBILITY LOGIC ---
 function updateSidebarVisibility() {

@@ -795,3 +795,118 @@ textarea.auto-expand {
     outline: none;
     width: 100%;
 }
+
+/* ================= EXPERIMENTAL THEMES ================= */
+/* Theme: Neon Nights (Cyberpunk) */
+body.theme-cyberpunk {
+    --primary: #00f3ff;
+    --primary-hover: #00c7d6;
+    --primary-soft: rgba(0, 243, 255, 0.15);
+    --bg-app: #050505;
+    --bg-header: rgba(10, 10, 10, 0.95);
+    --bg-card: rgba(10, 10, 10, 0.9);
+    --bg-input: #000;
+    --text-main: #e0f7fa;
+    --text-muted: #58a6ff;
+    --border-color: #00f3ff;
+    --border-radius: 2px; /* Sharp edges */
+    --shadow-card: 0 0 10px rgba(0, 243, 255, 0.2);
+    background: radial-gradient(circle at center, #1a0b2e 0%, #000000 100%) !important;
+    font-family: 'Courier New', Courier, monospace; /* Tech font */
+}
+body.theme-cyberpunk .card {
+    border: 1px solid var(--primary);
+    box-shadow: 0 0 15px var(--primary-soft);
+}
+body.theme-cyberpunk .btn-primary {
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: bold;
+    clip-path: polygon(10% 0, 100% 0, 100% 80%, 90% 100%, 0 100%, 0 20%);
+    border-radius: 0;
+}
+body.theme-cyberpunk .sidebar {
+    border-right: 2px solid var(--primary);
+}
+
+/* Theme: Deep Sea (Oceanic) */
+body.theme-ocean {
+    --primary: #4fc3f7;
+    --primary-hover: #29b6f6;
+    --primary-soft: rgba(79, 195, 247, 0.2);
+    --bg-app: #0d1b2a;
+    --bg-header: rgba(13, 27, 42, 0.6);
+    --bg-card: rgba(255, 255, 255, 0.05); /* Glassy */
+    --bg-input: rgba(255, 255, 255, 0.1);
+    --text-main: #e0e1dd;
+    --text-muted: #a0e1dd;
+    --border-color: rgba(255, 255, 255, 0.1);
+    --border-radius: 25px; /* Super round */
+    background: linear-gradient(to bottom, #0d1b2a, #1b263b) !important;
+}
+body.theme-ocean .sidebar {
+    margin: 10px;
+    height: calc(100% - 20px);
+    border-radius: 25px;
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+body.theme-ocean .content-wrapper {
+    margin-left: 90px; /* Adjust for floating sidebar */
+}
+body.theme-ocean .card {
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+/* Theme: Enchanted Forest (Nature) */
+body.theme-forest {
+    --primary: #95d5b2;
+    --primary-hover: #74c69d;
+    --primary-soft: rgba(149, 213, 178, 0.2);
+    --bg-app: #1b4332;
+    --bg-header: rgba(27, 67, 50, 0.9);
+    --bg-card: rgba(45, 106, 79, 0.9);
+    --bg-input: #40916c;
+    --text-main: #d8f3dc;
+    --text-muted: #95d5b2;
+    --border-color: #52b788;
+    --border-radius: 16px;
+    background: linear-gradient(135deg, #081c15 0%, #1b4332 100%) !important;
+}
+body.theme-forest .sidebar {
+    background: #081c15;
+    border-right: none;
+}
+body.theme-forest .nav-item.active {
+    background: rgba(255,255,255,0.1);
+    border-right: none;
+    border-left: 4px solid var(--primary);
+}
+
+/* Theme: Royal Amethyst (Luxury) */
+body.theme-royal {
+    --primary: #ffd700; /* Gold */
+    --primary-hover: #ffcc00;
+    --primary-soft: rgba(255, 215, 0, 0.15);
+    --bg-app: #10002b;
+    --bg-header: rgba(36, 0, 70, 0.95);
+    --bg-card: rgba(60, 9, 108, 0.8);
+    --bg-input: #5a189a;
+    --text-main: #e0aaff;
+    --text-muted: #c77dff;
+    --border-color: #ffd700; /* Gold borders */
+    --border-radius: 4px;
+    background: radial-gradient(circle at top right, #3c096c, #10002b) !important;
+}
+body.theme-royal .card {
+    border: 1px solid var(--primary);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+}
+body.theme-royal h2, body.theme-royal h3 {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom-color: var(--primary);
+    text-align: center; /* Centered headers for royal feel */
+}

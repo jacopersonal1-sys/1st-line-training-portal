@@ -854,6 +854,20 @@
                 
                 <button class="btn-primary" style="width:auto; margin-top:15px;" onclick="saveThemeSettings()">Apply & Save Changes</button>
             </div>
+
+            <div class="card" style="margin-top:20px; border:1px dashed var(--primary);">
+                <h3><i class="fas fa-flask" style="color:var(--primary);"></i> Experimental Themes</h3>
+                <p style="color:var(--text-muted); margin-bottom:15px;">Try out these auto-generated visual styles. Click 'Reset to Original' to revert.</p>
+                
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-cyberpunk')" style="border-color:#00f3ff; color:#00f3ff;">Neon Nights</button>
+                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-ocean')" style="border-color:#4fc3f7; color:#4fc3f7;">Deep Sea</button>
+                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-forest')" style="border-color:#76c893; color:#76c893;">Enchanted Forest</button>
+                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-royal')" style="border-color:#9d4edd; color:#9d4edd;">Royal Amethyst</button>
+                </div>
+                
+                <button class="btn-danger" style="margin-top:15px; width:auto;" onclick="applyExperimentalTheme(null)"><i class="fas fa-undo"></i> Reset to Original</button>
+            </div>
         </div>
 
         </section>

@@ -427,11 +427,7 @@ function calculateAgentStatus(records) {
     records.forEach(r => {
         if (r.score < limit) {
             const name = r.assessment;
-            
-            // AUTO-DETECT VETTING FAILURES
-            if (name.toLowerCase().includes('vetting')) {
-                failedSemi.push(`${name} (${r.score}%)`);
-            } else if (typeof INSIGHT_CONFIG !== 'undefined') {
+            if (typeof INSIGHT_CONFIG !== 'undefined') {
                 if (INSIGHT_CONFIG.CRITICAL.some(k => name.includes(k))) failedCritical.push(`${name} (${r.score}%)`);
                 else if (INSIGHT_CONFIG.SEMI_CRITICAL.some(k => name.includes(k))) failedSemi.push(`${name} (${r.score}%)`);
                 else failedImprove.push(`${name} (${r.score}%)`);
