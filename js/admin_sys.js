@@ -32,27 +32,38 @@ async function secureSysSave() {
 // --- SECTION 1: GLOBAL CONFIGURATION (Assessments & Vetting) ---
 
 function loadAdminAssessments() { 
-    const list = document.getElementById('assessList');
-    if(!list) return;
+    const stdList = document.getElementById('assessListStandard');
+    const liveList = document.getElementById('assessListLive');
+    const vetList = document.getElementById('assessListVetting');
+    
+    if(!stdList || !liveList || !vetList) return;
     
     const arr = JSON.parse(localStorage.getItem('assessments')||'[]');
-    list.innerHTML = arr.map((a,i) => `
-        <tr>
-            <td>${a.name}</td>
-            <td>
-                ${a.video ? '<span class="badge-secondary">Video</span>' : ''} 
-                ${a.live ? '<span class="badge-primary">Live</span>' : ''}
-            </td>
-            <td>${CURRENT_USER.role === 'admin' ? `<button class="btn-danger btn-sm" onclick="remAssess(${i})">X</button>` : ''}</td>
-        </tr>
-    `).join(''); 
+    
+    let stdHtml = '';
+    let liveHtml = '';
+    let vetHtml = '';
 
-    // Hide Add Section for Special Viewer
-    const addSection = document.getElementById('newAssessName')?.parentElement;
-    if (addSection) {
-        if (CURRENT_USER.role === 'special_viewer') addSection.classList.add('hidden');
-        else addSection.classList.remove('hidden');
-    }
+    arr.forEach((a) => {
+        let typeLabel = a.video ? ' <i class="fas fa-video" title="Video Required" style="color:var(--text-muted); font-size:0.8rem;"></i>' : '';
+        
+        // Robust escaping for onclick handler (handles quotes and backslashes)
+        const safeName = a.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        
+        const row = `
+            <tr>
+                <td>${a.name}${typeLabel}</td>
+                <td style="text-align:right;"><button class="btn-danger btn-sm" onclick="remAssess('${safeName}')"><i class="fas fa-trash"></i></button></td>
+            </tr>`;
+        
+        if (a.name.toLowerCase().includes('vetting')) vetHtml += row;
+        else if (a.live) liveHtml += row;
+        else stdHtml += row;
+    });
+
+    stdList.innerHTML = stdHtml;
+    liveList.innerHTML = liveHtml;
+    vetList.innerHTML = vetHtml;
 }
 
 async function addAssessment() { 
@@ -60,10 +71,16 @@ async function addAssessment() {
     const v = document.getElementById('newAssessVideo').checked; 
     const l = document.getElementById('newAssessLive').checked; 
     
-    if(!n) return alert("Enter assessment name"); 
+    if(!n) {
+        if(typeof showToast === 'function') showToast("Enter assessment name", "warning");
+        return;
+    }
     
     const a = JSON.parse(localStorage.getItem('assessments') || '[]'); 
-    if(a.find(x => x.name.toLowerCase() === n.toLowerCase())) return alert("Assessment already exists");
+    if(a.find(x => x.name.toLowerCase() === n.toLowerCase())) {
+        if(typeof showToast === 'function') showToast("Assessment already exists", "warning");
+        return;
+    }
 
     a.push({name:n, video:v, live:l}); 
     localStorage.setItem('assessments', JSON.stringify(a)); 
@@ -71,23 +88,44 @@ async function addAssessment() {
     if(typeof saveToServer === 'function') await saveToServer(['assessments'], false);
     
     document.getElementById('newAssessName').value = '';
+    
+    // Blur to prevent focus issues before reload
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+
     loadAdminAssessments(); 
     
     if(typeof updateAssessmentDropdown === 'function') updateAssessmentDropdown(); 
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns(); 
+    
+    if(typeof showToast === 'function') showToast("Assessment added", "success");
 }
 
-async function remAssess(i) { 
-    if(!confirm("Remove this assessment from the list? Existing records will not be deleted.")) return;
-    const a = JSON.parse(localStorage.getItem('assessments')); 
-    a.splice(i,1); 
+async function remAssess(name) { 
+    if(!confirm(`Remove "${name}" from the list? Existing records will not be deleted.`)) return;
+    
+    let a = JSON.parse(localStorage.getItem('assessments') || '[]'); 
+    const initialLen = a.length;
+    
+    // Filter by name (Robust Deletion)
+    a = a.filter(x => x.name !== name);
+    
+    if (a.length === initialLen) {
+        if(typeof showToast === 'function') showToast("Error: Assessment not found.", "error");
+        return;
+    }
+
     localStorage.setItem('assessments', JSON.stringify(a)); 
     
     await secureSysSave();
 
+    // Blur to prevent focus issues
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+
     loadAdminAssessments(); 
     if(typeof updateAssessmentDropdown === 'function') updateAssessmentDropdown(); 
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns(); 
+    
+    if(typeof showToast === 'function') showToast("Assessment removed", "success");
 }
 
 function loadAdminVetting() { 

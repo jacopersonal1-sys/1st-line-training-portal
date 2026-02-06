@@ -353,6 +353,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); border-color: rgba(243, 112, 33, 0.3); }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
 .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
 .table-responsive { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.95rem; }

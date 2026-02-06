@@ -629,14 +629,32 @@
         </div>
 
         <div id="admin-view-assessments" class="admin-view">
-            <div class="card grid-2">
-            <div>
+            <div class="card">
                 <h3>Add Assessment</h3>
-                <input type="text" id="newAssessName" placeholder="Name" aria-label="Assessment Name">
-                <div style="display:flex; gap:10px; margin-bottom:10px;"><label><input type="checkbox" id="newAssessVideo"> Video?</label><label><input type="checkbox" id="newAssessLive"> Live?</label></div>
-                <button class="btn-primary" onclick="addAssessment()">Add</button>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <input type="text" id="newAssessName" placeholder="Name" aria-label="Assessment Name" style="margin:0; flex:1; min-width:200px;">
+                    <label style="white-space:nowrap; cursor:pointer;"><input type="checkbox" id="newAssessVideo"> Video?</label>
+                    <label style="white-space:nowrap; cursor:pointer;"><input type="checkbox" id="newAssessLive"> Live?</label>
+                    <button class="btn-primary" onclick="addAssessment()" style="width:auto;">Add</button>
+                </div>
             </div>
-            <div><h3>Current Assessments</h3><div style="max-height:400px; overflow-y:auto;"><table class="admin-table"><thead><tr><th>Name</th><th>Flags</th><th>Act</th></tr></thead><tbody id="assessList"></tbody></table></div></div>
+            
+            <div class="card">
+                <h3>Current Assessments Configuration</h3>
+                <div class="grid-3" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:20px;">
+                    <div>
+                        <h4 style="border-bottom:2px solid var(--text-muted); padding-bottom:5px; margin-bottom:10px; color:var(--text-main);">Standard Assessments</h4>
+                        <div style="max-height:500px; overflow-y:auto; background:var(--bg-input); border-radius:8px; padding:5px;"><table class="admin-table" style="margin:0;"><thead><tr><th>Name</th><th style="width:40px;"></th></tr></thead><tbody id="assessListStandard"></tbody></table></div>
+                    </div>
+                    <div>
+                        <h4 style="border-bottom:2px solid var(--primary); padding-bottom:5px; margin-bottom:10px; color:var(--primary);">Live Assessments</h4>
+                        <div style="max-height:500px; overflow-y:auto; background:var(--bg-input); border-radius:8px; padding:5px;"><table class="admin-table" style="margin:0;"><thead><tr><th>Name</th><th style="width:40px;"></th></tr></thead><tbody id="assessListLive"></tbody></table></div>
+                    </div>
+                    <div>
+                        <h4 style="border-bottom:2px solid #9b59b6; padding-bottom:5px; margin-bottom:10px; color:#9b59b6;">Vetting Tests</h4>
+                        <div style="max-height:500px; overflow-y:auto; background:var(--bg-input); border-radius:8px; padding:5px;"><table class="admin-table" style="margin:0;"><thead><tr><th>Name</th><th style="width:40px;"></th></tr></thead><tbody id="assessListVetting"></tbody></table></div>
+                    </div>
+                </div>
             </div>
         </div>
 
