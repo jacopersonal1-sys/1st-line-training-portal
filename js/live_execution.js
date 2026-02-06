@@ -175,14 +175,35 @@ function renderAdminLivePanel(container) {
 function updateAdminLiveView() {
     // Helper to update just the answer box without redrawing inputs (preserves focus)
     const session = JSON.parse(localStorage.getItem('liveSession'));
-    if (!session.active || session.currentQ === -1) return;
+    if (!session || !session.active) return;
     
-    const ansBox = document.getElementById('live-admin-answer-box');
-    if (ansBox) {
-        const ans = session.answers[session.currentQ];
-        const displayAns = (typeof ans === 'string') ? ans : (ans ? JSON.stringify(ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>');
-        const html = `<strong>TRAINEE ANSWER:</strong><br>${displayAns}`;
-        if (ansBox.innerHTML !== html) ansBox.innerHTML = html;
+    // 1. Update Answer Box (Current Question)
+    if (session.currentQ !== -1) {
+        const ansBox = document.getElementById('live-admin-answer-box');
+        if (ansBox) {
+            const ans = session.answers[session.currentQ];
+            const displayAns = (typeof ans === 'string') ? ans : (ans ? JSON.stringify(ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>');
+            const html = `<strong>TRAINEE ANSWER:</strong><br>${displayAns}`;
+            if (ansBox.innerHTML !== html) ansBox.innerHTML = html;
+        }
+    }
+
+    // 2. Update Sidebar Status Icons (Checkmarks)
+    // This ensures Admin sees progress without full re-render
+    const test = JSON.parse(localStorage.getItem('tests') || '[]').find(t => t.id == session.testId);
+    if (test) {
+        test.questions.forEach((q, idx) => {
+            // Find the icon inside the sidebar item
+            const itemIcon = document.querySelector(`.live-q-item[onclick="adminJumpToQuestion(${idx})"] i`);
+            if (itemIcon) {
+                const hasAns = session.answers[idx] !== undefined && session.answers[idx] !== null && session.answers[idx] !== "";
+                const isCurrent = idx === session.currentQ;
+                
+                if (isCurrent) { itemIcon.className = "fas fa-dot-circle"; itemIcon.style.color = "var(--primary)"; }
+                else if (hasAns) { itemIcon.className = "fas fa-check-circle"; itemIcon.style.color = "green"; }
+                else { itemIcon.className = "far fa-circle"; itemIcon.style.color = ""; }
+            }
+        });
     }
 }
 
@@ -352,23 +373,86 @@ async function submitLiveAnswer(qIdx) {
 }
 
 async function finishLiveSession() {
-    if (!confirm("Finish assessment and save results?")) return;
-
+    // 1. Calculate Summary & Show Overview
     const session = JSON.parse(localStorage.getItem('liveSession'));
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
 
-    // Calculate Score
     let totalScore = 0;
     let maxScore = 0;
+    let summaryHtml = '<table class="admin-table"><thead><tr><th>Q</th><th>Answer Preview</th><th>Score</th><th>Comment</th></tr></thead><tbody>';
+
     test.questions.forEach((q, idx) => {
-        maxScore += parseFloat(q.points || 1);
-        totalScore += (session.scores[idx] || 0);
+        const pts = parseFloat(q.points || 1);
+        const score = parseFloat(session.scores[idx] || 0);
+        maxScore += pts;
+        totalScore += score;
+        
+        const ans = session.answers[idx] ? (typeof session.answers[idx] === 'object' ? JSON.stringify(session.answers[idx]) : session.answers[idx]) : '-';
+        const comment = session.comments[idx] || '';
+        
+        summaryHtml += `<tr>
+            <td>${idx+1}</td>
+            <td><div style="max-height:50px; overflow:hidden; font-size:0.8rem;">${ans}</div></td>
+            <td>${score} / ${pts}</td>
+            <td>${comment}</td>
+        </tr>`;
     });
+    summaryHtml += '</tbody></table>';
 
     const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
 
-    // 1. Update Booking Status
+    // 2. Inject Summary View (Replaces the Question View)
+    const container = document.getElementById('live-execution-content');
+    container.innerHTML = `
+        <div class="card" style="max-width:900px; margin:20px auto; height:calc(100vh - 200px); display:flex; flex-direction:column;">
+            <div style="border-bottom:1px solid var(--border-color); padding-bottom:15px; margin-bottom:15px;">
+                <h2 style="margin:0;">Assessment Summary</h2>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                    <div style="font-size:1.1rem;">Trainee: <strong>${session.trainee}</strong></div>
+                    <div style="font-size:1.5rem; font-weight:bold; color:${percentage >= 80 ? '#2ecc71' : '#ff5252'};">
+                        Final Score: ${percentage}% <span style="font-size:1rem; color:var(--text-muted);">(${totalScore}/${maxScore})</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="flex:1; overflow-y:auto; margin-bottom:20px; border:1px solid var(--border-color); border-radius:6px;">
+                ${summaryHtml}
+            </div>
+            
+            <div style="display:flex; justify-content:flex-end; gap:15px;">
+                <button class="btn-secondary" onclick="loadLiveExecution()">Back to Grading</button>
+                <button class="btn-success" onclick="confirmAndSaveLiveSession(${percentage})">Confirm & Submit</button>
+            </div>
+        </div>
+    `;
+}
+
+async function confirmAndSaveLiveSession(percentage) {
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const test = tests.find(t => t.id == session.testId);
+
+    // 1. Create Full Submission Record (For "View Completed Test" & Marking Queue)
+    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const newSub = {
+        id: Date.now().toString(),
+        testId: test.id,
+        testTitle: test.title,
+        trainee: session.trainee,
+        date: new Date().toISOString().split('T')[0],
+        answers: session.answers,
+        status: 'completed',
+        score: percentage,
+        type: 'live',
+        marker: session.trainer,
+        comments: session.comments, // Save comments
+        scores: session.scores      // Save individual scores
+    };
+    submissions.push(newSub);
+    localStorage.setItem('submissions', JSON.stringify(submissions));
+
+    // 2. Update Booking Status
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
     const booking = bookings.find(b => b.id === session.bookingId);
     if (booking) {
@@ -377,28 +461,42 @@ async function finishLiveSession() {
     }
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
 
-    // 2. Create Record
+    // 3. Create Record (For Dashboard/Progress)
     const records = JSON.parse(localStorage.getItem('records') || '[]');
+    
+    // Determine Group ID dynamically
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    let groupId = "Live-Session";
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (members.some(m => m.toLowerCase() === session.trainee.toLowerCase())) { 
+            groupId = gid; 
+            break; 
+        }
+    }
+    
+    // Determine Phase (Vetting vs Assessment)
+    const phaseVal = test.title.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+    
     records.push({
         id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
-        groupID: "Live-Session", // Could lookup real group
+        groupID: groupId,
         trainee: session.trainee,
         assessment: test.title,
         score: percentage,
         date: new Date().toISOString().split('T')[0],
-        phase: 'Live Assessment',
+        phase: phaseVal,
         cycle: 'Live',
         link: 'Live-Session',
         docSaved: true
     });
     localStorage.setItem('records', JSON.stringify(records));
 
-    // 3. Clear Session
+    // 4. Clear Session
     session.active = false;
     localStorage.setItem('liveSession', JSON.stringify(session));
 
-    // Sync All
-    if (typeof saveToServer === 'function') await saveToServer(['liveSession', 'liveBookings', 'records'], true);
+    // 5. Sync All
+    if (typeof saveToServer === 'function') await saveToServer(['liveSession', 'liveBookings', 'records', 'submissions'], true);
 
     alert(`Session Completed. Score: ${percentage}%`);
     showTab('live-assessment');

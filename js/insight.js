@@ -135,8 +135,11 @@ function renderStandardView(members, filter, grid, navHTML) {
     let count = 0;
 
     members.forEach(trainee => {
-        // Strict Group Filter
-        const traineeRecords = records.filter(r => r.trainee === trainee && r.groupID === filter);
+        // UPDATED: Inclusive Group Filter
+        // Includes records for this group OR system-generated records (Live/Digital) for this trainee
+        const validGroups = [filter, 'Live-Session', 'Digital-Assessment', 'Manual-Upload', 'Unknown'];
+        const traineeRecords = records.filter(r => r.trainee === trainee && (validGroups.includes(r.groupID) || !r.groupID));
+        
         const review = reviews.find(r => r.trainee === trainee);
         
         let cycleLabel = "New Onboard";
@@ -235,7 +238,10 @@ function renderProgressView(members, filter, grid, navHTML) {
     let html = '<div style="margin-top:15px; display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:20px;">';
 
     members.forEach(trainee => {
-        const myRecords = records.filter(r => r.trainee === trainee && r.groupID === filter);
+        // UPDATED: Inclusive Record Fetching
+        const validGroups = [filter, 'Live-Session', 'Digital-Assessment', 'Manual-Upload', 'Unknown'];
+        const myRecords = records.filter(r => r.trainee === trainee && (validGroups.includes(r.groupID) || !r.groupID));
+        
         const mySubs = submissions.filter(s => s.trainee === trainee);
         const myReport = reports.find(r => r.trainee === trainee);
         const myReview = reviews.find(r => r.trainee === trainee);
