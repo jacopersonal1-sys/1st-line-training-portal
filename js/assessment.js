@@ -218,6 +218,11 @@ function openAdminMarking(subId) {
         const pointsMax = parseFloat(q.points || 1);
         let markHtml = '';
         let autoScore = 0;
+        
+        // Display Admin Notes if present
+        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        
+        // Prepend to markHtml later
 
         // --- SCORING LOGIC ---
         if (q.type === 'text') {
@@ -375,7 +380,7 @@ function openAdminMarking(subId) {
         container.innerHTML += `
             <div class="marking-item" style="margin-bottom:25px;">
                 <div style="font-weight:600;">Q${idx + 1}: ${q.text} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
-                ${markHtml}
+                ${adminNoteHtml}${markHtml}
             </div>`;
     });
 
@@ -839,7 +844,7 @@ function renderQuestionInput(q, idx) {
     }
     
     if (q.type === 'live_practical') {
-        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Notes (Optional)...">${savedAns || ''}</textarea>`;
+        return `<div style="padding:20px; text-align:center; color:var(--text-muted); border:1px dashed var(--border-color); border-radius:8px; background:var(--bg-input);"><em>Practical Task - Click <strong>Done</strong> when finished.</em></div>`;
     }
     
     if (q.type === 'matching') {

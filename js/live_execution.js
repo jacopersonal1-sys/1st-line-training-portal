@@ -120,12 +120,16 @@ function renderAdminLivePanel(container) {
         const traineeAns = hasAns ? (typeof rawAns === 'object' ? JSON.stringify(rawAns) : rawAns) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
         const currentScore = session.scores[currentQ] || 0;
         const currentComment = session.comments[currentQ] || '';
+        
+        // Admin Note Display
+        const adminNote = q.adminNotes ? `<div style="margin-bottom:15px; padding:10px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.9rem;"><strong>Marker Note:</strong> ${q.adminNotes}</div>` : '';
 
         mainHtml = `
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; height:100%;">
                 <div class="card" style="overflow-y:auto;">
                     <h4>Admin Preview (Q${currentQ+1})</h4>
                     <div style="font-size:1.2rem; font-weight:bold; margin-bottom:15px;">${q.text}</div>
+                    ${adminNote}
                     <div style="background:var(--bg-input); padding:10px; border-radius:4px;">
                         <small>Type: ${q.type}</small><br>
                         <small>Points: ${q.points || 1}</small>
@@ -135,7 +139,7 @@ function renderAdminLivePanel(container) {
                 <div class="card admin-interaction-active" style="display:flex; flex-direction:column; gap:15px;">
                     <div id="live-admin-answer-box" style="background:#000; color:#0f0; padding:10px; border-radius:4px; font-family:monospace; min-height:60px;">
                         <strong>TRAINEE ANSWER:</strong><br>
-                        ${traineeAns}
+                        ${formatAdminAnswerPreview(q, rawAns)}
                     </div>
                     
                     <div>
@@ -186,7 +190,7 @@ function updateAdminLiveView() {
         if (ansBox) {
             const ans = session.answers[session.currentQ];
             const hasAns = ans !== undefined && ans !== null && ans !== "";
-            const displayAns = hasAns ? ((typeof ans === 'object') ? JSON.stringify(ans) : ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
+            const displayAns = hasAns ? formatAdminAnswerPreview(test.questions[session.currentQ], ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
             const html = `<strong>TRAINEE ANSWER:</strong><br>${displayAns}`;
             if (ansBox.innerHTML !== html) ansBox.innerHTML = html;
         }
@@ -209,6 +213,32 @@ function updateAdminLiveView() {
             }
         });
     }
+}
+
+// --- HELPER: FORMAT ANSWER FOR ADMIN (Matrix/Visuals) ---
+function formatAdminAnswerPreview(q, ans) {
+    if (!q) return '';
+    if (ans === undefined || ans === null || ans === "") return '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
+
+    if (q.type === 'matrix') {
+        let html = '<table style="width:100%; border-collapse:collapse; font-size:0.8rem; color:#fff;">';
+        (q.rows || []).forEach((r, rIdx) => {
+            const userSelection = ans[rIdx];
+            const correctSelection = q.correct ? q.correct[rIdx] : null;
+            const colName = (q.cols && q.cols[userSelection]) ? q.cols[userSelection] : 'None';
+            
+            let icon = '';
+            if (userSelection == correctSelection) icon = '<span style="color:#2ecc71;">✔</span>';
+            else icon = '<span style="color:#ff5252;">✘</span>';
+            
+            html += `<tr><td style="padding:2px;">${r}</td><td style="padding:2px;">: <strong>${colName}</strong> ${icon}</td></tr>`;
+        });
+        html += '</table>';
+        return html;
+    }
+    
+    if (typeof ans === 'object') return JSON.stringify(ans);
+    return ans;
 }
 
 // --- TRAINEE VIEW ---
@@ -366,13 +396,19 @@ async function saveLiveComment(idx, val) {
 async function submitLiveAnswer(qIdx) {
     // Get answer from window.USER_ANSWERS (populated by renderQuestionInput helpers)
     const ans = window.USER_ANSWERS[qIdx];
-    
-    if (ans === undefined || ans === null || ans === "") {
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const test = tests.find(t => t.id == session.testId);
+    const q = test.questions[qIdx];
+
+    // Allow empty for Practical (Auto-fill "Completed")
+    if (q.type !== 'live_practical' && (ans === undefined || ans === null || ans === "")) {
         if(!confirm("Submit empty answer?")) return;
     }
 
-    const session = JSON.parse(localStorage.getItem('liveSession'));
-    session.answers[qIdx] = ans;
+    // For practical, if empty, mark as "Completed"
+    session.answers[qIdx] = (q.type === 'live_practical' && !ans) ? "Completed" : ans;
+    
     localStorage.setItem('liveSession', JSON.stringify(session));
     
     // Force Sync so Admin sees it immediately
@@ -383,10 +419,7 @@ async function submitLiveAnswer(qIdx) {
     
     if(btn) { 
         // Check type to determine text
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-        const test = tests.find(t => t.id == session.testId);
-        const isPractical = test && test.questions[qIdx].type === 'live_practical';
-        
+        const isPractical = q.type === 'live_practical';
         btn.innerText = isPractical ? "Done" : "Update Answer"; 
         const statusSpan = document.getElementById('submit-status');
         if(statusSpan) {
@@ -422,7 +455,7 @@ async function finishLiveSession() {
              answerDisplay = `<div style="font-style:italic; color:var(--text-muted);">Practical Task - See Notes below</div>`;
              if(hasAns) answerDisplay += `<div style="margin-top:5px; padding:5px; background:rgba(255,255,255,0.05);">${ans}</div>`;
         } else {
-             answerDisplay = hasAns ? ((typeof ans === 'object') ? JSON.stringify(ans) : ans) : '-';
+             answerDisplay = hasAns ? formatAdminAnswerPreview(q, ans) : '-';
         }
 
         return `

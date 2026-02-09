@@ -189,7 +189,7 @@ async function saveScores() {
 // conflicts with the more advanced grading engine in assessment.js.
 
 // Function to View Completed Tests (Called from Test Records)
-function viewCompletedTest(trainee, assessment) {
+function viewCompletedTest(trainee, assessment, mode = 'view') {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     // Find all matches
     const matches = subs.filter(s => s.trainee === trainee && s.testTitle === assessment);
@@ -206,6 +206,14 @@ function viewCompletedTest(trainee, assessment) {
     
     if(typeof openAdminMarking === 'function') {
         openAdminMarking(sub.id);
+        
+        // Hide the submit button if viewing only
+        if (mode === 'view') {
+            setTimeout(() => {
+                const btn = document.getElementById('markingSubmitBtn');
+                if(btn) btn.style.display = 'none';
+            }, 50);
+        }
     }
 }
 
@@ -273,12 +281,16 @@ function loadTestRecords() {
 
                 const scoreDisplay = s.status === 'completed' ? `<span style="font-weight:bold; color:green;">${s.score}%</span>` : '<span style="color:orange;">Pending</span>';
                 
+                const safeTrainee = s.trainee.replace(/'/g, "\\'");
+                const safeTitle = s.testTitle.replace(/'/g, "\\'");
+
                 // Link to 'assessment.js' viewer
                 // Note: 'viewCompletedTest' calls 'openAdminMarking' in assessment.js
-                let actionBtn = `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${s.trainee}', '${s.testTitle}')">View</button>`;
+                let actionBtn = `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'view')">View</button>`;
                 
                 // ADMIN ONLY ACTIONS
                 if (CURRENT_USER.role === 'admin') {
+                    actionBtn += ` <button class="btn-primary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'edit')" title="Edit Score"><i class="fas fa-pen"></i></button>`;
                     actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;
                     
                     // Allow Retake if not already archived

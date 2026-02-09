@@ -110,7 +110,7 @@ function loadTestBuilder(existingId = null) {
 function addQuestion(type) {
     // UPDATED: Consistent String IDs
     const id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    let q = { id, type, text: "", points: 1 }; // Default structure with points
+    let q = { id, type, text: "", points: 1, adminNotes: "" }; // Default structure with points
 
     // Specific structures per type
     if (type === 'multiple_choice' || type === 'multi_select') {
@@ -255,6 +255,9 @@ function renderBuilder() {
                     <input type="number" placeholder="Points" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>
             </div>
+            <div style="margin-bottom:10px;">
+                <input type="text" placeholder="Admin/Marker Notes (Hidden from Trainee)" value="${q.adminNotes || ''}" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border-style:dashed;">
+            </div>
             <div style="margin-top:10px;">
                 ${innerHTML}
             </div>
@@ -303,6 +306,7 @@ function restoreBuilderDraft() {
 // --- BUILDER UPDATERS ---
 function updateQText(idx, val) { BUILDER_QUESTIONS[idx].text = val; }
 function updatePoints(idx, val) { BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; renderBuilder(); }
+function updateAdminNotes(idx, val) { BUILDER_QUESTIONS[idx].adminNotes = val; }
 
 function updateOptText(qIdx, oIdx, val) { BUILDER_QUESTIONS[qIdx].options[oIdx] = val; }
 function updateCorrect(qIdx, oIdx, type) { 
