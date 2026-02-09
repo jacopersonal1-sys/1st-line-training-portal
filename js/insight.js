@@ -600,6 +600,11 @@ async function submitInsightReview() {
         btn.disabled = false;
     }
 
+    // FIX: Blur active element to prevent Electron focus loss
+    if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+    }
+
     document.getElementById('insightReviewModal').classList.add('hidden');
     renderInsightDashboard(); 
 }

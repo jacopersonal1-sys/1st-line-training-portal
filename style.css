@@ -441,7 +441,7 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
 /* Taking View */
 .taking-card { background: var(--bg-card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border-color); }
 .q-text { font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; }
-.taking-input { width: 100%; min-height: 200px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 8px; }
+.taking-input { width: 100%; min-height: 60px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 8px; }
 
 .taking-radio { display: block; padding: 10px; background: var(--bg-input); margin-bottom: 5px; cursor: pointer; border-radius: 4px; }
 .taking-radio:hover { background: var(--bg-hover); }

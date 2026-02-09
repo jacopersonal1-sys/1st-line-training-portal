@@ -158,6 +158,11 @@ async function deleteHistorySubmission(id) {
     // 3. Force Sync to Cloud (Instant Overwrite)
     if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], true);
     
+    // FIX: Blur active element to prevent Electron focus loss
+    if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+    }
+
     loadCompletedHistory();
     if (typeof showToast === 'function') showToast("Submission and Record deleted.", "success");
     

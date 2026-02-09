@@ -367,7 +367,12 @@ async function saveGeneratedReport() {
     }
     // --- SECURE SAVE END ---
 
-    alert("Report saved successfully.");
+    // FIX: Blur active element to prevent Electron focus loss
+    if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+    }
+
+    if(typeof showToast === 'function') showToast("Report saved successfully.", "success");
 }
 
 function renderSavedReportsList() {

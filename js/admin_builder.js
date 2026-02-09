@@ -282,6 +282,11 @@ function renderBuilder() {
     `}).join('');
     
     document.getElementById('builderTotalScore').innerText = totalPoints;
+
+    // VISUAL FIX: Resize textareas after rendering
+    setTimeout(() => {
+        container.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
+    }, 0);
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---

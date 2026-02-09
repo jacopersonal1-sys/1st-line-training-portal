@@ -261,11 +261,11 @@ async function scanAndGenerateUsers() {
 
         // FIX: Ensure cloud sync happens immediately
         await secureUserSave();
-        alert(`Generated ${createdCount} missing accounts (${resurrectedCount} restored from deletion).`); 
+        if(typeof showToast === 'function') showToast(`Generated ${createdCount} missing accounts (${resurrectedCount} restored).`, "success");
         loadAdminUsers(); 
         populateTraineeDropdown(); 
     } else {
-        alert("No missing users found based on current Rosters/Records.");
+        if(typeof showToast === 'function') showToast("No missing users found.", "info");
     }
 }
 

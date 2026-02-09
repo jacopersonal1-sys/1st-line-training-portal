@@ -454,6 +454,11 @@ function viewCompletedTest(trainee, assessment) {
 async function finalizeAdminMarking(subId) {
     if (!confirm("Save changes to scores? This will update the permanent record.")) return;
 
+    // FIX: Blur active element to prevent Electron focus loss on DOM destruction
+    if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+    }
+
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
     
@@ -805,6 +810,11 @@ function renderTestPaper(containerId = 'takingQuestions') {
     </div>`;
     
     content.innerHTML = html;
+
+    // VISUAL FIX: Resize textareas after rendering
+    setTimeout(() => {
+        content.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
+    }, 0);
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---

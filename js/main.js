@@ -336,6 +336,11 @@ function showTab(id, btn) {
   // Find button by onclick attribute (reliable for sidebar navigation)
   const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${id}')"]`);
   if(sidebarBtn) sidebarBtn.classList.add('active');
+
+  // VISUAL FIX: Auto-resize textareas when tab becomes visible
+  setTimeout(() => {
+      document.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
+  }, 50);
     
   // --- DYNAMIC DATA REFRESH ---
   // Whenever a tab is shown, refresh its specific data/dropdowns
@@ -620,6 +625,7 @@ function populateFetchFilters() {
 
 // --- GLOBAL UTILS ---
 function autoResize(el) {
+    if (!el) return;
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
 }

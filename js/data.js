@@ -24,7 +24,8 @@ const DB_SCHEMA = {
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
     agentNotes: {}, // Private notes on agents { "username": "note content" }
-    liveSession: { active: false, bookingId: null, testId: null, trainee: null, trainer: null, currentQ: -1, answers: {}, scores: {}, comments: {} }
+    liveSession: { active: false, bookingId: null, testId: null, trainee: null, trainer: null, currentQ: -1, answers: {}, scores: {}, comments: {} },
+    archive_submissions: [] // Bandwidth Optimization: Old submissions moved here
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -66,6 +67,23 @@ async function loadFromServer(silent = false) {
             return;
         }
 
+        // --- OPTIMIZATION: ROLE-BASED KEY FILTERING ---
+        // Prevent downloading heavy/irrelevant data based on user role to save bandwidth.
+        let ignoredKeys = [];
+        
+        if (!CURRENT_USER) {
+            // Login Screen: Only needs Users & Config. Ignore heavy admin data.
+            ignoredKeys = ['savedReports', 'accessLogs', 'agentNotes', 'linkRequests', 'submissions', 'records'];
+        } else if (CURRENT_USER.role === 'trainee') {
+            // Trainees: Don't need Admin reports, logs, or private notes.
+            // Note: They DO need 'submissions' and 'records' for their own history view.
+            ignoredKeys = ['savedReports', 'accessLogs', 'agentNotes', 'linkRequests', 'accessControl', 'archive_submissions'];
+        } else if (CURRENT_USER.role === 'teamleader') {
+            // Team Leaders: Don't need system logs or IP control.
+            ignoredKeys = ['accessLogs', 'accessControl', 'archive_submissions'];
+        }
+        // Admins fetch everything.
+
         // C. Identify Stale Keys
         const keysToFetch = [];
         meta.forEach(row => {
@@ -76,14 +94,19 @@ async function loadFromServer(silent = false) {
             }
         });
 
+        // Apply Filter
+        const finalKeysToFetch = keysToFetch.filter(k => !ignoredKeys.includes(k));
+        
+        // Debug: if(ignoredKeys.length > 0) console.log("Skipping keys:", ignoredKeys.filter(k => keysToFetch.includes(k)));
+
         // D. Fetch Content for Stale Keys Only
-        if (keysToFetch.length > 0) {
-            if(!silent) console.log(`Syncing updates for: ${keysToFetch.join(', ')}`);
+        if (finalKeysToFetch.length > 0) {
+            if(!silent) console.log(`Syncing updates for: ${finalKeysToFetch.join(', ')}`);
             
             const { data: docs, error: fetchErr } = await supabaseClient
                 .from('app_documents')
                 .select('key, content, updated_at')
-                .in('key', keysToFetch);
+                .in('key', finalKeysToFetch);
             
             if (fetchErr) throw fetchErr;
 
@@ -308,18 +331,25 @@ function performSmartMerge(server, local) {
             merged[key] = combined;
         } 
         // Case 2a: Vetting Session (Deep Merge Trainees)
-        else if (key === 'vettingSession') {
+        else if (key === 'vettingSession' || key === 'liveSession') {
             const safeSVal = sVal || {};
             const safeLVal = lVal || {};
             
-            merged[key] = { ...safeSVal, ...safeLVal }; // Merge top level (active, testId)
-            
-            // Deep merge trainees to prevent overwrites
-            if (safeSVal.trainees || safeLVal.trainees) {
-                merged[key].trainees = {
-                    ...(safeSVal.trainees || {}),
-                    ...(safeLVal.trainees || {})
-                };
+            // PRIORITY FIX: If Server is Active and Local is Inactive, trust Server.
+            // This prevents background sync from killing a session for a trainee.
+            if (safeSVal.active && !safeLVal.active) {
+                merged[key] = safeSVal;
+            } else {
+                // Standard Merge
+                merged[key] = { ...safeSVal, ...safeLVal }; 
+                
+                // Deep merge trainees/answers to prevent overwrites
+                if (key === 'vettingSession' && (safeSVal.trainees || safeLVal.trainees)) {
+                    merged[key].trainees = { ...(safeSVal.trainees || {}), ...(safeLVal.trainees || {}) };
+                }
+                if (key === 'liveSession' && (safeSVal.answers || safeLVal.answers)) {
+                    merged[key].answers = { ...(safeSVal.answers || {}), ...(safeLVal.answers || {}) };
+                }
             }
         }
         // Case 2: Objects (Rosters, Schedules)

@@ -696,11 +696,21 @@
         <div id="admin-view-data" class="admin-view">
             <div class="card grid-2">
             <div>
+                <h3>Database Statistics</h3>
+                <div id="dbStatsContainer" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
+                    <!-- Stats injected here -->
+                </div>
+
                 <h3>Bulk Actions</h3>
                 <div style="margin-bottom:15px;"><button class="btn-warning" onclick="syncGroupsFromRecords()"><i class="fas fa-sync"></i> Sync Groups</button></div>
                 
                 <div style="margin-bottom:15px; padding-top:10px; border-top:1px solid var(--border-color);">
                     <button class="btn-danger" onclick="deleteBulkRecords()"><i class="fas fa-trash-alt"></i> Delete Selected</button>
+                </div>
+
+                <div style="margin-bottom:15px; padding-top:10px; border-top:1px solid var(--border-color);">
+                    <p style="font-size:0.8rem; color:var(--text-muted);">Optimization</p>
+                    <button class="btn-secondary" onclick="archiveOldSubmissions()"><i class="fas fa-archive"></i> Archive Old Submissions</button>
                 </div>
 
                 <p style="font-size:0.8rem; color:var(--text-muted);">CSV Import</p>
