@@ -240,7 +240,7 @@ function openAdminMarking(subId) {
         // Prepend to markHtml later
 
         // --- SCORING LOGIC ---
-        if (q.type === 'text') {
+        if (q.type === 'text' || q.type === 'live_practical') {
             markHtml = `
                 <div style="background:var(--bg-input); padding:15px; border-radius:8px; margin-top:10px; border:1px solid var(--border-color); text-align:left;">
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:5px;">MODEL ANSWER:</div>
@@ -252,8 +252,12 @@ function openAdminMarking(subId) {
                     ${(() => {
                         // Use specific score if available (Live Assessment), else calc proportional
                         let val = 0;
-                        if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) val = sub.scores[idx];
-                        else val = sub.score ? (sub.score/100)*pointsMax : 0;
+                        if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) {
+                            val = sub.scores[idx];
+                        } else {
+                            // Fallback: Default to 0 for manual questions to avoid weird decimals (e.g. 3.85)
+                            val = 0; 
+                        }
                         return `
                     <div style="display:flex; align-items:center; gap:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
                         <label style="font-weight:bold;">Score (Max ${pointsMax}):</label>
@@ -386,6 +390,10 @@ function openAdminMarking(subId) {
             let currentVal = autoScore;
             if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) {
                 currentVal = sub.scores[idx];
+            } else if (sub.status === 'completed' && !sub.scores) {
+                // Legacy Fallback: If completed but no individual scores saved, estimate from total
+                // Round to nearest 0.5 to avoid 3.85
+                currentVal = Math.round(((sub.score || 0) / 100) * pointsMax * 2) / 2;
             }
 
             markHtml = `
@@ -608,6 +616,7 @@ async function finalizeAdminMarking(subId) {
     loadMarkingQueue();
     loadAssessmentDashboard();
     if (typeof renderMonthly === 'function') renderMonthly();
+    if (typeof loadTestRecords === 'function') loadTestRecords();
 }
 
 /**
