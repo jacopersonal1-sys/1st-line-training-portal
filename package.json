@@ -1,6 +1,6 @@
 {
   "name": "1st-line-training-portal",
-  "version": "2.0.53",
+  "version": "2.0.54",
   "description": "Training Portal Cloud Edition",
   "main": "electron-main.js",
   "scripts": {

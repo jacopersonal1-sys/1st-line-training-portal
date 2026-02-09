@@ -503,12 +503,20 @@ async function finalizeAdminMarking(subId) {
 
     const markInputs = document.querySelectorAll('.q-mark');
     let earnedPoints = 0;
-    markInputs.forEach(input => earnedPoints += parseFloat(input.value));
+    const specificScores = {}; // Store individual question scores
+
+    markInputs.forEach(input => {
+        const val = parseFloat(input.value) || 0;
+        earnedPoints += val;
+        const idx = input.getAttribute('data-idx');
+        if (idx !== null) specificScores[idx] = val;
+    });
 
     const percentage = maxScore > 0 ? Math.round((earnedPoints / maxScore) * 100) : 0;
 
     sub.score = percentage;
     sub.status = 'completed';
+    sub.scores = specificScores; // Persist individual scores
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
