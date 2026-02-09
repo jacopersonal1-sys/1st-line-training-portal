@@ -191,7 +191,7 @@ async function saveScores() {
 // Function to View Completed Tests (Called from Test Records)
 function viewCompletedTest(trainee, assessment, mode = 'view') {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    // Find all matches
+    // Find all matches to ensure we get the latest if multiple exist
     const matches = subs.filter(s => s.trainee === trainee && s.testTitle === assessment);
     
     if(matches.length === 0) {

@@ -444,19 +444,35 @@
         </section>
 
         <section id="test-manage" class="admin-only-section">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                 <h2>Assessment/Vetting Test Engine</h2>
                 <button class="btn-primary" onclick="loadTestBuilder(); showTab('test-builder')">+ Create New Assessment</button>
             </div>
-            <div class="card">
-                <h3>Assessment Dashboard</h3>
-                <div id="assessmentDashboard">
-                    <p style="color:var(--text-muted);">Loading Overview...</p>
+            
+            <div class="admin-sub-nav">
+                <button class="sub-tab-btn active" onclick="showTestEngineSub('overview', this)">Overview & Queue</button>
+                <button class="sub-tab-btn" onclick="showTestEngineSub('history', this)">Completed Assessments</button>
+            </div>
+
+            <div id="engine-view-overview">
+                <div class="card">
+                    <h3>Assessment Dashboard</h3>
+                    <div id="assessmentDashboard"><p style="color:var(--text-muted);">Loading Overview...</p></div>
+                </div>
+                <div class="card grid-2">
+                    <div><h3>Assessments List</h3><div id="testListAdmin"></div></div>
+                    <div><h3>Grading Queue</h3><div id="markingList"></div></div>
                 </div>
             </div>
-            <div class="card grid-2">
-                <div><h3>Assessments List</h3><div id="testListAdmin"></div></div>
-                <div><h3>Grading Queue</h3><div id="markingList"></div></div>
+
+            <div id="engine-view-history" class="hidden">
+                <div class="card">
+                    <h3>Completed Assessment History</h3>
+                    <div style="margin-bottom:15px;">
+                        <input type="text" id="historySearch" placeholder="Search Trainee or Test..." onkeyup="loadCompletedHistory()" style="width:300px; margin:0;">
+                    </div>
+                    <div id="completedHistoryList" style="max-height:600px; overflow-y:auto;"></div>
+                </div>
             </div>
         </section>
 
@@ -920,6 +936,7 @@
 <script src="js/assessment.js"></script>
 <script src="js/live_execution.js"></script>
 <script src="js/agent_search.js"></script>
+<script src="js/admin_history.js"></script>
 
 <script src="js/main.js"></script>
 
