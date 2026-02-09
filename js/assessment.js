@@ -261,22 +261,33 @@ function openAdminMarking(subId) {
             }
             else if (q.type === 'matrix') {
                 let correctRows = 0;
+                const totalRows = (q.rows || []).length;
                 (q.rows || []).forEach((r, rIdx) => {
                     const correctColIdx = q.correct ? q.correct[rIdx] : null;
                     if (userAns && userAns[rIdx] == correctColIdx) correctRows++;
                 });
-                if (correctRows === (q.rows || []).length) autoScore = pointsMax;
+                
+                // UPDATED: Partial Credit for Matrix
+                if (totalRows > 0) {
+                    autoScore = (correctRows / totalRows) * pointsMax;
+                    autoScore = Math.round(autoScore * 10) / 10;
+                }
             }
             else if (q.type === 'multi_select') {
-               // UPDATED: Partial Credit Logic
+               // UPDATED: Partial Credit with Negative Marking
                const correctArr = (q.correct || []).map(Number);
                const userArr = (userAns || []).map(Number);
                let match = 0;
-               userArr.forEach(a => { if(correctArr.includes(a)) match++; });
+               let incorrect = 0;
+               userArr.forEach(a => { 
+                   if(correctArr.includes(a)) match++; 
+                   else incorrect++;
+               });
                
-               // Score = (Matches / Total Correct Options) * Points
+               // Score = (Matches - Incorrect) / Total Correct * Points
                if(correctArr.length > 0) {
-                   autoScore = (match / correctArr.length) * pointsMax;
+                   let rawScore = ((match - incorrect) / correctArr.length) * pointsMax;
+                   autoScore = Math.max(0, rawScore); // Prevent negative total
                    // Round to 1 decimal
                    autoScore = Math.round(autoScore * 10) / 10;
                }
@@ -295,8 +306,26 @@ function openAdminMarking(subId) {
                 (q.rows || []).forEach((r, rIdx) => {
                     answerDisplay += `<tr><td style="text-align:left; font-weight:bold;">${r}</td>`;
                     (q.cols || []).forEach((c, cIdx) => {
-                        const isChecked = (userAns && userAns[rIdx] == cIdx) ? 'checked' : '';
-                        answerDisplay += `<td><input type="radio" disabled ${isChecked}></td>`;
+                        const isSelected = (userAns && userAns[rIdx] == cIdx);
+                        const isCorrect = (q.correct && q.correct[rIdx] == cIdx);
+                        
+                        let cellContent = '<i class="far fa-circle" style="color:var(--border-color); opacity:0.3;"></i>';
+                        let cellStyle = '';
+
+                        if (isSelected) {
+                            if (isCorrect) {
+                                cellContent = '<i class="fas fa-check-circle" style="color:#2ecc71; font-size:1.2rem;"></i>';
+                                cellStyle = 'background:rgba(46, 204, 113, 0.1);';
+                            } else {
+                                cellContent = '<i class="fas fa-times-circle" style="color:#ff5252; font-size:1.2rem;"></i>';
+                                cellStyle = 'background:rgba(255, 82, 82, 0.1);';
+                            }
+                        } else if (isCorrect) {
+                            cellContent = '<i class="fas fa-check" style="color:#2ecc71; opacity:0.5;"></i>';
+                            cellStyle = 'border: 2px dashed #2ecc71;';
+                        }
+                        
+                        answerDisplay += `<td style="${cellStyle}">${cellContent}</td>`;
                     });
                     answerDisplay += `</tr>`;
                 });
@@ -573,7 +602,11 @@ function loadTraineeTests() {
     // Filter tests: Must be in allowed list OR not linked to any schedule (Global)
     // Actually, user requested strict filtering: "only relevent to group assigned"
     // So we only show tests that are explicitly in the schedule.
-    const visibleTests = tests.filter(t => allowedTestIds.has(t.id.toString()));
+    let visibleTests = [];
+    
+    // ADMIN OVERRIDE: Admins see ALL tests
+    if (CURRENT_USER.role === 'admin') visibleTests = tests;
+    else visibleTests = tests.filter(t => allowedTestIds.has(t.id.toString()));
 
     if (visibleTests.length === 0) {
         container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No assessments available.</div>';
@@ -589,7 +622,7 @@ function loadTraineeTests() {
         let lockReason = "Locked";
         
         // Find schedule item to check status
-        if (myGroupId) {
+        if (myGroupId && CURRENT_USER.role !== 'admin') { // Admin bypasses schedule locks
             const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
             if (schedKey) {
                 const item = schedules[schedKey].items.find(i => i.linkedTestId == t.id);
@@ -962,17 +995,26 @@ async function submitTest() {
                     const correctColIdx = q.correct ? q.correct[rIdx] : null;
                     if (ans && ans[rIdx] == correctColIdx) correctRows++;
                 });
-                if (correctRows === (q.rows || []).length) score += pts;
+                
+                if ((q.rows || []).length > 0) {
+                    let partial = (correctRows / q.rows.length) * pts;
+                    score += Math.round(partial * 10) / 10;
+                }
             }
             else if (q.type === 'multi_select') {
-               // UPDATED: Partial Credit Logic
+               // UPDATED: Partial Credit with Negative Marking
                const correctArr = (q.correct || []).map(Number);
                const userArr = (ans || []).map(Number);
                let match = 0;
-               userArr.forEach(a => { if(correctArr.includes(a)) match++; });
+               let incorrect = 0;
+               userArr.forEach(a => { 
+                   if(correctArr.includes(a)) match++; 
+                   else incorrect++;
+               });
                
                if(correctArr.length > 0) {
-                   score += (match / correctArr.length) * pts;
+                   let rawScore = ((match - incorrect) / correctArr.length) * pts;
+                   score += Math.max(0, rawScore);
                }
             }
             else {
