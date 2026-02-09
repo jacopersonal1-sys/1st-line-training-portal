@@ -137,7 +137,8 @@ function updateSyncUI(status) {
     } else if (status === 'syncing') {
         el.innerHTML = '<i class="fas fa-sync fa-spin" style="color:var(--text-muted);"></i> Syncing...';
     } else if (status === 'success') {
-        el.innerHTML = '<i class="fas fa-check" style="color:#2ecc71;"></i> Synced';
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        el.innerHTML = `<i class="fas fa-check" style="color:#2ecc71;"></i> Synced ${time}`;
         // Fade out after 3 seconds
         setTimeout(() => { 
             if(el.innerHTML.includes('Synced')) {

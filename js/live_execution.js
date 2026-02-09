@@ -314,13 +314,13 @@ function renderTraineeLivePanel(container) {
     const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
     container.innerHTML = `
-        <div style="max-width:800px; margin:0 auto; padding:20px;">
+        <div style="max-width:1200px; margin:0 auto; padding:20px;">
             <div class="progress-track" style="margin-bottom:20px;">
                 <div class="progress-fill" style="width:${((session.currentQ+1)/test.questions.length)*100}%"></div>
             </div>
             
             <div class="card" style="padding:40px;">
-                <h2 style="font-size:2rem; margin-bottom:30px;">${session.currentQ + 1}. ${q.text} ${refBtn}</h2>
+                <h2 style="font-size:1.5rem; margin-bottom:30px; white-space: pre-wrap;">${session.currentQ + 1}. ${q.text} ${refBtn}</h2>
                 
                 <div class="live-input-area" style="font-size:1.2rem;">
                     ${inputHtml}
@@ -422,7 +422,8 @@ async function submitLiveAnswer(qIdx) {
     const btn = document.querySelector('.btn-primary.btn-lg');
     if(btn) { btn.innerText = "Sending..."; btn.disabled = true; }
     
-    if (typeof saveToServer === 'function') await saveToServer(['liveSession'], true);
+    // UPDATED: Use 'false' (Safe Merge) to prevent overwriting Admin's state updates
+    if (typeof saveToServer === 'function') await saveToServer(['liveSession'], false);
     
     if(btn) { 
         // Check type to determine text

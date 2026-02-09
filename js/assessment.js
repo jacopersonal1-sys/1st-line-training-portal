@@ -418,7 +418,7 @@ function openAdminMarking(subId) {
         submitBtn.style.display = 'none';
     } else {
         submitBtn.style.display = 'inline-block';
-        submitBtn.innerText = sub.status === 'completed' ? "Update Score" : "Finalize Score & Push to Records";
+        submitBtn.innerText = sub.status === 'completed' ? "Confirm & Save Scores" : "Finalize Score & Push to Records";
         submitBtn.onclick = () => finalizeAdminMarking(subId);
     }
 }
@@ -443,7 +443,7 @@ function viewCompletedTest(trainee, assessment) {
 }
 
 async function finalizeAdminMarking(subId) {
-    if (!confirm("Finalize these scores? This will update the trainee's records.")) return;
+    if (!confirm("Save these scores? This will update the trainee's records and overwrite any previous grading.")) return;
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
