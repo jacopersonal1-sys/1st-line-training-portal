@@ -479,6 +479,11 @@ async function finalizeAdminMarking(subId) {
     sub.score = percentage;
     sub.status = 'completed';
     sub.scores = specificScores; // Persist individual scores
+    
+    // TRACK EDIT HISTORY
+    sub.lastEditedBy = CURRENT_USER.user;
+    sub.lastEditedDate = new Date().toISOString();
+
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
@@ -538,6 +543,7 @@ async function finalizeAdminMarking(subId) {
     loadAssessmentDashboard();
     if (typeof renderMonthly === 'function') renderMonthly();
     if (typeof loadTestRecords === 'function') loadTestRecords();
+    if (typeof loadCompletedHistory === 'function') loadCompletedHistory(); // Refresh new history view
 }
 
 /**

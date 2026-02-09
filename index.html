@@ -468,8 +468,14 @@
             <div id="engine-view-history" class="hidden">
                 <div class="card">
                     <h3>Completed Assessment History</h3>
-                    <div style="margin-bottom:15px;">
-                        <input type="text" id="historySearch" placeholder="Search Trainee or Test..." onkeyup="loadCompletedHistory()" style="width:300px; margin:0;">
+                    <div style="margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+                        <select id="historyGroupFilter" onchange="loadCompletedHistory()" style="width:200px; margin:0;">
+                            <option value="">All Groups</option>
+                        </select>
+                        <select id="historyTestFilter" onchange="loadCompletedHistory()" style="width:200px; margin:0;">
+                            <option value="">All Tests</option>
+                        </select>
+                        <input type="text" id="historySearch" placeholder="Search Trainee..." onkeyup="loadCompletedHistory()" style="flex:1; margin:0; min-width:200px;">
                     </div>
                     <div id="completedHistoryList" style="max-height:600px; overflow-y:auto;"></div>
                 </div>

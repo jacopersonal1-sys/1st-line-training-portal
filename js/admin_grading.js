@@ -290,7 +290,6 @@ function loadTestRecords() {
                 
                 // ADMIN ONLY ACTIONS
                 if (CURRENT_USER.role === 'admin') {
-                    actionBtn += ` <button class="btn-primary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'edit')" title="Edit Score"><i class="fas fa-pen"></i></button>`;
                     actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;
                     
                     // Allow Retake if not already archived
