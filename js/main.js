@@ -94,9 +94,6 @@ window.onload = async function() {
     if(typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
     if(typeof loadRostersList === 'function') loadRostersList();
     
-    // Load Access Control UI (Ensure IP list is loaded on refresh)
-    if(typeof loadAdminAccess === 'function') loadAdminAccess();
-
     // Restore Session (With IP Security Check)
     const savedSession = sessionStorage.getItem('currentUser');
     if(savedSession) {
@@ -116,6 +113,9 @@ window.onload = async function() {
                     // Update Sidebar based on Role
                     updateSidebarVisibility();
                     
+                    // Load Access Control UI (Now safe to check role)
+                    if(typeof loadAdminAccess === 'function') loadAdminAccess();
+
                     if (typeof autoLogin === 'function') autoLogin();
                 } else {
                     sessionStorage.removeItem('currentUser'); // Clear invalid session
@@ -129,6 +129,9 @@ window.onload = async function() {
              // Check for experimental theme
              const expTheme = localStorage.getItem('experimental_theme');
              if (expTheme) applyExperimentalTheme(expTheme);
+
+             // Load Access Control UI (Now safe to check role)
+             if(typeof loadAdminAccess === 'function') loadAdminAccess();
 
              updateSidebarVisibility();
              if (typeof autoLogin === 'function') autoLogin();

@@ -318,8 +318,18 @@ async function allowRetake(subId) {
         sub.status = 'retake_allowed'; 
         localStorage.setItem('submissions', JSON.stringify(subs));
         
+        // RESET VETTING SESSION STATUS IF APPLICABLE
+        // This ensures the trainee can re-enter the Arena and isn't stuck on "Submitted"
+        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        if (session.active && session.testId == sub.testId) {
+            if (session.trainees && session.trainees[sub.trainee]) {
+                delete session.trainees[sub.trainee]; 
+                localStorage.setItem('vettingSession', JSON.stringify(session));
+            }
+        }
+
         // --- CLOUD SYNC (Instant) ---
-        if(typeof saveToServer === 'function') await saveToServer(['submissions'], false);
+        if(typeof saveToServer === 'function') await saveToServer(['submissions', 'vettingSession'], true);
         
         alert("Retake granted.");
         loadTestRecords();

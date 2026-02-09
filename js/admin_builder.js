@@ -93,6 +93,7 @@ function loadTestBuilder(existingId = null) {
             }
             
             if(test.duration) document.getElementById('builderDuration').value = test.duration;
+            document.getElementById('builderShuffle').checked = test.shuffle || false;
             
             // Load Questions
             BUILDER_QUESTIONS = test.questions || [];
@@ -103,6 +104,7 @@ function loadTestBuilder(existingId = null) {
     } else {
         // New Test
         if(typeSelect) typeSelect.onchange(); // Trigger default
+        document.getElementById('builderShuffle').checked = false;
         document.getElementById('builderCustomTitle').value = '';
     }
 }
@@ -110,7 +112,7 @@ function loadTestBuilder(existingId = null) {
 function addQuestion(type) {
     // UPDATED: Consistent String IDs
     const id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    let q = { id, type, text: "", points: 1, adminNotes: "" }; // Default structure with points
+    let q = { id, type, text: "", points: 1, adminNotes: "", imageLink: "", linkedToPrevious: false }; // Default structure with points
 
     // Specific structures per type
     if (type === 'multiple_choice' || type === 'multi_select') {
@@ -243,6 +245,17 @@ function renderBuilder() {
             `;
         }
 
+        let linkControl = '';
+        if (idx > 0) {
+            linkControl = `
+            <div style="margin-bottom:10px; padding:5px 10px; background:var(--bg-input); border-radius:4px; border:1px dashed var(--border-color);">
+                <label style="cursor:pointer; font-size:0.85rem; display:flex; align-items:center; margin:0; color:var(--text-muted);">
+                    <input type="checkbox" ${q.linkedToPrevious ? 'checked' : ''} onchange="updateLinkedToPrevious(${idx}, this.checked)" style="width:auto; margin-right:8px; margin-bottom:0;">
+                    <i class="fas fa-link" style="margin-right:5px;"></i> Keep attached to previous question (Group for Shuffle)
+                </label>
+            </div>`;
+        }
+
         return `
         <div class="question-card">
             <div class="q-header">
@@ -256,8 +269,12 @@ function renderBuilder() {
                 </div>
             </div>
             <div style="margin-bottom:10px;">
-                <input type="text" placeholder="Admin/Marker Notes (Hidden from Trainee)" value="${q.adminNotes || ''}" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border-style:dashed;">
+                <textarea placeholder="Admin/Marker Notes (Hidden from Trainee)" class="auto-expand" oninput="autoResize(this)" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border: 1px dashed var(--border-color); width:100%; min-height:40px;">${q.adminNotes || ''}</textarea>
             </div>
+            <div style="margin-bottom:10px;">
+                <input type="text" placeholder="Reference Image/Page URL (Optional)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary);">
+            </div>
+            ${linkControl}
             <div style="margin-top:10px;">
                 ${innerHTML}
             </div>
@@ -276,6 +293,7 @@ function saveBuilderDraft() {
         id: EDITING_TEST_ID,
         title: document.getElementById('builderAssessmentSelect').value,
         type: document.getElementById('builderTestType').value,
+        shuffle: document.getElementById('builderShuffle').checked,
         duration: document.getElementById('builderDuration').value
     };
     localStorage.setItem('draft_builder', JSON.stringify(draft));
@@ -296,6 +314,7 @@ function restoreBuilderDraft() {
     document.getElementById('builderAssessmentSelect').value = draft.title;
     document.getElementById('builderTestType').value = draft.type;
     document.getElementById('builderDuration').value = draft.duration;
+    document.getElementById('builderShuffle').checked = draft.shuffle || false;
     
     // Trigger type change to show/hide duration
     document.getElementById('builderTestType').onchange();
@@ -307,6 +326,8 @@ function restoreBuilderDraft() {
 function updateQText(idx, val) { BUILDER_QUESTIONS[idx].text = val; }
 function updatePoints(idx, val) { BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; renderBuilder(); }
 function updateAdminNotes(idx, val) { BUILDER_QUESTIONS[idx].adminNotes = val; }
+function updateImageLink(idx, val) { BUILDER_QUESTIONS[idx].imageLink = val; }
+function updateLinkedToPrevious(idx, val) { BUILDER_QUESTIONS[idx].linkedToPrevious = val; }
 
 function updateOptText(qIdx, oIdx, val) { BUILDER_QUESTIONS[qIdx].options[oIdx] = val; }
 function updateCorrect(qIdx, oIdx, type) { 
@@ -363,6 +384,7 @@ async function saveTest() {
     }
     
     const dur = document.getElementById('builderDuration').value;
+    const shuffle = document.getElementById('builderShuffle').checked;
 
     if (BUILDER_QUESTIONS.length === 0) {
         if(typeof showToast === 'function') showToast("Please add at least one question.", "warning");
@@ -383,6 +405,7 @@ async function saveTest() {
             tests[idx].title = linked;
             tests[idx].type = type;
             tests[idx].duration = type === 'vetting' ? dur : null;
+            tests[idx].shuffle = shuffle;
             tests[idx].questions = BUILDER_QUESTIONS;
         } else {
             // Fallback: If ID mismatch, push as new to avoid data loss
@@ -392,6 +415,7 @@ async function saveTest() {
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
+                shuffle: shuffle,
                 questions: BUILDER_QUESTIONS
             };
             tests.push(newTest);
@@ -403,6 +427,7 @@ async function saveTest() {
              if(!confirm("A test with this name already exists. Overwrite?")) return;
              tests[existingIdx].type = type;
              tests[existingIdx].duration = type === 'vetting' ? dur : null;
+             tests[existingIdx].shuffle = shuffle;
              tests[existingIdx].questions = BUILDER_QUESTIONS;
         } else {
             const newTest = {
@@ -410,6 +435,7 @@ async function saveTest() {
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
+                shuffle: shuffle,
                 questions: BUILDER_QUESTIONS
             };
             tests.push(newTest);

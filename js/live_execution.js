@@ -18,7 +18,7 @@ function loadLiveExecution() {
     }
 
     // Start Polling for updates (Real-time sync)
-    LIVE_POLLER = setInterval(syncLiveSessionState, 2000);
+    LIVE_POLLER = setInterval(syncLiveSessionState, 1000);
 }
 
 async function syncLiveSessionState() {
@@ -122,13 +122,17 @@ function renderAdminLivePanel(container) {
         const currentComment = session.comments[currentQ] || '';
         
         // Admin Note Display
-        const adminNote = q.adminNotes ? `<div style="margin-bottom:15px; padding:10px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.9rem;"><strong>Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        const adminNote = q.adminNotes ? `<div style="margin-bottom:15px; padding:10px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.9rem; white-space: pre-wrap;"><strong>Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        
+        // Reference Button
+        const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="margin-top:5px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
         mainHtml = `
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; height:100%;">
                 <div class="card" style="overflow-y:auto;">
                     <h4>Admin Preview (Q${currentQ+1})</h4>
                     <div style="font-size:1.2rem; font-weight:bold; margin-bottom:15px;">${q.text}</div>
+                    ${refBtn}
                     ${adminNote}
                     <div style="background:var(--bg-input); padding:10px; border-radius:4px;">
                         <small>Type: ${q.type}</small><br>
@@ -305,6 +309,9 @@ function renderTraineeLivePanel(container) {
     const isSubmitted = (session.answers[session.currentQ] !== undefined && session.answers[session.currentQ] !== null && session.answers[session.currentQ] !== "");
 
     const btnText = (q.type === 'live_practical') ? 'Done' : (isSubmitted ? 'Update Answer' : 'Submit Answer');
+    
+    // Reference Button
+    const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
     container.innerHTML = `
         <div style="max-width:800px; margin:0 auto; padding:20px;">
@@ -313,7 +320,7 @@ function renderTraineeLivePanel(container) {
             </div>
             
             <div class="card" style="padding:40px;">
-                <h2 style="font-size:2rem; margin-bottom:30px;">${session.currentQ + 1}. ${q.text}</h2>
+                <h2 style="font-size:2rem; margin-bottom:30px;">${session.currentQ + 1}. ${q.text} ${refBtn}</h2>
                 
                 <div class="live-input-area" style="font-size:1.2rem;">
                     ${inputHtml}

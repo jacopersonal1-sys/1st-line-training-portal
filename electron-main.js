@@ -8,6 +8,7 @@ autoUpdater.logger = console;
 
 let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
+let referenceWindow = null; // Track reference window
 
 function createWindow() {
     // Create the browser window.
@@ -118,6 +119,35 @@ ipcMain.on('restart-app', () => {
 ipcMain.on('force-restart', () => {
     app.relaunch();
     app.exit(0);
+});
+
+// IPC Listener for Reference Window (SharePoint/External Support)
+ipcMain.on('open-reference-window', (event, url) => {
+    if (referenceWindow) {
+        referenceWindow.focus();
+        referenceWindow.loadURL(url);
+        return;
+    }
+
+    referenceWindow = new BrowserWindow({
+        width: 1024,
+        height: 768,
+        title: "Reference Material",
+        icon: path.join(__dirname, 'icon.ico'),
+        parent: mainWindow, // Floats on top of main window
+        modal: false, // Allows interacting with both windows
+        autoHideMenuBar: true,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+    
+    referenceWindow.loadURL(url);
+
+    referenceWindow.on('closed', () => {
+        referenceWindow = null;
+    });
 });
 
 // --- AUTO-UPDATER EVENTS ---

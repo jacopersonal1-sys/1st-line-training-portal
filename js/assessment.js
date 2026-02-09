@@ -36,6 +36,18 @@ async function secureAssessmentSave() {
     }
 }
 
+// --- REFERENCE VIEWER (Native Window) ---
+function openReferenceViewer(url) {
+    if (typeof require !== 'undefined') {
+        console.log("Opening Reference via Electron IPC:", url);
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.send('open-reference-window', url);
+    } else {
+        console.log("Opening Reference via Window.Open:", url);
+        window.open(url, '_blank', 'width=1024,height=768');
+    }
+}
+
 /**
  * 1. ADMIN: ASSESSMENT DASHBOARD (OVERVIEW)
  */
@@ -220,8 +232,11 @@ function openAdminMarking(subId) {
         let autoScore = 0;
         
         // Display Admin Notes if present
-        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main); white-space: pre-wrap;"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
         
+        // Reference Button for Marker
+        const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
+
         // Prepend to markHtml later
 
         // --- SCORING LOGIC ---
@@ -367,19 +382,32 @@ function openAdminMarking(subId) {
                 answerDisplay = JSON.stringify(userAns);
             }
 
+            // Determine value to show (Saved override OR Auto-calc)
+            let currentVal = autoScore;
+            if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) {
+                currentVal = sub.scores[idx];
+            }
+
             markHtml = `
                 <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
                     <div style="margin-bottom:10px;">${answerDisplay}</div>
-                    <div style="font-size:0.9rem; border-top:1px solid var(--border-color); padding-top:5px; font-weight:bold;">
-                        Auto-Score: <strong>${autoScore} / ${pointsMax}</strong>
-                        <input type="hidden" class="q-mark" data-idx="${idx}" value="${autoScore}">
+                    <div style="font-size:0.9rem; border-top:1px solid var(--border-color); padding-top:5px; font-weight:bold; display:flex; align-items:center; justify-content:space-between;">
+                        <span>Auto-Score: ${autoScore} / ${pointsMax}</span>
+                        ${!isLocked ? 
+                            `<div style="display:flex; align-items:center; gap:5px;">
+                                <label style="font-size:0.8rem;">Override:</label>
+                                <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${currentVal}" style="width:70px; padding:5px;">
+                             </div>` 
+                            : 
+                            `<input type="hidden" class="q-mark" data-idx="${idx}" value="${currentVal}">`
+                        }
                     </div>
                 </div>`;
         }
 
         container.innerHTML += `
             <div class="marking-item" style="margin-bottom:25px;">
-                <div style="font-weight:600;">Q${idx + 1}: ${q.text} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
+                <div style="font-weight:600;">Q${idx + 1}: ${q.text} ${refBtn} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
                 ${adminNoteHtml}${markHtml}
             </div>`;
     });
@@ -691,6 +719,13 @@ function openTestTaker(testId, isArenaMode = false) {
     const test = tests.find(t => t.id == testId);
     if (!test) return;
 
+    // BLOCK VETTING TESTS OUTSIDE ARENA
+    // Vetting tests must go through the Arena process (Security Checks, Admin Push)
+    if (test.type === 'vetting' && !isArenaMode && CURRENT_USER.role === 'trainee') {
+        if(typeof showToast === 'function') showToast("Vetting tests must be taken in the Vetting Arena.", "error");
+        return;
+    }
+
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     
     // --- SCHEDULE ENFORCEMENT ---
@@ -751,6 +786,30 @@ function openTestTaker(testId, isArenaMode = false) {
     }
 
     window.CURRENT_TEST = JSON.parse(JSON.stringify(test)); 
+    
+    // Tag original indices before shuffling to map answers back later
+    window.CURRENT_TEST.questions.forEach((q, i) => q._originalIndex = i);
+
+    // --- SHUFFLE LOGIC (With Grouping) ---
+    if (window.CURRENT_TEST.shuffle) {
+        const questions = window.CURRENT_TEST.questions;
+        const groups = [];
+        let currentGroup = [];
+        
+        questions.forEach((q, i) => {
+            // If linked to previous and not the very first question, add to current group
+            if (q.linkedToPrevious && i > 0) {
+                currentGroup.push(q);
+            } else {
+                if (currentGroup.length > 0) groups.push(currentGroup);
+                currentGroup = [q];
+            }
+        });
+        if (currentGroup.length > 0) groups.push(currentGroup);
+        
+        window.CURRENT_TEST.questions = shuffleArray(groups).flat();
+    }
+
     window.USER_ANSWERS = {}; 
 
     window.CURRENT_TEST.questions.forEach((q, idx) => {
@@ -791,10 +850,13 @@ function renderTestPaper(containerId = 'takingQuestions') {
     `;
 
     window.CURRENT_TEST.questions.forEach((q, idx) => {
+        // Reference Button
+        const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
+
         html += `
         <div class="taking-card" style="margin-bottom:40px;">
             <div class="q-text-large" style="font-weight:700; margin-bottom:15px;">
-                ${idx + 1}. ${q.text} <span style="font-size:0.8rem; font-weight:normal; color:var(--text-muted); float:right;">(${q.points||1} pts)</span>
+                ${idx + 1}. ${q.text} ${refBtn} <span style="font-size:0.8rem; font-weight:normal; color:var(--text-muted); float:right; margin-left:10px;">(${q.points||1} pts)</span>
             </div>
             <div class="question-input-area" id="q_area_${idx}">${renderQuestionInput(q, idx)}</div>
         </div>`;
@@ -959,17 +1021,17 @@ function shuffleArray(array) {
 }
 
 // UPDATED: Async Submit
-async function submitTest() {
+async function submitTest(forceSubmit = false) {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const existing = subs.find(s => s.testId == window.CURRENT_TEST.id && s.trainee === CURRENT_USER.user && !s.archived);
     if (existing) {
-        alert("Error: Active submission already exists.");
+        if (!forceSubmit) alert("Error: Active submission already exists.");
         document.getElementById('test-timer-bar')?.remove();
         if(typeof showTab === 'function') showTab('my-tests');
         return;
     }
 
-    if (!confirm("Finalize your assessment? Answers will be locked for review.")) return;
+    if (!forceSubmit && !confirm("Finalize your assessment? Answers will be locked for review.")) return;
 
     if (window.TEST_TIMER) clearInterval(window.TEST_TIMER);
     const bar = document.getElementById('test-timer-bar');
@@ -1039,13 +1101,21 @@ async function submitTest() {
     const finalPercent = (maxScore > 0) ? Math.round((score / maxScore) * 100) : 0;
     const finalStatus = needsManual ? 'pending' : 'completed';
 
+    // REMAP ANSWERS: Map shuffled UI indices back to original Question indices
+    // This ensures Admin Grading (which loads original test) sees answers in correct slots.
+    const remappedAnswers = {};
+    window.CURRENT_TEST.questions.forEach((q, currentIdx) => {
+        const ans = window.USER_ANSWERS[currentIdx];
+        remappedAnswers[q._originalIndex] = ans;
+    });
+
     const submission = {
         id: Date.now().toString(),
         testId: window.CURRENT_TEST.id,
         testTitle: window.CURRENT_TEST.title,
         trainee: CURRENT_USER.user,
         date: new Date().toISOString().split('T')[0],
-        answers: window.USER_ANSWERS,
+        answers: remappedAnswers, // Save remapped answers
         status: finalStatus, 
         score: finalStatus === 'completed' ? finalPercent : 0 
     };
@@ -1135,8 +1205,8 @@ function startTestTimer(mins) {
         timerBar.innerText = `TIME: ${m}:${s < 10 ? '0' + s : s}`;
         if (secs <= 0) {
             clearInterval(window.TEST_TIMER);
-            alert("Time's up! Submitting automatically.");
-            submitTest();
+            if(typeof showToast === 'function') showToast("Time's up! Submitting automatically.", "warning");
+            submitTest(true);
         }
         secs--;
     }, 1000);

@@ -151,11 +151,19 @@ function renderMonthly() {
         
         if(r.link === 'Digital-Assessment' || r.link === 'Live-Session') {
              // Check if function exists to avoid reference errors
+             const safeTrainee = r.trainee.replace(/'/g, "\\'");
+             const safeAssess = r.assessment.replace(/'/g, "\\'");
+
              const clickAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function') 
-                ? `onclick="viewCompletedTest('${r.trainee}', '${r.assessment}')"` 
+                ? `onclick="viewCompletedTest('${safeTrainee}', '${safeAssess}')"` 
                 : `onclick="alert('Assessment viewer not loaded.')"`;
              
              actionHtml += `<button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button>`;
+             
+             if (CURRENT_USER.role === 'admin') {
+                 const editAction = `onclick="viewCompletedTest('${safeTrainee}', '${safeAssess}', 'edit')"`;
+                 actionHtml += ` <button class="btn-primary" style="padding:2px 8px; font-size:0.8rem;" ${editAction} aria-label="Edit Score"><i class="fas fa-pen"></i></button>`;
+             }
         } 
         else if (r.link && r.link.startsWith('http')) {
              actionHtml += `<a href="${r.link}" target="_blank" class="btn-secondary btn-sm" style="text-decoration:none; display:inline-block; margin-right:5px;" title="Open Link"><i class="fas fa-external-link-alt"></i> Open</a>`;

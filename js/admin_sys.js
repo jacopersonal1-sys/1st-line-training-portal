@@ -396,7 +396,7 @@ async function loadAdminAccess() {
     const list = document.getElementById('ipList');
     const addSection = document.getElementById('newIpInput')?.parentElement;
 
-    if (CURRENT_USER.role === 'special_viewer') {
+    if (CURRENT_USER && CURRENT_USER.role === 'special_viewer') {
         if (toggleBtn) toggleBtn.classList.add('hidden');
         if (addSection) addSection.classList.add('hidden');
     } else {
