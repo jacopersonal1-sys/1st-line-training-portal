@@ -400,14 +400,15 @@ function openAdminMarking(subId) {
                 <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
                     <div style="margin-bottom:10px;">${answerDisplay}</div>
                     <div style="font-size:0.9rem; border-top:1px solid var(--border-color); padding-top:5px; font-weight:bold; display:flex; align-items:center; justify-content:space-between;">
-                        <span>Auto-Score: ${autoScore} / ${pointsMax}</span>
                         ${!isLocked ? 
-                            `<div style="display:flex; align-items:center; gap:5px;">
-                                <label style="font-size:0.8rem;">Override:</label>
-                                <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${currentVal}" style="width:70px; padding:5px;">
+                            `<div style="display:flex; align-items:center; gap:10px; width:100%;">
+                                <span style="margin-right:auto; color:var(--text-muted); font-weight:normal; font-size:0.8rem;">(Auto: ${autoScore})</span>
+                                <label>Score:</label>
+                                <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${currentVal}" style="width:80px; padding:5px;">
+                                <span style="color:var(--text-muted); font-weight:normal;">/ ${pointsMax}</span>
                              </div>` 
                             : 
-                            `<input type="hidden" class="q-mark" data-idx="${idx}" value="${currentVal}">`
+                            `<span>Score: ${currentVal} / ${pointsMax}</span><input type="hidden" class="q-mark" data-idx="${idx}" value="${currentVal}">`
                         }
                     </div>
                 </div>`;
@@ -426,7 +427,7 @@ function openAdminMarking(subId) {
         submitBtn.style.display = 'none';
     } else {
         submitBtn.style.display = 'inline-block';
-        submitBtn.innerText = sub.status === 'completed' ? "Confirm & Save Scores" : "Finalize Score & Push to Records";
+        submitBtn.innerText = sub.status === 'completed' ? "Save Changes" : "Finalize Score & Push to Records";
         submitBtn.onclick = () => finalizeAdminMarking(subId);
     }
 }
