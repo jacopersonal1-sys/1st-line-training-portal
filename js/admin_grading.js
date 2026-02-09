@@ -206,12 +206,6 @@ function viewCompletedTest(trainee, assessment) {
     
     if(typeof openAdminMarking === 'function') {
         openAdminMarking(sub.id);
-        
-        // Hide the submit button since this is read-only view
-        setTimeout(() => {
-            const btn = document.getElementById('markingSubmitBtn');
-            if(btn) btn.style.display = 'none';
-        }, 50);
     }
 }
 

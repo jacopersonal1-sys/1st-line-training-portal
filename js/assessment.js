@@ -203,8 +203,8 @@ function openAdminMarking(subId) {
     modal.classList.remove('hidden');
     
     // Check if locked (Completed)
-    const isLocked = sub.status === 'completed';
-    const lockAttr = 'disabled'; // Always disabled in view mode unless we add an edit mode later
+    // UPDATED: Allow Admins to edit completed tests
+    const isLocked = sub.status === 'completed' && CURRENT_USER.role !== 'admin';
 
     container.innerHTML = `
         <div style="margin-bottom:20px; border-bottom:2px solid var(--border-color); padding-bottom:10px;">
@@ -385,7 +385,7 @@ function openAdminMarking(subId) {
         submitBtn.style.display = 'none';
     } else {
         submitBtn.style.display = 'inline-block';
-        submitBtn.innerText = "Finalize Score & Push to Records";
+        submitBtn.innerText = sub.status === 'completed' ? "Update Score" : "Finalize Score & Push to Records";
         submitBtn.onclick = () => finalizeAdminMarking(subId);
     }
 }
