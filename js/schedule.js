@@ -143,7 +143,10 @@ function buildTabs(schedules, isAdmin) {
             subLabel = (typeof getGroupLabel === 'function') ? getGroupLabel(data.assigned).split('[')[0] : data.assigned;
         }
         return `<button class="sched-tab-btn ${isActive}" onclick="switchScheduleTab('${key}')" style="padding: 8px 15px; border:1px solid var(--border-color); background:var(--bg-card); cursor:pointer; border-radius:6px; min-width:100px; text-align:left;">
-            <div style="font-weight:bold; font-size:0.9rem;">Schedule ${key}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:bold; font-size:0.9rem;">Schedule ${key}</span>
+                ${isAdmin && CURRENT_USER.role !== 'special_viewer' ? `<i class="fas fa-trash" onclick="event.stopPropagation(); deleteSchedule('${key}')" style="font-size:0.7rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
+            </div>
             <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
         </button>`;
     }).join('');
@@ -174,6 +177,8 @@ function buildTimeline(items, isAdmin) {
             let timelineClass = 'schedule-upcoming';
             if (status === 'active') timelineClass = 'schedule-active';
             else if (status === 'past') timelineClass = 'schedule-past';
+            
+            const dragAttr = isAdmin ? `draggable="true" ondragstart="dragTimeline(event, ${index})" ondragover="allowDropTimeline(event)" ondrop="dropTimeline(event, ${index})"` : '';
 
             let actions = '';
             if (isAdmin) {
@@ -228,7 +233,7 @@ function buildTimeline(items, isAdmin) {
             }
             // -------------------------------------
 
-            return `<div class="timeline-item ${timelineClass}" style="position:relative; padding-left:20px; border-left:2px solid var(--border-color); margin-bottom:20px;">
+            return `<div class="timeline-item ${timelineClass}" ${dragAttr} style="position:relative; padding-left:20px; border-left:2px solid var(--border-color); margin-bottom:20px;">
                 <div class="timeline-marker"></div>
                 <div class="timeline-content" style="background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -246,6 +251,37 @@ function buildTimeline(items, isAdmin) {
     }
 
     return timelineHTML;
+}
+
+// --- DRAG & DROP REORDERING ---
+let draggedItemIndex = null;
+
+function dragTimeline(ev, index) {
+    draggedItemIndex = index;
+    ev.dataTransfer.effectAllowed = "move";
+    ev.target.classList.add('dragging');
+}
+
+function allowDropTimeline(ev) {
+    ev.preventDefault();
+}
+
+async function dropTimeline(ev, targetIndex) {
+    ev.preventDefault();
+    document.querySelector('.dragging')?.classList.remove('dragging');
+    
+    if (draggedItemIndex === null || draggedItemIndex === targetIndex) return;
+
+    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const items = schedules[ACTIVE_SCHED_ID].items;
+    
+    // Move item in array
+    const [movedItem] = items.splice(draggedItemIndex, 1);
+    items.splice(targetIndex, 0, movedItem);
+    
+    localStorage.setItem('schedules', JSON.stringify(schedules));
+    await secureScheduleSave();
+    renderSchedule();
 }
 
 // --- CALENDAR VIEW LOGIC ---
@@ -718,6 +754,27 @@ async function createNewSchedule() {
     }
 }
 
+async function deleteSchedule(schedId) {
+    if(!confirm(`Delete Schedule Group '${schedId}' completely? This cannot be undone.`)) return;
+    
+    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    delete schedules[schedId];
+    
+    // Ensure at least one schedule exists
+    if (Object.keys(schedules).length === 0) {
+        schedules["A"] = { items: [], assigned: null };
+    }
+    
+    localStorage.setItem('schedules', JSON.stringify(schedules));
+    await secureScheduleSave();
+    
+    // Reset active ID if deleted
+    if (ACTIVE_SCHED_ID === schedId) {
+        ACTIVE_SCHED_ID = Object.keys(schedules)[0];
+    }
+    renderSchedule();
+}
+
 async function assignRosterToSchedule(schedId) {
     const select = document.getElementById('schedAssignSelect');
     const groupId = select.value;
@@ -780,7 +837,7 @@ async function addTimelineItem() {
 }
 
 async function deleteTimelineItem(index) {
-    if(!confirm("Delete this item?")) return;
+    if(!confirm("Are you sure you want to delete this timeline item? This action cannot be undone.")) return;
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     schedules[ACTIVE_SCHED_ID].items.splice(index, 1);
     localStorage.setItem('schedules', JSON.stringify(schedules));

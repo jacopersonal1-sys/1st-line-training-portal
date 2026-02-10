@@ -236,6 +236,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .timeline-container { position: relative; padding: 10px 0; }
 .timeline-container::before { content: ''; position: absolute; top: 0; left: 19px; height: 100%; width: 2px; background: var(--border-color); }
 .timeline-item { position: relative; margin-bottom: 25px; padding-left: 50px; }
+/* Drag & Drop Styles */
+.timeline-item[draggable="true"] { cursor: grab; }
+.timeline-item[draggable="true"]:active { cursor: grabbing; }
+.timeline-item.dragging { opacity: 0.5; border: 2px dashed var(--primary); }
 
 /* Status Styles & Dots */
 .timeline-marker { position: absolute; left: 10px; top: 0; width: 20px; height: 20px; background: var(--bg-card); border: 3px solid var(--text-muted); border-radius: 50%; z-index: 2; transition: 0.3s; }
