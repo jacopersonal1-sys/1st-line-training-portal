@@ -367,6 +367,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     }
 
     const session = {
+        active: true,
         bookingId: bookingId,
         testId: test.id,
         trainee: traineeName,
