@@ -52,12 +52,14 @@ function renderAgentDashboard(agentName) {
     const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const attendance = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     
     // Filter Data
     const agentRecords = records.filter(r => r.trainee.toLowerCase() === agentName.toLowerCase());
     const agentSubs = submissions.filter(s => s.trainee.toLowerCase() === agentName.toLowerCase());
     const agentReport = reports.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
     const agentReview = reviews.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
+    const agentAttendance = attendance.filter(a => a.user.toLowerCase() === agentName.toLowerCase());
     
     // Find Group
     let group = "Unknown Group";
@@ -179,6 +181,27 @@ function renderAgentDashboard(agentName) {
     } else {
         reportHtml = `<div class="card" style="text-align:center; padding:30px; color:var(--text-muted);">No Onboard Report generated yet.</div>`;
     }
+
+    // --- ATTENDANCE HISTORY ---
+    agentAttendance.sort((a,b) => new Date(b.date) - new Date(a.date)); // Newest first
+    let attHtml = `
+        <div class="card">
+            <h3>Attendance History</h3>
+            <div style="max-height:200px; overflow-y:auto;">
+                <table class="admin-table">
+                    <thead><tr><th>Date</th><th>In</th><th>Out</th><th>Status</th></tr></thead>
+                    <tbody>
+                        ${agentAttendance.length > 0 ? agentAttendance.map(a => `
+                            <tr>
+                                <td>${a.date}</td>
+                                <td>${a.clockIn}</td>
+                                <td>${a.clockOut || '-'}</td>
+                                <td>${a.isLate ? '<span class="status-badge status-fail">Late</span>' : '<span class="status-badge status-pass">On Time</span>'}</td>
+                            </tr>`).join('') : '<tr><td colspan="4" class="text-center">No records found.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
     
     // --- PRIVATE NOTES ---
     const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
@@ -196,7 +219,7 @@ function renderAgentDashboard(agentName) {
         </div>
     `;
     
-    container.innerHTML = headerHtml + reviewHtml + recordsHtml + reportHtml + notesHtml;
+    container.innerHTML = headerHtml + reviewHtml + recordsHtml + attHtml + reportHtml + notesHtml;
 }
 
 async function saveAgentNote(agentName) {

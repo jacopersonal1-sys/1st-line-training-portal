@@ -759,7 +759,7 @@ async function deleteSchedule(schedId) {
     
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     delete schedules[schedId];
-    
+
     // Ensure at least one schedule exists
     if (Object.keys(schedules).length === 0) {
         schedules["A"] = { items: [], assigned: null };
@@ -767,7 +767,7 @@ async function deleteSchedule(schedId) {
     
     localStorage.setItem('schedules', JSON.stringify(schedules));
     await secureScheduleSave();
-    
+
     // Reset active ID if deleted
     if (ACTIVE_SCHED_ID === schedId) {
         ACTIVE_SCHED_ID = Object.keys(schedules)[0];

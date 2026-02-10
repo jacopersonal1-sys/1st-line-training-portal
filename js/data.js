@@ -24,9 +24,11 @@ const DB_SCHEMA = {
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
     agentNotes: {}, // Private notes on agents { "username": "note content" }
-    liveSession: { active: false, bookingId: null, testId: null, trainee: null, trainer: null, currentQ: -1, answers: {}, scores: {}, comments: {} },
+    liveSessions: {}, // MULTI-SESSION SUPPORT: { bookingId: { active, testId, ... } }
     archive_submissions: [], // Bandwidth Optimization: Old submissions moved here
-    daily_usage: {} // Global Bandwidth Tracking: { "username": { date: "YYYY-MM-DD", ingress: 0, egress: 0 } }
+    daily_usage: {}, // Global Bandwidth Tracking: { "username": { date: "YYYY-MM-DD", ingress: 0, egress: 0 } }
+    attendance_records: [], // [{ id, user, date, clockIn, clockOut, isLate, lateData: {} }]
+    attendance_settings: { platforms: ["WhatsApp", "Microsoft Teams", "Call", "SMS"], contacts: ["Darren", "Netta", "Jaco", "Claudine"] }
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -103,6 +105,7 @@ async function loadFromServer(silent = false) {
             // Trainees: Don't need Admin reports, logs, or private notes.
             // Note: They DO need 'submissions' and 'records' for their own history view.
             ignoredKeys = ['savedReports', 'accessLogs', 'agentNotes', 'linkRequests', 'accessControl', 'archive_submissions'];
+            // Trainees DO need attendance_settings (for dropdowns) and attendance_records (to check their own status)
         } else if (CURRENT_USER.role === 'teamleader') {
             // Team Leaders: Don't need system logs or IP control.
             ignoredKeys = ['accessLogs', 'accessControl', 'archive_submissions'];
@@ -361,27 +364,13 @@ function performSmartMerge(server, local) {
 
             merged[key] = combined;
         } 
-        // Case 2a: Vetting Session (Deep Merge Trainees)
-        else if (key === 'vettingSession' || key === 'liveSession') {
+        // Case 2a: Vetting/Live Sessions (Deep Merge)
+        else if (key === 'vettingSession' || key === 'liveSessions') {
             const safeSVal = sVal || {};
             const safeLVal = lVal || {};
             
-            // PRIORITY FIX: If Server is Active and Local is Inactive, trust Server.
-            // This prevents background sync from killing a session for a trainee.
-            if (safeSVal.active && !safeLVal.active) {
-                merged[key] = safeSVal;
-            } else {
-                // Standard Merge
-                merged[key] = { ...safeSVal, ...safeLVal }; 
-                
-                // Deep merge trainees/answers to prevent overwrites
-                if (key === 'vettingSession' && (safeSVal.trainees || safeLVal.trainees)) {
-                    merged[key].trainees = { ...(safeSVal.trainees || {}), ...(safeLVal.trainees || {}) };
-                }
-                if (key === 'liveSession' && (safeSVal.answers || safeLVal.answers)) {
-                    merged[key].answers = { ...(safeSVal.answers || {}), ...(safeLVal.answers || {}) };
-                }
-            }
+            // Deep merge individual sessions/trainees to prevent overwrites
+            merged[key] = { ...safeSVal, ...safeLVal };
         }
         // Case 2: Objects (Rosters, Schedules)
         else if (typeof sVal === 'object' && sVal !== null && typeof lVal === 'object' && lVal !== null) {

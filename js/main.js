@@ -181,6 +181,11 @@ window.onload = async function() {
     // Also run once immediately if logged in
     if(savedSession) setTimeout(updateNotifications, 1000); 
 
+    // --- MANDATORY ATTENDANCE CHECK (Session Restore) ---
+    if (savedSession && typeof checkAttendanceStatus === 'function') {
+        setTimeout(checkAttendanceStatus, 1500); 
+    }
+
     // HIDE LOADER
     if(loader) loader.classList.add('hidden');
 };
