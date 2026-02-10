@@ -263,7 +263,14 @@ function renderBuilder() {
                 <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})"><i class="fas fa-times"></i></button>
             </div>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
-                <textarea placeholder="Enter Question Text" class="q-text-input auto-expand" oninput="autoResize(this)" onchange="updateQText(${idx}, this.value)" style="flex:3;">${q.text || ''}</textarea>
+                <div class="rich-text-container" style="flex:3;">
+                    <div class="rich-toolbar">
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('bold')" title="Bold"><i class="fas fa-bold"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('italic')" title="Italic"><i class="fas fa-italic"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('insertUnorderedList')" title="Bullet List"><i class="fas fa-list-ul"></i></button>
+                    </div>
+                    <div class="rich-editor" contenteditable="true" oninput="updateQText(${idx}, this.innerHTML)">${q.text || ''}</div>
+                </div>
                 <div style="flex:1;">
                     <input type="number" placeholder="Points" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>
@@ -328,8 +335,21 @@ function restoreBuilderDraft() {
 }
 
 // --- BUILDER UPDATERS ---
+function formatDoc(cmd, value=null) {
+    document.execCommand(cmd, false, value);
+}
+
 function updateQText(idx, val) { BUILDER_QUESTIONS[idx].text = val; }
-function updatePoints(idx, val) { BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; renderBuilder(); }
+function updatePoints(idx, val) { 
+    BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; 
+    updateBuilderTotalScore(); 
+}
+function updateBuilderTotalScore() {
+    let total = 0;
+    BUILDER_QUESTIONS.forEach(q => total += parseFloat(q.points || 0));
+    const el = document.getElementById('builderTotalScore');
+    if(el) el.innerText = total;
+}
 function updateAdminNotes(idx, val) { BUILDER_QUESTIONS[idx].adminNotes = val; }
 function updateImageLink(idx, val) { BUILDER_QUESTIONS[idx].imageLink = val; }
 function updateLinkedToPrevious(idx, val) { BUILDER_QUESTIONS[idx].linkedToPrevious = val; }
@@ -359,8 +379,8 @@ function updateOrderedItem(qIdx, iIdx, val) { BUILDER_QUESTIONS[qIdx].items[iIdx
 function addOrderedItem(idx) { BUILDER_QUESTIONS[idx].items.push(""); renderBuilder(); }
 function removeOrderedItem(idx, iIdx) { BUILDER_QUESTIONS[idx].items.splice(iIdx, 1); renderBuilder(); }
 
-function updateMatrixRow(qIdx, rIdx, val) { BUILDER_QUESTIONS[qIdx].rows[rIdx] = val; renderBuilder(); } 
-function updateMatrixCol(qIdx, cIdx, val) { BUILDER_QUESTIONS[qIdx].cols[cIdx] = val; renderBuilder(); }
+function updateMatrixRow(qIdx, rIdx, val) { BUILDER_QUESTIONS[qIdx].rows[rIdx] = val; } 
+function updateMatrixCol(qIdx, cIdx, val) { BUILDER_QUESTIONS[qIdx].cols[cIdx] = val; }
 function addMatrixRow(idx) { BUILDER_QUESTIONS[idx].rows.push(""); renderBuilder(); }
 function addMatrixCol(idx) { BUILDER_QUESTIONS[idx].cols.push(""); renderBuilder(); }
 function removeMatrixRow(idx, rIdx) { BUILDER_QUESTIONS[idx].rows.splice(rIdx, 1); renderBuilder(); }
@@ -497,15 +517,60 @@ function loadManageTests() {
     const container = document.getElementById('testListAdmin');
     if (!container) return;
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    container.innerHTML = tests.map(t => `
-        <div class="test-card-row">
-            <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
-            <div>
-                ${CURRENT_USER.role === 'admin' ? `<button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
-                <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
+    
+    const standard = tests.filter(t => !t.type || t.type === 'standard');
+    const vetting = tests.filter(t => t.type === 'vetting');
+    const live = tests.filter(t => t.type === 'live');
+
+    const renderList = (list, title) => {
+        if (list.length === 0) return '';
+        let html = `<h4 style="margin-top:15px; border-bottom:1px solid var(--border-color); padding-bottom:5px; color:var(--primary);">${title}</h4>`;
+        html += list.map(t => `
+            <div class="test-card-row">
+                <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
+                <div>
+                    ${CURRENT_USER.role === 'admin' ? `
+                    <button class="btn-secondary btn-sm" onclick="copyTest('${t.id}')" title="Copy"><i class="fas fa-copy"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+                    <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')" title="Delete"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
+                </div>
             </div>
-        </div>
-    `).join('');
+        `).join('');
+        return html;
+    };
+
+    let html = '';
+    if (tests.length === 0) {
+        html = '<p style="color:var(--text-muted); padding:10px;">No assessments created yet. Use the "+ Create New Assessment" button.</p>';
+    } else {
+        html += renderList(standard, 'Standard Assessments');
+        html += renderList(vetting, 'Vetting Tests');
+        html += renderList(live, 'Live Assessments');
+    }
+    
+    container.innerHTML = html;
+}
+
+async function copyTest(id) {
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const original = tests.find(t => t.id == id);
+    if (!original) return;
+
+    const newName = prompt("Enter name for the copied test:", original.title + " (Copy)");
+    if (!newName) return;
+
+    // Deep copy
+    const copy = JSON.parse(JSON.stringify(original));
+    copy.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+    copy.title = newName.trim();
+    
+    tests.push(copy);
+    localStorage.setItem('tests', JSON.stringify(tests));
+
+    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
+    
+    if(typeof showToast === 'function') showToast("Test copied successfully.", "success");
+    loadManageTests();
 }
 
 async function deleteTest(id) {

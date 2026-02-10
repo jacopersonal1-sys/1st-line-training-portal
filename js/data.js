@@ -440,13 +440,40 @@ async function fetchSystemStatus() {
                 const globalUsage = JSON.parse(localStorage.getItem('daily_usage') || '{}');
                 const today = new Date().toISOString().split('T')[0];
                 let total = 0;
+                let userList = [];
 
-                Object.values(globalUsage).forEach(u => {
+                Object.entries(globalUsage).forEach(([username, u]) => {
                     if (u.date === today) {
-                        total += (u.ingress || 0) + (u.egress || 0);
+                        const uTotal = (u.ingress || 0) + (u.egress || 0);
+                        total += uTotal;
+                        userList.push({ user: username, ingress: u.ingress || 0, egress: u.egress || 0, total: uTotal });
                     }
                 });
                 
+                // Sort descending by total usage
+                userList.sort((a,b) => b.total - a.total);
+
+                // Update Breakdown UI
+                const breakdownEl = document.getElementById('bandwidthBreakdown');
+                if (breakdownEl) {
+                    if (userList.length === 0) {
+                        breakdownEl.innerHTML = '<div style="padding:10px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No usage recorded today.</div>';
+                    } else {
+                        let html = '<table class="admin-table" style="font-size:0.8rem;"><thead><tr><th>User</th><th>Down</th><th>Up</th><th>Total</th></tr></thead><tbody>';
+                        userList.forEach(u => {
+                            const down = (typeof formatBytes === 'function') ? formatBytes(u.ingress) : (u.ingress/1024).toFixed(1)+'KB';
+                            const up = (typeof formatBytes === 'function') ? formatBytes(u.egress) : (u.egress/1024).toFixed(1)+'KB';
+                            const tot = (typeof formatBytes === 'function') ? formatBytes(u.total) : (u.total/1024).toFixed(1)+'KB';
+                            html += `<tr><td>${u.user}</td><td>${down}</td><td>${up}</td><td><strong>${tot}</strong></td></tr>`;
+                        });
+                        html += '</tbody></table>';
+                        breakdownEl.innerHTML = html;
+                    }
+                    
+                    // Render Chart
+                    if(typeof renderBandwidthChart === 'function') renderBandwidthChart(userList);
+                }
+
                 // ESTIMATE: Daily target (500MB) to stay safely within Free Tier (5GB/mo)
                 // Increased to 500MB as we are now summing ALL users
                 const DAILY_LIMIT = 500 * 1024 * 1024; 
@@ -538,6 +565,58 @@ async function fetchSystemStatus() {
         }
     } catch (e) {
         console.error("Supabase Status fetch error", e);
+    }
+}
+
+let bandwidthChartInstance = null;
+
+function renderBandwidthChart(userList) {
+    const ctx = document.getElementById('bandwidthChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+
+    if (userList.length === 0) {
+        if (bandwidthChartInstance) {
+            bandwidthChartInstance.destroy();
+            bandwidthChartInstance = null;
+        }
+        return;
+    }
+
+    // Prepare Data: Top 5 users + Others
+    const topUsers = userList.slice(0, 5);
+    const labels = topUsers.map(u => u.user);
+    const data = topUsers.map(u => (u.total / 1024 / 1024).toFixed(2)); // MB
+    
+    if (userList.length > 5) {
+        const othersTotal = userList.slice(5).reduce((acc, u) => acc + u.total, 0);
+        labels.push('Others');
+        data.push((othersTotal / 1024 / 1024).toFixed(2));
+    }
+
+    if (bandwidthChartInstance) {
+        bandwidthChartInstance.data.labels = labels;
+        bandwidthChartInstance.data.datasets[0].data = data;
+        bandwidthChartInstance.update();
+    } else {
+        bandwidthChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: ['#F37021', '#2ecc71', '#3498db', '#9b59b6', '#f1c40f', '#95a5a6'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'right', labels: { color: '#888', boxWidth: 10 } },
+                    title: { display: true, text: 'Usage by User (MB)', color: '#888' }
+                }
+            }
+        });
     }
 }
 

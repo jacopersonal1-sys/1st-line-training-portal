@@ -426,8 +426,21 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
 }
 
 /* ================= FORMS & ASSESSMENTS (UPDATED) ================= */
-.q-header { display: flex; justify-content: space-between; background: var(--bg-input); padding: 10px; border-radius: 4px; margin-bottom: 10px; }
-.question-card { border: 1px solid var(--border-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; background: var(--bg-card); }
+.q-header { display: flex; justify-content: space-between; background: var(--bg-input); padding: 10px; border-radius: 4px; margin-bottom: 10px; transition: background 0.2s; }
+.question-card { 
+    border: 1px solid var(--border-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; background: var(--bg-card); 
+    transition: all 0.2s ease; border-left: 4px solid transparent;
+}
+/* IMPROVEMENT: Highlight Active Question in Builder */
+.question-card:focus-within {
+    border-color: var(--primary);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+    transform: scale(1.01);
+}
+.question-card:focus-within .q-header {
+    background: var(--primary-soft);
+    color: var(--primary);
+}
 .q-actions button { margin-left: 5px; }
 .opt-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
 
@@ -441,7 +454,7 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
 /* Taking View */
 .taking-card { background: var(--bg-card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border-color); }
 .q-text { font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; }
-.taking-input { width: 100%; min-height: 60px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 8px; }
+.taking-input { width: 100%; min-height: 200px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 8px; }
 
 .taking-radio { display: block; padding: 10px; background: var(--bg-input); margin-bottom: 5px; cursor: pointer; border-radius: 4px; }
 .taking-radio:hover { background: var(--bg-hover); }
@@ -910,3 +923,67 @@ body.theme-royal h2, body.theme-royal h3 {
     letter-spacing: 1px;
     border-bottom-color: var(--primary);
     text-align: center; /* Centered headers for royal feel */
+}
+
+/* ================= REFERENCE VIEWER (Draggable) ================= */
+.reference-window {
+    position: fixed;
+    top: 100px; left: 100px;
+    width: 500px; height: 400px;
+    background: var(--bg-card);
+    border: 1px solid var(--primary);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    z-index: 10000; /* Above everything */
+    display: flex; flex-direction: column;
+    resize: both; overflow: hidden;
+    border-radius: 8px;
+    min-width: 300px; min-height: 200px;
+    animation: fadeInUp 0.3s ease-out;
+}
+.reference-header {
+    padding: 8px 15px;
+    background: var(--bg-input);
+    border-bottom: 1px solid var(--border-color);
+    cursor: move; /* Indicates draggable */
+    display: flex; justify-content: space-between; align-items: center;
+    user-select: none;
+}
+.reference-content {
+    flex: 1;
+    background: #ffffff; /* White background for images/docs */
+    position: relative;
+    overflow: hidden;
+}
+
+/* ================= RICH TEXT EDITOR (Test Builder) ================= */
+.rich-text-container {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-input);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.rich-text-container:focus-within {
+    border-color: var(--primary);
+    box-shadow: var(--focus-ring);
+}
+.rich-toolbar {
+    display: flex;
+    gap: 2px;
+    padding: 5px;
+    background: var(--bg-hover);
+    border-bottom: 1px solid var(--border-color);
+}
+.btn-tool {
+    background: transparent; border: none; color: var(--text-muted);
+    cursor: pointer; padding: 6px 10px; border-radius: 4px; font-size: 0.9rem;
+}
+.btn-tool:hover { background: rgba(255,255,255,0.1); color: var(--primary); }
+
+.rich-editor {
+    padding: 15px; min-height: 80px; outline: none;
+    color: var(--text-main); line-height: 1.5; font-size: 1rem;
+}
+.rich-editor ul, .rich-editor ol { margin: 0; padding-left: 20px; }
