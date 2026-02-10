@@ -25,7 +25,8 @@ const DB_SCHEMA = {
     linkRequests: [], // Requests from TLs for assessment links
     agentNotes: {}, // Private notes on agents { "username": "note content" }
     liveSession: { active: false, bookingId: null, testId: null, trainee: null, trainer: null, currentQ: -1, answers: {}, scores: {}, comments: {} },
-    archive_submissions: [] // Bandwidth Optimization: Old submissions moved here
+    archive_submissions: [], // Bandwidth Optimization: Old submissions moved here
+    daily_usage: {} // Global Bandwidth Tracking: { "username": { date: "YYYY-MM-DD", ingress: 0, egress: 0 } }
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -35,6 +36,30 @@ window.LAST_INTERACTION = Date.now();
         window.LAST_INTERACTION = Date.now();
     }, { passive: true });
 });
+
+// --- HELPER: DATA USAGE TRACKER ---
+function trackDataUsage(bytes, type) {
+    if (!CURRENT_USER) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Load Global Usage Object
+    let globalUsage = JSON.parse(localStorage.getItem('daily_usage') || '{}');
+    
+    // Initialize User Entry if missing or outdated
+    if (!globalUsage[CURRENT_USER.user] || globalUsage[CURRENT_USER.user].date !== today) {
+        globalUsage[CURRENT_USER.user] = { date: today, ingress: 0, egress: 0 };
+    }
+    
+    // Update Counts
+    if (type === 'in') globalUsage[CURRENT_USER.user].ingress += bytes;
+    if (type === 'out') globalUsage[CURRENT_USER.user].egress += bytes;
+    
+    // Save back to LocalStorage (will be synced to cloud by saveToServer)
+    localStorage.setItem('daily_usage', JSON.stringify(globalUsage));
+    // Also update legacy local tracker for immediate UI feedback if needed
+    localStorage.setItem('dataUsage', JSON.stringify(globalUsage[CURRENT_USER.user]));
+}
 
 // --- HELPER: UI PROTECTION (The Fix for Typing Issues) ---
 // Checks if the user is currently typing in a field.
@@ -109,6 +134,9 @@ async function loadFromServer(silent = false) {
                 .in('key', finalKeysToFetch);
             
             if (fetchErr) throw fetchErr;
+
+            // TRACK INGRESS (Download)
+            if(docs) trackDataUsage(JSON.stringify(docs).length, 'in');
 
             docs.forEach(doc => {
                 localStorage.setItem(doc.key, JSON.stringify(doc.content));
@@ -217,6 +245,9 @@ async function saveToServer(targetKeys = null, force = false) {
                     finalContent = mergedObj[key];
                 }
             }
+
+            // TRACK EGRESS (Upload)
+            trackDataUsage(JSON.stringify(finalContent).length, 'out');
 
             // C. Push to Supabase
             const { error: saveErr } = await supabaseClient
@@ -392,6 +423,8 @@ async function fetchSystemStatus() {
         if (!error) {
             const storageEl = document.getElementById('statusStorage');
             const latencyEl = document.getElementById('statusLatency');
+            const bandwidthEl = document.getElementById('statusBandwidth');
+            const lastSyncEl = document.getElementById('statusLastSync');
             const activeTable = document.getElementById('activeUsersTable');
 
             const memoryEl = document.getElementById('statusMemory');
@@ -400,6 +433,49 @@ async function fetchSystemStatus() {
 
             if (storageEl && typeof formatBytes === 'function') {
                 storageEl.innerText = formatBytes(storageSize);
+            }
+            
+            if (bandwidthEl) {
+                // AGGREGATE GLOBAL USAGE
+                const globalUsage = JSON.parse(localStorage.getItem('daily_usage') || '{}');
+                const today = new Date().toISOString().split('T')[0];
+                let total = 0;
+
+                Object.values(globalUsage).forEach(u => {
+                    if (u.date === today) {
+                        total += (u.ingress || 0) + (u.egress || 0);
+                    }
+                });
+                
+                // ESTIMATE: Daily target (500MB) to stay safely within Free Tier (5GB/mo)
+                // Increased to 500MB as we are now summing ALL users
+                const DAILY_LIMIT = 500 * 1024 * 1024; 
+                
+                const percent = Math.min(100, (total / DAILY_LIMIT) * 100).toFixed(1);
+                const remaining = Math.max(0, DAILY_LIMIT - total);
+                
+                const txtTotal = (typeof formatBytes === 'function') ? formatBytes(total) : (total / 1024 / 1024).toFixed(1) + ' MB';
+                const txtRem = (typeof formatBytes === 'function') ? formatBytes(remaining) : (remaining / 1024 / 1024).toFixed(1) + ' MB';
+                
+                let color = '#2ecc71'; // Green
+                if(percent > 75) color = '#f1c40f'; // Yellow
+                if(percent > 90) color = '#ff5252'; // Red
+
+                bandwidthEl.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:end; margin-bottom:5px;">
+                        <span style="font-size:1.2rem;">${txtTotal}</span>
+                        <span style="font-size:0.7rem; color:var(--text-muted);">Global Usage</span>
+                    </div>
+                    <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                        <div style="width:${percent}%; background:${color}; height:100%; transition:width 0.5s;"></div>
+                    </div>
+                `;
+            }
+
+            if (lastSyncEl) {
+                const ts = localStorage.getItem('lastSyncTimestamp');
+                const timeStr = ts ? new Date(parseInt(ts)).toLocaleTimeString() : 'Never';
+                lastSyncEl.innerText = timeStr;
             }
 
             if (latencyEl) {
