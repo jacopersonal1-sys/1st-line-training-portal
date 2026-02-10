@@ -380,6 +380,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
     sessions[bookingId] = session;
     localStorage.setItem('liveSessions', JSON.stringify(sessions));
+    ACTIVE_LIVE_SESSION_ID = bookingId; // FIX: Set active ID immediately
     
     // Force Sync
     if (typeof saveToServer === 'function') await saveToServer(['liveSessions'], true);
