@@ -461,7 +461,7 @@
                     <div id="assessmentDashboard"><p style="color:var(--text-muted);">Loading Overview...</p></div>
                 </div>
                 <div class="card grid-2">
-                    <div><h3>Assessments List</h3><div id="testListAdmin"></div></div>
+                    <div><h3>Test List</h3><div id="testListAdmin"></div></div>
                     <div><h3>Grading Queue</h3><div id="markingList"></div></div>
                 </div>
             </div>
@@ -609,7 +609,15 @@
             <h3 style="margin-top:0; color:#F37021;">Rules of Booking</h3>
             <ul style="margin:0; padding-left:20px; color:var(--text-main);"><li>Trainee is only allowed to book 1 session per hour.</li><li>Do not skip an assessment; rebooking will be difficult.</li><li>Booking times can change depending on the facilitator.</li><li><strong>Cancellation Policy:</strong> Trainees can only cancel 1 session. Further cancellations require Admin approval.</li></ul>
         </div>
-        <div class="card admin-only hidden"><h3>⚙️ Schedule Settings</h3><div class="grid-4" style="align-items:end;"><div><label for="liveStartDate">Start Date</label><input type="date" id="liveStartDate"></div><div><label for="liveNumDays">Number of Days</label><input type="number" id="liveNumDays" value="7" min="1"></div><button class="btn-primary" onclick="generateLiveTable()">Update Dates</button><button class="btn-danger" onclick="clearLiveBookings()">Reset All Bookings</button></div></div>
+        <div class="card admin-only hidden">
+            <h3>⚙️ Schedule Settings</h3>
+            <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 150px;"><label for="liveStartDate" style="display:block; margin-bottom:5px;">Start Date</label><input type="date" id="liveStartDate" style="margin-bottom:0;"></div>
+                <div style="flex: 1; min-width: 100px;"><label for="liveNumDays" style="display:block; margin-bottom:5px;">Number of Days</label><input type="number" id="liveNumDays" value="7" min="1" style="margin-bottom:0;"></div>
+                <button class="btn-primary" onclick="generateLiveTable()" style="height: 42px; white-space: nowrap;">Update Dates</button>
+                <button class="btn-danger" onclick="clearLiveBookings()" style="height: 42px; white-space: nowrap;">Reset All Bookings</button>
+            </div>
+        </div>
         <div class="card"><table class="booking-table"><thead><tr><th style="width:20%;">Date</th><th style="width:20%;">1:00 PM</th><th style="width:20%;">2:00 PM</th><th style="width:20%;">3:00 PM</th><th style="width:20%;">4:00 PM</th></tr></thead><tbody id="liveBookingBody"></tbody></table></div>
         </section>
 

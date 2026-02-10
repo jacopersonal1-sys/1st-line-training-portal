@@ -31,6 +31,11 @@ async function secureRequestSave() {
 
 function loadAllDataViews() { 
     populateMonthlyFilters(); 
+    // Force sync to ensure trainee sees latest scores immediately
+    if (typeof loadFromServer === 'function') {
+        // Silent load to update local cache without blocking UI
+        loadFromServer(true).then(() => renderMonthly());
+    }
     renderMonthly(); 
 }
 
@@ -127,7 +132,7 @@ function renderMonthly() {
     // SAFETY CHECK: Skip corrupted records without trainee names
     if (!r.trainee) return;
 
-    if(CURRENT_USER.role === 'trainee' && r.trainee.toLowerCase() !== CURRENT_USER.user.toLowerCase()) return;
+    if(CURRENT_USER.role === 'trainee' && r.trainee.toLowerCase() !== CURRENT_USER.user.toLowerCase()) return; // Strict filter for trainee
     if(fMonth !== '' && r.groupID !== fMonth) return;
     if(fAssess !== '' && r.assessment !== fAssess) return;
     if(fPhase !== '' && r.phase !== fPhase) return;

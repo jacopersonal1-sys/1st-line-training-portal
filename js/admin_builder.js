@@ -553,6 +553,7 @@ function loadManageTests() {
 
 async function copyTest(id) {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    // Loose comparison for ID to handle string/number differences
     const original = tests.find(t => t.id == id);
     if (!original) return;
 
