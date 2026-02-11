@@ -182,8 +182,10 @@
     <div class="modal-box" style="width: 600px;">
         <h3>First Time Setup</h3>
         <p style="margin-bottom:15px; color:var(--text-muted);">Please complete the following information to continue.</p>
-        <label for="questContact"><strong>Contact Information</strong> (Email / Phone)</label>
-        <textarea id="questContact" placeholder="e.g. email@example.com | 082 123 4567" style="height:60px;"></textarea>
+        <label for="questEmail"><strong>Email Address</strong></label>
+        <input type="text" id="questEmail" placeholder="name@example.com">
+        <label for="questPhone"><strong>Phone Number</strong></label>
+        <input type="text" id="questPhone" placeholder="082 123 4567">
         <label for="questKnowledge"><strong>Knowledge Present Before Training</strong></label>
         <textarea id="questKnowledge" placeholder="Briefly describe your prior experience..." style="height:80px;"></textarea>
         <button class="btn-primary" onclick="saveQuestionnaire()">Save & Continue</button>
@@ -652,7 +654,7 @@
                     <button class="btn-primary" style="background:#005fa3; padding:5px 10px; font-size:0.8rem;" onclick="scanAndGenerateUsers()"><i class="fas fa-sync"></i> Scan Missing</button>
                     <input type="text" placeholder="Filter..." id="userSearch" style="width:150px; margin:0;" onkeyup="loadAdminUsers()" aria-label="Filter Users">
                 </div>
-                <div style="max-height:400px; overflow-y:auto;"><table class="admin-table"><thead><tr><th>User</th><th>Role</th><th>Pass</th><th>Act</th></tr></thead><tbody id="userList"></tbody></table></div>
+                <div style="max-height:400px; overflow-y:auto;"><table class="admin-table"><thead><tr><th>User</th><th>Role</th><th>Email</th><th>Phone</th><th>Pass</th><th>Act</th></tr></thead><tbody id="userList"></tbody></table></div>
             </div>
             </div>
         </div>

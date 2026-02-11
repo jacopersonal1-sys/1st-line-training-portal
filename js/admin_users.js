@@ -348,7 +348,10 @@ function loadAdminUsers() {
                 `;
             }
 
-            return `<tr><td>${u.user}</td><td>${u.role}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
+            const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '-';
+            const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '-';
+
+            return `<tr><td>${u.user}</td><td>${u.role}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
         }).join(''); 
     }
 }

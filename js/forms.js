@@ -38,11 +38,12 @@ function checkQuestionnaire() {
 
 // UPDATED: Async Save with Visual Feedback
 async function saveQuestionnaire() {
-    const contact = document.getElementById('questContact').value.trim();
+    const email = document.getElementById('questEmail').value.trim();
+    const phone = document.getElementById('questPhone').value.trim();
     const knowledge = document.getElementById('questKnowledge').value.trim();
 
-    if (!contact || !knowledge) {
-        return alert("Please complete both fields to finalize your profile.");
+    if (!email || !phone || !knowledge) {
+        return alert("Please complete all fields to finalize your profile.");
     }
 
     // RELOAD USERS to ensure we have the latest list before modifying
@@ -52,7 +53,9 @@ async function saveQuestionnaire() {
     if (idx > -1) {
         // 1. Save the Data Object
         users[idx].traineeData = {
-            contact: contact,
+            email: email,
+            phone: phone,
+            contact: `${email} | ${phone}`, // Backward compatibility
             knowledge: knowledge,
             completedDate: new Date().toISOString()
         };
