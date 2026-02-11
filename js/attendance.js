@@ -151,10 +151,10 @@ function loadAttendanceDashboard() {
 
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const dateFilter = document.getElementById('attDateFilter').value || new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
     
-    // Filter by Date
-    const dailyRecords = records.filter(r => r.date === dateFilter);
+    // Update Alert Widget
+    if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
     
     // Group by Roster
     let html = '';
@@ -166,55 +166,54 @@ function loadAttendanceDashboard() {
         const groupLabel = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, members.length) : gid;
         
         html += `<div class="card" style="margin-bottom:20px;">
-            <h4 style="margin-top:0; border-bottom:1px solid var(--border-color); padding-bottom:10px;">${groupLabel}</h4>
+            <h4 style="margin-top:0; border-bottom:1px solid var(--border-color); padding-bottom:10px; color:var(--primary);">${groupLabel}</h4>
             <table class="admin-table">
                 <thead>
                     <tr>
                         <th>Trainee</th>
-                        <th>Clock In</th>
-                        <th>Clock Out</th>
-                        <th>Status</th>
-                        <th>Details</th>
+                        <th>Total Days</th>
+                        <th>Lates</th>
+                        <th>Today's Status</th>
+                        <th>Last Seen</th>
                     </tr>
                 </thead>
                 <tbody>`;
         
         members.forEach(member => {
-            const rec = dailyRecords.find(r => r.user === member);
+            // Get all records for this user
+            const userRecords = records.filter(r => r.user === member);
+            const totalDays = userRecords.length;
+            const lates = userRecords.filter(r => r.isLate).length;
             
-            if (rec) {
-                let statusHtml = '<span class="status-badge status-pass">On Time</span>';
-                let detailsHtml = '-';
-                
-                if (rec.isLate) {
-                    statusHtml = '<span class="status-badge status-fail">Late</span>';
-                    if (rec.lateData) {
-                        detailsHtml = `<small><strong>Reason:</strong> ${rec.lateData.reason}<br>`;
-                        if (rec.lateData.informed) {
-                            detailsHtml += `<strong>Informed:</strong> ${rec.lateData.contact} via ${rec.lateData.platform}</small>`;
-                        } else {
-                            detailsHtml += `<strong>Informed:</strong> No</small>`;
-                        }
-                    }
+            // Sort to find last seen
+            userRecords.sort((a,b) => new Date(b.date) - new Date(a.date));
+            const lastRecord = userRecords[0];
+            
+            // Check Today
+            const todayRecord = userRecords.find(r => r.date === today);
+            let todayStatus = '<span class="status-badge status-fail" style="opacity:0.5;">Absent</span>';
+            
+            if (todayRecord) {
+                if (todayRecord.clockOut) {
+                    todayStatus = '<span class="status-badge status-pass">Clocked Out</span>';
+                } else {
+                    todayStatus = '<span class="status-badge status-improve">Active</span>';
                 }
-
-                html += `<tr>
-                    <td>${member}</td>
-                    <td>${rec.clockIn}</td>
-                    <td>${rec.clockOut || '<span style="color:var(--text-muted);">Active</span>'}</td>
-                    <td>${statusHtml}</td>
-                    <td>${detailsHtml}</td>
-                </tr>`;
-            } else {
-                // Absent / Not yet clocked in
-                html += `<tr class="user-idle">
-                    <td>${member}</td>
-                    <td>-</td>
-                    <td>-</td>
-                    <td><span class="status-badge status-semi">Absent / Pending</span></td>
-                    <td>-</td>
-                </tr>`;
+                
+                if (todayRecord.isLate) {
+                     todayStatus += ' <span style="font-size:0.7rem; color:#ff5252;">(Late)</span>';
+                }
             }
+
+            const lastSeenStr = lastRecord ? `${lastRecord.date} (${lastRecord.clockIn})` : '-';
+
+            html += `<tr>
+                <td><strong>${member}</strong></td>
+                <td>${totalDays}</td>
+                <td style="${lates > 0 ? 'color:#ff5252; font-weight:bold;' : ''}">${lates}</td>
+                <td>${todayStatus}</td>
+                <td style="font-size:0.85rem; color:var(--text-muted);">${lastSeenStr}</td>
+            </tr>`;
         });
         
         html += `</tbody></table></div>`;

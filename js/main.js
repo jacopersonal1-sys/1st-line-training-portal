@@ -471,6 +471,9 @@ function showAdminSub(viewName, btn) {
   if(viewName === 'updates' && typeof loadAdminUpdates === 'function') {
       loadAdminUpdates();
   }
+  if(viewName === 'attendance' && typeof loadAttendanceDashboard === 'function') {
+      loadAttendanceDashboard();
+  }
 }
 
 /* ================= HEADER BUTTONS ================= */

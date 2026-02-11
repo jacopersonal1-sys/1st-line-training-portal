@@ -530,7 +530,7 @@ function buildAdminWidgets() {
             </div>
         </div>
 
-        <div class="dash-card" onclick="showAdminSub('attendance', document.getElementById('btn-sub-attendance'))" style="cursor:pointer; position:relative;">
+        <div class="dash-card" onclick="showTab('admin-panel'); showAdminSub('attendance', document.getElementById('btn-sub-attendance'))" style="cursor:pointer; position:relative;">
             ${badgeAtt}
             <div class="dash-icon"><i class="fas fa-clock"></i></div>
             <div class="dash-data">

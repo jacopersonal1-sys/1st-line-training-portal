@@ -514,7 +514,9 @@ function openUserEdit(username) {
             <option value="trainee">Trainee</option>
             <option value="teamleader">Team Leader</option>
             <option value="admin">Admin</option>
-        </select>`;
+        </select>
+        <label>Idle Timeout (Minutes)</label>
+        <input type="number" id="editUserTimeout" value="${u.idleTimeout || 15}" min="1" placeholder="Default: 15">`;
     
     if (CURRENT_USER.role !== 'admin') {
         const roleSelect = document.getElementById('editUserRole');
@@ -544,6 +546,9 @@ async function saveUserEdit() {
     if(CURRENT_USER.role === 'admin') {
         users[editTargetIndex].role = document.getElementById('editUserRole').value;
     }
+
+    const timeoutVal = parseInt(document.getElementById('editUserTimeout').value);
+    users[editTargetIndex].idleTimeout = (timeoutVal && timeoutVal > 0) ? timeoutVal : 15;
     
     localStorage.setItem('users', JSON.stringify(users));
     

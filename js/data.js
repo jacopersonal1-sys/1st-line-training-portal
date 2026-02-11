@@ -432,6 +432,7 @@ async function fetchSystemStatus() {
                                 <td>
                                     <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${u.user}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
                                     <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${u.user}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
+                                    <button class="btn-primary btn-sm" onclick="sendRemoteCommand('${u.user}', 'force_update')" title="Force Update Check"><i class="fas fa-cloud-download-alt"></i></button>
                                 </td>
                             </tr>
                         `;
@@ -529,6 +530,12 @@ async function sendHeartbeat() {
                 if (typeof logout === 'function') logout();
             } else if (sessionData.pending_action === 'restart') {
                 if (typeof triggerForceRestart === 'function') triggerForceRestart();
+            } else if (sessionData.pending_action === 'force_update') {
+                if (typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    ipcRenderer.send('manual-update-check');
+                    if(typeof showToast === 'function') showToast("System Update Check Initiated by Admin", "info");
+                }
             }
         }
     } catch (e) { /* Silent fail */ }
@@ -679,6 +686,15 @@ function startRealtimeSync() {
     // Fast updates for "Active User" dashboard status
     HEARTBEAT_INTERVAL_ID = setInterval(() => {
         sendHeartbeat();
+
+        // --- AUTO LOGOUT CHECK ---
+        if (CURRENT_USER) {
+            const last = window.LAST_INTERACTION || Date.now();
+            const limitMinutes = CURRENT_USER.idleTimeout || 15;
+            if ((Date.now() - last) > (limitMinutes * 60 * 1000)) {
+                if (typeof window.cacheAndLogout === 'function') window.cacheAndLogout();
+            }
+        }
         
         if(CURRENT_USER && CURRENT_USER.role === 'admin') {
             const statusView = document.getElementById('admin-view-status');
