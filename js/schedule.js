@@ -3,6 +3,7 @@
 // State Tracker for Timeline
 let ACTIVE_SCHED_ID = 'A'; 
 let VIEW_MODE = 'list'; // 'list' or 'calendar'
+let DRAG_SRC_INDEX = null; // Track item being dragged
 let CALENDAR_MONTH = new Date();
 
 // --- SA PUBLIC HOLIDAYS (2026 Reference) ---
@@ -158,9 +159,9 @@ function buildToolbar(scheduleData, isAdmin) {
     }
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')">Completed / Clear</button>`}</div></div>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')" style="margin-left:5px;">Unassign</button>`}</div></div>`;
     } else {
-        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button>`}</div>`;
+        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button>`}</div>`;
     }
 }
 
@@ -181,6 +182,7 @@ function buildTimeline(items, isAdmin) {
                     actions = '';
                 } else {
                     actions = `
+                        <span style="cursor:grab; color:var(--text-muted); margin-right:10px;" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                         <button class="btn-edit-sched" onclick="editTimelineItem(${index})" aria-label="Edit Item"><i class="fas fa-pen"></i></button>
                         <button class="btn-danger btn-sm" onclick="deleteTimelineItem(${index})" aria-label="Delete Item" style="margin-left:5px;"><i class="fas fa-trash"></i></button>
                     `;
@@ -228,7 +230,7 @@ function buildTimeline(items, isAdmin) {
             }
             // -------------------------------------
 
-            return `<div class="timeline-item ${timelineClass}" style="position:relative; padding-left:20px; border-left:2px solid var(--border-color); margin-bottom:20px;">
+            return `<div class="timeline-item ${timelineClass}" draggable="${isAdmin}" ondragstart="schedDragStart(event, ${index})" ondragover="schedDragOver(event)" ondrop="schedDrop(event, ${index})" style="position:relative; padding-left:20px; border-left:2px solid var(--border-color); margin-bottom:20px;">
                 <div class="timeline-marker"></div>
                 <div class="timeline-content" style="background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -970,4 +972,52 @@ function checkTimeAccess(openStr, closeStr, ignoreTime) {
 function goToTest(testId) {
     if(CURRENT_USER.role === 'teamleader') return;
     showTab('my-tests');
+}
+
+// --- DELETE SCHEDULE ---
+async function deleteSchedule(id) {
+    if (!confirm(`Are you sure you want to delete Schedule ${id} and all its items? This cannot be undone.`)) return;
+    
+    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    delete schedules[id];
+    
+    // If no schedules left, create default A
+    if (Object.keys(schedules).length === 0) {
+        schedules["A"] = { items: [], assigned: null };
+    }
+    
+    localStorage.setItem('schedules', JSON.stringify(schedules));
+    await secureScheduleSave();
+    
+    // Switch to first available
+    ACTIVE_SCHED_ID = Object.keys(schedules).sort()[0];
+    renderSchedule();
+}
+
+// --- DRAG AND DROP HANDLERS ---
+function schedDragStart(e, index) {
+    DRAG_SRC_INDEX = index;
+    e.dataTransfer.effectAllowed = 'move';
+    e.target.style.opacity = '0.4';
+}
+
+function schedDragOver(e) {
+    if (e.preventDefault) e.preventDefault(); // Necessary. Allows us to drop.
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+}
+
+async function schedDrop(e, targetIndex) {
+    if (e.stopPropagation) e.stopPropagation();
+    if (DRAG_SRC_INDEX !== null && DRAG_SRC_INDEX !== targetIndex) {
+        const schedules = JSON.parse(localStorage.getItem('schedules'));
+        const items = schedules[ACTIVE_SCHED_ID].items;
+        const item = items[DRAG_SRC_INDEX];
+        items.splice(DRAG_SRC_INDEX, 1); // Remove from old
+        items.splice(targetIndex, 0, item); // Insert at new
+        localStorage.setItem('schedules', JSON.stringify(schedules));
+        await secureScheduleSave();
+        renderSchedule();
+    }
+    return false;
 }

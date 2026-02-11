@@ -146,6 +146,15 @@ function renderBuilder() {
     container.innerHTML = BUILDER_QUESTIONS.map((q, idx) => {
         totalPoints += parseFloat(q.points || 0);
         let innerHTML = '';
+        
+        // Rich Text Toolbar HTML
+        const toolbarHtml = `
+            <div class="rich-toolbar">
+                <button class="btn-tool" onclick="insertTag(${idx}, 'b')" title="Bold"><b>B</b></button>
+                <button class="btn-tool" onclick="insertTag(${idx}, 'i')" title="Italic"><i>I</i></button>
+                <button class="btn-tool" onclick="insertTag(${idx}, 'ul')" title="List"><i class="fas fa-list-ul"></i></button>
+                <button class="btn-tool" onclick="insertTag(${idx}, 'br')" title="Line Break">&crarr;</button>
+            </div>`;
 
         if (q.type === 'multiple_choice' || q.type === 'multi_select') {
             const isMulti = q.type === 'multi_select';
@@ -244,13 +253,16 @@ function renderBuilder() {
         }
 
         return `
-        <div class="question-card">
+        <div class="question-card" onclick="highlightQuestion(this)">
             <div class="q-header">
                 <strong>Question ${idx + 1} (${q.type.replace('_', ' ')})</strong>
                 <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})"><i class="fas fa-times"></i></button>
             </div>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
-                <textarea placeholder="Enter Question Text" class="q-text-input auto-expand" oninput="autoResize(this)" onchange="updateQText(${idx}, this.value)" style="flex:3;">${q.text || ''}</textarea>
+                <div style="flex:3; display:flex; flex-direction:column;">
+                    ${toolbarHtml}
+                    <textarea id="q_text_${idx}" placeholder="Enter Question Text (HTML supported)" class="q-text-input auto-expand" oninput="autoResize(this)" onchange="updateQText(${idx}, this.value)">${q.text || ''}</textarea>
+                </div>
                 <div style="flex:1;">
                     <input type="number" placeholder="Points" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>
@@ -265,6 +277,26 @@ function renderBuilder() {
     `}).join('');
     
     document.getElementById('builderTotalScore').innerText = totalPoints;
+}
+
+// --- RICH TEXT HELPER ---
+function insertTag(idx, tag) {
+    const textarea = document.getElementById(`q_text_${idx}`);
+    if (!textarea) return;
+
+    let start = textarea.selectionStart;
+    let end = textarea.selectionEnd;
+    let text = textarea.value;
+    let insert = "";
+
+    if (tag === 'b') insert = `<b>${text.substring(start, end)}</b>`;
+    else if (tag === 'i') insert = `<i>${text.substring(start, end)}</i>`;
+    else if (tag === 'ul') insert = `\n<ul>\n  <li>${text.substring(start, end)}</li>\n</ul>\n`;
+    else if (tag === 'br') insert = `<br>`;
+
+    textarea.value = text.substring(0, start) + insert + text.substring(end);
+    updateQText(idx, textarea.value);
+    textarea.focus();
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---
@@ -345,6 +377,11 @@ function updateMatrixCorrect(qIdx, rIdx, val) {
 }
 
 function removeQuestion(idx) { BUILDER_QUESTIONS.splice(idx, 1); renderBuilder(); }
+
+function highlightQuestion(card) {
+    document.querySelectorAll('.question-card').forEach(c => c.classList.remove('active-edit'));
+    card.classList.add('active-edit');
+}
 
 async function saveTest() {
     const type = document.getElementById('builderTestType').value;
@@ -466,15 +503,32 @@ function loadManageTests() {
     const container = document.getElementById('testListAdmin');
     if (!container) return;
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    container.innerHTML = tests.map(t => `
+    
+    // Group by Type
+    const standard = tests.filter(t => !t.type || t.type === 'standard');
+    const live = tests.filter(t => t.type === 'live');
+    const vetting = tests.filter(t => t.type === 'vetting');
+
+    const renderGroup = (title, list, color) => {
+        if (list.length === 0) return '';
+        return `
+            <h4 style="border-bottom:2px solid ${color}; padding-bottom:5px; margin-top:15px; color:${color};">${title}</h4>
+            ${list.map(t => `
         <div class="test-card-row">
             <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
             <div>
-                ${CURRENT_USER.role === 'admin' ? `<button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
+                ${CURRENT_USER.role === 'admin' ? `
+                <button class="btn-secondary btn-sm" onclick="copyTest('${t.id}')" title="Copy"><i class="fas fa-copy"></i></button>
+                <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
                 <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
             </div>
-        </div>
-    `).join('');
+        </div>`).join('')}`;
+    };
+
+    container.innerHTML = 
+        renderGroup("Standard Assessments", standard, "var(--text-main)") +
+        renderGroup("Live Assessments", live, "var(--primary)") +
+        renderGroup("Vetting Tests", vetting, "#9b59b6");
 }
 
 async function deleteTest(id) {
@@ -487,4 +541,26 @@ async function deleteTest(id) {
     if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
     
     loadManageTests();
+}
+
+async function copyTest(id) {
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const original = tests.find(t => t.id == id);
+    if (!original) return;
+
+    const newName = prompt("Enter name for the copy:", original.title + " (Copy)");
+    if (!newName) return;
+
+    const copy = JSON.parse(JSON.stringify(original));
+    copy.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+    copy.title = newName;
+    
+    tests.push(copy);
+    localStorage.setItem('tests', JSON.stringify(tests));
+
+    // Sync
+    if(typeof saveToServer === 'function') await saveToServer(['tests'], false);
+
+    loadManageTests();
+    if(typeof showToast === 'function') showToast("Test copied successfully.", "success");
 }

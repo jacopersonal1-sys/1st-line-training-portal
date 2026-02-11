@@ -18,7 +18,7 @@ function loadLiveExecution() {
     }
 
     // Start Polling for updates (Real-time sync)
-    LIVE_POLLER = setInterval(syncLiveSessionState, 2000);
+    LIVE_POLLER = setInterval(syncLiveSessionState, 1000); // Faster polling (1s) for immediate updates
 }
 
 async function syncLiveSessionState() {
@@ -143,6 +143,7 @@ function renderAdminLivePanel(container) {
                 <div class="card" style="overflow-y:auto;">
                     <h4>Admin Preview (Q${currentQ+1})</h4>
                     <div style="font-size:1.2rem; font-weight:bold; margin-bottom:15px;">${q.text}</div>
+                    <button class="btn-secondary btn-sm" onclick="updateAdminLiveView()" style="margin-bottom:10px;"><i class="fas fa-sync"></i> Force Refresh Answer</button>
                     ${adminNote}
                     <div style="background:var(--bg-input); padding:10px; border-radius:4px;">
                         <small>Type: ${q.type}</small><br>
@@ -288,7 +289,7 @@ function renderTraineeLivePanel(container) {
     const q = test.questions[session.currentQ];
     let existingAns = session.answers[session.currentQ];
 
-    // --- FIX: Initialize default answers for complex types if undefined ---
+    // --- FIX: Initialize default answers for complex types if undefined (Prevents Matrix Reset) ---
     if (existingAns === undefined || existingAns === null) {
         if (q.type === 'ranking' || q.type === 'drag_drop') {
             existingAns = [...(q.items || [])];
@@ -327,9 +328,11 @@ function renderTraineeLivePanel(container) {
             </div>
             
             <div class="card" style="padding:40px;">
-                <h2 style="font-size:2rem; margin-bottom:30px;">${session.currentQ + 1}. ${q.text}</h2>
+                <div style="max-height:25vh; overflow-y:auto; margin-bottom:30px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                    <h2 style="font-size:2rem; margin:0;">${session.currentQ + 1}. ${q.text}</h2>
+                </div>
                 
-                <div class="live-input-area" style="font-size:1.2rem;">
+                <div class="live-input-area" style="font-size:1.2rem; max-height:60vh; overflow-y:auto;">
                     ${inputHtml}
                 </div>
 
@@ -432,7 +435,7 @@ async function submitLiveAnswer(qIdx) {
     const btn = document.querySelector('.btn-primary.btn-lg');
     if(btn) { btn.innerText = "Sending..."; btn.disabled = true; }
     
-    await updateGlobalSessionArray(session, false);
+    await updateGlobalSessionArray(session, false); // Safe Merge (prevents overwriting other sessions)
     
     if(btn) { 
         // Check type to determine text

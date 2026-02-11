@@ -192,7 +192,13 @@ function openAdminMarking(subId) {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Error: Submission data not found.");
+ 
+    // SNAPSHOT LOGIC: Use saved test definition if available (Historical accuracy)
+    // SNAPSHOT LOGIC: STRICTLY use saved test definition if available (Historical accuracy)
+    let test = sub.testSnapshot;
     
+    if (!test) {
+    if (!test || !test.questions) {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == sub.testId); 
     
@@ -207,9 +213,9 @@ function openAdminMarking(subId) {
     const isLocked = sub.status === 'completed' && CURRENT_USER.role !== 'admin';
 
     container.innerHTML = `
-        <div style="margin-bottom:20px; border-bottom:2px solid var(--border-color); padding-bottom:10px;">
-            <h2 style="margin:0;">Marking: ${sub.trainee}</h2>
-            <p style="color:var(--primary); font-weight:bold; margin:5px 0;">${sub.testTitle}</p>
+        <div style="margin-bottom:20px; border-bottom:2px solid var(--border-color); padding-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+            <div><h2 style="margin:0;">Marking: ${sub.trainee}</h2><p style="color:var(--primary); font-weight:bold; margin:5px 0;">${sub.testTitle}</p></div>
+            <button class="btn-secondary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
         </div>
     `;
 
@@ -220,13 +226,10 @@ function openAdminMarking(subId) {
         let autoScore = 0;
         
         // Display Admin Notes if present
-        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main); white-space: pre-wrap;"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
         
         // Display Trainer Comments (from Live Assessment)
         let trainerCommentHtml = (sub.comments && sub.comments[idx]) ? `<div style="margin-bottom:10px; padding:8px; background:rgba(46, 204, 113, 0.1); border-left:3px solid #2ecc71; font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-comment-dots"></i> Trainer Comment:</strong> ${sub.comments[idx]}</div>` : '';
-
-        // Reference Button for Marker
-        const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
         // Prepend to markHtml later
 
@@ -806,7 +809,8 @@ function renderQuestionInput(q, idx) {
         (q.rows || []).forEach((r, rIdx) => {
             html += `<tr><td style="text-align:left; font-weight:bold;">${r}</td>`;
             (q.cols || []).forEach((c, cIdx) => {
-                const isChecked = (savedAns && savedAns[rIdx] == cIdx) ? 'checked' : '';
+                // Loose equality (==) to handle string/number mismatch from JSON
+                const isChecked = (savedAns && savedAns[rIdx] != null && savedAns[rIdx] == cIdx) ? 'checked' : '';
                 html += `<td><input type="radio" style="cursor:pointer;" name="mx_${idx}_${rIdx}" value="${cIdx}" onchange="updateMatrixAnswer(${idx}, ${rIdx}, ${cIdx})" ${isChecked}></td>`;
             });
             html += `</tr>`;

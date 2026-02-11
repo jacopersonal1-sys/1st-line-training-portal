@@ -109,6 +109,7 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
 .login-brand span { 
     background: linear-gradient(135deg, var(--primary), #ff9a5b);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     color: var(--primary);
 }
@@ -238,6 +239,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .timeline-container { position: relative; padding: 10px 0; }
 .timeline-container::before { content: ''; position: absolute; top: 0; left: 19px; height: 100%; width: 2px; background: var(--border-color); }
 .timeline-item { position: relative; margin-bottom: 25px; padding-left: 50px; }
+
+/* Drag and Drop Visuals */
+.timeline-item[draggable="true"] { cursor: grab; }
+.timeline-item[draggable="true"]:active { cursor: grabbing; }
 
 /* Status Styles & Dots */
 .timeline-marker { position: absolute; left: 10px; top: 0; width: 20px; height: 20px; background: var(--bg-card); border: 3px solid var(--text-muted); border-radius: 50%; z-index: 2; transition: 0.3s; }
@@ -416,7 +421,7 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
 .admin-view.active { display: block; }
 
 @media print {
-  body { background: white; -webkit-print-color-adjust: exact; }
+  body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .no-print, .top-bar, .sidebar, #manage, #capture, #monthly, #insights, #live-assessment, #assessment-schedule, #admin-panel, #profile-view, #bookingModal, #scheduleModal, #adminEditModal, #login-screen { display: none !important; }
   #app { margin: 0; padding: 0; display: block !important; }
   .content-wrapper { margin: 0; padding: 0; width: 100%; }
@@ -443,7 +448,7 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
 /* Taking View */
 .taking-card { background: var(--bg-card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border-color); }
 .q-text { font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; }
-.taking-input { width: 100%; min-height: 200px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 8px; }
+.taking-input { width: 100%; min-height: 300px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 8px; }
 
 .taking-radio { display: block; padding: 10px; background: var(--bg-input); margin-bottom: 5px; cursor: pointer; border-radius: 4px; }
 .taking-radio:hover { background: var(--bg-hover); }
@@ -757,6 +762,22 @@ textarea.auto-expand {
     text-align: left;
 }
 
+/* --- RICH TEXT TOOLBAR --- */
+.rich-toolbar {
+    display: flex; gap: 5px; margin-bottom: 5px;
+    background: var(--bg-input); padding: 5px; border-radius: 4px 4px 0 0; border: 1px solid var(--border-color); border-bottom: none;
+}
+.btn-tool {
+    background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-main);
+    padding: 2px 8px; cursor: pointer; border-radius: 3px; font-size: 0.8rem;
+}
+.btn-tool:hover { background: var(--bg-hover); color: var(--primary); }
+
+.question-card.active-edit {
+    border: 2px solid var(--primary);
+    box-shadow: 0 0 15px var(--primary-soft);
+}
+
 /* ================= VETTING SECURITY LOG ================= */
 .security-log-box {
     background: rgba(0,0,0,0.2);
@@ -791,6 +812,7 @@ textarea.auto-expand {
     padding: 20px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
+    overflow-y: auto; /* Fix for long answers */
 }
 
 /* ================= AGENT SEARCH ================= */
