@@ -18,6 +18,7 @@ Kindly assist with access to the following programs (the error the onboards are 
 Q-Contact
 Corteza (CRM Instance present)
 ACS
+Odoo portal
 
 Please find the onboards whom require access below:
 ${emails.join('\n')}`;

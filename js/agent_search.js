@@ -52,6 +52,7 @@ function renderAgentDashboard(agentName) {
     const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     
     // Filter Data
     const agentRecords = records.filter(r => r.trainee.toLowerCase() === agentName.toLowerCase());
@@ -180,6 +181,44 @@ function renderAgentDashboard(agentName) {
         reportHtml = `<div class="card" style="text-align:center; padding:30px; color:var(--text-muted);">No Onboard Report generated yet.</div>`;
     }
     
+    // --- ATTENDANCE HISTORY ---
+    const agentAtt = attRecords.filter(r => r.user.toLowerCase() === agentName.toLowerCase());
+    agentAtt.sort((a,b) => new Date(b.date) - new Date(a.date)); // Newest first
+    
+    const totalDays = agentAtt.length;
+    const lateDays = agentAtt.filter(r => r.isLate).length;
+    const onTimeDays = totalDays - lateDays;
+    
+    let attHtml = `
+        <div class="card">
+            <h3><i class="fas fa-clock" style="color:var(--primary); margin-right:10px;"></i>Attendance History</h3>
+            <div style="display:flex; gap:20px; margin-bottom:15px; justify-content:space-around; background:var(--bg-input); padding:15px; border-radius:8px;">
+                <div style="text-align:center;">
+                    <div style="font-size:1.5rem; font-weight:bold;">${totalDays}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Days Present</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:1.5rem; font-weight:bold; color:#2ecc71;">${onTimeDays}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">On Time</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:1.5rem; font-weight:bold; color:${lateDays > 0 ? '#ff5252' : 'var(--text-main)'};">${lateDays}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Late</div>
+                </div>
+            </div>
+            <div style="max-height:200px; overflow-y:auto;">
+                <table class="admin-table">
+                    <thead><tr><th>Date</th><th>In</th><th>Out</th><th>Status</th></tr></thead>
+                    <tbody>
+                        ${agentAtt.length > 0 ? agentAtt.map(r => `
+                            <tr><td>${r.date}</td><td>${r.clockIn}</td><td>${r.clockOut||'-'}</td><td>${r.isLate ? '<span style="color:#ff5252;">Late</span>' : '<span style="color:#2ecc71;">On Time</span>'}</td></tr>
+                        `).join('') : '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No attendance records found.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
     // --- PRIVATE NOTES ---
     const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
     const agentNote = notes[agentName] || "";
@@ -196,7 +235,7 @@ function renderAgentDashboard(agentName) {
         </div>
     `;
     
-    container.innerHTML = headerHtml + reviewHtml + recordsHtml + reportHtml + notesHtml;
+    container.innerHTML = headerHtml + reviewHtml + recordsHtml + reportHtml + attHtml + notesHtml;
 }
 
 async function saveAgentNote(agentName) {

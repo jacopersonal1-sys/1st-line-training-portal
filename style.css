@@ -143,15 +143,17 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
     background: var(--bg-card); border-right: 1px solid var(--border-color);
     z-index: 1000; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden; white-space: nowrap; display: flex; flex-direction: column;
+    -webkit-app-region: drag; /* Make sidebar a drag handle */
 }
 .sidebar:hover { width: 250px; box-shadow: 10px 0 30px rgba(0,0,0,0.5); }
-.sidebar-menu { padding-top: 90px; display: flex; flex-direction: column; gap: 5px; }
+.sidebar-menu { padding-top: 90px; display: flex; flex-direction: column; gap: 5px; -webkit-app-region: no-drag; /* Keep buttons clickable */ }
 
 .nav-item {
     background: transparent; border: none; color: var(--text-muted);
     padding: 12px 0 12px 20px; text-align: left; cursor: pointer;
     display: flex; align-items: center; font-size: 1.1rem;
     transition: 0.2s; width: 100%; border-radius: 0;
+    -webkit-app-region: no-drag;
 }
 .nav-item i { width: 30px; text-align: center; margin-right: 15px; font-size: 1.2rem; }
 .nav-text { opacity: 0; transition: opacity 0.2s; font-weight: 500; font-size: 0.95rem; }

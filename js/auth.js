@@ -164,6 +164,9 @@ async function autoLogin() {
   applyRolePermissions();
   checkFirstTimeLogin();
   
+  // MANDATORY: Check Attendance on Login
+  if (typeof checkAttendanceStatus === 'function') checkAttendanceStatus();
+  
   // Trigger Notifications Calculation
   if (typeof updateNotifications === 'function') updateNotifications();
   

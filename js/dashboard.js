@@ -448,6 +448,8 @@ function buildAdminWidgets() {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
     const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const today = new Date().toISOString().split('T')[0];
     
     // 1. Stats Calculation
     const totalTrainees = users.filter(u => u.role === 'trainee').length;
@@ -478,6 +480,13 @@ function buildAdminWidgets() {
     const newBookingsCount = bookings.filter(b => b.date >= todayStr && b.status === 'Booked').length;
     const badgeBooking = newBookingsCount > 0 
         ? `<span class="badge-count" style="top:-8px; right:-8px; background:#2ecc71; font-size:0.8rem;">${newBookingsCount}</span>` 
+        : '';
+
+    // Attendance Alert (Missing Clock-ins)
+    const clockedInCount = attRecords.filter(r => r.date === today).length;
+    const missingAtt = totalTrainees - clockedInCount;
+    const badgeAtt = missingAtt > 0 
+        ? `<span class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${missingAtt}</span>` 
         : '';
 
     return `
@@ -518,6 +527,15 @@ function buildAdminWidgets() {
             <div class="dash-data">
                 <h3>Live Bookings</h3>
                 <p>Manage Sessions</p>
+            </div>
+        </div>
+
+        <div class="dash-card" onclick="showAdminSub('attendance', document.getElementById('btn-sub-attendance'))" style="cursor:pointer; position:relative;">
+            ${badgeAtt}
+            <div class="dash-icon"><i class="fas fa-clock"></i></div>
+            <div class="dash-data">
+                <h3>Attendance</h3>
+                <p>View Register</p>
             </div>
         </div>
 
@@ -720,6 +738,14 @@ function buildTraineeWidgets() {
     const myRecords = records.filter(r => r.trainee === CURRENT_USER.user);
     const lastRecord = myRecords.length > 0 ? myRecords[myRecords.length - 1] : null;
 
+    // 3. Attendance Status
+    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const today = new Date().toISOString().split('T')[0];
+    const myAtt = attRecords.find(r => r.user === CURRENT_USER.user && r.date === today);
+    
+    let clockOutBtn = (myAtt && !myAtt.clockOut) 
+        ? `<button class="btn-warning btn-sm" style="width:100%; margin-top:10px;" onclick="submitClockOut()">Clock Out</button>` : '';
+
     return `
         <div class="dash-panel main-panel">
             <h4><i class="fas fa-tasks"></i> Up Next</h4>
@@ -727,6 +753,7 @@ function buildTraineeWidgets() {
                 <h2 style="color:var(--primary);">${nextTask}</h2>
                 <p style="color:var(--text-muted);">${nextDate}</p>
                 <button class="btn-primary" style="margin-top:15px;" onclick="showTab('assessment-schedule')">Go to Schedule</button>
+                ${clockOutBtn}
             </div>
         </div>
 

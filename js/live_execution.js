@@ -451,6 +451,18 @@ async function submitLiveAnswer(qIdx) {
 async function finishLiveSession() {
     // 1. Build Editable Summary View
     const session = JSON.parse(localStorage.getItem('liveSession'));
+    
+    // FIX: Scrape current inputs if visible (for the last question)
+    const currentCommentInput = document.getElementById('liveCommentInput');
+    const currentScoreInput = document.getElementById('liveScoreInput');
+    if (currentCommentInput && session.currentQ !== -1) {
+        session.comments[session.currentQ] = currentCommentInput.value;
+    }
+    if (currentScoreInput && session.currentQ !== -1) {
+        session.scores[session.currentQ] = parseFloat(currentScoreInput.value) || 0;
+    }
+    localStorage.setItem('liveSession', JSON.stringify(session));
+
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
 
@@ -490,11 +502,11 @@ async function finishLiveSession() {
             <div style="display:grid; grid-template-columns: 1fr 2fr; gap:15px;">
                 <div>
                     <label style="font-size:0.8rem;">Score</label>
-                    <input type="number" class="live-final-score" value="${currentScore}" max="${pts}" min="0" step="0.5" onchange="saveLiveScore(${idx}, this.value)">
+                    <input type="number" class="live-final-score" data-idx="${idx}" value="${currentScore}" max="${pts}" min="0" step="0.5" onchange="saveLiveScore(${idx}, this.value)">
                 </div>
                 <div>
                     <label style="font-size:0.8rem;">Comment</label>
-                    <input type="text" class="live-final-comment" value="${currentComment}" placeholder="Feedback..." onchange="saveLiveComment(${idx}, this.value)">
+                    <input type="text" class="live-final-comment" data-idx="${idx}" value="${currentComment}" placeholder="Feedback..." onchange="saveLiveComment(${idx}, this.value)">
                 </div>
             </div>
         </div>`;
@@ -525,6 +537,17 @@ async function confirmAndSaveLiveSession() {
     const session = JSON.parse(localStorage.getItem('liveSession'));
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
+
+    // ROBUSTNESS: Scrape inputs to ensure latest edits are captured
+    // (Fixes issue where comments don't save if user doesn't click away first)
+    document.querySelectorAll('.live-final-comment').forEach(input => {
+        const idx = input.getAttribute('data-idx');
+        if(idx !== null) session.comments[idx] = input.value;
+    });
+    document.querySelectorAll('.live-final-score').forEach(input => {
+        const idx = input.getAttribute('data-idx');
+        if(idx !== null) session.scores[idx] = parseFloat(input.value) || 0;
+    });
 
     // Recalculate Score (in case edits were made in summary view)
     let totalScore = 0;

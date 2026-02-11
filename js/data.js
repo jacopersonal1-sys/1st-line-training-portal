@@ -19,6 +19,11 @@ const DB_SCHEMA = {
     insightReviews: [], 
     exemptions: [], 
     notices: [],
+    attendance_records: [],
+    attendance_settings: {
+        platforms: ["WhatsApp", "Microsoft Teams", "Call", "SMS"],
+        contacts: ["Darren", "Netta", "Jaco", "Claudine"]
+    },
     revokedUsers: [], // Added to ensure blacklist syncs
     accessLogs: [], // Login/Logout/Timeout History
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
