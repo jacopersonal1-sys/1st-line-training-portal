@@ -181,9 +181,6 @@ async function remVetting(i) {
 // --- SECTION 2: DATABASE MANAGEMENT (Raw Data) ---
 
 function loadAdminDatabase() { 
-    // Refresh Stats
-    renderDatabaseStats();
-
     const term = document.getElementById('dbSearch') ? document.getElementById('dbSearch').value.toLowerCase() : '';
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const users = JSON.parse(localStorage.getItem('users') || '[]');
@@ -237,23 +234,6 @@ function loadAdminDatabase() {
              else leftPanel.classList.remove('hidden');
          }
     }
-}
-
-function renderDatabaseStats() {
-    const statsContainer = document.getElementById('dbStatsContainer');
-    if (!statsContainer) return;
-
-    const recs = JSON.parse(localStorage.getItem('records') || '[]');
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const arch = JSON.parse(localStorage.getItem('archive_submissions') || '[]');
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-
-    statsContainer.innerHTML = `
-        <div class="status-item"><strong>${users.length}</strong> Users</div>
-        <div class="status-item"><strong>${recs.length}</strong> Records</div>
-        <div class="status-item"><strong>${subs.length}</strong> Active Subs</div>
-        <div class="status-item" style="color:var(--text-muted);"><strong>${arch.length}</strong> Archived</div>
-    `;
 }
 
 async function deleteBulkRecords() {
@@ -340,47 +320,6 @@ async function syncGroupsFromRecords() {
     
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
     alert(`Sync Complete! Added ${updatedCount} trainees to their respective groups.`); 
-}
-
-async function archiveOldSubmissions() {
-    if(!confirm("Archive submissions from previous months?\n\nThis moves completed tests older than the current month to a separate storage key ('archive_submissions').\n\nThis significantly reduces bandwidth usage for daily syncs.")) return;
-
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const archives = JSON.parse(localStorage.getItem('archive_submissions') || '[]');
-    
-    const now = new Date();
-    // Cutoff: 1st day of the current month (00:00:00)
-    const cutoffDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    
-    const keep = [];
-    const move = [];
-    
-    subs.forEach(s => {
-        const sDate = new Date(s.date);
-        // Archive if older than current month AND completed
-        if (sDate < cutoffDate && s.status === 'completed') {
-            move.push(s);
-        } else {
-            keep.push(s);
-        }
-    });
-    
-    if (move.length === 0) {
-        if(typeof showToast === 'function') showToast("No old completed submissions found to archive.", "info");
-        return;
-    }
-    
-    // Add to archives
-    const newArchives = [...archives, ...move];
-    
-    localStorage.setItem('submissions', JSON.stringify(keep));
-    localStorage.setItem('archive_submissions', JSON.stringify(newArchives));
-    
-    if(typeof saveToServer === 'function') await saveToServer(['submissions', 'archive_submissions'], true);
-    
-    if(typeof showToast === 'function') showToast(`Archived ${move.length} submissions successfully.`, "success");
-    loadAdminDatabase();
-    if(typeof loadCompletedHistory === 'function') loadCompletedHistory();
 }
 
 // --- SECTION 3: IMPORT / EXPORT & BACKUP (OVERRIDES) ---
@@ -631,4 +570,17 @@ async function confirmFactoryReset() {
         console.error("Reset Error:", error);
         alert("An error occurred during reset.");
     }
+}
+
+async function resetLiveSessionsKey() {
+    if(!confirm("Clear 'liveSessions' array? Use this if the Live Arena is lagging due to data bloat.")) return;
+    
+    const btn = document.activeElement;
+    if(btn) { btn.innerText = "Clearing..."; btn.disabled = true; }
+
+    localStorage.setItem('liveSessions', '[]');
+    if (typeof saveToServer === 'function') await saveToServer(['liveSessions'], true);
+    
+    alert("Live Sessions cleared. Reloading...");
+    location.reload();
 }

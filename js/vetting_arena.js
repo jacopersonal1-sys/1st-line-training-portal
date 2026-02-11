@@ -343,13 +343,6 @@ async function pollVettingSession() {
         // Only re-render if state changed
         if (currentLocal !== newStr) {
             localStorage.setItem('vettingSession', newStr);
-            
-            // FIX: If session ended while taking test, force submit/exit
-            if (!serverSession.active && document.getElementById('arenaTestContainer')) {
-                if (typeof submitTest === 'function') await submitTest(true); // Force submit
-                return;
-            }
-
             // If we are NOT currently taking the test, refresh the view
             if (!document.getElementById('arenaTestContainer')) {
                 renderTraineeArena();
@@ -456,7 +449,7 @@ async function updateTraineeStatus(status, timerStr = "") {
     // CHECK: Session Ended?
     const currentSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
     if (!currentSession.active && status === 'started') {
-        if (typeof submitTest === 'function') await submitTest(true);
+        if (typeof submitTest === 'function') await submitTest();
         return;
     }
 
@@ -479,14 +472,10 @@ async function updateTraineeStatus(status, timerStr = "") {
             apps: apps
         };
 
-        // CHECK: Forbidden Apps OR Multiple Screens during test?
-        if ((apps.length > 0 || screens > 1) && status === 'started') {
-            let reason = [];
-            if (apps.length > 0) reason.push("Forbidden apps (" + apps.join(', ') + ")");
-            if (screens > 1) reason.push("Multiple monitors (" + screens + ")");
-            
-            alert("Security Violation: " + reason.join(' & ') + " detected. Test ended.");
-            if (typeof submitTest === 'function') await submitTest(true); // Force Submit (No Cancel)
+        // CHECK: Forbidden Apps during test?
+        if (apps.length > 0 && status === 'started') {
+            alert("Security Violation: Forbidden apps detected (" + apps.join(', ') + "). Test ending.");
+            if (typeof submitTest === 'function') await submitTest();
             return; // Stop here, submitTest will handle the rest
         }
     }
@@ -498,24 +487,12 @@ async function updateTraineeStatus(status, timerStr = "") {
 function startActiveTestMonitoring() {
     if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
     
-    // Update status/heartbeat every 30 seconds
+    // Update status every 30 seconds
     SECURITY_MONITOR_INTERVAL = setInterval(() => {
         const timerEl = document.getElementById('test-timer-bar');
         const timeStr = timerEl ? timerEl.innerText.replace('TIME: ', '') : '';
         updateTraineeStatus('started', timeStr);
     }, 30000);
-
-    // FAST SECURITY POLL (3s) - Detect violations quickly
-    // We don't send full status to server every 3s to save bandwidth, 
-    // but we check locally and trigger updateTraineeStatus ONLY if violation found.
-    setInterval(async () => {
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            const apps = await ipcRenderer.invoke('get-process-list');
-            const screens = await ipcRenderer.invoke('get-screen-count');
-            if (apps.length > 0 || screens > 1) updateTraineeStatus('started'); // Trigger the kick logic
-        }
-    }, 3000);
 }
 
 // Called by assessment.js when submitting

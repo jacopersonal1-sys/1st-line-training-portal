@@ -191,7 +191,7 @@ async function saveScores() {
 // Function to View Completed Tests (Called from Test Records)
 function viewCompletedTest(trainee, assessment, mode = 'view') {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    // Find all matches to ensure we get the latest if multiple exist
+    // Find all matches
     const matches = subs.filter(s => s.trainee === trainee && s.testTitle === assessment);
     
     if(matches.length === 0) {
@@ -290,6 +290,7 @@ function loadTestRecords() {
                 
                 // ADMIN ONLY ACTIONS
                 if (CURRENT_USER.role === 'admin') {
+                    actionBtn += ` <button class="btn-primary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'edit')" title="Edit Score"><i class="fas fa-pen"></i></button>`;
                     actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;
                     
                     // Allow Retake if not already archived
@@ -317,18 +318,8 @@ async function allowRetake(subId) {
         sub.status = 'retake_allowed'; 
         localStorage.setItem('submissions', JSON.stringify(subs));
         
-        // RESET VETTING SESSION STATUS IF APPLICABLE
-        // This ensures the trainee can re-enter the Arena and isn't stuck on "Submitted"
-        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-        if (session.active && session.testId == sub.testId) {
-            if (session.trainees && session.trainees[sub.trainee]) {
-                delete session.trainees[sub.trainee]; 
-                localStorage.setItem('vettingSession', JSON.stringify(session));
-            }
-        }
-
         // --- CLOUD SYNC (Instant) ---
-        if(typeof saveToServer === 'function') await saveToServer(['submissions', 'vettingSession'], true);
+        if(typeof saveToServer === 'function') await saveToServer(['submissions'], false);
         
         alert("Retake granted.");
         loadTestRecords();

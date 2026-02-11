@@ -93,7 +93,6 @@ function loadTestBuilder(existingId = null) {
             }
             
             if(test.duration) document.getElementById('builderDuration').value = test.duration;
-            document.getElementById('builderShuffle').checked = test.shuffle || false;
             
             // Load Questions
             BUILDER_QUESTIONS = test.questions || [];
@@ -104,7 +103,6 @@ function loadTestBuilder(existingId = null) {
     } else {
         // New Test
         if(typeSelect) typeSelect.onchange(); // Trigger default
-        document.getElementById('builderShuffle').checked = false;
         document.getElementById('builderCustomTitle').value = '';
     }
 }
@@ -112,7 +110,7 @@ function loadTestBuilder(existingId = null) {
 function addQuestion(type) {
     // UPDATED: Consistent String IDs
     const id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    let q = { id, type, text: "", points: 1, adminNotes: "", imageLink: "", linkedToPrevious: false }; // Default structure with points
+    let q = { id, type, text: "", points: 1, adminNotes: "" }; // Default structure with points
 
     // Specific structures per type
     if (type === 'multiple_choice' || type === 'multi_select') {
@@ -245,17 +243,6 @@ function renderBuilder() {
             `;
         }
 
-        let linkControl = '';
-        if (idx > 0) {
-            linkControl = `
-            <div style="margin-bottom:10px; padding:5px 10px; background:var(--bg-input); border-radius:4px; border:1px dashed var(--border-color);">
-                <label style="cursor:pointer; font-size:0.85rem; display:flex; align-items:center; margin:0; color:var(--text-muted);">
-                    <input type="checkbox" ${q.linkedToPrevious ? 'checked' : ''} onchange="updateLinkedToPrevious(${idx}, this.checked)" style="width:auto; margin-right:8px; margin-bottom:0;">
-                    <i class="fas fa-link" style="margin-right:5px;"></i> Keep attached to previous question (Group for Shuffle)
-                </label>
-            </div>`;
-        }
-
         return `
         <div class="question-card">
             <div class="q-header">
@@ -263,25 +250,14 @@ function renderBuilder() {
                 <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})"><i class="fas fa-times"></i></button>
             </div>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
-                <div class="rich-text-container" style="flex:3;">
-                    <div class="rich-toolbar">
-                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('bold')" title="Bold"><i class="fas fa-bold"></i></button>
-                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('italic')" title="Italic"><i class="fas fa-italic"></i></button>
-                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('insertUnorderedList')" title="Bullet List"><i class="fas fa-list-ul"></i></button>
-                    </div>
-                    <div class="rich-editor" contenteditable="true" oninput="updateQText(${idx}, this.innerHTML)">${q.text || ''}</div>
-                </div>
+                <textarea placeholder="Enter Question Text" class="q-text-input auto-expand" oninput="autoResize(this)" onchange="updateQText(${idx}, this.value)" style="flex:3;">${q.text || ''}</textarea>
                 <div style="flex:1;">
                     <input type="number" placeholder="Points" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>
             </div>
             <div style="margin-bottom:10px;">
-                <textarea placeholder="Admin/Marker Notes (Hidden from Trainee)" class="auto-expand" oninput="autoResize(this)" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border: 1px dashed var(--border-color); width:100%; min-height:40px;">${q.adminNotes || ''}</textarea>
+                <input type="text" placeholder="Admin/Marker Notes (Hidden from Trainee)" value="${q.adminNotes || ''}" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border-style:dashed;">
             </div>
-            <div style="margin-bottom:10px;">
-                <input type="text" placeholder="Reference Image/Page URL (Optional)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary);">
-            </div>
-            ${linkControl}
             <div style="margin-top:10px;">
                 ${innerHTML}
             </div>
@@ -289,11 +265,6 @@ function renderBuilder() {
     `}).join('');
     
     document.getElementById('builderTotalScore').innerText = totalPoints;
-
-    // VISUAL FIX: Resize textareas after rendering
-    setTimeout(() => {
-        container.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
-    }, 0);
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---
@@ -305,7 +276,6 @@ function saveBuilderDraft() {
         id: EDITING_TEST_ID,
         title: document.getElementById('builderAssessmentSelect').value,
         type: document.getElementById('builderTestType').value,
-        shuffle: document.getElementById('builderShuffle').checked,
         duration: document.getElementById('builderDuration').value
     };
     localStorage.setItem('draft_builder', JSON.stringify(draft));
@@ -326,7 +296,6 @@ function restoreBuilderDraft() {
     document.getElementById('builderAssessmentSelect').value = draft.title;
     document.getElementById('builderTestType').value = draft.type;
     document.getElementById('builderDuration').value = draft.duration;
-    document.getElementById('builderShuffle').checked = draft.shuffle || false;
     
     // Trigger type change to show/hide duration
     document.getElementById('builderTestType').onchange();
@@ -335,24 +304,9 @@ function restoreBuilderDraft() {
 }
 
 // --- BUILDER UPDATERS ---
-function formatDoc(cmd, value=null) {
-    document.execCommand(cmd, false, value);
-}
-
 function updateQText(idx, val) { BUILDER_QUESTIONS[idx].text = val; }
-function updatePoints(idx, val) { 
-    BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; 
-    updateBuilderTotalScore(); 
-}
-function updateBuilderTotalScore() {
-    let total = 0;
-    BUILDER_QUESTIONS.forEach(q => total += parseFloat(q.points || 0));
-    const el = document.getElementById('builderTotalScore');
-    if(el) el.innerText = total;
-}
+function updatePoints(idx, val) { BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; renderBuilder(); }
 function updateAdminNotes(idx, val) { BUILDER_QUESTIONS[idx].adminNotes = val; }
-function updateImageLink(idx, val) { BUILDER_QUESTIONS[idx].imageLink = val; }
-function updateLinkedToPrevious(idx, val) { BUILDER_QUESTIONS[idx].linkedToPrevious = val; }
 
 function updateOptText(qIdx, oIdx, val) { BUILDER_QUESTIONS[qIdx].options[oIdx] = val; }
 function updateCorrect(qIdx, oIdx, type) { 
@@ -379,8 +333,8 @@ function updateOrderedItem(qIdx, iIdx, val) { BUILDER_QUESTIONS[qIdx].items[iIdx
 function addOrderedItem(idx) { BUILDER_QUESTIONS[idx].items.push(""); renderBuilder(); }
 function removeOrderedItem(idx, iIdx) { BUILDER_QUESTIONS[idx].items.splice(iIdx, 1); renderBuilder(); }
 
-function updateMatrixRow(qIdx, rIdx, val) { BUILDER_QUESTIONS[qIdx].rows[rIdx] = val; } 
-function updateMatrixCol(qIdx, cIdx, val) { BUILDER_QUESTIONS[qIdx].cols[cIdx] = val; }
+function updateMatrixRow(qIdx, rIdx, val) { BUILDER_QUESTIONS[qIdx].rows[rIdx] = val; renderBuilder(); } 
+function updateMatrixCol(qIdx, cIdx, val) { BUILDER_QUESTIONS[qIdx].cols[cIdx] = val; renderBuilder(); }
 function addMatrixRow(idx) { BUILDER_QUESTIONS[idx].rows.push(""); renderBuilder(); }
 function addMatrixCol(idx) { BUILDER_QUESTIONS[idx].cols.push(""); renderBuilder(); }
 function removeMatrixRow(idx, rIdx) { BUILDER_QUESTIONS[idx].rows.splice(rIdx, 1); renderBuilder(); }
@@ -409,7 +363,6 @@ async function saveTest() {
     }
     
     const dur = document.getElementById('builderDuration').value;
-    const shuffle = document.getElementById('builderShuffle').checked;
 
     if (BUILDER_QUESTIONS.length === 0) {
         if(typeof showToast === 'function') showToast("Please add at least one question.", "warning");
@@ -430,7 +383,6 @@ async function saveTest() {
             tests[idx].title = linked;
             tests[idx].type = type;
             tests[idx].duration = type === 'vetting' ? dur : null;
-            tests[idx].shuffle = shuffle;
             tests[idx].questions = BUILDER_QUESTIONS;
         } else {
             // Fallback: If ID mismatch, push as new to avoid data loss
@@ -440,7 +392,6 @@ async function saveTest() {
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
-                shuffle: shuffle,
                 questions: BUILDER_QUESTIONS
             };
             tests.push(newTest);
@@ -452,7 +403,6 @@ async function saveTest() {
              if(!confirm("A test with this name already exists. Overwrite?")) return;
              tests[existingIdx].type = type;
              tests[existingIdx].duration = type === 'vetting' ? dur : null;
-             tests[existingIdx].shuffle = shuffle;
              tests[existingIdx].questions = BUILDER_QUESTIONS;
         } else {
             const newTest = {
@@ -460,7 +410,6 @@ async function saveTest() {
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
-                shuffle: shuffle,
                 questions: BUILDER_QUESTIONS
             };
             tests.push(newTest);
@@ -517,61 +466,15 @@ function loadManageTests() {
     const container = document.getElementById('testListAdmin');
     if (!container) return;
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    
-    const standard = tests.filter(t => !t.type || t.type === 'standard');
-    const vetting = tests.filter(t => t.type === 'vetting');
-    const live = tests.filter(t => t.type === 'live');
-
-    const renderList = (list, title) => {
-        if (list.length === 0) return '';
-        let html = `<h4 style="margin-top:15px; border-bottom:1px solid var(--border-color); padding-bottom:5px; color:var(--primary);">${title}</h4>`;
-        html += list.map(t => `
-            <div class="test-card-row">
-                <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
-                <div>
-                    ${CURRENT_USER.role === 'admin' ? `
-                    <button class="btn-secondary btn-sm" onclick="copyTest('${t.id}')" title="Copy"><i class="fas fa-copy"></i></button>
-                    <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')" title="Edit"><i class="fas fa-edit"></i></button>
-                    <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')" title="Delete"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
-                </div>
+    container.innerHTML = tests.map(t => `
+        <div class="test-card-row">
+            <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
+            <div>
+                ${CURRENT_USER.role === 'admin' ? `<button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
+                <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
             </div>
-        `).join('');
-        return html;
-    };
-
-    let html = '';
-    if (tests.length === 0) {
-        html = '<p style="color:var(--text-muted); padding:10px;">No assessments created yet. Use the "+ Create New Assessment" button.</p>';
-    } else {
-        html += renderList(standard, 'Standard Assessments');
-        html += renderList(vetting, 'Vetting Tests');
-        html += renderList(live, 'Live Assessments');
-    }
-    
-    container.innerHTML = html;
-}
-
-async function copyTest(id) {
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    // Loose comparison for ID to handle string/number differences
-    const original = tests.find(t => t.id == id);
-    if (!original) return;
-
-    const newName = prompt("Enter name for the copied test:", original.title + " (Copy)");
-    if (!newName) return;
-
-    // Deep copy
-    const copy = JSON.parse(JSON.stringify(original));
-    copy.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    copy.title = newName.trim();
-    
-    tests.push(copy);
-    localStorage.setItem('tests', JSON.stringify(tests));
-
-    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
-    
-    if(typeof showToast === 'function') showToast("Test copied successfully.", "success");
-    loadManageTests();
+        </div>
+    `).join('');
 }
 
 async function deleteTest(id) {

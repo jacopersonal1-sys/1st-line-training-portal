@@ -94,6 +94,9 @@ window.onload = async function() {
     if(typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
     if(typeof loadRostersList === 'function') loadRostersList();
     
+    // Load Access Control UI (Ensure IP list is loaded on refresh)
+    if(typeof loadAdminAccess === 'function') loadAdminAccess();
+
     // Restore Session (With IP Security Check)
     const savedSession = sessionStorage.getItem('currentUser');
     if(savedSession) {
@@ -113,9 +116,6 @@ window.onload = async function() {
                     // Update Sidebar based on Role
                     updateSidebarVisibility();
                     
-                    // Load Access Control UI (Now safe to check role)
-                    if(typeof loadAdminAccess === 'function') loadAdminAccess();
-
                     if (typeof autoLogin === 'function') autoLogin();
                 } else {
                     sessionStorage.removeItem('currentUser'); // Clear invalid session
@@ -129,9 +129,6 @@ window.onload = async function() {
              // Check for experimental theme
              const expTheme = localStorage.getItem('experimental_theme');
              if (expTheme) applyExperimentalTheme(expTheme);
-
-             // Load Access Control UI (Now safe to check role)
-             if(typeof loadAdminAccess === 'function') loadAdminAccess();
 
              updateSidebarVisibility();
              if (typeof autoLogin === 'function') autoLogin();
@@ -180,11 +177,6 @@ window.onload = async function() {
     setInterval(updateNotifications, 60000);
     // Also run once immediately if logged in
     if(savedSession) setTimeout(updateNotifications, 1000); 
-
-    // --- MANDATORY ATTENDANCE CHECK (Session Restore) ---
-    if (savedSession && typeof checkAttendanceStatus === 'function') {
-        setTimeout(checkAttendanceStatus, 1500); 
-    }
 
     // HIDE LOADER
     if(loader) loader.classList.add('hidden');
@@ -341,11 +333,6 @@ function showTab(id, btn) {
   // Find button by onclick attribute (reliable for sidebar navigation)
   const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${id}')"]`);
   if(sidebarBtn) sidebarBtn.classList.add('active');
-
-  // VISUAL FIX: Auto-resize textareas when tab becomes visible
-  setTimeout(() => {
-      document.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
-  }, 50);
     
   // --- DYNAMIC DATA REFRESH ---
   // Whenever a tab is shown, refresh its specific data/dropdowns
@@ -630,7 +617,6 @@ function populateFetchFilters() {
 
 // --- GLOBAL UTILS ---
 function autoResize(el) {
-    if (!el) return;
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
 }

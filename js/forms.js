@@ -86,11 +86,6 @@ async function saveQuestionnaire() {
         }
         // --- SECURE SAVE END ---
         
-        // FIX: Blur active element to prevent Electron focus loss
-        if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur();
-        }
-
         if(typeof showToast === 'function') showToast("Profile saved. You may now start your assessments.", "success");
         document.getElementById('questionnaireModal').classList.add('hidden');
     }

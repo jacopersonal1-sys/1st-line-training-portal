@@ -1,24 +1,14 @@
 /* ================= LIVE ASSESSMENT EXECUTION ENGINE ================= */
 /* Handles real-time interaction between Trainer (Admin) and Trainee */
 
-let LIVE_POLLER = null; // The interval for polling
-let ACTIVE_LIVE_SESSION_ID = null; // The bookingId of the session this user is in
-let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing for trainees
+let LIVE_POLLER = null;
+let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
 
 function loadLiveExecution() {
     if (LIVE_POLLER) clearInterval(LIVE_POLLER);
     
     const container = document.getElementById('live-execution-content');
     if (!container) return;
-
-    // Determine which session this user belongs to
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    if (CURRENT_USER.role === 'trainee') {
-        ACTIVE_LIVE_SESSION_ID = Object.keys(sessions).find(id => sessions[id].active && sessions[id].trainee === CURRENT_USER.user);
-    } else {
-        // Admin/Trainer can only be in one session at a time
-        ACTIVE_LIVE_SESSION_ID = Object.keys(sessions).find(id => sessions[id].active && sessions[id].trainer === CURRENT_USER.user);
-    }
 
     LAST_RENDERED_Q = -2; // Reset on load
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
@@ -28,7 +18,7 @@ function loadLiveExecution() {
     }
 
     // Start Polling for updates (Real-time sync)
-    LIVE_POLLER = setInterval(syncLiveSessionState, 1000);
+    LIVE_POLLER = setInterval(syncLiveSessionState, 2000);
 }
 
 async function syncLiveSessionState() {
@@ -39,22 +29,36 @@ async function syncLiveSessionState() {
     const { data, error } = await supabaseClient
         .from('app_documents')
         .select('content')
-        .eq('key', 'liveSessions')
+        .eq('key', 'liveSessions') // Fetch the ARRAY
         .single();
 
     if (data && data.content) {
-        const serverSession = data.content;
-        const localSession = JSON.parse(localStorage.getItem('liveSessions') || '{}');
+        const allSessions = data.content || [];
+        localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+
+        // FIND MY RELEVANT SESSION
+        let myServerSession = null;
+        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+            // Admin: Find the session I am currently viewing (stored in local state)
+            const viewingId = localStorage.getItem('currentLiveSessionId');
+            myServerSession = allSessions.find(s => s.sessionId === viewingId) || { active: false };
+        } else {
+            // Trainee: Find the session assigned to me
+            myServerSession = allSessions.find(s => s.trainee === CURRENT_USER.user && s.active) || { active: false };
+        }
+
+        // Update the local "Active Session" proxy for UI rendering
+        const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
         
         // Only update if state actually changed
-        if (JSON.stringify(serverSession) !== JSON.stringify(localSession)) {
-            localStorage.setItem('liveSessions', JSON.stringify(serverSession));
+        if (JSON.stringify(myServerSession) !== JSON.stringify(localSession)) {
+            localStorage.setItem('liveSession', JSON.stringify(myServerSession));
             
             const container = document.getElementById('live-execution-content');
             if (container) {
                 if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
                     // Admin: Update view but try to preserve focus if typing
-                    if (!document.querySelector('.admin-interaction-active') || serverSession.currentQ !== localSession.currentQ) {
+                    if (!document.querySelector('.admin-interaction-active') || myServerSession.currentQ !== localSession.currentQ) {
                         renderAdminLivePanel(container);
                     } else {
                         updateAdminLiveView(); 
@@ -62,10 +66,9 @@ async function syncLiveSessionState() {
                 } else {
                     // Trainee: ONLY re-render if the question changed or session status changed
                     // This fixes the "Selection Disappears" bug
-                    const mySession = serverSession[ACTIVE_LIVE_SESSION_ID];
-                    if (mySession && (mySession.currentQ !== LAST_RENDERED_Q || mySession.active !== localSession[ACTIVE_LIVE_SESSION_ID]?.active)) {
+                    if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
                         renderTraineeLivePanel(container);
-                        LAST_RENDERED_Q = mySession.currentQ;
+                        LAST_RENDERED_Q = myServerSession.currentQ;
                     }
                 }
             }
@@ -76,9 +79,9 @@ async function syncLiveSessionState() {
 // --- ADMIN VIEW ---
 
 function renderAdminLivePanel(container) {
-    const session = ACTIVE_LIVE_SESSION_ID ? JSON.parse(localStorage.getItem('liveSessions') || '{}')[ACTIVE_LIVE_SESSION_ID] : null;
+    const session = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
     
-    if (!session || !session.active) {
+    if (!session.active) {
         container.innerHTML = `
             <div style="text-align:center; padding:50px; color:var(--text-muted);">
                 <i class="fas fa-satellite-dish" style="font-size:4rem; margin-bottom:20px;"></i>
@@ -133,17 +136,13 @@ function renderAdminLivePanel(container) {
         const currentComment = session.comments[currentQ] || '';
         
         // Admin Note Display
-        const adminNote = q.adminNotes ? `<div style="margin-bottom:15px; padding:10px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.9rem; white-space: pre-wrap;"><strong>Marker Note:</strong> ${q.adminNotes}</div>` : '';
-        
-        // Reference Button
-        const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="margin-top:5px;"><i class="fas fa-image"></i> View Reference</button>` : '';
+        const adminNote = q.adminNotes ? `<div style="margin-bottom:15px; padding:10px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.9rem;"><strong>Marker Note:</strong> ${q.adminNotes}</div>` : '';
 
         mainHtml = `
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; height:100%;">
                 <div class="card" style="overflow-y:auto;">
                     <h4>Admin Preview (Q${currentQ+1})</h4>
                     <div style="font-size:1.2rem; font-weight:bold; margin-bottom:15px;">${q.text}</div>
-                    ${refBtn}
                     ${adminNote}
                     <div style="background:var(--bg-input); padding:10px; border-radius:4px;">
                         <small>Type: ${q.type}</small><br>
@@ -196,16 +195,13 @@ function renderAdminLivePanel(container) {
 
 function updateAdminLiveView() {
     // Helper to update just the answer box without redrawing inputs (preserves focus)
-    const session = ACTIVE_LIVE_SESSION_ID ? JSON.parse(localStorage.getItem('liveSessions') || '{}')[ACTIVE_LIVE_SESSION_ID] : null;
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-
+    const session = JSON.parse(localStorage.getItem('liveSession'));
     if (!session || !session.active) return;
     
     // 1. Update Answer Box (Current Question)
-    const test = tests.find(t => t.id == session.testId);
     if (session.currentQ !== -1) {
         const ansBox = document.getElementById('live-admin-answer-box');
-        if (ansBox && test) { // FIX: Ensure test is defined
+        if (ansBox) {
             const ans = session.answers[session.currentQ];
             const hasAns = ans !== undefined && ans !== null && ans !== "";
             const displayAns = hasAns ? formatAdminAnswerPreview(test.questions[session.currentQ], ans) : '<span style="color:var(--text-muted); font-style:italic;">Waiting for answer...</span>';
@@ -216,6 +212,7 @@ function updateAdminLiveView() {
 
     // 2. Update Sidebar Status Icons (Checkmarks)
     // This ensures Admin sees progress without full re-render
+    const test = JSON.parse(localStorage.getItem('tests') || '[]').find(t => t.id == session.testId);
     if (test) {
         test.questions.forEach((q, idx) => {
             // Find the icon inside the sidebar item
@@ -261,13 +258,10 @@ function formatAdminAnswerPreview(q, ans) {
 // --- TRAINEE VIEW ---
 
 function renderTraineeLivePanel(container) {
-    // Set global flag for assessment.js input handlers
-    window.IS_LIVE_ARENA = true;
-
     // Note: This function wipes the container. Only call if question changed.
-    const session = ACTIVE_LIVE_SESSION_ID ? JSON.parse(localStorage.getItem('liveSessions') || '{}')[ACTIVE_LIVE_SESSION_ID] : null;
+    const session = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
     
-    if (!session || !session.active || session.trainee !== CURRENT_USER.user) {
+    if (!session.active || session.trainee !== CURRENT_USER.user) {
         container.innerHTML = `
             <div style="text-align:center; padding:100px; color:var(--text-muted);">
                 <i class="fas fa-hourglass-half" style="font-size:5rem; margin-bottom:20px; opacity:0.5;"></i>
@@ -325,22 +319,18 @@ function renderTraineeLivePanel(container) {
     const isSubmitted = (session.answers[session.currentQ] !== undefined && session.answers[session.currentQ] !== null && session.answers[session.currentQ] !== "");
 
     const btnText = (q.type === 'live_practical') ? 'Done' : (isSubmitted ? 'Update Answer' : 'Submit Answer');
-    
-    // Reference Button
-    const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
     container.innerHTML = `
-        <div style="max-width:95%; margin:0 auto; padding:20px;">
+        <div style="max-width:800px; margin:0 auto; padding:20px;">
             <div class="progress-track" style="margin-bottom:20px;">
                 <div class="progress-fill" style="width:${((session.currentQ+1)/test.questions.length)*100}%"></div>
             </div>
             
             <div class="card" style="padding:40px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start;">
-                    <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">${session.currentQ + 1}. ${q.text} ${refBtn}</div>
-                    <div class="live-input-area" style="font-size:1.2rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
-                        ${inputHtml}
-                    </div>
+                <h2 style="font-size:2rem; margin-bottom:30px;">${session.currentQ + 1}. ${q.text}</h2>
+                
+                <div class="live-input-area" style="font-size:1.2rem;">
+                    ${inputHtml}
                 </div>
 
                 <div style="margin-top:40px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:15px;">
@@ -367,6 +357,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     }
 
     const session = {
+        sessionId: Date.now() + "_" + Math.random().toString(36).substr(2, 5), // Unique ID
         active: true,
         bookingId: bookingId,
         testId: test.id,
@@ -378,25 +369,23 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
         comments: {}
     };
 
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    sessions[bookingId] = session;
-    localStorage.setItem('liveSessions', JSON.stringify(sessions));
-    ACTIVE_LIVE_SESSION_ID = bookingId; // FIX: Set active ID immediately
+    // 1. Update Local Proxy
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    localStorage.setItem('currentLiveSessionId', session.sessionId); // Track what Admin is looking at
     
-    // Force Sync
-    if (typeof saveToServer === 'function') await saveToServer(['liveSessions'], true);
+    // 2. Update Global Array
+    await updateGlobalSessionArray(session, false); // Safe Merge to prevent wiping other admins
 
     showTab('live-execution');
     loadLiveExecution();
 }
 
 async function adminPushQuestion(idx) {
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    if (sessions[ACTIVE_LIVE_SESSION_ID]) {
-        sessions[ACTIVE_LIVE_SESSION_ID].currentQ = idx;
-        localStorage.setItem('liveSessions', JSON.stringify(sessions));
-        if (typeof saveToServer === 'function') await saveToServer(['liveSessions'], true);
-    }
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    session.currentQ = idx;
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    
+    await updateGlobalSessionArray(session, false);
     
     renderAdminLivePanel(document.getElementById('live-execution-content'));
 }
@@ -406,35 +395,26 @@ async function adminJumpToQuestion(idx) {
 }
 
 async function saveLiveScore(idx, val) {
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    if (sessions[ACTIVE_LIVE_SESSION_ID]) {
-        if (!sessions[ACTIVE_LIVE_SESSION_ID].scores) sessions[ACTIVE_LIVE_SESSION_ID].scores = {};
-        sessions[ACTIVE_LIVE_SESSION_ID].scores[idx] = parseFloat(val);
-        localStorage.setItem('liveSessions', JSON.stringify(sessions));
-    }
-    // Background save
-    if (typeof saveToServer === 'function') saveToServer(['liveSessions'], false);
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    session.scores[idx] = parseFloat(val);
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    
+    updateGlobalSessionArray(session, false); // Background save
 }
 
 async function saveLiveComment(idx, val) {
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    if (sessions[ACTIVE_LIVE_SESSION_ID]) {
-        if (!sessions[ACTIVE_LIVE_SESSION_ID].comments) sessions[ACTIVE_LIVE_SESSION_ID].comments = {};
-        sessions[ACTIVE_LIVE_SESSION_ID].comments[idx] = val;
-        localStorage.setItem('liveSessions', JSON.stringify(sessions));
-    }
-    // Background save
-    if (typeof saveToServer === 'function') saveToServer(['liveSessions'], false);
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    session.comments[idx] = val;
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    
+    updateGlobalSessionArray(session, false); // Background save
 }
 
 async function submitLiveAnswer(qIdx) {
     // Get answer from window.USER_ANSWERS (populated by renderQuestionInput helpers)
     const ans = window.USER_ANSWERS[qIdx];
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    const session = sessions[ACTIVE_LIVE_SESSION_ID];
-    if (!session) return;
-
+    const session = JSON.parse(localStorage.getItem('liveSession'));
     const test = tests.find(t => t.id == session.testId);
     const q = test.questions[qIdx];
 
@@ -446,14 +426,13 @@ async function submitLiveAnswer(qIdx) {
     // For practical, if empty, mark as "Completed"
     session.answers[qIdx] = (q.type === 'live_practical' && !ans) ? "Completed" : ans;
     
-    localStorage.setItem('liveSessions', JSON.stringify(sessions));
+    localStorage.setItem('liveSession', JSON.stringify(session));
     
     // Force Sync so Admin sees it immediately
     const btn = document.querySelector('.btn-primary.btn-lg');
     if(btn) { btn.innerText = "Sending..."; btn.disabled = true; }
     
-    // UPDATED: Use 'false' (Safe Merge) to prevent overwriting Admin's state updates
-    if (typeof saveToServer === 'function') await saveToServer(['liveSessions'], false);
+    await updateGlobalSessionArray(session, false);
     
     if(btn) { 
         // Check type to determine text
@@ -471,8 +450,7 @@ async function submitLiveAnswer(qIdx) {
 
 async function finishLiveSession() {
     // 1. Build Editable Summary View
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    const session = sessions[ACTIVE_LIVE_SESSION_ID];
+    const session = JSON.parse(localStorage.getItem('liveSession'));
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
 
@@ -544,8 +522,7 @@ async function finishLiveSession() {
 }
 
 async function confirmAndSaveLiveSession() {
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    const session = sessions[ACTIVE_LIVE_SESSION_ID];
+    const session = JSON.parse(localStorage.getItem('liveSession'));
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
 
@@ -572,8 +549,7 @@ async function confirmAndSaveLiveSession() {
         type: 'live',
         marker: session.trainer,
         comments: session.comments, // Save comments
-        scores: session.scores,     // Save individual scores
-        testSnapshot: test          // SNAPSHOT: Save test definition for history
+        scores: session.scores      // Save individual scores
     };
     submissions.push(newSub);
     localStorage.setItem('submissions', JSON.stringify(submissions));
@@ -618,21 +594,41 @@ async function confirmAndSaveLiveSession() {
     localStorage.setItem('records', JSON.stringify(records));
 
     // 4. Clear Session
-    delete sessions[ACTIVE_LIVE_SESSION_ID];
-    localStorage.setItem('liveSessions', JSON.stringify(sessions));
+    session.active = false;
+    localStorage.setItem('liveSession', JSON.stringify(session));
 
     // 5. Sync All
-    if (typeof saveToServer === 'function') await saveToServer(['liveSessions', 'liveBookings', 'records', 'submissions'], true);
+    await updateGlobalSessionArray(session, false); // Sync session state first
+    if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], true);
 
     if(typeof showToast === 'function') showToast(`Session Completed. Score: ${percentage}%`, "success");
     showTab('live-assessment');
 }
 
 async function endLiveSession() {
-    if(!confirm("Abort session? Any unsaved data will be lost.")) return;
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '{}');
-    delete sessions[ACTIVE_LIVE_SESSION_ID];
-    localStorage.setItem('liveSessions', JSON.stringify(sessions));
-    if (typeof saveToServer === 'function') await saveToServer(['liveSessions'], true);
+    if(!confirm("Abort session? Data will be lost.")) return;
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    session.active = false;
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    
+    await updateGlobalSessionArray(session, false);
     showTab('live-assessment');
+}
+
+// --- HELPER: SYNC LOCAL SESSION TO GLOBAL ARRAY ---
+async function updateGlobalSessionArray(localSession, force = true) {
+    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    
+    // Remove old version of this session
+    allSessions = allSessions.filter(s => s.sessionId !== localSession.sessionId);
+    
+    // Add new version (if active or just completed)
+    // We keep completed sessions briefly to ensure sync, but cleanup logic should exist elsewhere
+    allSessions.push(localSession);
+    
+    localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+    
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['liveSessions'], force);
+    }
 }

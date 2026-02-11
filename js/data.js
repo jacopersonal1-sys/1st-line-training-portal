@@ -24,11 +24,7 @@ const DB_SCHEMA = {
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
     agentNotes: {}, // Private notes on agents { "username": "note content" }
-    liveSessions: {}, // MULTI-SESSION SUPPORT: { bookingId: { active, testId, ... } }
-    archive_submissions: [], // Bandwidth Optimization: Old submissions moved here
-    daily_usage: {}, // Global Bandwidth Tracking: { "username": { date: "YYYY-MM-DD", ingress: 0, egress: 0 } }
-    attendance_records: [], // [{ id, user, date, clockIn, clockOut, isLate, lateData: {} }]
-    attendance_settings: { platforms: ["WhatsApp", "Microsoft Teams", "Call", "SMS"], contacts: ["Darren", "Netta", "Jaco", "Claudine"] }
+    liveSessions: [] // CHANGED: Array to support multiple concurrent sessions
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -38,30 +34,6 @@ window.LAST_INTERACTION = Date.now();
         window.LAST_INTERACTION = Date.now();
     }, { passive: true });
 });
-
-// --- HELPER: DATA USAGE TRACKER ---
-function trackDataUsage(bytes, type) {
-    if (!CURRENT_USER) return;
-
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Load Global Usage Object
-    let globalUsage = JSON.parse(localStorage.getItem('daily_usage') || '{}');
-    
-    // Initialize User Entry if missing or outdated
-    if (!globalUsage[CURRENT_USER.user] || globalUsage[CURRENT_USER.user].date !== today) {
-        globalUsage[CURRENT_USER.user] = { date: today, ingress: 0, egress: 0 };
-    }
-    
-    // Update Counts
-    if (type === 'in') globalUsage[CURRENT_USER.user].ingress += bytes;
-    if (type === 'out') globalUsage[CURRENT_USER.user].egress += bytes;
-    
-    // Save back to LocalStorage (will be synced to cloud by saveToServer)
-    localStorage.setItem('daily_usage', JSON.stringify(globalUsage));
-    // Also update legacy local tracker for immediate UI feedback if needed
-    localStorage.setItem('dataUsage', JSON.stringify(globalUsage[CURRENT_USER.user]));
-}
 
 // --- HELPER: UI PROTECTION (The Fix for Typing Issues) ---
 // Checks if the user is currently typing in a field.
@@ -94,24 +66,6 @@ async function loadFromServer(silent = false) {
             return;
         }
 
-        // --- OPTIMIZATION: ROLE-BASED KEY FILTERING ---
-        // Prevent downloading heavy/irrelevant data based on user role to save bandwidth.
-        let ignoredKeys = [];
-        
-        if (!CURRENT_USER) {
-            // Login Screen: Only needs Users & Config. Ignore heavy admin data.
-            ignoredKeys = ['savedReports', 'accessLogs', 'agentNotes', 'linkRequests', 'submissions', 'records'];
-        } else if (CURRENT_USER.role === 'trainee') {
-            // Trainees: Don't need Admin reports, logs, or private notes.
-            // Note: They DO need 'submissions' and 'records' for their own history view.
-            ignoredKeys = ['savedReports', 'accessLogs', 'agentNotes', 'linkRequests', 'accessControl', 'archive_submissions'];
-            // Trainees DO need attendance_settings (for dropdowns) and attendance_records (to check their own status)
-        } else if (CURRENT_USER.role === 'teamleader') {
-            // Team Leaders: Don't need system logs or IP control.
-            ignoredKeys = ['accessLogs', 'accessControl', 'archive_submissions'];
-        }
-        // Admins fetch everything.
-
         // C. Identify Stale Keys
         const keysToFetch = [];
         meta.forEach(row => {
@@ -122,24 +76,16 @@ async function loadFromServer(silent = false) {
             }
         });
 
-        // Apply Filter
-        const finalKeysToFetch = keysToFetch.filter(k => !ignoredKeys.includes(k));
-        
-        // Debug: if(ignoredKeys.length > 0) console.log("Skipping keys:", ignoredKeys.filter(k => keysToFetch.includes(k)));
-
         // D. Fetch Content for Stale Keys Only
-        if (finalKeysToFetch.length > 0) {
-            if(!silent) console.log(`Syncing updates for: ${finalKeysToFetch.join(', ')}`);
+        if (keysToFetch.length > 0) {
+            if(!silent) console.log(`Syncing updates for: ${keysToFetch.join(', ')}`);
             
             const { data: docs, error: fetchErr } = await supabaseClient
                 .from('app_documents')
                 .select('key, content, updated_at')
-                .in('key', finalKeysToFetch);
+                .in('key', keysToFetch);
             
             if (fetchErr) throw fetchErr;
-
-            // TRACK INGRESS (Download)
-            if(docs) trackDataUsage(JSON.stringify(docs).length, 'in');
 
             docs.forEach(doc => {
                 localStorage.setItem(doc.key, JSON.stringify(doc.content));
@@ -191,8 +137,7 @@ function updateSyncUI(status) {
     } else if (status === 'syncing') {
         el.innerHTML = '<i class="fas fa-sync fa-spin" style="color:var(--text-muted);"></i> Syncing...';
     } else if (status === 'success') {
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        el.innerHTML = `<i class="fas fa-check" style="color:#2ecc71;"></i> Synced ${time}`;
+        el.innerHTML = '<i class="fas fa-check" style="color:#2ecc71;"></i> Synced';
         // Fade out after 3 seconds
         setTimeout(() => { 
             if(el.innerHTML.includes('Synced')) {
@@ -248,9 +193,6 @@ async function saveToServer(targetKeys = null, force = false) {
                     finalContent = mergedObj[key];
                 }
             }
-
-            // TRACK EGRESS (Upload)
-            trackDataUsage(JSON.stringify(finalContent).length, 'out');
 
             // C. Push to Supabase
             const { error: saveErr } = await supabaseClient
@@ -330,7 +272,12 @@ function performSmartMerge(server, local) {
                         );
                     }
 
-                    // 6. Fallback: Deep Compare
+                    // 6. Live Sessions (Unique by sessionId) - FIXES LIVE ARENA CRASH
+                    if (key === 'liveSessions' && localItem.sessionId && serverItem.sessionId) {
+                        return localItem.sessionId === serverItem.sessionId;
+                    }
+
+                    // 7. Fallback: Deep Compare
                     return JSON.stringify(localItem) === JSON.stringify(serverItem);
                 });
 
@@ -351,6 +298,7 @@ function performSmartMerge(server, local) {
                                 localItem.phase === i.phase
                             );
                         }
+                        if (key === 'liveSessions' && localItem.sessionId && i.sessionId) return localItem.sessionId === i.sessionId;
                         return JSON.stringify(i) === JSON.stringify(localItem);
                     });
                     if(index > -1) combined[index] = localItem;
@@ -364,13 +312,20 @@ function performSmartMerge(server, local) {
 
             merged[key] = combined;
         } 
-        // Case 2a: Vetting/Live Sessions (Deep Merge)
-        else if (key === 'vettingSession' || key === 'liveSessions') {
+        // Case 2a: Vetting Session (Deep Merge Trainees)
+        else if (key === 'vettingSession') {
             const safeSVal = sVal || {};
             const safeLVal = lVal || {};
             
-            // Deep merge individual sessions/trainees to prevent overwrites
-            merged[key] = { ...safeSVal, ...safeLVal };
+            merged[key] = { ...safeSVal, ...safeLVal }; // Merge top level (active, testId)
+            
+            // Deep merge trainees to prevent overwrites
+            if (safeSVal.trainees || safeLVal.trainees) {
+                merged[key].trainees = {
+                    ...(safeSVal.trainees || {}),
+                    ...(safeLVal.trainees || {})
+                };
+            }
         }
         // Case 2: Objects (Rosters, Schedules)
         else if (typeof sVal === 'object' && sVal !== null && typeof lVal === 'object' && lVal !== null) {
@@ -412,8 +367,6 @@ async function fetchSystemStatus() {
         if (!error) {
             const storageEl = document.getElementById('statusStorage');
             const latencyEl = document.getElementById('statusLatency');
-            const bandwidthEl = document.getElementById('statusBandwidth');
-            const lastSyncEl = document.getElementById('statusLastSync');
             const activeTable = document.getElementById('activeUsersTable');
 
             const memoryEl = document.getElementById('statusMemory');
@@ -422,76 +375,6 @@ async function fetchSystemStatus() {
 
             if (storageEl && typeof formatBytes === 'function') {
                 storageEl.innerText = formatBytes(storageSize);
-            }
-            
-            if (bandwidthEl) {
-                // AGGREGATE GLOBAL USAGE
-                const globalUsage = JSON.parse(localStorage.getItem('daily_usage') || '{}');
-                const today = new Date().toISOString().split('T')[0];
-                let total = 0;
-                let userList = [];
-
-                Object.entries(globalUsage).forEach(([username, u]) => {
-                    if (u.date === today) {
-                        const uTotal = (u.ingress || 0) + (u.egress || 0);
-                        total += uTotal;
-                        userList.push({ user: username, ingress: u.ingress || 0, egress: u.egress || 0, total: uTotal });
-                    }
-                });
-                
-                // Sort descending by total usage
-                userList.sort((a,b) => b.total - a.total);
-
-                // Update Breakdown UI
-                const breakdownEl = document.getElementById('bandwidthBreakdown');
-                if (breakdownEl) {
-                    if (userList.length === 0) {
-                        breakdownEl.innerHTML = '<div style="padding:10px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No usage recorded today.</div>';
-                    } else {
-                        let html = '<table class="admin-table" style="font-size:0.8rem;"><thead><tr><th>User</th><th>Down</th><th>Up</th><th>Total</th></tr></thead><tbody>';
-                        userList.forEach(u => {
-                            const down = (typeof formatBytes === 'function') ? formatBytes(u.ingress) : (u.ingress/1024).toFixed(1)+'KB';
-                            const up = (typeof formatBytes === 'function') ? formatBytes(u.egress) : (u.egress/1024).toFixed(1)+'KB';
-                            const tot = (typeof formatBytes === 'function') ? formatBytes(u.total) : (u.total/1024).toFixed(1)+'KB';
-                            html += `<tr><td>${u.user}</td><td>${down}</td><td>${up}</td><td><strong>${tot}</strong></td></tr>`;
-                        });
-                        html += '</tbody></table>';
-                        breakdownEl.innerHTML = html;
-                    }
-                    
-                    // Render Chart
-                    if(typeof renderBandwidthChart === 'function') renderBandwidthChart(userList);
-                }
-
-                // ESTIMATE: Daily target (500MB) to stay safely within Free Tier (5GB/mo)
-                // Increased to 500MB as we are now summing ALL users
-                const DAILY_LIMIT = 500 * 1024 * 1024; 
-                
-                const percent = Math.min(100, (total / DAILY_LIMIT) * 100).toFixed(1);
-                const remaining = Math.max(0, DAILY_LIMIT - total);
-                
-                const txtTotal = (typeof formatBytes === 'function') ? formatBytes(total) : (total / 1024 / 1024).toFixed(1) + ' MB';
-                const txtRem = (typeof formatBytes === 'function') ? formatBytes(remaining) : (remaining / 1024 / 1024).toFixed(1) + ' MB';
-                
-                let color = '#2ecc71'; // Green
-                if(percent > 75) color = '#f1c40f'; // Yellow
-                if(percent > 90) color = '#ff5252'; // Red
-
-                bandwidthEl.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:end; margin-bottom:5px;">
-                        <span style="font-size:1.2rem;">${txtTotal}</span>
-                        <span style="font-size:0.7rem; color:var(--text-muted);">Global Usage</span>
-                    </div>
-                    <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
-                        <div style="width:${percent}%; background:${color}; height:100%; transition:width 0.5s;"></div>
-                    </div>
-                `;
-            }
-
-            if (lastSyncEl) {
-                const ts = localStorage.getItem('lastSyncTimestamp');
-                const timeStr = ts ? new Date(parseInt(ts)).toLocaleTimeString() : 'Never';
-                lastSyncEl.innerText = timeStr;
             }
 
             if (latencyEl) {
@@ -554,58 +437,6 @@ async function fetchSystemStatus() {
         }
     } catch (e) {
         console.error("Supabase Status fetch error", e);
-    }
-}
-
-let bandwidthChartInstance = null;
-
-function renderBandwidthChart(userList) {
-    const ctx = document.getElementById('bandwidthChart');
-    if (!ctx || typeof Chart === 'undefined') return;
-
-    if (userList.length === 0) {
-        if (bandwidthChartInstance) {
-            bandwidthChartInstance.destroy();
-            bandwidthChartInstance = null;
-        }
-        return;
-    }
-
-    // Prepare Data: Top 5 users + Others
-    const topUsers = userList.slice(0, 5);
-    const labels = topUsers.map(u => u.user);
-    const data = topUsers.map(u => (u.total / 1024 / 1024).toFixed(2)); // MB
-    
-    if (userList.length > 5) {
-        const othersTotal = userList.slice(5).reduce((acc, u) => acc + u.total, 0);
-        labels.push('Others');
-        data.push((othersTotal / 1024 / 1024).toFixed(2));
-    }
-
-    if (bandwidthChartInstance) {
-        bandwidthChartInstance.data.labels = labels;
-        bandwidthChartInstance.data.datasets[0].data = data;
-        bandwidthChartInstance.update();
-    } else {
-        bandwidthChartInstance = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: data,
-                    backgroundColor: ['#F37021', '#2ecc71', '#3498db', '#9b59b6', '#f1c40f', '#95a5a6'],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'right', labels: { color: '#888', boxWidth: 10 } },
-                    title: { display: true, text: 'Usage by User (MB)', color: '#888' }
-                }
-            }
-        });
     }
 }
 

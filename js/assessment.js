@@ -36,18 +36,6 @@ async function secureAssessmentSave() {
     }
 }
 
-// --- REFERENCE VIEWER (Native Window) ---
-function openReferenceViewer(url) {
-    if (typeof require !== 'undefined') {
-        console.log("Opening Reference via Electron IPC:", url);
-        const { ipcRenderer } = require('electron');
-        ipcRenderer.send('open-reference-window', url);
-    } else {
-        console.log("Opening Reference via Window.Open:", url);
-        window.open(url, '_blank', 'width=1024,height=768');
-    }
-}
-
 /**
  * 1. ADMIN: ASSESSMENT DASHBOARD (OVERVIEW)
  */
@@ -204,15 +192,10 @@ function openAdminMarking(subId) {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Error: Submission data not found.");
-
-    // SNAPSHOT LOGIC: Use saved test definition if available (Historical accuracy)
-    let test = sub.testSnapshot;
     
-    if (!test) {
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-        test = tests.find(t => t.id == sub.testId); 
-    }
-
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const test = tests.find(t => t.id == sub.testId); 
+    
     if(!test) return alert("Original Assessment definition seems to be deleted.");
 
     const modal = document.getElementById('markingModal');
@@ -231,25 +214,18 @@ function openAdminMarking(subId) {
     `;
 
     test.questions.forEach((q, idx) => {
-        // FILTER: If using live definition (no snapshot) and question didn't exist in submission, skip it.
-        // This prevents new questions added AFTER submission from appearing in old records.
-        if (!sub.testSnapshot && sub.answers && !Object.prototype.hasOwnProperty.call(sub.answers, idx)) return;
-
         const userAns = sub.answers[idx];
         const pointsMax = parseFloat(q.points || 1);
         let markHtml = '';
         let autoScore = 0;
         
         // Display Admin Notes if present
-        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main); white-space: pre-wrap;"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
         
-        // Reference Button for Marker
-        const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
-
         // Prepend to markHtml later
 
         // --- SCORING LOGIC ---
-        if (q.type === 'text' || q.type === 'live_practical') {
+        if (q.type === 'text') {
             markHtml = `
                 <div style="background:var(--bg-input); padding:15px; border-radius:8px; margin-top:10px; border:1px solid var(--border-color); text-align:left;">
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:5px;">MODEL ANSWER:</div>
@@ -261,12 +237,8 @@ function openAdminMarking(subId) {
                     ${(() => {
                         // Use specific score if available (Live Assessment), else calc proportional
                         let val = 0;
-                        if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) {
-                            val = sub.scores[idx];
-                        } else {
-                            // Fallback: Default to 0 for manual questions to avoid weird decimals (e.g. 3.85)
-                            val = 0; 
-                        }
+                        if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) val = sub.scores[idx];
+                        else val = sub.score ? (sub.score/100)*pointsMax : 0;
                         return `
                     <div style="display:flex; align-items:center; gap:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
                         <label style="font-weight:bold;">Score (Max ${pointsMax}):</label>
@@ -395,37 +367,19 @@ function openAdminMarking(subId) {
                 answerDisplay = JSON.stringify(userAns);
             }
 
-            // Determine value to show (Saved override OR Auto-calc)
-            let currentVal = autoScore;
-            if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) {
-                currentVal = sub.scores[idx];
-            } else if (sub.status === 'completed' && !sub.scores) {
-                // Legacy Fallback: If completed but no individual scores saved, estimate from total
-                // Round to nearest 0.5 to avoid 3.85
-                currentVal = Math.round(((sub.score || 0) / 100) * pointsMax * 2) / 2;
-            }
-
             markHtml = `
                 <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
                     <div style="margin-bottom:10px;">${answerDisplay}</div>
-                    <div style="font-size:0.9rem; border-top:1px solid var(--border-color); padding-top:5px; font-weight:bold; display:flex; align-items:center; justify-content:space-between;">
-                        ${!isLocked ? 
-                            `<div style="display:flex; align-items:center; gap:10px; width:100%;">
-                                <span style="margin-right:auto; color:var(--text-muted); font-weight:normal; font-size:0.8rem;">(Auto: ${autoScore})</span>
-                                <label>Score:</label>
-                                <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${currentVal}" style="width:80px; padding:5px;">
-                                <span style="color:var(--text-muted); font-weight:normal;">/ ${pointsMax}</span>
-                             </div>` 
-                            : 
-                            `<span>Score: ${currentVal} / ${pointsMax}</span><input type="hidden" class="q-mark" data-idx="${idx}" value="${currentVal}">`
-                        }
+                    <div style="font-size:0.9rem; border-top:1px solid var(--border-color); padding-top:5px; font-weight:bold;">
+                        Auto-Score: <strong>${autoScore} / ${pointsMax}</strong>
+                        <input type="hidden" class="q-mark" data-idx="${idx}" value="${autoScore}">
                     </div>
                 </div>`;
         }
 
         container.innerHTML += `
             <div class="marking-item" style="margin-bottom:25px;">
-                <div style="font-weight:600;">Q${idx + 1}: ${q.text} ${refBtn} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
+                <div style="font-weight:600;">Q${idx + 1}: ${q.text} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
                 ${adminNoteHtml}${markHtml}
             </div>`;
     });
@@ -436,7 +390,7 @@ function openAdminMarking(subId) {
         submitBtn.style.display = 'none';
     } else {
         submitBtn.style.display = 'inline-block';
-        submitBtn.innerText = sub.status === 'completed' ? "Save Changes" : "Finalize Score & Push to Records";
+        submitBtn.innerText = sub.status === 'completed' ? "Update Score" : "Finalize Score & Push to Records";
         submitBtn.onclick = () => finalizeAdminMarking(subId);
     }
 }
@@ -461,12 +415,7 @@ function viewCompletedTest(trainee, assessment) {
 }
 
 async function finalizeAdminMarking(subId) {
-    if (!confirm("Save changes to scores? This will update the permanent record.")) return;
-
-    // FIX: Blur active element to prevent Electron focus loss on DOM destruction
-    if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-    }
+    if (!confirm("Finalize these scores? This will update the trainee's records.")) return;
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
@@ -479,25 +428,12 @@ async function finalizeAdminMarking(subId) {
 
     const markInputs = document.querySelectorAll('.q-mark');
     let earnedPoints = 0;
-    const specificScores = {}; // Store individual question scores
-
-    markInputs.forEach(input => {
-        const val = parseFloat(input.value) || 0;
-        earnedPoints += val;
-        const idx = input.getAttribute('data-idx');
-        if (idx !== null) specificScores[idx] = val;
-    });
+    markInputs.forEach(input => earnedPoints += parseFloat(input.value));
 
     const percentage = maxScore > 0 ? Math.round((earnedPoints / maxScore) * 100) : 0;
 
     sub.score = percentage;
     sub.status = 'completed';
-    sub.scores = specificScores; // Persist individual scores
-    
-    // TRACK EDIT HISTORY
-    sub.lastEditedBy = CURRENT_USER.user;
-    sub.lastEditedDate = new Date().toISOString();
-
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
@@ -556,8 +492,94 @@ async function finalizeAdminMarking(subId) {
     loadMarkingQueue();
     loadAssessmentDashboard();
     if (typeof renderMonthly === 'function') renderMonthly();
-    if (typeof loadTestRecords === 'function') loadTestRecords();
-    if (typeof loadCompletedHistory === 'function') loadCompletedHistory(); // Refresh new history view
+}
+
+async function finalizeAdminMarking(subId) {
+    if (!confirm("Finalize these scores? This will update the trainee's records.")) return;
+
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const sub = subs.find(s => s.id === subId);
+    
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const test = tests.find(t => t.id == sub.testId);
+    let maxScore = 0;
+    if(test) test.questions.forEach(q => maxScore += parseFloat(q.points || 1));
+    else maxScore = document.querySelectorAll('.q-mark').length; 
+
+    const markInputs = document.querySelectorAll('.q-mark');
+    let earnedPoints = 0;
+    const specificScores = {}; // Store individual question scores
+
+    markInputs.forEach(input => {
+        const val = parseFloat(input.value) || 0;
+        earnedPoints += val;
+        const idx = input.getAttribute('data-idx');
+        if (idx !== null) specificScores[idx] = val;
+    });
+
+    const percentage = maxScore > 0 ? Math.round((earnedPoints / maxScore) * 100) : 0;
+
+    sub.score = percentage;
+    sub.status = 'completed';
+    sub.scores = specificScores; // Persist individual scores
+    localStorage.setItem('submissions', JSON.stringify(subs));
+
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    let groupId = "Unknown";
+    // UPDATED: Case-insensitive match for Group ID
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (members.some(m => m.toLowerCase() === sub.trainee.toLowerCase())) { 
+            groupId = gid; 
+            break; 
+        }
+    }
+    
+    let cycleVal = 'Digital Onboard';
+    if(typeof getTraineeCycle === 'function') cycleVal = getTraineeCycle(sub.trainee, groupId);
+    const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    
+    // DEDUPLICATION (Fix for Duplicates)
+    const existingIdx = records.findIndex(r => 
+        r.trainee === sub.trainee && 
+        r.assessment === sub.testTitle
+    );
+
+    const newRecord = {
+        id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+        groupID: groupId,
+        trainee: sub.trainee,
+        assessment: sub.testTitle,
+        score: percentage,
+        date: sub.date,
+        phase: phaseVal,
+        cycle: cycleVal,
+        link: 'Digital-Assessment',
+        docSaved: true
+    };
+
+    if (existingIdx > -1) {
+        records[existingIdx].score = percentage;
+        records[existingIdx].cycle = cycleVal;
+        records[existingIdx].docSaved = true;
+        // Preserve ID
+        if(!records[existingIdx].id) records[existingIdx].id = newRecord.id;
+    } else {
+        records.push(newRecord);
+    }
+    
+    localStorage.setItem('records', JSON.stringify(records));
+
+    // --- SECURE SAVE ---
+    await secureAssessmentSave(); // Saves submissions, records, tests
+
+    if(typeof showToast === 'function') showToast(`Marking Finalized! Trainee scored ${percentage}%`, "success");
+    document.getElementById('markingModal').classList.add('hidden');
+    
+    loadMarkingQueue();
+    loadAssessmentDashboard();
+    if (typeof renderMonthly === 'function') renderMonthly();
 }
 
 /**
@@ -669,13 +691,6 @@ function openTestTaker(testId, isArenaMode = false) {
     const test = tests.find(t => t.id == testId);
     if (!test) return;
 
-    // BLOCK VETTING TESTS OUTSIDE ARENA
-    // Vetting tests must go through the Arena process (Security Checks, Admin Push)
-    if (test.type === 'vetting' && !isArenaMode && CURRENT_USER.role === 'trainee') {
-        if(typeof showToast === 'function') showToast("Vetting tests must be taken in the Vetting Arena.", "error");
-        return;
-    }
-
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     
     // --- SCHEDULE ENFORCEMENT ---
@@ -736,30 +751,6 @@ function openTestTaker(testId, isArenaMode = false) {
     }
 
     window.CURRENT_TEST = JSON.parse(JSON.stringify(test)); 
-    
-    // Tag original indices before shuffling to map answers back later
-    window.CURRENT_TEST.questions.forEach((q, i) => q._originalIndex = i);
-
-    // --- SHUFFLE LOGIC (With Grouping) ---
-    if (window.CURRENT_TEST.shuffle) {
-        const questions = window.CURRENT_TEST.questions;
-        const groups = [];
-        let currentGroup = [];
-        
-        questions.forEach((q, i) => {
-            // If linked to previous and not the very first question, add to current group
-            if (q.linkedToPrevious && i > 0) {
-                currentGroup.push(q);
-            } else {
-                if (currentGroup.length > 0) groups.push(currentGroup);
-                currentGroup = [q];
-            }
-        });
-        if (currentGroup.length > 0) groups.push(currentGroup);
-        
-        window.CURRENT_TEST.questions = shuffleArray(groups).flat();
-    }
-
     window.USER_ANSWERS = {}; 
 
     window.CURRENT_TEST.questions.forEach((q, idx) => {
@@ -800,13 +791,10 @@ function renderTestPaper(containerId = 'takingQuestions') {
     `;
 
     window.CURRENT_TEST.questions.forEach((q, idx) => {
-        // Reference Button
-        const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
-
         html += `
         <div class="taking-card" style="margin-bottom:40px;">
             <div class="q-text-large" style="font-weight:700; margin-bottom:15px;">
-                ${idx + 1}. ${q.text} ${refBtn} <span style="font-size:0.8rem; font-weight:normal; color:var(--text-muted); float:right; margin-left:10px;">(${q.points||1} pts)</span>
+                ${idx + 1}. ${q.text} <span style="font-size:0.8rem; font-weight:normal; color:var(--text-muted); float:right;">(${q.points||1} pts)</span>
             </div>
             <div class="question-input-area" id="q_area_${idx}">${renderQuestionInput(q, idx)}</div>
         </div>`;
@@ -819,11 +807,6 @@ function renderTestPaper(containerId = 'takingQuestions') {
     </div>`;
     
     content.innerHTML = html;
-
-    // VISUAL FIX: Resize textareas after rendering
-    setTimeout(() => {
-        content.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
-    }, 0);
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---
@@ -928,46 +911,22 @@ function renderQuestionInput(q, idx) {
 }
 
 // --- HELPERS ---
-function recordAnswer(qIdx, val) { 
-    window.USER_ANSWERS[qIdx] = val;
-    // Live Arena: Persist answer locally to session immediately
-    if (window.IS_LIVE_ARENA) {
-        const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
-        if (session.active && session.currentQ === qIdx) {
-            if (!session.answers) session.answers = {};
-            session.answers[qIdx] = val;
-            localStorage.setItem('liveSession', JSON.stringify(session));
-            // SYNC TO SERVER IMMEDIATELY
-            if (typeof saveToServer === 'function') {
-                saveToServer(['liveSession'], false); // Safe merge, fire-and-forget
-            }
-        }
-    }
-}
+function recordAnswer(qIdx, val) { window.USER_ANSWERS[qIdx] = val; }
 function updateMatchingAnswer(qIdx, rowIdx, val) {
     if(!window.USER_ANSWERS[qIdx]) window.USER_ANSWERS[qIdx] = [];
     window.USER_ANSWERS[qIdx][rowIdx] = val;
-    // Live Arena: Persist
-    if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
 function updateMatrixAnswer(qIdx, rowIdx, colIdx) {
     if(!window.USER_ANSWERS[qIdx]) window.USER_ANSWERS[qIdx] = {};
     window.USER_ANSWERS[qIdx][rowIdx] = colIdx;
-    // Live Arena: Persist
-    if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
 function updateMultiSelect(qIdx, optIdx, isChecked) {
     if(!window.USER_ANSWERS[qIdx]) window.USER_ANSWERS[qIdx] = [];
     if(isChecked) {
-        // Prevent duplicates
-        if (!window.USER_ANSWERS[qIdx].includes(optIdx)) {
-            window.USER_ANSWERS[qIdx].push(optIdx);
-        }
+        window.USER_ANSWERS[qIdx].push(optIdx);
     } else {
         window.USER_ANSWERS[qIdx] = window.USER_ANSWERS[qIdx].filter(i => i !== optIdx);
     }
-    // Live Arena: Persist
-    if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
 function moveRankingItem(qIdx, itemIdx, direction) {
     const list = window.USER_ANSWERS[qIdx];
@@ -1000,17 +959,17 @@ function shuffleArray(array) {
 }
 
 // UPDATED: Async Submit
-async function submitTest(forceSubmit = false) {
+async function submitTest() {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const existing = subs.find(s => s.testId == window.CURRENT_TEST.id && s.trainee === CURRENT_USER.user && !s.archived);
     if (existing) {
-        if (!forceSubmit) alert("Error: Active submission already exists.");
+        alert("Error: Active submission already exists.");
         document.getElementById('test-timer-bar')?.remove();
         if(typeof showTab === 'function') showTab('my-tests');
         return;
     }
 
-    if (!forceSubmit && !confirm("Finalize your assessment? Answers will be locked for review.")) return;
+    if (!confirm("Finalize your assessment? Answers will be locked for review.")) return;
 
     if (window.TEST_TIMER) clearInterval(window.TEST_TIMER);
     const bar = document.getElementById('test-timer-bar');
@@ -1080,28 +1039,15 @@ async function submitTest(forceSubmit = false) {
     const finalPercent = (maxScore > 0) ? Math.round((score / maxScore) * 100) : 0;
     const finalStatus = needsManual ? 'pending' : 'completed';
 
-    // REMAP ANSWERS: Map shuffled UI indices back to original Question indices
-    // This ensures Admin Grading (which loads original test) sees answers in correct slots.
-    const remappedAnswers = {};
-    window.CURRENT_TEST.questions.forEach((q, currentIdx) => {
-        const ans = window.USER_ANSWERS[currentIdx];
-        remappedAnswers[q._originalIndex] = ans;
-    });
-
-    // SNAPSHOT: Capture the test definition state at time of submission
-    // We fetch the canonical version from storage to ensure we have the unshuffled structure
-    const originalTestDef = JSON.parse(localStorage.getItem('tests') || '[]').find(t => t.id == window.CURRENT_TEST.id);
-
     const submission = {
         id: Date.now().toString(),
         testId: window.CURRENT_TEST.id,
         testTitle: window.CURRENT_TEST.title,
         trainee: CURRENT_USER.user,
         date: new Date().toISOString().split('T')[0],
-        answers: remappedAnswers, // Save remapped answers
+        answers: window.USER_ANSWERS,
         status: finalStatus, 
-        score: finalStatus === 'completed' ? finalPercent : 0,
-        testSnapshot: originalTestDef || window.CURRENT_TEST // Save snapshot
+        score: finalStatus === 'completed' ? finalPercent : 0 
     };
 
     subs.push(submission);
@@ -1189,8 +1135,8 @@ function startTestTimer(mins) {
         timerBar.innerText = `TIME: ${m}:${s < 10 ? '0' + s : s}`;
         if (secs <= 0) {
             clearInterval(window.TEST_TIMER);
-            if(typeof showToast === 'function') showToast("Time's up! Submitting automatically.", "warning");
-            submitTest(true);
+            alert("Time's up! Submitting automatically.");
+            submitTest();
         }
         secs--;
     }, 1000);

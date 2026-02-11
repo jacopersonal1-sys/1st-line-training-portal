@@ -31,11 +31,6 @@ async function secureRequestSave() {
 
 function loadAllDataViews() { 
     populateMonthlyFilters(); 
-    // Force sync to ensure trainee sees latest scores immediately
-    if (typeof loadFromServer === 'function') {
-        // Silent load to update local cache without blocking UI
-        loadFromServer(true).then(() => renderMonthly());
-    }
     renderMonthly(); 
 }
 
@@ -132,7 +127,7 @@ function renderMonthly() {
     // SAFETY CHECK: Skip corrupted records without trainee names
     if (!r.trainee) return;
 
-    if(CURRENT_USER.role === 'trainee' && r.trainee.toLowerCase() !== CURRENT_USER.user.toLowerCase()) return; // Strict filter for trainee
+    if(CURRENT_USER.role === 'trainee' && r.trainee.toLowerCase() !== CURRENT_USER.user.toLowerCase()) return;
     if(fMonth !== '' && r.groupID !== fMonth) return;
     if(fAssess !== '' && r.assessment !== fAssess) return;
     if(fPhase !== '' && r.phase !== fPhase) return;
@@ -156,11 +151,8 @@ function renderMonthly() {
         
         if(r.link === 'Digital-Assessment' || r.link === 'Live-Session') {
              // Check if function exists to avoid reference errors
-             const safeTrainee = r.trainee.replace(/'/g, "\\'");
-             const safeAssess = r.assessment.replace(/'/g, "\\'");
-
              const clickAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function') 
-                ? `onclick="viewCompletedTest('${safeTrainee}', '${safeAssess}')"` 
+                ? `onclick="viewCompletedTest('${r.trainee}', '${r.assessment}')"` 
                 : `onclick="alert('Assessment viewer not loaded.')"`;
              
              actionHtml += `<button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button>`;
@@ -372,12 +364,7 @@ async function saveGeneratedReport() {
     }
     // --- SECURE SAVE END ---
 
-    // FIX: Blur active element to prevent Electron focus loss
-    if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-    }
-
-    if(typeof showToast === 'function') showToast("Report saved successfully.", "success");
+    alert("Report saved successfully.");
 }
 
 function renderSavedReportsList() {

@@ -58,9 +58,6 @@ function renderDashboard() {
         container.appendChild(content);
         container.appendChild(manager);
         
-        // Check for missing clock-ins immediately
-        if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
-        
         // Trigger Dashboard-specific health check
         updateDashboardHealth();
     } else if (role === 'teamleader') {
@@ -722,12 +719,6 @@ function buildTraineeWidgets() {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const myRecords = records.filter(r => r.trainee === CURRENT_USER.user);
     const lastRecord = myRecords.length > 0 ? myRecords[myRecords.length - 1] : null;
-    
-    // Check if clocked in today to show Clock Out button
-    const today = new Date().toISOString().split('T')[0];
-    const attRecs = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const myAtt = attRecs.find(r => r.user === CURRENT_USER.user && r.date === today);
-    const showClockOut = myAtt && !myAtt.clockOut;
 
     return `
         <div class="dash-panel main-panel">
@@ -763,14 +754,5 @@ function buildTraineeWidgets() {
                 <p>Schedule Assessment</p>
             </div>
         </div>
-        
-        ${showClockOut ? `
-        <div class="dash-card" onclick="submitClockOut()" style="cursor:pointer; border:1px solid #e74c3c;">
-            <div class="dash-icon" style="background:rgba(231, 76, 60, 0.1); color:#e74c3c;"><i class="fas fa-sign-out-alt"></i></div>
-            <div class="dash-data">
-                <h3>Clock Out</h3>
-                <p>End Day</p>
-            </div>
-        </div>` : ''}
     `;
 }

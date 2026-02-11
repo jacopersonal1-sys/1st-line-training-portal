@@ -91,27 +91,10 @@ function toggleGroupMode() {
 async function saveRoster() {
     const radio = document.querySelector('input[name="groupMode"]:checked');
     const mode = radio ? radio.value : 'new';
-    const rawInput = document.getElementById('newGroupNames').value;
     
-    // PARSE EMAILS & EXTRACT NAMES
-    // Expected format: username.surname@herotel.com
-    const lines = rawInput.split('\n').map(l => l.trim()).filter(l => l);
+    const names = document.getElementById('newGroupNames').value.split('\n').map(n=>n.trim()).filter(n=>n); 
     
-    if(!lines.length) return alert("Please enter at least one trainee email.");
-
-    const names = [];
-    const emails = [];
-
-    lines.forEach(line => {
-        // Basic email validation/extraction
-        if (line.includes('@')) {
-            emails.push(line);
-            // Extract name: "john.doe@..." -> "John Doe"
-            const namePart = line.split('@')[0];
-            const fullName = namePart.split('.').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
-            names.push(fullName);
-        }
-    });
+    if(!names.length) return alert("Please enter at least one trainee name.");
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     let targetGroupId = "";
@@ -154,11 +137,6 @@ async function saveRoster() {
     
     refreshAllDropdowns();
     
-    // TRIGGER OUTLOOK EMAIL GENERATION
-    if (typeof generateOnboardingEmail === 'function') {
-        generateOnboardingEmail(emails);
-    }
-
     alert(`Successfully ${mode === 'new' ? 'created' : 'updated'} group: ${getGroupLabel(targetGroupId, rosters[targetGroupId].length)}`);
 }
 
@@ -201,25 +179,7 @@ async function deleteGroup(groupId) {
     delete rosters[groupId];
     localStorage.setItem('rosters', JSON.stringify(rosters));
     
-    // DEEP CLEAN: Remove associated records and exemptions
-    let records = JSON.parse(localStorage.getItem('records') || '[]');
-    const initialRecLen = records.length;
-    records = records.filter(r => r.groupID !== groupId);
-    
-    if (records.length !== initialRecLen) {
-        localStorage.setItem('records', JSON.stringify(records));
-    }
-
-    let exemptions = JSON.parse(localStorage.getItem('exemptions') || '[]');
-    const initialExLen = exemptions.length;
-    exemptions = exemptions.filter(e => e.groupID !== groupId);
-    
-    if (exemptions.length !== initialExLen) {
-        localStorage.setItem('exemptions', JSON.stringify(exemptions));
-    }
-
-    // Force sync all affected keys
-    if(typeof saveToServer === 'function') await saveToServer(['rosters', 'records', 'exemptions'], true);
+    await secureUserSave();
     
     refreshAllDropdowns();
 }
@@ -301,11 +261,11 @@ async function scanAndGenerateUsers() {
 
         // FIX: Ensure cloud sync happens immediately
         await secureUserSave();
-        if(typeof showToast === 'function') showToast(`Generated ${createdCount} missing accounts (${resurrectedCount} restored).`, "success");
+        alert(`Generated ${createdCount} missing accounts (${resurrectedCount} restored from deletion).`); 
         loadAdminUsers(); 
         populateTraineeDropdown(); 
     } else {
-        if(typeof showToast === 'function') showToast("No missing users found.", "info");
+        alert("No missing users found based on current Rosters/Records.");
     }
 }
 
