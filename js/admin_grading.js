@@ -188,35 +188,6 @@ async function saveScores() {
 // We deleted 'loadMarkingQueue' and 'approveSubmission' here to avoid 
 // conflicts with the more advanced grading engine in assessment.js.
 
-// Function to View Completed Tests (Called from Test Records)
-function viewCompletedTest(trainee, assessment, mode = 'view') {
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    // Find all matches
-    const matches = subs.filter(s => s.trainee === trainee && s.testTitle === assessment);
-    
-    if(matches.length === 0) {
-        if(typeof showToast === 'function') showToast("Digital submission file not found.", "error");
-        else alert("Digital submission file not found.");
-        return;
-    }
-    
-    // Sort by ID (Timestamp) descending to get the latest
-    matches.sort((a,b) => b.id.localeCompare(a.id));
-    const sub = matches[0];
-    
-    if(typeof openAdminMarking === 'function') {
-        openAdminMarking(sub.id);
-        
-        // Hide the submit button if viewing only
-        if (mode === 'view') {
-            setTimeout(() => {
-                const btn = document.getElementById('markingSubmitBtn');
-                if(btn) btn.style.display = 'none';
-            }, 50);
-        }
-    }
-}
-
 // --- SECTION 3: TEST RECORDS & HISTORY ---
 
 function loadTestRecords() {
@@ -318,8 +289,18 @@ async function allowRetake(subId) {
         sub.status = 'retake_allowed'; 
         localStorage.setItem('submissions', JSON.stringify(subs));
         
+        // RESET VETTING SESSION STATUS IF APPLICABLE
+        // This ensures the trainee can re-enter the Arena and isn't stuck on "Submitted"
+        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        if (session.active && session.testId == sub.testId) {
+            if (session.trainees && session.trainees[sub.trainee]) {
+                delete session.trainees[sub.trainee]; 
+                localStorage.setItem('vettingSession', JSON.stringify(session));
+            }
+        }
+
         // --- CLOUD SYNC (Instant) ---
-        if(typeof saveToServer === 'function') await saveToServer(['submissions'], false);
+        if(typeof saveToServer === 'function') await saveToServer(['submissions', 'vettingSession'], true);
         
         alert("Retake granted.");
         loadTestRecords();

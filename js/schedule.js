@@ -144,7 +144,10 @@ function buildTabs(schedules, isAdmin) {
             subLabel = (typeof getGroupLabel === 'function') ? getGroupLabel(data.assigned).split('[')[0] : data.assigned;
         }
         return `<button class="sched-tab-btn ${isActive}" onclick="switchScheduleTab('${key}')" style="padding: 8px 15px; border:1px solid var(--border-color); background:var(--bg-card); cursor:pointer; border-radius:6px; min-width:100px; text-align:left;">
-            <div style="font-weight:bold; font-size:0.9rem;">Schedule ${key}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:bold; font-size:0.9rem;">Schedule ${key}</span>
+                ${isAdmin && CURRENT_USER.role !== 'special_viewer' ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
+            </div>
             <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
         </button>`;
     }).join('');
@@ -383,6 +386,8 @@ function renderLiveTable() {
     const timeSlots = ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
     const trainers = ["Trainer 1", "Trainer 2"];
 
+    const searchTerm = document.getElementById('liveBookingSearch') ? document.getElementById('liveBookingSearch').value.toLowerCase() : '';
+
     let html = '';
 
     validDays.forEach(d => {
@@ -411,6 +416,13 @@ function renderLiveTable() {
                 const isTaken = !!booking;
                 const isMine = booking && booking.trainee === CURRENT_USER.user;
                 const isCompleted = booking && booking.status === 'Completed';
+
+                let highlightClass = '';
+                if (isTaken && searchTerm) {
+                    if (booking.trainee.toLowerCase().includes(searchTerm) || booking.assessment.toLowerCase().includes(searchTerm)) {
+                        highlightClass = 'search-match';
+                    }
+                }
 
                 let slotHtml = '';
                 
@@ -446,7 +458,7 @@ function renderLiveTable() {
                     }
 
                     slotHtml += `
-                        <div class="slot-item ${statusClass}" style="margin-bottom:8px;">
+                        <div class="slot-item ${statusClass} ${highlightClass}" style="margin-bottom:8px;">
                             ${info}
                             <div style="margin-top:4px;">${actions}</div>
                         </div>`;
@@ -987,7 +999,7 @@ async function deleteSchedule(id) {
     }
     
     localStorage.setItem('schedules', JSON.stringify(schedules));
-    await secureScheduleSave();
+    if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
     
     // Switch to first available
     ACTIVE_SCHED_ID = Object.keys(schedules).sort()[0];

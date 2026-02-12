@@ -110,7 +110,7 @@ function loadTestBuilder(existingId = null) {
 function addQuestion(type) {
     // UPDATED: Consistent String IDs
     const id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    let q = { id, type, text: "", points: 1, adminNotes: "" }; // Default structure with points
+    let q = { id, type, text: "", points: 1, adminNotes: "", imageLink: "", linkedToPrevious: false }; // Default structure with points
 
     // Specific structures per type
     if (type === 'multiple_choice' || type === 'multi_select') {
@@ -147,15 +147,6 @@ function renderBuilder() {
         totalPoints += parseFloat(q.points || 0);
         let innerHTML = '';
         
-        // Rich Text Toolbar HTML
-        const toolbarHtml = `
-            <div class="rich-toolbar">
-                <button class="btn-tool" onclick="insertTag(${idx}, 'b')" title="Bold"><b>B</b></button>
-                <button class="btn-tool" onclick="insertTag(${idx}, 'i')" title="Italic"><i>I</i></button>
-                <button class="btn-tool" onclick="insertTag(${idx}, 'ul')" title="List"><i class="fas fa-list-ul"></i></button>
-                <button class="btn-tool" onclick="insertTag(${idx}, 'br')" title="Line Break">&crarr;</button>
-            </div>`;
-
         if (q.type === 'multiple_choice' || q.type === 'multi_select') {
             const isMulti = q.type === 'multi_select';
             innerHTML = `
@@ -252,24 +243,43 @@ function renderBuilder() {
             `;
         }
 
+        let linkControl = '';
+        if (idx > 0) {
+            linkControl = `
+            <div style="margin-bottom:10px; padding:5px 10px; background:var(--bg-input); border-radius:4px; border:1px dashed var(--border-color);">
+                <label style="cursor:pointer; font-size:0.85rem; display:flex; align-items:center; margin:0; color:var(--text-muted);">
+                    <input type="checkbox" ${q.linkedToPrevious ? 'checked' : ''} onchange="updateLinkedToPrevious(${idx}, this.checked)" style="width:auto; margin-right:8px; margin-bottom:0;">
+                    <i class="fas fa-link" style="margin-right:5px;"></i> Keep attached to previous question (Group for Shuffle)
+                </label>
+            </div>`;
+        }
+
         return `
-        <div class="question-card" onclick="highlightQuestion(this)">
+        <div class="question-card">
             <div class="q-header">
                 <strong>Question ${idx + 1} (${q.type.replace('_', ' ')})</strong>
                 <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})"><i class="fas fa-times"></i></button>
             </div>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
-                <div style="flex:3; display:flex; flex-direction:column;">
-                    ${toolbarHtml}
-                    <textarea id="q_text_${idx}" placeholder="Enter Question Text (HTML supported)" class="q-text-input auto-expand" oninput="autoResize(this)" onchange="updateQText(${idx}, this.value)">${q.text || ''}</textarea>
+                <div class="rich-text-container" style="flex:3;">
+                    <div class="rich-toolbar">
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('bold')" title="Bold"><i class="fas fa-bold"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('italic')" title="Italic"><i class="fas fa-italic"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('insertUnorderedList')" title="Bullet List"><i class="fas fa-list-ul"></i></button>
+                    </div>
+                    <div class="rich-editor" contenteditable="true" oninput="updateQText(${idx}, this.innerHTML)">${q.text || ''}</div>
                 </div>
                 <div style="flex:1;">
                     <input type="number" placeholder="Points" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>
             </div>
             <div style="margin-bottom:10px;">
-                <input type="text" placeholder="Admin/Marker Notes (Hidden from Trainee)" value="${q.adminNotes || ''}" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border-style:dashed;">
+                <textarea placeholder="Admin/Marker Notes (Hidden from Trainee)" class="auto-expand" oninput="autoResize(this)" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border: 1px dashed var(--border-color); width:100%; min-height:40px;">${q.adminNotes || ''}</textarea>
             </div>
+            <div style="margin-bottom:10px;">
+                <input type="text" placeholder="Reference Image/Page URL (Optional)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary);">
+            </div>
+            ${linkControl}
             <div style="margin-top:10px;">
                 ${innerHTML}
             </div>
@@ -277,26 +287,16 @@ function renderBuilder() {
     `}).join('');
     
     document.getElementById('builderTotalScore').innerText = totalPoints;
+
+    // FIX: Auto-resize text areas immediately after render
+    setTimeout(() => {
+        container.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
+    }, 0);
 }
 
 // --- RICH TEXT HELPER ---
-function insertTag(idx, tag) {
-    const textarea = document.getElementById(`q_text_${idx}`);
-    if (!textarea) return;
-
-    let start = textarea.selectionStart;
-    let end = textarea.selectionEnd;
-    let text = textarea.value;
-    let insert = "";
-
-    if (tag === 'b') insert = `<b>${text.substring(start, end)}</b>`;
-    else if (tag === 'i') insert = `<i>${text.substring(start, end)}</i>`;
-    else if (tag === 'ul') insert = `\n<ul>\n  <li>${text.substring(start, end)}</li>\n</ul>\n`;
-    else if (tag === 'br') insert = `<br>`;
-
-    textarea.value = text.substring(0, start) + insert + text.substring(end);
-    updateQText(idx, textarea.value);
-    textarea.focus();
+function formatDoc(cmd, value=null) {
+    document.execCommand(cmd, false, value);
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---
@@ -339,6 +339,8 @@ function restoreBuilderDraft() {
 function updateQText(idx, val) { BUILDER_QUESTIONS[idx].text = val; }
 function updatePoints(idx, val) { BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; renderBuilder(); }
 function updateAdminNotes(idx, val) { BUILDER_QUESTIONS[idx].adminNotes = val; }
+function updateImageLink(idx, val) { BUILDER_QUESTIONS[idx].imageLink = val; }
+function updateLinkedToPrevious(idx, val) { BUILDER_QUESTIONS[idx].linkedToPrevious = val; }
 
 function updateOptText(qIdx, oIdx, val) { BUILDER_QUESTIONS[qIdx].options[oIdx] = val; }
 function updateCorrect(qIdx, oIdx, type) { 

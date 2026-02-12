@@ -29,7 +29,8 @@ const DB_SCHEMA = {
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
     agentNotes: {}, // Private notes on agents { "username": "note content" }
-    liveSessions: [] // CHANGED: Array to support multiple concurrent sessions
+    liveSessions: [], // CHANGED: Array to support multiple concurrent sessions
+    forbiddenApps: [] // Dynamic list of blacklisted processes
 };
 
 // --- GLOBAL INTERACTION TRACKER ---

@@ -92,9 +92,29 @@ async function saveRoster() {
     const radio = document.querySelector('input[name="groupMode"]:checked');
     const mode = radio ? radio.value : 'new';
     
-    const names = document.getElementById('newGroupNames').value.split('\n').map(n=>n.trim()).filter(n=>n); 
+    const rawInput = document.getElementById('newGroupNames').value;
     
-    if(!names.length) return alert("Please enter at least one trainee name.");
+    // PARSE EMAILS & EXTRACT NAMES
+    // Expected format: username.surname@herotel.com
+    const lines = rawInput.split('\n').map(l => l.trim()).filter(l => l);
+    
+    if(!lines.length) return alert("Please enter at least one trainee email or name.");
+
+    const names = [];
+    const emails = [];
+
+    lines.forEach(line => {
+        // Basic email validation/extraction
+        if (line.includes('@')) {
+            emails.push(line);
+            // Extract name: "john.doe@..." -> "John Doe"
+            const namePart = line.split('@')[0];
+            const fullName = namePart.split(/[._]/).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+            names.push(fullName);
+        } else {
+            names.push(line); // Fallback for plain names
+        }
+    });
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     let targetGroupId = "";
@@ -136,6 +156,11 @@ async function saveRoster() {
     document.getElementById('newGroupNames').value = ''; 
     
     refreshAllDropdowns();
+    
+    // TRIGGER OUTLOOK EMAIL GENERATION
+    if (emails.length > 0 && typeof generateOnboardingEmail === 'function') {
+        generateOnboardingEmail(emails);
+    }
     
     alert(`Successfully ${mode === 'new' ? 'created' : 'updated'} group: ${getGroupLabel(targetGroupId, rosters[targetGroupId].length)}`);
 }
@@ -250,7 +275,15 @@ async function scanAndGenerateUsers() {
                 resurrectedCount++;
             }
 
-            users.push({ user: name, pass: Math.floor(1000+Math.random()*9000).toString(), role: 'trainee' }); 
+            let pin = "0000";
+            if (typeof require !== 'undefined') {
+                const { randomBytes } = require('crypto');
+                const buf = randomBytes(2);
+                pin = ((buf.readUInt16BE(0) % 9000) + 1000).toString();
+            } else {
+                pin = Math.floor(1000 + Math.random() * 9000).toString();
+            }
+            users.push({ user: name, pass: pin, role: 'trainee' }); 
             createdCount++; 
         } 
     }); 
@@ -424,8 +457,16 @@ async function confirmMoveUser() {
 function generatePassword() { 
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$";
     let pass = "";
-    for(let i=0; i<12; i++) {
-        pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    if (typeof require !== 'undefined') {
+        const { randomBytes } = require('crypto');
+        const buf = randomBytes(12);
+        for(let i=0; i<12; i++) {
+            pass += chars.charAt(buf[i] % chars.length);
+        }
+    } else {
+        for(let i=0; i<12; i++) {
+            pass += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
     }
     document.getElementById('newUserPass').value = pass; 
 }
@@ -488,7 +529,7 @@ async function remUser(username) {
         localStorage.setItem('users',JSON.stringify(users)); 
         
         // 4. FORCE SAVE
-        await secureUserSave();
+        if(typeof saveToServer === 'function') await saveToServer(['users', 'revokedUsers'], true);
 
         loadAdminUsers(); 
         populateTraineeDropdown(); 
@@ -556,4 +597,30 @@ async function saveUserEdit() {
     
     document.getElementById('adminEditModal').classList.add('hidden');
     loadAdminUsers();
+}
+
+// --- EMAIL AUTOMATION ---
+function generateOnboardingEmail(emails) {
+    if (!emails || emails.length === 0) return;
+
+    const toAddress = "systemsupport@herotel.com";
+    const ccAddresses = "darren.tupper@herotel.com,jaco.prince@herotel.com,soanette.wilken@herotel.com";
+    const subject = "Access Request for New Onboards";
+    
+    const body = `Good day.
+
+Hope this finds you well.
+
+Kindly assist with access to the following programs (the error the onboards are getting is either their email address is not found or incorrect username & password):
+
+Q-Contact
+Corteza (CRM Instance present)
+ACS
+Odoo portal
+
+Please find the onboards whom require access below:
+${emails.join('\n')}`;
+
+    const mailtoLink = `mailto:${toAddress}?cc=${ccAddresses}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailtoLink;
 }

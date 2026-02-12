@@ -174,7 +174,7 @@ ipcMain.handle('set-content-protection', (event, enable) => {
     return true;
 });
 
-ipcMain.handle('get-process-list', async () => {
+ipcMain.handle('get-process-list', async (event, customTargets) => {
     return new Promise((resolve) => {
         // Windows command to list running apps
         const cmd = process.platform === 'win32' 
@@ -187,7 +187,9 @@ ipcMain.handle('get-process-list', async () => {
                 return;
             }
             // Simple parsing for Windows CSV
-            const targets = [
+            const targets = (customTargets && Array.isArray(customTargets) && customTargets.length > 0) 
+            ? customTargets.map(t => t.toLowerCase())
+            : [
                 'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'safari', 
                 'waterfox', 'tor', 'duckduckgo', 'maxthon', 'seamonkey', 'avast', 'yandex',
                 'whatsapp'

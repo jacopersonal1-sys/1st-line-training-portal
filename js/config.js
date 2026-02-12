@@ -72,3 +72,15 @@ const INSIGHT_CONFIG = {
         "VoIP", "Email"
     ]
 };
+
+// --- DYNAMIC CONFIGURATION DEFAULTS ---
+const DEFAULT_FORBIDDEN_APPS = [
+    'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'safari', 
+    'waterfox', 'tor', 'duckduckgo', 'maxthon', 'seamonkey', 'avast', 'yandex',
+    'whatsapp', 'discord', 'slack', 'teams'
+];
+
+const SUPPORT_EMAILS = {
+    TO: "systemsupport@herotel.com",
+    CC: "darren.tupper@herotel.com,jaco.prince@herotel.com,soanette.wilken@herotel.com"
+};

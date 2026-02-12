@@ -154,6 +154,17 @@
   </div>
 </div>
 
+<div id="attendanceAdminModal" class="modal-overlay hidden" style="z-index: 3500;">
+    <div class="modal-box" style="width: 800px; max-width: 95%;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h3>Attendance Register & Review</h3>
+            <button class="btn-secondary btn-sm" onclick="document.getElementById('attendanceAdminModal').classList.add('hidden')"><i class="fas fa-times"></i></button>
+        </div>
+        <div style="margin-bottom:15px;"><label>Select Group</label><select id="attAdminGroupSelect" onchange="renderAttendanceRegister()"></select></div>
+        <div id="attAdminContent" style="max-height:60vh; overflow-y:auto;"></div>
+    </div>
+</div>
+
 <div id="adminEditModal" class="modal-overlay hidden" style="z-index: 3000;">
     <div class="modal-box">
         <h3 id="adminEditTitle">Edit Item</h3>
@@ -621,6 +632,10 @@
                 <button class="btn-danger" onclick="clearLiveBookings()" style="width:auto; height:42px; margin-left:auto;">Reset All Bookings</button>
             </div>
         </div>
+        <div class="card" style="padding:15px; display:flex; align-items:center; gap:10px;">
+            <i class="fas fa-search" style="color:var(--text-muted);"></i>
+            <input type="text" id="liveBookingSearch" placeholder="Search bookings by Trainee Name or Assessment..." onkeyup="renderLiveTable()" style="margin:0; border:none; background:transparent; font-size:1rem; width:100%;">
+        </div>
         <div class="card"><table class="booking-table"><thead><tr><th style="width:20%;">Date</th><th style="width:20%;">1:00 PM</th><th style="width:20%;">2:00 PM</th><th style="width:20%;">3:00 PM</th><th style="width:20%;">4:00 PM</th></tr></thead><tbody id="liveBookingBody"></tbody></table></div>
         </section>
 
@@ -639,12 +654,10 @@
         
         <div class="admin-sub-nav">
             <button class="sub-tab-btn active" id="btn-sub-users" onclick="showAdminSub('users', this)">Manage Users</button>
-            <button class="sub-tab-btn" id="btn-sub-assessments" onclick="showAdminSub('assessments', this)">Assessments</button>
-            <button class="sub-tab-btn" id="btn-sub-vetting" onclick="showAdminSub('vetting', this)">Vetting Topics</button>
+            <button class="sub-tab-btn" id="btn-sub-assessments" onclick="showAdminSub('assessments', this)">Training Topics</button>
             <button class="sub-tab-btn" id="btn-sub-data" onclick="showAdminSub('data', this)">Database</button>
             <button class="sub-tab-btn" id="btn-sub-access" onclick="showAdminSub('access', this)">Access Control</button>
             <button class="sub-tab-btn" id="btn-sub-status" onclick="showAdminSub('status', this)">System Status</button>
-            <button class="sub-tab-btn" id="btn-sub-attendance" onclick="showAdminSub('attendance', this)">Attendance</button>
             <button class="sub-tab-btn" id="btn-sub-updates" onclick="showAdminSub('updates', this)">System Updates</button>
             <button class="sub-tab-btn" id="btn-sub-theme" onclick="showAdminSub('theme', this)">Theme Settings</button> 
         </div>
@@ -693,24 +706,30 @@
                     </div>
                     <div>
                         <h4 style="border-bottom:2px solid #9b59b6; padding-bottom:5px; margin-bottom:10px; color:#9b59b6;">Vetting Tests</h4>
-                        <div style="max-height:500px; overflow-y:auto; background:var(--bg-input); border-radius:8px; padding:5px;"><table class="admin-table" style="margin:0;"><thead><tr><th>Name</th><th style="width:40px;"></th></tr></thead><tbody id="assessListVetting"></tbody></table></div>
+                        <div style="max-height:300px; overflow-y:auto; background:var(--bg-input); border-radius:8px; padding:5px; margin-bottom:20px;"><table class="admin-table" style="margin:0;"><thead><tr><th>Name</th><th style="width:40px;"></th></tr></thead><tbody id="assessListVetting"></tbody></table></div>
+                        
+                        <h4 style="border-bottom:2px solid #9b59b6; padding-bottom:5px; margin-bottom:10px; color:#9b59b6;">Vetting Topics</h4>
+                        <div style="display:flex; gap:5px; margin-bottom:10px;">
+                            <input type="text" id="newVettingTopic" placeholder="New Topic" aria-label="Vetting Topic Name" style="margin:0; font-size:0.9rem;">
+                            <button class="btn-primary btn-sm" onclick="addVettingTopic()" style="width:auto;">Add</button>
+                        </div>
+                        <ul id="vettingList" class="vetting-list"></ul>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div id="admin-view-vetting" class="admin-view">
-            <div class="card grid-2">
-            <div><h3>Add Vetting Topic</h3><input type="text" id="newVettingTopic" placeholder="Topic Name" aria-label="Vetting Topic Name"><button class="btn-primary" onclick="addVettingTopic()">Add Topic</button></div>
-            <div><ul id="vettingList" style="list-style:none;padding:0; color:var(--text-muted);"></ul></div>
             </div>
         </div>
 
         <div id="admin-view-data" class="admin-view">
             <div class="card grid-2">
             <div>
+                <h3>Database Statistics</h3>
+                <div id="dbStatsContainer" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;"></div>
+
                 <h3>Bulk Actions</h3>
-                <div style="margin-bottom:15px;"><button class="btn-warning" onclick="syncGroupsFromRecords()"><i class="fas fa-sync"></i> Sync Groups</button></div>
+                <div style="margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn-warning" onclick="syncGroupsFromRecords()"><i class="fas fa-sync"></i> Sync Groups</button>
+                    <button class="btn-secondary" onclick="archiveOldSubmissions()" title="Move old completed tests to archive"><i class="fas fa-archive"></i> Archive Old</button>
+                </div>
                 
                 <div style="margin-bottom:15px; padding-top:10px; border-top:1px solid var(--border-color);">
                     <button class="btn-danger" onclick="deleteBulkRecords()"><i class="fas fa-trash-alt"></i> Delete Selected</button>
@@ -865,23 +884,6 @@
             </div>
         </div>
 
-        <div id="admin-view-attendance" class="admin-view">
-            <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h3>Attendance Register</h3>
-                </div>
-                <div id="attAlertWidget" class="hidden" style="margin-bottom:20px;"></div>
-                <div id="attendanceList"></div>
-                
-                <div style="margin-top:30px; padding-top:20px; border-top:1px solid var(--border-color);">
-                    <h4>Settings (Dropdown Options)</h4>
-                    <label>Platforms (Comma separated)</label><input type="text" id="setAttPlatforms" value="WhatsApp, Microsoft Teams, Call, SMS">
-                    <label>Contacts (Comma separated)</label><input type="text" id="setAttContacts" value="Darren, Netta, Jaco, Claudine">
-                    <button class="btn-secondary" onclick="saveAttendanceSettings()">Save Settings</button>
-                </div>
-            </div>
-        </div>
-
         <div id="admin-view-updates" class="admin-view">
             <div class="card">
                 <h3>System Updates</h3>
@@ -970,9 +972,13 @@
 <script src="js/reporting.js"></script>
 <script src="js/forms.js"></script> 
 <script src="js/insight.js"></script>
-<script src="js/assessment.js"></script>
+<script src="js/assessment_core.js"></script>
+<script src="js/assessment_admin.js"></script>
+<script src="js/assessment_trainee.js"></script>
 <script src="js/live_execution.js"></script>
 <script src="js/agent_search.js"></script>
+<script src="js/admin_history.js"></script>
+<script src="js/attendance.js"></script>
 
 <script src="js/main.js"></script>
 

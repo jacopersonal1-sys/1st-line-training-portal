@@ -343,6 +343,13 @@ async function pollVettingSession() {
         // Only re-render if state changed
         if (currentLocal !== newStr) {
             localStorage.setItem('vettingSession', newStr);
+            
+            // FIX: If session ended while taking test, force submit/exit
+            if (!serverSession.active && document.getElementById('arenaTestContainer')) {
+                if (typeof submitTest === 'function') await submitTest(true); // Force submit
+                return;
+            }
+
             // If we are NOT currently taking the test, refresh the view
             if (!document.getElementById('arenaTestContainer')) {
                 renderTraineeArena();
@@ -375,7 +382,13 @@ async function checkSystemCompliance() {
         if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
         
         // Check Apps
-        const apps = await ipcRenderer.invoke('get-process-list');
+        // Load dynamic list or default
+        let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+        if (forbidden.length === 0 && typeof DEFAULT_FORBIDDEN_APPS !== 'undefined') {
+            forbidden = DEFAULT_FORBIDDEN_APPS;
+        }
+
+        const apps = await ipcRenderer.invoke('get-process-list', forbidden);
         if (apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
     }
 
@@ -493,6 +506,24 @@ function startActiveTestMonitoring() {
         const timeStr = timerEl ? timerEl.innerText.replace('TIME: ', '') : '';
         updateTraineeStatus('started', timeStr);
     }, 30000);
+
+    // FAST SECURITY POLL (3s) - Detect violations quickly
+    // We don't send full status to server every 3s to save bandwidth, 
+    // but we check locally and trigger updateTraineeStatus ONLY if violation found.
+    setInterval(async () => {
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            
+            let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+            if (forbidden.length === 0 && typeof DEFAULT_FORBIDDEN_APPS !== 'undefined') {
+                forbidden = DEFAULT_FORBIDDEN_APPS;
+            }
+
+            const apps = await ipcRenderer.invoke('get-process-list', forbidden);
+            const screens = await ipcRenderer.invoke('get-screen-count');
+            if (apps.length > 0 || screens > 1) updateTraineeStatus('started'); // Trigger the kick logic
+        }
+    }, 3000);
 }
 
 // Called by assessment.js when submitting

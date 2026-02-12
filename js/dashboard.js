@@ -482,11 +482,10 @@ function buildAdminWidgets() {
         ? `<span class="badge-count" style="top:-8px; right:-8px; background:#2ecc71; font-size:0.8rem;">${newBookingsCount}</span>` 
         : '';
 
-    // Attendance Alert (Missing Clock-ins)
-    const clockedInCount = attRecords.filter(r => r.date === today).length;
-    const missingAtt = totalTrainees - clockedInCount;
-    const badgeAtt = missingAtt > 0 
-        ? `<span class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${missingAtt}</span>` 
+    // Attendance Alert (Unconfirmed Lates)
+    const unconfirmedLates = attRecords.filter(r => r.isLate && !r.lateConfirmed).length;
+    const badgeAtt = unconfirmedLates > 0 
+        ? `<span id="badgeAtt" class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${unconfirmedLates}</span>` 
         : '';
 
     return `
@@ -530,12 +529,12 @@ function buildAdminWidgets() {
             </div>
         </div>
 
-        <div class="dash-card" onclick="showTab('admin-panel'); showAdminSub('attendance', document.getElementById('btn-sub-attendance'))" style="cursor:pointer; position:relative;">
+        <div class="dash-card" onclick="openAttendanceRegister()" style="cursor:pointer; position:relative;">
             ${badgeAtt}
             <div class="dash-icon"><i class="fas fa-clock"></i></div>
             <div class="dash-data">
                 <h3>Attendance</h3>
-                <p>View Register</p>
+                <p>Review Lates</p>
             </div>
         </div>
 

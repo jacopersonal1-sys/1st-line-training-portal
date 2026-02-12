@@ -337,6 +337,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
     color: var(--text-muted);
 }
 
+/* Search Highlight */
+.slot-item.search-match {
+    border: 2px solid #F37021;
+    box-shadow: 0 0 10px rgba(243, 112, 33, 0.5);
+    transform: scale(1.02);
+    z-index: 5;
+}
+
 .btn-cancel { 
     margin-top: 5px; 
     font-size: 0.75rem; 
@@ -430,6 +438,18 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
   .a4-page { box-shadow: none; margin: 0; width: 100%; min-height: auto; page-break-after: always; }
   .hidden-print-field { display: none !important; }
   .report-block { break-inside: avoid; page-break-inside: avoid; }
+
+  /* PRINTING MODAL SUPPORT */
+  body.printing-modal > *:not(#markingModal) { display: none !important; }
+  body.printing-modal #markingModal { 
+      display: block !important; position: absolute; top: 0; left: 0; width: 100%; height: auto; 
+      background: white; z-index: 9999; overflow: visible;
+  }
+  body.printing-modal #markingModal .modal-box {
+      width: 100%; max-width: 100%; border: none; box-shadow: none; padding: 0;
+  }
+  body.printing-modal #markingContainer { max-height: none !important; overflow: visible !important; }
+  body.printing-modal button { display: none !important; }
 }
 
 /* ================= FORMS & ASSESSMENTS (UPDATED) ================= */
@@ -437,6 +457,17 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
 .question-card { border: 1px solid var(--border-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; background: var(--bg-card); }
 .q-actions button { margin-left: 5px; }
 .opt-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+
+/* IMPROVEMENT: Highlight Active Question in Builder */
+.question-card:focus-within {
+    border-color: var(--primary);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+    transform: scale(1.01);
+}
+.question-card:focus-within .q-header {
+    background: var(--primary-soft);
+    color: var(--primary);
+}
 
 /* Test List Cards */
 .test-card-row { animation: fadeInUp 0.3s ease-out forwards;
@@ -936,4 +967,57 @@ body.theme-royal h2, body.theme-royal h3 {
     letter-spacing: 1px;
     border-bottom-color: var(--primary);
     text-align: center; /* Centered headers for royal feel */
+}
+
+/* ================= REFERENCE VIEWER (Draggable) ================= */
+.reference-window {
+    position: fixed;
+    top: 100px; left: 100px;
+    width: 500px; height: 400px;
+    background: var(--bg-card);
+    border: 1px solid var(--primary);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    z-index: 10000; /* Above everything */
+    display: flex; flex-direction: column;
+    resize: both; overflow: hidden;
+    border-radius: 8px;
+    min-width: 300px; min-height: 200px;
+    animation: fadeInUp 0.3s ease-out;
+}
+.reference-header {
+    padding: 8px 15px;
+    background: var(--bg-input);
+    border-bottom: 1px solid var(--border-color);
+    cursor: move; /* Indicates draggable */
+    display: flex; justify-content: space-between; align-items: center;
+    user-select: none;
+    font-weight: bold; color: var(--primary);
+}
+.reference-content {
+    flex: 1;
+    background: #ffffff; /* White background for images/docs */
+    position: relative;
+    overflow: hidden;
+}
+
+/* ================= RICH TEXT EDITOR (Test Builder) ================= */
+.rich-toolbar {
+    display: flex; gap: 5px; margin-bottom: 5px;
+    background: var(--bg-input); padding: 5px; border-radius: 4px 4px 0 0; border: 1px solid var(--border-color); border-bottom: none;
+}
+.btn-tool {
+    background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-main);
+    padding: 2px 8px; cursor: pointer; border-radius: 3px; font-size: 0.8rem;
+}
+.btn-tool:hover { background: var(--bg-hover); color: var(--primary); }
+
+/* ================= VETTING CONFIGURATION ================= */
+.vetting-list {
+    list-style: none;
+    padding: 5px;
+    color: var(--text-muted);
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--bg-input);
+    border-radius: 8px;
 }

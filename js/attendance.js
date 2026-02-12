@@ -145,104 +145,98 @@ async function submitClockOut() {
 
 // --- ADMIN LOGIC ---
 
-function loadAttendanceDashboard() {
-    const container = document.getElementById('attendanceList');
-    if (!container) return;
+function openAttendanceRegister() {
+    const modal = document.getElementById('attendanceAdminModal');
+    if(modal) {
+        modal.classList.remove('hidden');
+        populateAttendanceGroupSelect();
+        renderAttendanceRegister();
+    }
+}
 
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+function populateAttendanceGroupSelect() {
+    const sel = document.getElementById('attAdminGroupSelect');
+    if(!sel) return;
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Update Alert Widget
-    if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
-    
-    // Group by Roster
-    let html = '';
-    
+    sel.innerHTML = '';
     Object.keys(rosters).sort().reverse().forEach(gid => {
-        const members = rosters[gid];
-        if (!members || members.length === 0) return;
-
-        const groupLabel = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, members.length) : gid;
-        
-        html += `<div class="card" style="margin-bottom:20px;">
-            <h4 style="margin-top:0; border-bottom:1px solid var(--border-color); padding-bottom:10px; color:var(--primary);">${groupLabel}</h4>
-            <table class="admin-table">
-                <thead>
-                    <tr>
-                        <th>Trainee</th>
-                        <th>Total Days</th>
-                        <th>Lates</th>
-                        <th>Today's Status</th>
-                        <th>Last Seen</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-        
-        members.forEach(member => {
-            // Get all records for this user
-            const userRecords = records.filter(r => r.user === member);
-            const totalDays = userRecords.length;
-            const lates = userRecords.filter(r => r.isLate).length;
-            
-            // Sort to find last seen
-            userRecords.sort((a,b) => new Date(b.date) - new Date(a.date));
-            const lastRecord = userRecords[0];
-            
-            // Check Today
-            const todayRecord = userRecords.find(r => r.date === today);
-            let todayStatus = '<span class="status-badge status-fail" style="opacity:0.5;">Absent</span>';
-            
-            if (todayRecord) {
-                if (todayRecord.clockOut) {
-                    todayStatus = '<span class="status-badge status-pass">Clocked Out</span>';
-                } else {
-                    todayStatus = '<span class="status-badge status-improve">Active</span>';
-                }
-                
-                if (todayRecord.isLate) {
-                     todayStatus += ' <span style="font-size:0.7rem; color:#ff5252;">(Late)</span>';
-                }
-            }
-
-            const lastSeenStr = lastRecord ? `${lastRecord.date} (${lastRecord.clockIn})` : '-';
-
-            html += `<tr>
-                <td><strong>${member}</strong></td>
-                <td>${totalDays}</td>
-                <td style="${lates > 0 ? 'color:#ff5252; font-weight:bold;' : ''}">${lates}</td>
-                <td>${todayStatus}</td>
-                <td style="font-size:0.85rem; color:var(--text-muted);">${lastSeenStr}</td>
-            </tr>`;
-        });
-        
-        html += `</tbody></table></div>`;
+        const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
+        sel.add(new Option(label, gid));
     });
+}
 
+function renderAttendanceRegister() {
+    const container = document.getElementById('attAdminContent');
+    const gid = document.getElementById('attAdminGroupSelect').value;
+    if(!container || !gid) return;
+
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const members = rosters[gid] || [];
+
+    let html = `<table class="admin-table"><thead><tr><th>Agent</th><th>Total Days</th><th>Lates</th><th>Unconfirmed Lates</th><th>Action</th></tr></thead><tbody>`;
+
+    members.forEach(m => {
+        const myRecs = records.filter(r => r.user === m);
+        const total = myRecs.length;
+        const lates = myRecs.filter(r => r.isLate).length;
+        // Unconfirmed: Late AND (lateConfirmed is undefined or false)
+        const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed);
+        
+        let actionBtn = '-';
+        if(unconfirmed.length > 0) {
+            // Pass the first unconfirmed ID for simplicity, or handle bulk
+            actionBtn = `<button class="btn-warning btn-sm" onclick="confirmLate('${unconfirmed[0].id}')">Review (${unconfirmed.length})</button>`;
+        }
+
+        html += `<tr>
+            <td>${m}</td>
+            <td>${total}</td>
+            <td>${lates}</td>
+            <td style="${unconfirmed.length > 0 ? 'color:#ff5252; font-weight:bold;' : ''}">${unconfirmed.length}</td>
+            <td>${actionBtn}</td>
+        </tr>`;
+    });
+    html += `</tbody></table>`;
     container.innerHTML = html;
+}
+
+async function confirmLate(recordId) {
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const rec = records.find(r => r.id === recordId);
+    
+    if(!rec) return;
+    
+    const reason = rec.lateData ? rec.lateData.reason : "No reason provided.";
+    const informed = rec.lateData && rec.lateData.informed ? `Informed: ${rec.lateData.contact}` : "Did not inform.";
+    
+    if(confirm(`Review Late Entry for ${rec.user}:\n\nDate: ${rec.date}\nTime: ${rec.clockIn}\nReason: ${reason}\n${informed}\n\nConfirm this late entry?`)) {
+        rec.lateConfirmed = true;
+        localStorage.setItem('attendance_records', JSON.stringify(records));
+        if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
+        
+        renderAttendanceRegister();
+        if(typeof checkMissingClockIns === 'function') checkMissingClockIns(); // Refresh badge
+    }
 }
 
 function checkMissingClockIns() {
     // Admin Alert Widget Logic
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const today = new Date().toISOString().split('T')[0];
     
-    const trainees = users.filter(u => u.role === 'trainee');
-    const clockedIn = records.filter(r => r.date === today).map(r => r.user);
-    
-    const missing = trainees.filter(t => !clockedIn.includes(t.user));
+    // Count Unconfirmed Lates
+    const unconfirmedCount = records.filter(r => r.isLate && !r.lateConfirmed).length;
     
     const widget = document.getElementById('attAlertWidget');
-    if (widget) {
-        if (missing.length > 0) {
-            widget.innerHTML = `<div style="padding:10px; background:rgba(255, 82, 82, 0.1); border-left:4px solid #ff5252; border-radius:4px;">
-                <strong><i class="fas fa-user-clock"></i> Missing Clock-Ins (${missing.length})</strong>
-                <div style="font-size:0.8rem; margin-top:5px; max-height:60px; overflow-y:auto;">${missing.map(u => u.user).join(', ')}</div>
-            </div>`;
-            widget.classList.remove('hidden');
+    // We don't use the widget anymore, we use the Dashboard Badge.
+    // But we can update the badge here if called.
+    const badge = document.getElementById('badgeAtt');
+    if(badge) {
+        if(unconfirmedCount > 0) {
+            badge.innerText = unconfirmedCount;
+            badge.classList.remove('hidden');
         } else {
-            widget.classList.add('hidden');
+            badge.classList.add('hidden');
         }
     }
 }
@@ -262,80 +256,3 @@ async function saveAttendanceSettings() {
     
     if (typeof showToast === 'function') showToast("Attendance settings saved.", "success");
 }
-```
-
-### 3. c:\BuildZone\index.html
-Adding the modal, admin view, and script reference.
-
-```diff
-    </div>
-</div>
-
-<div id="attendanceModal" class="modal-overlay hidden" style="z-index: 4000; background: rgba(0,0,0,0.9);">
-    <div class="modal-box">
-        <h3><i class="fas fa-clock"></i> Daily Clock In</h3>
-        <p style="color:var(--text-muted); margin-bottom:20px;">Please confirm your attendance for today.</p>
-        
-        <div id="lateReasonSection" class="hidden" style="background:rgba(255, 82, 82, 0.1); padding:15px; border-radius:8px; border:1px solid #ff5252; margin-bottom:20px;">
-            <strong style="color:#ff5252; display:block; margin-bottom:10px;">You are clocking in after 08:00 AM.</strong>
-            
-            <label for="attLateReason">Valid Reason for Lateness</label>
-            <textarea id="attLateReason" placeholder="Explain why you are late..." style="height:60px;"></textarea>
-            
-            <div style="margin-top:10px;">
-                <label style="cursor:pointer; display:flex; align-items:center;">
-                    <input type="checkbox" id="attInformed" onchange="toggleInformedDetails()" style="width:auto; margin-right:10px;"> 
-                    Did you inform a Trainer/Team Leader?
-                </label>
-            </div>
-            
-            <div id="attInformedDetails" class="hidden" style="margin-top:10px; padding-left:20px; border-left:2px solid var(--border-color);">
-                <label>Platform Used</label><select id="attPlatform"></select>
-                <label>Person Informed</label><select id="attContact"></select>
-            </div>
-        </div>
-
-        <button class="btn-primary btn-lg" style="width:100%;" onclick="submitClockIn()">Confirm Clock In</button>
-    </div>
-</div>
-
-<div id="bookingModal" class="modal-overlay hidden">
-  <div class="modal-box">
-    <h3>Confirm Booking</h3>
-            <button class="sub-tab-btn" id="btn-sub-data" onclick="showAdminSub('data', this)">Database</button>
-            <button class="sub-tab-btn" id="btn-sub-access" onclick="showAdminSub('access', this)">Access Control</button>
-            <button class="sub-tab-btn" id="btn-sub-status" onclick="showAdminSub('status', this)">System Status</button>
-            <button class="sub-tab-btn" id="btn-sub-attendance" onclick="showAdminSub('attendance', this)">Attendance</button>
-            <button class="sub-tab-btn" id="btn-sub-updates" onclick="showAdminSub('updates', this)">System Updates</button>
-            <button class="sub-tab-btn" id="btn-sub-theme" onclick="showAdminSub('theme', this)">Theme Settings</button> 
-        </div>
-            </div>
-        </div>
-
-        <div id="admin-view-attendance" class="admin-view">
-            <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h3>Attendance Register</h3>
-                    <input type="date" id="attDateFilter" onchange="loadAttendanceDashboard()" style="margin:0;">
-                </div>
-                <div id="attAlertWidget" class="hidden" style="margin-bottom:20px;"></div>
-                <div id="attendanceList"></div>
-                
-                <div style="margin-top:30px; padding-top:20px; border-top:1px solid var(--border-color);">
-                    <h4>Settings (Dropdown Options)</h4>
-                    <label>Platforms (Comma separated)</label><input type="text" id="setAttPlatforms" value="WhatsApp, Microsoft Teams, Call, SMS">
-                    <label>Contacts (Comma separated)</label><input type="text" id="setAttContacts" value="Darren, Netta, Jaco, Claudine">
-                    <button class="btn-secondary" onclick="saveAttendanceSettings()">Save Settings</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="admin-view-updates" class="admin-view">
-            <div class="card">
-                <h3>System Updates</h3>
-<script src="js/live_execution.js"></script>
-<script src="js/agent_search.js"></script>
-<script src="js/admin_history.js"></script>
-<script src="js/attendance.js"></script>
-
-<script src="js/main.js"></script>

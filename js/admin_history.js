@@ -30,7 +30,7 @@ function loadCompletedHistory() {
     const testFilter = document.getElementById('historyTestFilter') ? document.getElementById('historyTestFilter').value : '';
 
     // Filter for Completed items
-    let completed = subs.filter(s => s.status === 'completed');
+    let completed = subs.filter(s => s.status === 'completed' && !s.archived);
 
     // Apply Group Filter
     if (groupFilter) {
@@ -92,6 +92,7 @@ function loadCompletedHistory() {
                 <td>${editedBy}</td>
                 <td>
                     <button class="btn-primary btn-sm" onclick="openAdminMarking('${s.id}')" title="Raw Edit Score"><i class="fas fa-pen"></i> Edit</button>
+                    <button class="btn-warning btn-sm" onclick="processHistoryRetake('${s.id}')" title="Allow Retake"><i class="fas fa-redo"></i></button>
                     <button class="btn-danger btn-sm" onclick="deleteHistorySubmission('${s.id}')" title="Delete Permanently"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>
@@ -168,4 +169,32 @@ async function deleteHistorySubmission(id) {
     
     // Refresh other views if needed
     if (typeof renderMonthly === 'function') renderMonthly();
+}
+
+async function processHistoryRetake(subId) {
+    if(!confirm("Allow retake? This archives the current submission and unlocks the test for the trainee.")) return;
+    
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const sub = subs.find(s => s.id == subId);
+    
+    if(sub) {
+        sub.archived = true;
+        sub.status = 'retake_allowed';
+        localStorage.setItem('submissions', JSON.stringify(subs));
+        
+        // RESET VETTING SESSION STATUS IF APPLICABLE
+        // This ensures the trainee can re-enter the Arena and isn't stuck on "Submitted"
+        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        if (session.active && session.testId == sub.testId) {
+            if (session.trainees && session.trainees[sub.trainee]) {
+                delete session.trainees[sub.trainee]; 
+                localStorage.setItem('vettingSession', JSON.stringify(session));
+            }
+        }
+
+        if(typeof saveToServer === 'function') await saveToServer(['submissions', 'vettingSession'], true);
+        
+        alert("Retake granted.");
+        loadCompletedHistory(); // Refresh THIS view
+    }
 }

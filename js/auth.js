@@ -170,9 +170,6 @@ async function autoLogin() {
   // Trigger Notifications Calculation
   if (typeof updateNotifications === 'function') updateNotifications();
   
-  // NEW: Trigger Urgent Notices Update
-  if (typeof updateNotices === 'function') updateNotices(CURRENT_USER.role);
-
   // CHECK FOR SAVED WORK (Inactivity Recovery)
   if (typeof checkForDrafts === 'function') checkForDrafts();
 

@@ -31,6 +31,11 @@ async function secureRequestSave() {
 
 function loadAllDataViews() { 
     populateMonthlyFilters(); 
+    // Force sync to ensure trainee sees latest scores immediately
+    if (typeof loadFromServer === 'function') {
+        // Silent load to update local cache without blocking UI
+        loadFromServer(true).then(() => renderMonthly());
+    }
     renderMonthly(); 
 }
 
@@ -151,8 +156,11 @@ function renderMonthly() {
         
         if(r.link === 'Digital-Assessment' || r.link === 'Live-Session') {
              // Check if function exists to avoid reference errors
+             const safeTrainee = r.trainee.replace(/'/g, "\\'");
+             const safeAssess = r.assessment.replace(/'/g, "\\'");
+
              const clickAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function') 
-                ? `onclick="viewCompletedTest('${r.trainee}', '${r.assessment}')"` 
+                ? `onclick="viewCompletedTest('${safeTrainee}', '${safeAssess}')"` 
                 : `onclick="alert('Assessment viewer not loaded.')"`;
              
              actionHtml += `<button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button>`;

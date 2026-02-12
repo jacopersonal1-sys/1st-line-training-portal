@@ -4,8 +4,8 @@
 function generateOnboardingEmail(emails) {
     if (!emails || emails.length === 0) return;
 
-    const toAddress = "systemsupport@herotel.com";
-    const ccAddresses = "darren.tupper@herotel.com,jaco.prince@herotel.com,soanette.wilken@herotel.com";
+    const toAddress = (typeof SUPPORT_EMAILS !== 'undefined') ? SUPPORT_EMAILS.TO : "systemsupport@herotel.com";
+    const ccAddresses = (typeof SUPPORT_EMAILS !== 'undefined') ? SUPPORT_EMAILS.CC : "darren.tupper@herotel.com,jaco.prince@herotel.com,soanette.wilken@herotel.com";
     const subject = "Access Request for New Onboards";
     
     // Construct the body with the specific template requested

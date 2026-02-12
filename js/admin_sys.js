@@ -64,6 +64,9 @@ function loadAdminAssessments() {
     stdList.innerHTML = stdHtml;
     liveList.innerHTML = liveHtml;
     vetList.innerHTML = vetHtml;
+
+    // Also load Vetting Topics since they share the view now
+    loadAdminVetting();
 }
 
 async function addAssessment() { 
@@ -133,9 +136,9 @@ function loadAdminVetting() {
     const list = document.getElementById('vettingList');
     if(list) {
         list.innerHTML = topics.map((t,i) => `
-            <li>
-                ${t} 
-                ${CURRENT_USER.role === 'admin' ? `<button class="btn-danger btn-sm" style="margin-left:10px;" onclick="remVetting(${i})">X</button>` : ''}
+            <li style="display:flex; justify-content:space-between; align-items:center; padding:5px; border-bottom:1px solid var(--border-color);">
+                <span>${t}</span>
+                ${CURRENT_USER.role === 'admin' ? `<button class="btn-danger btn-sm" onclick="remVetting(${i})" style="padding:2px 6px;">&times;</button>` : ''}
             </li>
         `).join(''); 
     }
@@ -322,6 +325,46 @@ async function syncGroupsFromRecords() {
     alert(`Sync Complete! Added ${updatedCount} trainees to their respective groups.`); 
 }
 
+async function archiveOldSubmissions() {
+    if(!confirm("Archive submissions from previous months?\n\nThis moves completed tests older than the current month to a separate storage key ('archive_submissions').\n\nThis significantly reduces bandwidth usage for daily syncs.")) return;
+
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const archives = JSON.parse(localStorage.getItem('archive_submissions') || '[]');
+    
+    const now = new Date();
+    // Cutoff: 1st day of the current month (00:00:00)
+    const cutoffDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    const keep = [];
+    const move = [];
+    
+    subs.forEach(s => {
+        const sDate = new Date(s.date);
+        // Archive if older than current month AND completed
+        if (sDate < cutoffDate && s.status === 'completed') {
+            move.push(s);
+        } else {
+            keep.push(s);
+        }
+    });
+    
+    if (move.length === 0) {
+        if(typeof showToast === 'function') showToast("No old completed submissions found to archive.", "info");
+        return;
+    }
+    
+    // Add to archives
+    const newArchives = [...archives, ...move];
+    
+    localStorage.setItem('submissions', JSON.stringify(keep));
+    localStorage.setItem('archive_submissions', JSON.stringify(newArchives));
+    
+    if(typeof saveToServer === 'function') await saveToServer(['submissions', 'archive_submissions'], true);
+    
+    if(typeof showToast === 'function') showToast(`Archived ${move.length} submissions successfully.`, "success");
+    loadAdminDatabase();
+}
+
 // --- SECTION 3: IMPORT / EXPORT & BACKUP (OVERRIDES) ---
 
 function toggleAutoBackup() {
@@ -418,7 +461,7 @@ async function loadAdminAccess() {
             list.innerHTML = ac.whitelist.map((ip, i) => `
                 <li style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid #eee;">
                     <span>${ip}</span>
-                    ${CURRENT_USER.role === 'admin' ? `<button class="btn-danger btn-sm" onclick="removeIpAddress(${i})"><i class="fas fa-trash"></i></button>` : ''}
+                    ${(CURRENT_USER && CURRENT_USER.role === 'admin') ? `<button class="btn-danger btn-sm" onclick="removeIpAddress(${i})"><i class="fas fa-trash"></i></button>` : ''}
                 </li>
             `).join('');
         }
