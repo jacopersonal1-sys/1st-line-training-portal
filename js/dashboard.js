@@ -23,10 +23,6 @@ function renderDashboard() {
 
     const role = CURRENT_USER.role;
     
-    // 1. URGENT NOTICES SECTION
-    const noticeHtml = buildNoticeBanners(role);
-    container.innerHTML += noticeHtml;
-    
     // NEW: Invasive Modal Check for Trainees
     if (role === 'trainee') {
         if (typeof checkUrgentNoticesPopup === 'function') checkUrgentNoticesPopup();
@@ -49,21 +45,35 @@ function renderDashboard() {
     
     if (role === 'admin' || role === 'special_viewer') {
         content.innerHTML = buildAdminWidgets();
-        content.innerHTML += buildLinkRequestsWidget(); // Add Link Requests Widget
-        // Append Notice Manager for Admins
+        
+        // Append Notice Manager for Admins (Bottom)
         const manager = document.createElement('div');
         manager.className = 'dash-panel full-width';
         manager.style.marginTop = '20px';
         manager.innerHTML = buildNoticeManager();
+        
         container.appendChild(content);
+        
+        // Urgent Notices (Bottom for Admin)
+        const noticeHtml = buildNoticeBanners(role);
+        if(noticeHtml) container.insertAdjacentHTML('beforeend', noticeHtml);
+        
         container.appendChild(manager);
         
         // Trigger Dashboard-specific health check
         updateDashboardHealth();
     } else if (role === 'teamleader') {
+        // Urgent Notices (Top for TL)
+        const noticeHtml = buildNoticeBanners(role);
+        container.innerHTML = noticeHtml + container.innerHTML;
+        
         content.innerHTML = buildTLWidgets();
         container.appendChild(content);
     } else {
+        // Urgent Notices (Top for Trainee)
+        const noticeHtml = buildNoticeBanners(role);
+        container.innerHTML = noticeHtml + container.innerHTML;
+        
         content.innerHTML = buildTraineeWidgets();
         container.appendChild(content);
     }
@@ -134,7 +144,7 @@ async function updateDashboardHealth() {
                             : '<span class="status-badge status-pass">Active</span>';
                         return `
                             <tr>
-                                <td><strong>${u.user}</strong></td>
+                                <td style="max-width:100px; overflow:hidden; text-overflow:ellipsis;"><strong>${u.user}</strong></td>
                                 <td>${u.role}</td>
                                 <td>${statusBadge}</td>
                                 <td>${idleStr}</td>
@@ -488,95 +498,174 @@ function buildAdminWidgets() {
         ? `<span id="badgeAtt" class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${unconfirmedLates}</span>` 
         : '';
 
+    // --- HOVER DETAILS GENERATION ---
+    
+    // 1. Schedule Details
+    let schedDetailsHtml = '';
+    Object.keys(schedules).sort().forEach(k => {
+        const groupName = schedules[k].assigned;
+        if(groupName && rosters[groupName]) {
+            schedDetailsHtml += `<div style="font-size:0.8rem; margin-bottom:8px; border-bottom:1px dashed var(--border-color); padding-bottom:4px;">
+                <strong style="color:var(--primary);">${k} (${groupName}):</strong><br>
+                <span style="color:var(--text-muted);">${rosters[groupName].join(', ')}</span>
+            </div>`;
+        }
+    });
+    if(!schedDetailsHtml) schedDetailsHtml = '<div style="color:var(--text-muted); font-style:italic;">No active schedules.</div>';
+
+    // 2. Pending Marking Details
+    const pendingDetailsHtml = submissions.filter(s => s.status === 'pending').map(s => 
+        `<div style="font-size:0.8rem; margin-bottom:4px; display:flex; justify-content:space-between;">
+            <span>${s.trainee}</span> <span style="color:var(--text-muted);">${s.testTitle}</span>
+        </div>`
+    ).join('') || '<div style="color:var(--text-muted); font-style:italic;">Queue empty.</div>';
+
+    // 3. Insight Details (Action Required)
+    const insightDetailsHtml = records.filter(r => r.score < IMPROVE_LIMIT).map(r => 
+        `<div style="font-size:0.8rem; margin-bottom:4px; display:flex; justify-content:space-between;">
+            <span style="color:#e74c3c;">${r.trainee}</span> <span>${r.assessment} (${r.score}%)</span>
+        </div>`
+    ).slice(0, 15).join('') || '<div style="color:var(--text-muted); font-style:italic;">No critical actions.</div>';
+
+    // 4. Live Booking Details
+    const bookingDetailsHtml = bookings.filter(b => b.date >= todayStr && b.status === 'Booked').map(b => 
+        `<div style="font-size:0.8rem; margin-bottom:4px;">
+            <span style="color:var(--primary);">${b.time}</span> ${b.trainee}
+        </div>`
+    ).slice(0, 10).join('') || '<div style="color:var(--text-muted); font-style:italic;">No upcoming bookings.</div>';
+
     return `
-        <div class="dash-card">
-            <div class="dash-icon"><i class="fas fa-users"></i></div>
-            <div class="dash-data">
-                <h3>${totalTrainees}</h3>
-                <p>Total Trainees</p>
+        <div class="dash-grid-main">
+            <!-- 1. Total Trainees (Static) -->
+            <div class="dash-card">
+                <div class="dash-icon"><i class="fas fa-users"></i></div>
+                <div class="dash-data">
+                    <h3>${totalTrainees}</h3>
+                    <p>Total Trainees</p>
+                </div>
+            </div>
+
+            <!-- 2. Agent on Schedule (Expandable) -->
+            <div class="dash-card dash-card-expandable">
+                <div class="dash-primary-content">
+                    <div class="dash-icon"><i class="fas fa-clipboard-list"></i></div>
+                    <div class="dash-data">
+                        <h3 style="font-size:1.1rem; line-height:1.4;">${rosterDisplay}</h3>
+                        <p>Agents on Schedule</p>
+                    </div>
+                </div>
+                <div class="dash-details">
+                    ${schedDetailsHtml}
+                </div>
+            </div>
+
+            <!-- 3. Pending Marking (Expandable) -->
+            <div class="dash-card dash-card-expandable" onclick="showTab('test-manage')" style="cursor:pointer; position:relative;">
+                <div class="dash-primary-content">
+                    <div class="dash-icon"><i class="fas fa-highlighter"></i></div>
+                    <div class="dash-data">
+                        <h3 style="${pendingMarking > 0 ? 'color:#e74c3c' : ''}">${pendingMarking}</h3>
+                        <p>Pending Marking</p>
+                    </div>
+                </div>
+                <div class="dash-details">
+                    ${pendingDetailsHtml}
+                </div>
+            </div>
+        
+            <!-- 4. Insight (Expandable) -->
+            <div class="dash-card dash-card-expandable" onclick="showTab('insights')" style="cursor:pointer; border:1px solid var(--primary); position:relative;">
+                ${badgeInsight}
+                <div class="dash-primary-content">
+                    <div class="dash-icon"><i class="fas fa-search"></i></div>
+                    <div class="dash-data">
+                        <h3>Insight</h3>
+                        <p>View Dashboard</p>
+                    </div>
+                </div>
+                <div class="dash-details">
+                    <div style="font-size:0.8rem; font-weight:bold; margin-bottom:5px; color:#e74c3c;">Action Required:</div>
+                    ${insightDetailsHtml}
+                </div>
+            </div>
+
+            <!-- 5. Live Bookings (Expandable) -->
+            <div class="dash-card dash-card-expandable" onclick="showTab('live-assessment')" style="cursor:pointer; position:relative;">
+                ${badgeBooking}
+                <div class="dash-primary-content">
+                    <div class="dash-icon"><i class="fas fa-calendar-check"></i></div>
+                    <div class="dash-data">
+                        <h3>Live Bookings</h3>
+                        <p>Manage Sessions</p>
+                    </div>
+                </div>
+                <div class="dash-details">
+                    ${bookingDetailsHtml}
+                </div>
+            </div>
+
+            <!-- 6. Attendance (Static) -->
+            <div class="dash-card" onclick="openAttendanceRegister()" style="cursor:pointer; position:relative;">
+                ${badgeAtt}
+                <div class="dash-icon"><i class="fas fa-clock"></i></div>
+                <div class="dash-data">
+                    <h3>Attendance</h3>
+                    <p>Review Lates</p>
+                </div>
             </div>
         </div>
-        <div class="dash-card">
-            <div class="dash-icon"><i class="fas fa-clipboard-list"></i></div>
-            <div class="dash-data">
-                <h3 style="font-size:1.1rem; line-height:1.4;">${rosterDisplay}</h3>
-                <p>Agents on Schedule</p>
+
+        <!-- BOTTOM SECTION: System & Users -->
+        <div class="dash-grid-bottom">
+            
+            <!-- System Status (Reworked) -->
+            <div class="dash-panel">
+                <h4><i class="fas fa-server"></i> System Health</h4>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:15px;">
+                    <div class="status-item">
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Storage</div>
+                        <strong id="dashStorage">...</strong>
+                    </div>
+                    <div class="status-item">
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Latency</div>
+                        <strong id="dashLatency">...</strong>
+                    </div>
+                    <div class="status-item">
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Sync</div>
+                        <strong id="dashLastSync">...</strong>
+                    </div>
+                    <div class="status-item">
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Network</div>
+                        <strong id="statusConnection" style="color:var(--primary);">Checking...</strong>
+                    </div>
+                </div>
             </div>
-        </div>
-        <div class="dash-card" onclick="showTab('test-manage')" style="cursor:pointer; position:relative;">
-            <div class="dash-icon"><i class="fas fa-highlighter"></i></div>
-            <div class="dash-data">
-                <h3 style="${pendingMarking > 0 ? 'color:#e74c3c' : ''}">${pendingMarking}</h3>
-                <p>Pending Marking</p>
+
+            <!-- Active Users (Compressed) -->
+            <div class="dash-panel">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h4><i class="fas fa-user-clock"></i> Active Users</h4>
+                    <button class="btn-secondary btn-sm" onclick="updateDashboardHealth()"><i class="fas fa-sync"></i></button>
+                </div>
+                <div class="table-responsive" style="max-height:150px; overflow-y:auto; margin-top:10px;">
+                    <table class="admin-table compressed-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Idle</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashActiveUsersBody">
+                            <tr><td colspan="4" class="text-center">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
         
-        <div class="dash-card" onclick="showTab('insights')" style="cursor:pointer; border:1px solid var(--primary); position:relative;">
-            ${badgeInsight}
-            <div class="dash-icon"><i class="fas fa-search"></i></div>
-            <div class="dash-data">
-                <h3>Insight</h3>
-                <p>View Dashboard</p>
-            </div>
-        </div>
-
-        <div class="dash-card" onclick="showTab('live-assessment')" style="cursor:pointer; position:relative;">
-            ${badgeBooking}
-            <div class="dash-icon"><i class="fas fa-calendar-check"></i></div>
-            <div class="dash-data">
-                <h3>Live Bookings</h3>
-                <p>Manage Sessions</p>
-            </div>
-        </div>
-
-        <div class="dash-card" onclick="openAttendanceRegister()" style="cursor:pointer; position:relative;">
-            ${badgeAtt}
-            <div class="dash-icon"><i class="fas fa-clock"></i></div>
-            <div class="dash-data">
-                <h3>Attendance</h3>
-                <p>Review Lates</p>
-            </div>
-        </div>
-
-        <div class="dash-panel full-width">
-            <h4><i class="fas fa-server"></i> System Status</h4>
-            <div style="display:flex; gap:20px; flex-wrap:wrap; margin-top:10px;">
-                <div class="status-item">
-                    <span class="status-dot good"></span>
-                    Storage: <strong id="dashStorage">Checking...</strong>
-                </div>
-                <div class="status-item">
-                    <span class="status-dot good"></span>
-                    Latency: <strong id="dashLatency">...</strong>
-                </div>
-                <div class="status-item">
-                    <span class="status-dot good"></span>
-                    Last Sync: <strong id="dashLastSync">Calculating...</strong>
-                </div>
-            </div>
-        </div>
-
-        <div class="dash-panel full-width">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h4><i class="fas fa-user-clock"></i> Active Users Monitor</h4>
-                <button class="btn-secondary btn-sm" onclick="updateDashboardHealth()"><i class="fas fa-sync"></i> Refresh</button>
-            </div>
-            <div class="table-responsive" style="max-height:250px; overflow-y:auto; margin-top:10px;">
-                <table class="admin-table">
-                    <thead>
-                        <tr>
-                            <th>User</th>
-                            <th>Role</th>
-                            <th>Status</th>
-                            <th>Idle Time</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dashActiveUsersBody">
-                        <tr><td colspan="4" class="text-center">Loading active users...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+        ${buildLinkRequestsWidget()}
     `;
 }
 
@@ -742,8 +831,12 @@ function buildTraineeWidgets() {
     const today = new Date().toISOString().split('T')[0];
     const myAtt = attRecords.find(r => r.user === CURRENT_USER.user && r.date === today);
     
-    let clockOutBtn = (myAtt && !myAtt.clockOut) 
-        ? `<button class="btn-warning btn-sm" style="width:100%; margin-top:10px;" onclick="submitClockOut()">Clock Out</button>` : '';
+    let clockOutBtn = '';
+    if (myAtt && !myAtt.clockOut) {
+        clockOutBtn = `<button class="btn-warning btn-sm" style="width:100%; margin-top:10px;" onclick="submitClockOut()">Clock Out</button>`;
+    } else if (!myAtt) {
+        clockOutBtn = `<button class="btn-success btn-sm" style="width:100%; margin-top:10px;" onclick="openClockInModal()">Clock In</button>`;
+    }
 
     // NEW: Check for Active Live Session (Redirect Prompt)
     const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');

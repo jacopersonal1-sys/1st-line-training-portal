@@ -6,7 +6,15 @@
 function checkAttendanceStatus() {
     if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
 
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const day = now.getDay(); // 0=Sun, 6=Sat
+    const hour = now.getHours();
+
+    // RESTRICTION: Only pop up Mon-Fri (1-5) AND Before 08:00 AM
+    if (day === 0 || day === 6) return; 
+    if (hour >= 8) return;
+
+    const today = now.toISOString().split('T')[0];
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     
     // Check if already clocked in today
@@ -18,7 +26,8 @@ function checkAttendanceStatus() {
     } else if (!myRecord.clockOut) {
         // Clocked in, but not out. Show "Clock Out" button in dashboard/header if needed.
         // For now, we just ensure the modal is closed.
-        document.getElementById('attendanceModal').classList.add('hidden');
+        const modal = document.getElementById('attendanceModal');
+        if(modal) modal.classList.add('hidden');
     }
 }
 
