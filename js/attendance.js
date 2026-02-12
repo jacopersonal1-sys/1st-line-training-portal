@@ -183,12 +183,15 @@ function renderAttendanceRegister() {
         // Unconfirmed: Late AND (lateConfirmed is undefined or false)
         const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed);
         
-        let actionBtn = '-';
+        const safeUser = m.replace(/'/g, "\\'");
+        let actionBtn = `<button class="btn-secondary btn-sm" onclick="manageAgentAttendance('${safeUser}')">View/Edit</button>`;
+
         if(unconfirmed.length > 0) {
             // Pass the first unconfirmed ID for simplicity, or handle bulk
             actionBtn = `
                 <button class="btn-warning btn-sm" onclick="confirmLate('${unconfirmed[0].id}')" title="Review Reason">Review</button>
                 <button class="btn-danger btn-sm" onclick="deleteLateEntry('${unconfirmed[0].id}')" style="margin-left:5px;" title="Delete Entry"><i class="fas fa-trash"></i></button>
+                <button class="btn-secondary btn-sm" onclick="manageAgentAttendance('${safeUser}')" style="margin-left:5px;">View/Edit</button>
             `;
         }
 
@@ -232,6 +235,64 @@ async function deleteLateEntry(recordId) {
         localStorage.setItem('attendance_records', JSON.stringify(records));
         if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
         renderAttendanceRegister();
+        if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
+    }
+}
+
+function manageAgentAttendance(username) {
+    const container = document.getElementById('attAdminContent');
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const myRecs = records.filter(r => r.user === username);
+    
+    myRecs.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+    let html = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h4>Attendance History: ${username}</h4>
+            <button class="btn-secondary btn-sm" onclick="renderAttendanceRegister()">&larr; Back to Register</button>
+        </div>
+        <div style="max-height:50vh; overflow-y:auto;">
+        <table class="admin-table">
+            <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+    `;
+    
+    if (myRecs.length === 0) {
+        html += `<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No records found.</td></tr>`;
+    } else {
+        myRecs.forEach(r => {
+            const status = r.isLate ? '<span style="color:#ff5252;">Late</span>' : '<span style="color:#2ecc71;">On Time</span>';
+            const safeUser = username.replace(/'/g, "\\'");
+            html += `
+                <tr>
+                    <td>${r.date}</td>
+                    <td>${r.clockIn}</td>
+                    <td>${r.clockOut || '-'}</td>
+                    <td>${status}</td>
+                    <td>
+                        <button class="btn-danger btn-sm" onclick="deleteAttendanceRecord('${r.id}', '${safeUser}')" title="Delete Record"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+    
+    html += `</tbody></table></div>`;
+    container.innerHTML = html;
+}
+
+async function deleteAttendanceRecord(id, username) {
+    if(!confirm("Permanently delete this attendance entry?")) return;
+    
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const idx = records.findIndex(r => r.id === id);
+    
+    if(idx > -1) {
+        records.splice(idx, 1);
+        localStorage.setItem('attendance_records', JSON.stringify(records));
+        if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
+        
+        manageAgentAttendance(username);
         if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
     }
 }

@@ -369,12 +369,39 @@ function renderLiveTable() {
     const settings = JSON.parse(localStorage.getItem('liveScheduleSettings') || '{"days":5}');
     const startDate = settings.startDate ? settings.startDate : new Date().toISOString().split('T')[0];
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const activeSlots = settings.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
     
     // 2. Admin Controls Visibility
     if(CURRENT_USER.role === 'admin') {
-        document.querySelector('#live-assessment .admin-only').classList.remove('hidden');
+        const adminPanel = document.querySelector('#live-assessment .admin-only');
+        adminPanel.classList.remove('hidden');
+
+        // INJECT SLOTS IF MISSING
+        if (!document.getElementById('liveSlotConfig')) {
+             const slotDiv = document.createElement('div');
+             slotDiv.id = 'liveSlotConfig';
+             slotDiv.style.cssText = "margin-top:15px; padding-top:10px; border-top:1px dashed var(--border-color); display:flex; gap:15px; flex-wrap:wrap;";
+             slotDiv.innerHTML = `
+                <label style="font-size:0.9rem; font-weight:bold;">Active Hours:</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="slot_100PM"> 1:00 PM</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="slot_200PM"> 2:00 PM</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="slot_300PM"> 3:00 PM</label>
+                <label style="cursor:pointer;"><input type="checkbox" id="slot_400PM"> 4:00 PM</label>
+             `;
+             adminPanel.appendChild(slotDiv);
+        }
+
         document.getElementById('liveStartDate').value = startDate;
         document.getElementById('liveNumDays').value = settings.days;
+        
+        // Populate Slot Checkboxes
+        const slotContainer = document.getElementById('liveSlotConfig');
+        if (slotContainer) {
+            ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].forEach(slot => {
+                const cb = document.getElementById(`slot_${slot.replace(/[: ]/g, '')}`);
+                if(cb) cb.checked = activeSlots.includes(slot);
+            });
+        }
     } else {
         document.querySelector('#live-assessment .admin-only').classList.add('hidden');
     }
@@ -383,7 +410,7 @@ function renderLiveTable() {
     const validDays = getNextBusinessDays(startDate, parseInt(settings.days) || 5);
 
     // 4. Define Slots
-    const timeSlots = ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
+    const timeSlots = activeSlots;
     const trainers = ["Trainer 1", "Trainer 2"];
 
     const searchTerm = document.getElementById('liveBookingSearch') ? document.getElementById('liveBookingSearch').value.toLowerCase() : '';
@@ -689,7 +716,16 @@ async function generateLiveTable() {
     
     if(!start || !days) return alert("Please fill in start date and duration.");
     
-    const settings = { startDate: start, days: days };
+    // Capture Active Slots
+    const activeSlots = [];
+    ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].forEach(slot => {
+        const cb = document.getElementById(`slot_${slot.replace(/[: ]/g, '')}`);
+        if(cb && cb.checked) activeSlots.push(slot);
+    });
+
+    if(activeSlots.length === 0) return alert("Please select at least one time slot.");
+
+    const settings = { startDate: start, days: days, activeSlots: activeSlots };
     localStorage.setItem('liveScheduleSettings', JSON.stringify(settings));
     
     await secureScheduleSave();

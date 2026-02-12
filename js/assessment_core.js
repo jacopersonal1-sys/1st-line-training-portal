@@ -50,7 +50,7 @@ function renderQuestionInput(q, idx) {
     const savedAns = window.USER_ANSWERS[idx];
 
     if (q.type === 'text') {
-        return `<textarea class="taking-input auto-expand" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Type your answer here...">${savedAns || ''}</textarea>`;
+        return `<textarea class="taking-input auto-expand" spellcheck="true" lang="en" oninput="autoResize(this)" onchange="recordAnswer(${idx}, this.value)" placeholder="Type your answer here...">${savedAns || ''}</textarea>`;
     }
     
     if (q.type === 'live_practical') {

@@ -193,7 +193,7 @@ function openAdminMarking(subId) {
         
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
-        let trainerCommentHtml = (sub.comments && sub.comments[idx]) ? `<div style="margin-bottom:10px; padding:8px; background:rgba(46, 204, 113, 0.1); border-left:3px solid #2ecc71; font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-comment-dots"></i> Trainer Comment:</strong> ${sub.comments[idx]}</div>` : '';
+        // Removed static display of comment, replaced with editable textarea below
 
         if (q.type === 'text' || q.type === 'live_practical') {
             markHtml = `
@@ -334,6 +334,15 @@ function openAdminMarking(subId) {
             } else if (sub.status === 'completed' && !sub.scores) {
                 currentVal = Math.round(((sub.score || 0) / 100) * pointsMax * 2) / 2;
             }
+            
+            // Comment/Note Logic
+            const currentComment = (sub.comments && sub.comments[idx]) ? sub.comments[idx] : '';
+            const commentHtml = `
+                <div style="margin-top:10px;">
+                    <label style="font-size:0.8rem; color:var(--text-muted);">Trainer Note / Comment:</label>
+                    <textarea class="q-comment" data-idx="${idx}" placeholder="Add feedback..." spellcheck="true" style="width:100%; height:50px; font-size:0.85rem; margin-top:5px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" ${isLocked ? 'disabled' : ''}>${currentComment}</textarea>
+                </div>
+            `;
 
             markHtml = `
                 <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
@@ -352,13 +361,14 @@ function openAdminMarking(subId) {
                             `<span>Score: ${currentVal} / ${pointsMax}</span><input type="hidden" class="q-mark" data-idx="${idx}" value="${currentVal}">`
                         }
                     </div>
+                    ${commentHtml}
                 </div>`;
         }
 
         container.innerHTML += `
             <div class="marking-item" style="margin-bottom:25px;">
                 <div style="font-weight:600;">Q${idx + 1}: ${q.text} ${refBtn} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
-                ${adminNoteHtml}${trainerCommentHtml}${markHtml}
+                ${adminNoteHtml}${markHtml}
             </div>`;
     });
 
@@ -413,8 +423,10 @@ async function finalizeAdminMarking(subId) {
     else maxScore = document.querySelectorAll('.q-mark').length; 
 
     const markInputs = document.querySelectorAll('.q-mark');
+    const commentInputs = document.querySelectorAll('.q-comment');
     let earnedPoints = 0;
     const specificScores = {}; 
+    const specificComments = sub.comments || {};
 
     markInputs.forEach(input => {
         const val = parseFloat(input.value) || 0;
@@ -422,12 +434,18 @@ async function finalizeAdminMarking(subId) {
         const idx = input.getAttribute('data-idx');
         if (idx !== null) specificScores[idx] = val;
     });
+    
+    commentInputs.forEach(input => {
+        const idx = input.getAttribute('data-idx');
+        if (idx !== null) specificComments[idx] = input.value;
+    });
 
     const percentage = maxScore > 0 ? Math.round((earnedPoints / maxScore) * 100) : 0;
 
     sub.score = percentage;
     sub.status = 'completed';
     sub.scores = specificScores; 
+    sub.comments = specificComments;
     
     sub.lastEditedBy = CURRENT_USER.user;
     sub.lastEditedDate = new Date().toISOString();

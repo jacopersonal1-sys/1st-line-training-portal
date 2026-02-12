@@ -151,6 +151,9 @@ async function syncLiveSessionState() {
 // --- ADMIN VIEW ---
 
 function renderAdminLivePanel(container) {
+    // FIX: Do not re-render if we are in the Summary/Finish view
+    if (document.getElementById('live-summary-view')) return;
+
     const session = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
     
     if (!session.active) {
@@ -239,7 +242,7 @@ function renderAdminLivePanel(container) {
                     
                     <div>
                         <label>Trainer Comment</label>
-                        <textarea id="liveCommentInput" rows="3" onchange="saveLiveComment(${currentQ}, this.value)">${currentComment}</textarea>
+                        <textarea id="liveCommentInput" rows="3" spellcheck="true" onchange="saveLiveComment(${currentQ}, this.value)">${currentComment}</textarea>
                     </div>
 
                     <div style="margin-top:auto; display:flex; justify-content:space-between;">
@@ -707,6 +710,7 @@ async function finishLiveSession() {
     // 2. Inject Summary View (Replaces the Question View)
     const container = document.getElementById('live-execution-content');
     container.innerHTML = `
+        <div id="live-summary-view"></div> <!-- Marker for refresh prevention -->
         <div class="card" style="max-width:900px; margin:20px auto; height:calc(100vh - 150px); display:flex; flex-direction:column;">
             <div style="border-bottom:1px solid var(--border-color); padding-bottom:15px; margin-bottom:15px;">
                 <h2 style="margin:0;">Assessment Summary: ${session.trainee}</h2>
@@ -718,7 +722,7 @@ async function finishLiveSession() {
             </div>
             
             <div style="border-top:1px solid var(--border-color); padding-top:15px; margin-top:15px; display:flex; justify-content:space-between; align-items:center;">
-                <button class="btn-secondary" onclick="loadLiveExecution()">Back to Grading</button>
+                <button class="btn-secondary" onclick="document.getElementById('live-summary-view').remove(); loadLiveExecution()">Back to Grading</button>
                 <button class="btn-success" onclick="confirmAndSaveLiveSession()">Confirm & Submit</button>
             </div>
         </div>
