@@ -193,7 +193,14 @@ function openAdminMarking(subId) {
         
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
-        // Removed static display of comment, replaced with editable textarea below
+        // Comment/Note Logic (Shared for ALL types)
+        const currentComment = (sub.comments && sub.comments[idx]) ? sub.comments[idx] : '';
+        const commentHtml = `
+            <div style="margin-top:10px;">
+                <label style="font-size:0.8rem; color:var(--text-muted);">Trainer Note / Comment:</label>
+                <textarea class="q-comment" data-idx="${idx}" placeholder="Add feedback..." spellcheck="true" style="width:100%; height:50px; font-size:0.85rem; margin-top:5px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" ${isLocked ? 'disabled' : ''}>${currentComment}</textarea>
+            </div>
+        `;
 
         if (q.type === 'text' || q.type === 'live_practical') {
             markHtml = `
@@ -217,6 +224,7 @@ function openAdminMarking(subId) {
                         <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${val}" style="width:80px; padding:5px;" ${isLocked ? 'disabled' : ''}>
                     </div>`;
                     })()}
+                    ${commentHtml}
                 </div>`;
         } 
         else {
@@ -334,15 +342,6 @@ function openAdminMarking(subId) {
             } else if (sub.status === 'completed' && !sub.scores) {
                 currentVal = Math.round(((sub.score || 0) / 100) * pointsMax * 2) / 2;
             }
-            
-            // Comment/Note Logic
-            const currentComment = (sub.comments && sub.comments[idx]) ? sub.comments[idx] : '';
-            const commentHtml = `
-                <div style="margin-top:10px;">
-                    <label style="font-size:0.8rem; color:var(--text-muted);">Trainer Note / Comment:</label>
-                    <textarea class="q-comment" data-idx="${idx}" placeholder="Add feedback..." spellcheck="true" style="width:100%; height:50px; font-size:0.85rem; margin-top:5px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" ${isLocked ? 'disabled' : ''}>${currentComment}</textarea>
-                </div>
-            `;
 
             markHtml = `
                 <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
