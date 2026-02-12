@@ -184,6 +184,47 @@ window.onload = async function() {
     if(loader) loader.classList.add('hidden');
 };
 
+// --- REFERENCE VIEWER (Draggable Window) ---
+window.openReferenceViewer = function(url) {
+    if (!url) return;
+    
+    // Remove existing if any
+    const existing = document.querySelector('.reference-window');
+    if (existing) existing.remove();
+
+    const win = document.createElement('div');
+    win.className = 'reference-window'; // Styles in style.css
+    
+    let content = '';
+    // Simple check for images vs webpages
+    if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
+        content = `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`;
+    } else {
+        content = `<webview src="${url}" style="width:100%; height:100%; border:none;" allowpopups></webview>`;
+    }
+
+    win.innerHTML = `
+        <div class="reference-header" onmousedown="dragRefWindow(event, this.parentElement)">
+            <span><i class="fas fa-book"></i> Reference Material</span>
+            <button onclick="this.parentElement.parentElement.remove()" style="background:none; border:none; color:inherit; cursor:pointer;"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="reference-content">${content}</div>
+    `;
+    
+    document.body.appendChild(win);
+};
+
+window.dragRefWindow = function(e, el) {
+    let pos3 = e.clientX; let pos4 = e.clientY;
+    document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
+    document.onmousemove = (e) => {
+        e.preventDefault();
+        let pos1 = pos3 - e.clientX; let pos2 = pos4 - e.clientY;
+        pos3 = e.clientX; pos4 = e.clientY;
+        el.style.top = (el.offsetTop - pos2) + "px"; el.style.left = (el.offsetLeft - pos1) + "px";
+    };
+};
+
 // --- NEW: THEME APPLICATION LOGIC ---
 function applyUserTheme() {
     const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || 'null');
@@ -290,8 +331,8 @@ function updateSidebarVisibility() {
         // Rules
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
-            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'monthly', 'insights', 'test-manage', 'test-records', 'live-assessment'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution'];
+            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment'];
+            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly'];
             
             // Special Check for Arena
             if (targetTab === 'vetting-arena') {

@@ -486,18 +486,40 @@
 
         <section id="test-manage" class="admin-only-section">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h2>Assessment/Vetting Test Engine</h2>
+                <h2>Test Engine & History</h2>
                 <button class="btn-primary" onclick="loadTestBuilder(); showTab('test-builder')">+ Create New Assessment</button>
             </div>
-            <div class="card">
-                <h3>Assessment Dashboard</h3>
-                <div id="assessmentDashboard">
-                    <p style="color:var(--text-muted);">Loading Overview...</p>
+            
+            <div class="admin-sub-nav">
+                <button class="sub-tab-btn active" onclick="showTestEngineSub('overview', this)">Overview & Manage</button>
+                <button class="sub-tab-btn" onclick="showTestEngineSub('history', this)">Completed Assessments (History)</button>
+            </div>
+
+            <div id="engine-view-overview">
+                <div class="card">
+                    <h3>Assessment Dashboard</h3>
+                    <div id="assessmentDashboard">
+                        <p style="color:var(--text-muted);">Loading Overview...</p>
+                    </div>
+                </div>
+                <div class="card grid-2">
+                    <div><h3>Test List</h3><div id="testListAdmin"></div></div>
+                    <div><h3>Grading Queue</h3><div id="markingList"></div></div>
                 </div>
             </div>
-            <div class="card grid-2">
-                <div><h3>Test List</h3><div id="testListAdmin"></div></div>
-                <div><h3>Grading Queue</h3><div id="markingList"></div></div>
+            
+            <div id="engine-view-history" class="hidden">
+                <div class="card">
+                    <h3>Completed Assessments</h3>
+                    <div class="grid-3" style="margin-bottom:15px;">
+                        <div><label>Filter by Group</label><select id="historyGroupFilter" onchange="loadCompletedHistory()"><option value="">All</option></select></div>
+                        <div><label>Filter by Test</label><select id="historyTestFilter" onchange="loadCompletedHistory()"><option value="">All</option></select></div>
+                        <div><label>Search Trainee</label><input type="text" id="historySearch" placeholder="Name..." onkeyup="loadCompletedHistory()" style="margin-bottom:0;"></div>
+                    </div>
+                    <div class="table-responsive" style="max-height:600px; overflow-y:auto;">
+                        <div id="completedHistoryList"></div>
+                    </div>
+                </div>
             </div>
         </section>
 

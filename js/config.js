@@ -3,7 +3,7 @@
 // --- SUPABASE CONFIGURATION ---
 // Critical: These keys connect the Electron app to the Cloud Database.
 const SUPABASE_URL = 'https://ukhgyvhqoijgetxzlzpy.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_kqWhx44NM-nAWrWI3j3bIw_hSyCLKz6';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVraGd5dmhxb2lqZ2V0eHpsenB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njg4MDQsImV4cCI6MjA4NTM0NDgwNH0.FONPTHcaicp7IAI47gwmic4frYM1ruitTSfNQT8vEf4';
 
 // Initialize the Supabase Client
 // We use 'window.supabaseClient' to avoid conflict with the library's global 'supabase' variable.

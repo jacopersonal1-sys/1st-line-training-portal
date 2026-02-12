@@ -117,7 +117,15 @@ async function loadFromServer(silent = false) {
 
     } catch (err) { 
         updateSyncUI('error');
-        if(!silent) console.error("Supabase Load Error:", err);
+        if(!silent) {
+            console.error("Supabase Load Error:", err);
+            // Helper for 401/406 errors to give a clear hint
+            if (err.code === 401 || err.status === 401) {
+                console.warn("AUTHENTICATION FAILED: Check SUPABASE_ANON_KEY in config.js");
+            } else if (err.message && err.message.includes("row level security")) {
+                console.warn("DATABASE PERMISSION ERROR: Run the RLS Policy SQL in Supabase to allow access.");
+            }
+        }
     }
 }
 
@@ -223,7 +231,15 @@ async function saveToServer(targetKeys = null, force = false) {
     } catch (err) {
         updateSyncUI('error');
         console.error("Cloud Sync Error:", err);
-        if(typeof showToast === 'function') showToast("Save Failed: " + err.message, 'error');
+        
+        let msg = err.message || "Check Console for details";
+        // Detect RLS Policy errors and give a clearer message
+        if (msg.includes("row level security")) {
+            msg = "Database Permission Denied (RLS Policy)";
+            console.warn("FIX: Go to Supabase > SQL Editor and run: CREATE POLICY \"Allow All\" ON app_documents FOR ALL USING (true);");
+        }
+        
+        if(typeof showToast === 'function') showToast("Save Failed: " + msg, 'error');
     }
 }
 
@@ -655,6 +671,62 @@ function handleAutoBackup() {
 
 let SYNC_INTERVAL = null;
 let HEARTBEAT_INTERVAL_ID = null;
+
+/* ================= REALTIME HELPERS ================= */
+// Lightweight wrapper around Supabase Realtime for a single app_documents key.
+// We keep this tiny and focused to stay within free-tier constraints.
+//
+// Usage:
+//   const unsub = subscribeToDocKey('vettingSession', (content, payload) => { ... });
+//   unsub?.();
+//
+// Notes:
+// - Requires Supabase Realtime to be enabled for Postgres changes.
+// - If RLS blocks the table or Realtime isn't configured, callers should fallback to polling.
+window.__DOC_REALTIME_SUBS = window.__DOC_REALTIME_SUBS || {};
+
+function subscribeToDocKey(docKey, onContent) {
+    try {
+        if (!window.supabaseClient || !docKey || typeof onContent !== 'function') return null;
+
+        // Clean up any existing subscription for this key
+        if (window.__DOC_REALTIME_SUBS[docKey]) {
+            try { window.__DOC_REALTIME_SUBS[docKey].unsubscribe(); } catch (e) {}
+            delete window.__DOC_REALTIME_SUBS[docKey];
+        }
+
+        const channel = window.supabaseClient
+            .channel(`doc_${docKey}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'app_documents', filter: `key=eq.${docKey}` },
+                (payload) => {
+                    const content = payload?.new?.content;
+                    if (content === undefined) return;
+                    onContent(content, payload);
+                }
+            )
+            .subscribe((status) => {
+                // Status can be: SUBSCRIBED / TIMED_OUT / CLOSED / CHANNEL_ERROR
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    console.warn(`Realtime subscription issue for ${docKey}:`, status);
+                }
+            });
+
+        window.__DOC_REALTIME_SUBS[docKey] = channel;
+
+        // Return unsubscribe function
+        return () => {
+            try { channel.unsubscribe(); } catch (e) {}
+            if (window.__DOC_REALTIME_SUBS[docKey] === channel) {
+                delete window.__DOC_REALTIME_SUBS[docKey];
+            }
+        };
+    } catch (e) {
+        console.warn("subscribeToDocKey failed:", e);
+        return null;
+    }
+}
 
 function startRealtimeSync() {
     if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);

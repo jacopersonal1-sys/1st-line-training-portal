@@ -6,6 +6,8 @@
 let ADMIN_MONITOR_INTERVAL = null;
 let TRAINEE_NET_POLLER = null;
 let TRAINEE_LOCAL_POLLER = null;
+let VETTING_REALTIME_UNSUB = null;
+let ADMIN_VETTING_REALTIME_UNSUB = null;
 
 function loadVettingArena() {
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
@@ -17,6 +19,7 @@ function loadVettingArena() {
 
 function renderAdminArena() {
     if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
+    if (ADMIN_VETTING_REALTIME_UNSUB) { try { ADMIN_VETTING_REALTIME_UNSUB(); } catch (e) {} ADMIN_VETTING_REALTIME_UNSUB = null; }
 
     const container = document.getElementById('vetting-arena-content');
     const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false, "testId":null, "trainees":{}}');
@@ -98,6 +101,17 @@ function renderAdminArena() {
 
     container.innerHTML = controlPanel;
 
+    // Prefer Realtime to get instant trainee updates (free-tier friendly: no constant reads).
+    // Keep the existing 5s UI refresh as a fallback/monitor tick.
+    if (typeof subscribeToDocKey === 'function') {
+        ADMIN_VETTING_REALTIME_UNSUB = subscribeToDocKey('vettingSession', (content) => {
+            localStorage.setItem('vettingSession', JSON.stringify(content || { active: false, trainees: {} }));
+            // Re-render quickly to reflect changes (only if this view is visible)
+            const c = document.getElementById('vetting-arena-content');
+            if (c && c.offsetParent !== null) renderAdminArena();
+        });
+    }
+
     // Auto-Refresh Monitor every 5 seconds if active
     if (session.active) {
         ADMIN_MONITOR_INTERVAL = setTimeout(loadVettingArena, 5000);
@@ -140,6 +154,26 @@ function renderTraineeRows(trainees) {
             }
             if (CURRENT_USER.role === 'special_viewer') actions = 'Blocked';
         }
+
+        // NEW: Security Switch (Replaces Lock Button)
+        const isRelaxed = data.relaxed === true;
+        const isSecurityOn = !isRelaxed;
+        const disabledAttr = CURRENT_USER.role === 'special_viewer' ? 'disabled' : '';
+        
+        const switchHtml = `
+            <div style="display:flex; align-items:center; gap:8px; margin-top:5px;" title="Toggle Security Rules">
+                <label class="switch" style="margin-bottom:0;">
+                    <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="toggleSecurity('${user}', !this.checked)">
+                    <span class="slider round"></span>
+                </label>
+                <span style="font-size:0.75rem; color:${isSecurityOn ? '#2ecc71' : '#e67e22'}; font-weight:bold;">
+                    ${isSecurityOn ? 'SECURE' : 'OFF'}
+                </span>
+            </div>
+        `;
+
+        if (actions === '-') actions = switchHtml;
+        else actions = `<div style="display:flex; flex-direction:column; gap:5px;">${actions}<div>${switchHtml}</div></div>`;
 
         return `
             <tr>
@@ -190,6 +224,15 @@ async function endVettingSession() {
     if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true);
     
     if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
+    loadVettingArena();
+}
+
+async function toggleSecurity(username, enable) {
+    const session = JSON.parse(localStorage.getItem('vettingSession'));
+    if (!session.trainees[username]) session.trainees[username] = {};
+    session.trainees[username].relaxed = enable;
+    localStorage.setItem('vettingSession', JSON.stringify(session));
+    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], false);
     loadVettingArena();
 }
 
@@ -295,11 +338,53 @@ function renderTraineeArena() {
 function stopTraineePollers() {
     if (TRAINEE_NET_POLLER) clearInterval(TRAINEE_NET_POLLER);
     if (TRAINEE_LOCAL_POLLER) clearInterval(TRAINEE_LOCAL_POLLER);
+    if (VETTING_REALTIME_UNSUB) { try { VETTING_REALTIME_UNSUB(); } catch (e) {} VETTING_REALTIME_UNSUB = null; }
 }
 
 function startTraineePreFlight() {
-    // 1. Network Poll (5s) - Check if session is still active
-    TRAINEE_NET_POLLER = setInterval(pollVettingSession, 5000);
+    // Prefer Realtime for session updates. Fallback to polling if unavailable.
+    let usingRealtime = false;
+    if (typeof subscribeToDocKey === 'function') {
+        VETTING_REALTIME_UNSUB = subscribeToDocKey('vettingSession', (content) => {
+            const serverSession = content || { active: false };
+            const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+
+            // Merge only the global session flags + override flag (same logic as poller)
+            localSession.active = serverSession.active;
+            localSession.testId = serverSession.testId;
+            localSession.targetGroup = serverSession.targetGroup;
+
+            if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
+                if (!localSession.trainees) localSession.trainees = {};
+                if (!localSession.trainees[CURRENT_USER.user]) localSession.trainees[CURRENT_USER.user] = {};
+                localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
+                localSession.trainees[CURRENT_USER.user].relaxed = serverSession.trainees[CURRENT_USER.user].relaxed;
+            }
+
+            const newStr = JSON.stringify(localSession);
+            const currentLocal = localStorage.getItem('vettingSession');
+            if (currentLocal !== newStr) {
+                localStorage.setItem('vettingSession', newStr);
+
+                // If session ended while taking test, force submit/exit
+                if (!serverSession.active && document.getElementById('arenaTestContainer')) {
+                    if (typeof submitTest === 'function') submitTest(true);
+                    return;
+                }
+
+                if (!document.getElementById('arenaTestContainer')) {
+                    renderTraineeArena();
+                }
+                if (typeof applyRolePermissions === 'function') applyRolePermissions();
+            }
+        });
+        usingRealtime = !!VETTING_REALTIME_UNSUB;
+    }
+
+    // Fallback network poll (5s)
+    if (!usingRealtime) {
+        TRAINEE_NET_POLLER = setInterval(pollVettingSession, 5000);
+    }
 
     // 2. Local Security Poll (2s) - Check Screens/Apps
     // This prevents the "Stuck" issue by constantly re-evaluating
@@ -335,6 +420,7 @@ async function pollVettingSession() {
             
             // Adopt override if present on server
             localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
+            localSession.trainees[CURRENT_USER.user].relaxed = serverSession.trainees[CURRENT_USER.user].relaxed;
         }
 
         const newStr = JSON.stringify(localSession);
@@ -371,10 +457,11 @@ async function checkSystemCompliance() {
     const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
     const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
     const isOverridden = myData && myData.override;
+    const isRelaxed = myData && myData.relaxed;
 
     let errors = [];
     
-    if (typeof require !== 'undefined') {
+    if (!isRelaxed && typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         
         // Check Screens
@@ -394,13 +481,17 @@ async function checkSystemCompliance() {
 
     // Determine Status
     let currentStatus = 'ready';
-    if (errors.length > 0 && !isOverridden) {
+    if (errors.length > 0 && !isOverridden && !isRelaxed) {
         currentStatus = 'blocked';
     }
 
     // Update UI
     if (errors.length === 0) {
-        logBox.innerHTML = `<div class="sec-pass"><i class="fas fa-check"></i> System Secure. Ready to start.</div>`;
+        if (isRelaxed) {
+            logBox.innerHTML = `<div class="sec-pass" style="color:#e67e22;"><i class="fas fa-unlock"></i> <strong>Security Relaxed.</strong> Strict rules disabled by Admin.</div>`;
+        } else {
+            logBox.innerHTML = `<div class="sec-pass"><i class="fas fa-check"></i> System Secure. Ready to start.</div>`;
+        }
         btn.disabled = false;
         btn.style.opacity = '1';
         btn.style.cursor = 'pointer';
@@ -439,7 +530,11 @@ async function enterArena(testId) {
     stopTraineePollers();
 
     // 1. Enforce Security
-    if (typeof require !== 'undefined') {
+    const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+    const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
+    const isRelaxed = myData && myData.relaxed;
+
+    if (!isRelaxed && typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         await ipcRenderer.invoke('set-kiosk-mode', true);
         await ipcRenderer.invoke('set-content-protection', true);
@@ -456,21 +551,23 @@ async function enterArena(testId) {
 }
 
 async function updateTraineeStatus(status, timerStr = "") {
-    // We need to fetch latest session to avoid overwriting others
-    await loadFromServer(true); 
+    // We avoid full-schema loadFromServer(true) here to reduce reads.
+    // saveToServer(['vettingSession'], false) already performs a merge and our merge logic
+    // deep-merges trainees, so we won't wipe other trainees/admin changes.
+    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false,"trainees":{}}');
     
     // CHECK: Session Ended?
-    const currentSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-    if (!currentSession.active && status === 'started') {
+    if (!session.active && status === 'started') {
         if (typeof submitTest === 'function') await submitTest();
         return;
     }
-
-    const session = JSON.parse(localStorage.getItem('vettingSession'));
     
     if (!session.trainees) session.trainees = {};
     if (!session.trainees[CURRENT_USER.user]) session.trainees[CURRENT_USER.user] = {};
     
+    // Check if security is relaxed for this user
+    const isRelaxed = session.trainees[CURRENT_USER.user].relaxed === true;
+
     session.trainees[CURRENT_USER.user].status = status;
     if (timerStr) session.trainees[CURRENT_USER.user].timer = timerStr;
     
@@ -478,7 +575,13 @@ async function updateTraineeStatus(status, timerStr = "") {
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         const screens = await ipcRenderer.invoke('get-screen-count');
-        const apps = await ipcRenderer.invoke('get-process-list');
+        
+        // Use dynamic forbidden list (same as checkSystemCompliance)
+        let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+        if (forbidden.length === 0 && typeof DEFAULT_FORBIDDEN_APPS !== 'undefined') {
+            forbidden = DEFAULT_FORBIDDEN_APPS;
+        }
+        const apps = await ipcRenderer.invoke('get-process-list', forbidden);
         
         session.trainees[CURRENT_USER.user].security = {
             screens: screens,
@@ -486,7 +589,7 @@ async function updateTraineeStatus(status, timerStr = "") {
         };
 
         // CHECK: Forbidden Apps during test?
-        if (apps.length > 0 && status === 'started') {
+        if (!isRelaxed && apps.length > 0 && status === 'started') {
             alert("Security Violation: Forbidden apps detected (" + apps.join(', ') + "). Test ending.");
             if (typeof submitTest === 'function') await submitTest();
             return; // Stop here, submitTest will handle the rest
@@ -511,6 +614,20 @@ function startActiveTestMonitoring() {
     // We don't send full status to server every 3s to save bandwidth, 
     // but we check locally and trigger updateTraineeStatus ONLY if violation found.
     setInterval(async () => {
+        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
+        const isRelaxed = myData && myData.relaxed;
+
+        if (isRelaxed) {
+            // Ensure Kiosk is OFF if rules are relaxed mid-test
+            if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                ipcRenderer.invoke('set-kiosk-mode', false).catch(()=>{});
+                ipcRenderer.invoke('set-content-protection', false).catch(()=>{});
+            }
+            return; // Skip checks
+        }
+
         if (typeof require !== 'undefined') {
             const { ipcRenderer } = require('electron');
             

@@ -15,8 +15,12 @@ function loadTraineeTests() {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     let myGroupId = null;
     
+
     for (const [gid, members] of Object.entries(rosters)) {
-        if (members.includes(CURRENT_USER.user)) { myGroupId = gid; break; }
+        if (!members || !Array.isArray(members)) continue;
+
+        // FIX: Case-insensitive check ensures reliability even if casing differs
+        if (members.some(m => m && m.toLowerCase() === CURRENT_USER.user.toLowerCase())) { myGroupId = gid; break; }
     }
 
     let allowedTestIds = new Set();
@@ -114,7 +118,8 @@ function openTestTaker(testId, isArenaMode = false) {
         let myGroupId = null;
         
         for (const [gid, members] of Object.entries(rosters)) {
-            if (members.includes(CURRENT_USER.user)) { myGroupId = gid; break; }
+            // FIX: Case-insensitive check
+            if (members.some(m => m.toLowerCase() === CURRENT_USER.user.toLowerCase())) { myGroupId = gid; break; }
         }
 
         let isScheduled = false;

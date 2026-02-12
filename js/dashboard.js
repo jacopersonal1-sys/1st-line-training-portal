@@ -745,7 +745,26 @@ function buildTraineeWidgets() {
     let clockOutBtn = (myAtt && !myAtt.clockOut) 
         ? `<button class="btn-warning btn-sm" style="width:100%; margin-top:10px;" onclick="submitClockOut()">Clock Out</button>` : '';
 
+    // NEW: Check for Active Live Session (Redirect Prompt)
+    const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const myLive = liveSessions.find(s => s.trainee === CURRENT_USER.user && s.active);
+    
+    let liveBanner = '';
+    if (myLive) {
+        liveBanner = `
+        <div class="dash-panel full-width" style="background:rgba(39, 174, 96, 0.1); border:1px solid #2ecc71; animation: pulse 2s infinite; margin-bottom:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h3 style="color:#2ecc71; margin:0;"><i class="fas fa-satellite-dish"></i> Live Session Started!</h3>
+                    <p style="margin:5px 0 0 0;">Your trainer is waiting in the arena.</p>
+                </div>
+                <button class="btn-success" onclick="showTab('live-execution')">Join Now</button>
+            </div>
+        </div>`;
+    }
+
     return `
+        ${liveBanner}
         <div class="dash-panel main-panel">
             <h4><i class="fas fa-tasks"></i> Up Next</h4>
             <div style="margin-top:15px;">

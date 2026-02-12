@@ -3,9 +3,15 @@
 
 let LIVE_POLLER = null;
 let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
+let LIVE_REALTIME_UNSUB = null;
+let LIVE_FALLBACK_POLLER = null;
+let LIVE_CONN_INTERVAL = null;
 
 function loadLiveExecution() {
     if (LIVE_POLLER) clearInterval(LIVE_POLLER);
+    if (LIVE_FALLBACK_POLLER) clearInterval(LIVE_FALLBACK_POLLER);
+    if (LIVE_REALTIME_UNSUB) { try { LIVE_REALTIME_UNSUB(); } catch (e) {} LIVE_REALTIME_UNSUB = null; }
+    if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
     
     const container = document.getElementById('live-execution-content');
     if (!container) return;
@@ -17,8 +23,65 @@ function loadLiveExecution() {
         renderTraineeLivePanel(container);
     }
 
-    // Start Polling for updates (Real-time sync)
-    LIVE_POLLER = setInterval(syncLiveSessionState, 1000); // Faster polling (1s) for immediate updates
+    // Prefer Realtime (push) to reduce reads on free tier.
+    // Fallback to polling if Realtime isn't available/configured.
+    let usingRealtime = false;
+    if (typeof subscribeToDocKey === 'function') {
+        LIVE_REALTIME_UNSUB = subscribeToDocKey('liveSessions', (content) => {
+            // Keep local cache updated
+            const allSessions = content || [];
+            localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+
+            // Update my local "liveSession" proxy and UI using existing logic
+            // (We reuse the same selector logic as the poller).
+            let myServerSession = null;
+            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+                const viewingId = localStorage.getItem('currentLiveSessionId');
+                if (viewingId) {
+                    myServerSession = allSessions.find(s => s.sessionId === viewingId) || null;
+                }
+                // REJOIN LOGIC: if no explicit viewingId or not found, attach to first session
+                // where this user is the trainer
+                if (!myServerSession) {
+                    myServerSession = allSessions.find(s => s.trainer === CURRENT_USER.user && s.active) || { active: false };
+                    if (myServerSession && myServerSession.sessionId) {
+                        localStorage.setItem('currentLiveSessionId', myServerSession.sessionId);
+                    }
+                }
+            } else {
+                myServerSession = allSessions.find(s => s.trainee === CURRENT_USER.user && s.active) || { active: false };
+            }
+
+            const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+            if (JSON.stringify(myServerSession) !== JSON.stringify(localSession)) {
+                localStorage.setItem('liveSession', JSON.stringify(myServerSession));
+                const c = document.getElementById('live-execution-content');
+                if (c) {
+                    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+                        if (!document.querySelector('.admin-interaction-active') || myServerSession.currentQ !== localSession.currentQ) {
+                            renderAdminLivePanel(c);
+                        } else {
+                            updateAdminLiveView();
+                        }
+                    } else {
+                        if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
+                            renderTraineeLivePanel(c);
+                            LAST_RENDERED_Q = myServerSession.currentQ;
+                        }
+                    }
+                }
+            }
+        });
+        usingRealtime = !!LIVE_REALTIME_UNSUB;
+    }
+
+    if (!usingRealtime) {
+        // Start Polling for updates (1s) for immediate updates
+        LIVE_POLLER = setInterval(syncLiveSessionState, 1000);
+    } else {
+        // Safety net: periodic poll (slow) to self-heal if events are missed
+        LIVE_FALLBACK_POLLER = setInterval(syncLiveSessionState, 15000);
+    }
 }
 
 async function syncLiveSessionState() {
@@ -39,9 +102,18 @@ async function syncLiveSessionState() {
         // FIND MY RELEVANT SESSION
         let myServerSession = null;
         if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
-            // Admin: Find the session I am currently viewing (stored in local state)
+            // Admin: Prefer the session we are explicitly viewing
             const viewingId = localStorage.getItem('currentLiveSessionId');
-            myServerSession = allSessions.find(s => s.sessionId === viewingId) || { active: false };
+            if (viewingId) {
+                myServerSession = allSessions.find(s => s.sessionId === viewingId) || null;
+            }
+            // REJOIN LOGIC: If not found, attach to first active session where this admin is trainer
+            if (!myServerSession) {
+                myServerSession = allSessions.find(s => s.trainer === CURRENT_USER.user && s.active) || { active: false };
+                if (myServerSession && myServerSession.sessionId) {
+                    localStorage.setItem('currentLiveSessionId', myServerSession.sessionId);
+                }
+            }
         } else {
             // Trainee: Find the session assigned to me
             myServerSession = allSessions.find(s => s.trainee === CURRENT_USER.user && s.active) || { active: false };
@@ -189,18 +261,37 @@ function renderAdminLivePanel(container) {
             </div>
             <div style="flex:1; overflow-y:auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border-color); margin-bottom:10px;">
-                    <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
+                    <div>
+                        <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
+                        <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
+                            Checking connection...
+                        </div>
+                    </div>
                     <button class="btn-danger btn-sm" onclick="endLiveSession()">Abort Session</button>
                 </div>
                 ${mainHtml}
             </div>
         </div>`;
+
+    // Start connection status polling for this trainee
+    if (typeof updateLiveConnectionStatus === 'function') {
+        updateLiveConnectionStatus(session.trainee);
+        if (LIVE_CONN_INTERVAL) clearInterval(LIVE_CONN_INTERVAL);
+        LIVE_CONN_INTERVAL = setInterval(() => {
+            updateLiveConnectionStatus(session.trainee);
+        }, 10000); // every 10s while panel is open
+    }
 }
 
 function updateAdminLiveView() {
     // Helper to update just the answer box without redrawing inputs (preserves focus)
     const session = JSON.parse(localStorage.getItem('liveSession'));
     if (!session || !session.active) return;
+    
+    // Load current test definition once (used by both answer box and sidebar)
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const test = tests.find(t => t.id == session.testId);
+    if (!test) return;
     
     // 1. Update Answer Box (Current Question)
     if (session.currentQ !== -1) {
@@ -216,20 +307,57 @@ function updateAdminLiveView() {
 
     // 2. Update Sidebar Status Icons (Checkmarks)
     // This ensures Admin sees progress without full re-render
-    const test = JSON.parse(localStorage.getItem('tests') || '[]').find(t => t.id == session.testId);
-    if (test) {
-        test.questions.forEach((q, idx) => {
-            // Find the icon inside the sidebar item
-            const itemIcon = document.querySelector(`.live-q-item[onclick="adminJumpToQuestion(${idx})"] i`);
-            if (itemIcon) {
-                const hasAns = session.answers[idx] !== undefined && session.answers[idx] !== null && session.answers[idx] !== "";
-                const isCurrent = idx === session.currentQ;
-                
-                if (isCurrent) { itemIcon.className = "fas fa-dot-circle"; itemIcon.style.color = "var(--primary)"; }
-                else if (hasAns) { itemIcon.className = "fas fa-check-circle"; itemIcon.style.color = "green"; }
-                else { itemIcon.className = "far fa-circle"; itemIcon.style.color = ""; }
-            }
-        });
+    test.questions.forEach((q, idx) => {
+        const itemIcon = document.querySelector(`.live-q-item[onclick="adminJumpToQuestion(${idx})"] i`);
+        if (itemIcon) {
+            const hasAns = session.answers[idx] !== undefined && session.answers[idx] !== null && session.answers[idx] !== "";
+            const isCurrent = idx === session.currentQ;
+            
+            if (isCurrent) { itemIcon.className = "fas fa-dot-circle"; itemIcon.style.color = "var(--primary)"; }
+            else if (hasAns) { itemIcon.className = "fas fa-check-circle"; itemIcon.style.color = "green"; }
+            else { itemIcon.className = "far fa-circle"; itemIcon.style.color = ""; }
+        }
+    });
+}
+
+// --- CONNECTION HEALTH (ADMIN & TRAINEE VIEW) ---
+async function updateLiveConnectionStatus(traineeUser, elementId = 'live-conn-status') {
+    const el = document.getElementById(elementId);
+    if (!el || !window.supabaseClient || !traineeUser) return;
+
+    try {
+        const { data, error } = await supabaseClient
+            .from('sessions')
+            .select('lastSeen, idleTime, isIdle')
+            .eq('user', traineeUser)
+            .single();
+
+        if (error || !data) {
+            el.innerText = 'Connection: Unknown';
+            el.style.color = 'var(--text-muted)';
+            return;
+        }
+
+        const lastSeen = new Date(data.lastSeen).getTime();
+        const now = Date.now();
+        const ageMs = now - lastSeen;
+
+        const online = ageMs < 90000; // seen in last 90s (Accommodates 60s heartbeat)
+        const idleSecs = Math.round((data.idleTime || 0) / 1000);
+
+        if (!online) {
+            el.innerText = 'Connection: Offline (last seen ' + Math.round(ageMs/1000) + 's ago)';
+            el.style.color = '#ff5252';
+        } else if (data.isIdle) {
+            el.innerText = 'Connection: Online (idle ' + idleSecs + 's)';
+            el.style.color = 'orange';
+        } else {
+            el.innerText = 'Connection: Online (active)';
+            el.style.color = '#2ecc71';
+        }
+    } catch (e) {
+        el.innerText = 'Connection: Unknown';
+        el.style.color = 'var(--text-muted)';
     }
 }
 
@@ -332,6 +460,12 @@ function renderTraineeLivePanel(container) {
 
     container.innerHTML = `
         <div style="max-width:95%; margin:0 auto; padding:20px;">
+            <div style="margin-bottom:10px;">
+                <h2 style="margin:0;">Live Assessment</h2>
+                <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
+                    Checking connection...
+                </div>
+            </div>
             <div class="progress-track" style="margin-bottom:20px;">
                 <div class="progress-fill" style="width:${((session.currentQ+1)/test.questions.length)*100}%"></div>
             </div>
@@ -350,6 +484,53 @@ function renderTraineeLivePanel(container) {
                 </div>
             </div>
         </div>`;
+
+    // NEW: Attach listeners for Real-time Admin Monitoring (Typing/Selecting)
+    attachRealtimeListeners(session.currentQ);
+
+    // Trainee-side connection hint (simple, read-only)
+    if (typeof updateLiveConnectionStatus === 'function') {
+        updateLiveConnectionStatus(CURRENT_USER.user, 'live-conn-status-trainee');
+        if (LIVE_CONN_INTERVAL) clearInterval(LIVE_CONN_INTERVAL);
+        LIVE_CONN_INTERVAL = setInterval(() => {
+            updateLiveConnectionStatus(CURRENT_USER.user, 'live-conn-status-trainee');
+        }, 10000);
+    }
+}
+
+// --- REAL-TIME SYNC ENGINE ---
+let REALTIME_SAVE_TIMEOUT = null;
+
+function attachRealtimeListeners(qIdx) {
+    const container = document.querySelector('.live-input-area');
+    if(!container) return;
+
+    // Listen to all input types (Text, Radio, Checkbox, Select)
+    const inputs = container.querySelectorAll('input, textarea, select');
+    inputs.forEach(input => {
+        input.addEventListener('input', () => handleRealtimeInput(qIdx));
+        input.addEventListener('change', () => handleRealtimeInput(qIdx));
+    });
+}
+
+function handleRealtimeInput(qIdx) {
+    // Wait briefly for assessment_core.js to update the global USER_ANSWERS object
+    setTimeout(() => {
+        const ans = window.USER_ANSWERS[qIdx];
+        const session = JSON.parse(localStorage.getItem('liveSession'));
+        
+        // Only sync if data actually changed
+        if (JSON.stringify(session.answers[qIdx]) !== JSON.stringify(ans)) {
+            session.answers[qIdx] = ans;
+            localStorage.setItem('liveSession', JSON.stringify(session));
+            
+            // Debounced Cloud Sync (1 second delay to prevent flooding)
+            if (REALTIME_SAVE_TIMEOUT) clearTimeout(REALTIME_SAVE_TIMEOUT);
+            REALTIME_SAVE_TIMEOUT = setTimeout(() => {
+                updateGlobalSessionArray(session, false);
+            }, 1000);
+        }
+    }, 50);
 }
 
 // --- ACTIONS ---
@@ -575,6 +756,8 @@ async function confirmAndSaveLiveSession() {
         id: Date.now().toString(),
         testId: test.id,
         testTitle: test.title,
+        // SNAPSHOT: store full test definition at time of assessment
+        testSnapshot: test,
         trainee: session.trainee,
         date: new Date().toISOString().split('T')[0],
         answers: session.answers,

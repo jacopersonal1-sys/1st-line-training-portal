@@ -25,6 +25,7 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false, // Needed for some legacy JS interactions
+            webviewTag: true, // ENABLED: Required for SharePoint/External Reference Viewer
             devTools: !app.isPackaged // Disable DevTools in production (.exe)
         }
     });
@@ -69,12 +70,13 @@ function createWindow() {
 // App Life Cycle
 const gotTheLock = app.requestSingleInstanceLock();
 
-if (!gotTheLock) {
+// SECURITY: Enforce Single Instance Lock in Production (Trainees)
+// We allow multiple instances in Dev Mode (!app.isPackaged) for testing.
+if (!gotTheLock && app.isPackaged) {
     app.quit();
 } else {
-    app.on('second-instance', (event, commandLine, workingDirectory) => {
+    app.on('second-instance', () => {
         // Someone tried to run a second instance, we should focus our window.
-        const mainWindow = BrowserWindow.getAllWindows()[0];
         if (mainWindow) {
             if (mainWindow.isMinimized()) mainWindow.restore();
             mainWindow.focus();

@@ -175,9 +175,16 @@ function openAdminMarking(subId) {
     `;
 
     test.questions.forEach((q, idx) => {
-        if (!sub.testSnapshot && sub.answers && !Object.prototype.hasOwnProperty.call(sub.answers, idx)) return;
-
-        const userAns = sub.answers[idx];
+        // FIX: Use original index if available (handles shuffled snapshots), else loop index
+        const lookupIdx = (q._originalIndex !== undefined) ? q._originalIndex : idx;
+        
+        // Robust retrieval: try lookupIdx as number and string
+        let userAns = undefined;
+        if (sub.answers) {
+            userAns = sub.answers[lookupIdx];
+            if (userAns === undefined) userAns = sub.answers[String(lookupIdx)];
+        }
+        
         const pointsMax = parseFloat(q.points || 1);
         let markHtml = '';
         let autoScore = 0;
@@ -284,7 +291,7 @@ function openAdminMarking(subId) {
                             cellContent = '<i class="fas fa-check" style="color:#2ecc71; opacity:0.5;"></i>';
                             cellStyle = 'border: 2px dashed #2ecc71;';
                         }
-                        answerDisplay += `<td style=""></td>`;
+                        answerDisplay += `<td style="${cellStyle}">${cellContent}</td>`;
                     });
                     answerDisplay += `</tr>`;
                 });
@@ -307,14 +314,14 @@ function openAdminMarking(subId) {
                     let style = "";
                     if(isSelected) style = "font-weight:bold; color:var(--primary);";
                     if(isCorrect) style += " border:1px solid green;";
-                    return `<div style="padding:5px; ">${isSelected ? '●' : '○'}  ${isCorrect ? ' (Correct)' : ''}</div>`;
+                    return `<div style="padding:5px; ${style}">${isSelected ? '●' : '○'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
                 }).join('');
             }
             else if (q.type === 'multi_select') {
                 answerDisplay = (q.options || []).map((opt, oIdx) => {
                     const isSelected = userAns && userAns.includes(oIdx);
                     const isCorrect = q.correct && q.correct.includes(oIdx);
-                    return `<div style="padding:5px; ${isSelected ? 'color:var(--primary); font-weight:bold;' : ''}">${isSelected ? '☑' : '☐'}  ${isCorrect ? ' (Correct)' : ''}</div>`;
+                    return `<div style="padding:5px; ${isSelected ? 'color:var(--primary); font-weight:bold;' : ''}">${isSelected ? '☑' : '☐'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
                 }).join('');
             }
             else {
@@ -330,6 +337,8 @@ function openAdminMarking(subId) {
 
             markHtml = `
                 <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:5px;">AGENT RESPONSE:</div>
+                    <div style="margin-bottom:15px;">${answerDisplay}</div>
                     <div style="margin-bottom:10px;"></div>
                     <div style="font-size:0.9rem; border-top:1px solid var(--border-color); padding-top:5px; font-weight:bold; display:flex; align-items:center; justify-content:space-between;">
                         ${!isLocked ? 
