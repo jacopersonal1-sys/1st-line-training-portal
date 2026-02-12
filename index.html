@@ -18,7 +18,10 @@
 <div id="login-screen" class="login-page">
   <div class="login-wrapper">
     <div class="login-header">
-      <div class="login-brand">1st Line<span>Training</span></div>
+      <div class="login-brand">
+          <img src="icon.svg" alt="Logo" style="height: 60px; vertical-align: middle; margin-right: 10px;">
+          1st Line<span>Training</span>
+      </div>
       <p>Enter your credentials to access the portal.</p>
     </div>
     
@@ -358,7 +361,7 @@
                     <button class="icon-btn" onclick="refreshApp()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
                     <button class="icon-btn logout" onclick="logout()" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
                 </div>
-                <div class="bubble-handle"><i class="fas fa-graduation-cap"></i></div>
+                <div class="bubble-handle"><img src="icon.svg" alt="Menu" style="height: 30px;"></div>
             </div>
         </div>
       </header>
@@ -907,30 +910,33 @@
         </div>
 
         <div id="admin-view-updates" class="admin-view">
-            <div class="card">
+            <div class="card" style="text-align:center; max-width:600px; margin:40px auto;">
+                <img src="icon.svg" style="height:80px; margin-bottom:20px;">
                 <h3>System Updates</h3>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:20px; border-bottom:1px solid var(--border-color);">
-                    <div>
-                        <div style="font-size:0.9rem; color:var(--text-muted);">Current Version</div>
-                        <div id="currentVersionDisplay" style="font-size:1.5rem; font-weight:bold; color:var(--primary);">Loading...</div>
-                    </div>
-                    <div>
-                        <button id="btnCheckUpdates" class="btn-primary" onclick="triggerManualUpdate()"><i class="fas fa-sync"></i> Check for Updates</button>
-                        <button id="btnInstallUpdate" class="btn-success hidden" onclick="restartAndInstall()"><i class="fas fa-arrow-circle-up"></i> Restart & Install</button>
-                    </div>
+                
+                <div id="updateStatusContainer" style="margin:20px 0;">
+                    <div style="font-size:0.9rem; color:var(--text-muted); margin-bottom:5px;">Current Version</div>
+                    <div id="currentVersionDisplay" style="font-size:1.5rem; font-weight:bold; color:var(--primary); margin-bottom:20px;">Loading...</div>
+                    
+                    <button id="btnCheckUpdates" class="btn-primary btn-lg" onclick="triggerManualUpdate()"><i class="fas fa-sync"></i> Check for Updates</button>
+                    <button id="btnInstallUpdate" class="btn-success btn-lg hidden" onclick="restartAndInstall()"><i class="fas fa-arrow-circle-up"></i> Restart & Install</button>
                 </div>
 
-                <div id="updateProgressContainer" class="hidden" style="margin-bottom:20px;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                        <span id="updateStatusText">Downloading...</span>
+                <div id="updateProgressContainer" class="hidden" style="background:var(--bg-input); padding:20px; border-radius:12px; border:1px solid var(--border-color); text-align:left;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-weight:bold;">
+                        <span id="updateStatusText" style="color:var(--primary);">Downloading...</span>
                         <span id="updateProgressText">0%</span>
                     </div>
-                    <div style="height:10px; background:var(--bg-input); border-radius:5px; overflow:hidden;">
-                        <div id="updateProgressBar" style="height:100%; width:0%; background:var(--primary); transition:width 0.3s;"></div>
+                    <div class="progress-track" style="height:12px; margin:0;">
+                        <div id="updateProgressBar" class="progress-fill" style="width:0%;"></div>
                     </div>
+                    <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px; text-align:center;">Please do not close the application.</p>
                 </div>
 
-                <div style="background:var(--bg-input); padding:15px; border-radius:8px; height:200px; overflow-y:auto; border:1px solid var(--border-color);" id="updateLog"></div>
+                <div style="margin-top:20px; text-align:left;">
+                    <h4 style="font-size:0.9rem; color:var(--text-muted); border-bottom:1px solid var(--border-color); padding-bottom:5px;">Update Log</h4>
+                    <div id="updateLog" style="height:100px; overflow-y:auto; font-family:monospace; font-size:0.8rem; color:var(--text-muted); padding:10px; background:rgba(0,0,0,0.2); border-radius:6px;"></div>
+                </div>
             </div>
         </div>
 

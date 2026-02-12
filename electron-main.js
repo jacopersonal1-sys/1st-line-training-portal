@@ -15,7 +15,7 @@ function createWindow() {
         width: 1920,
         height: 1080,
         title: "1st Line Training Portal",
-        icon: path.join(__dirname, 'icon.ico'), // Ensure you have an icon.ico or remove this line
+        icon: path.join(__dirname, 'ico.ico'), // Updated to new icon file
         titleBarStyle: 'hidden',
         titleBarOverlay: {
             color: '#1A1410',

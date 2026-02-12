@@ -186,7 +186,10 @@ function renderAttendanceRegister() {
         let actionBtn = '-';
         if(unconfirmed.length > 0) {
             // Pass the first unconfirmed ID for simplicity, or handle bulk
-            actionBtn = `<button class="btn-warning btn-sm" onclick="confirmLate('${unconfirmed[0].id}')">Review (${unconfirmed.length})</button>`;
+            actionBtn = `
+                <button class="btn-warning btn-sm" onclick="confirmLate('${unconfirmed[0].id}')" title="Review Reason">Review</button>
+                <button class="btn-danger btn-sm" onclick="deleteLateEntry('${unconfirmed[0].id}')" style="margin-left:5px;" title="Delete Entry"><i class="fas fa-trash"></i></button>
+            `;
         }
 
         html += `<tr>
@@ -217,6 +220,19 @@ async function confirmLate(recordId) {
         
         renderAttendanceRegister();
         if(typeof checkMissingClockIns === 'function') checkMissingClockIns(); // Refresh badge
+    }
+}
+
+async function deleteLateEntry(recordId) {
+    if(!confirm("Delete this late entry? It will be removed from the record.")) return;
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const idx = records.findIndex(r => r.id === recordId);
+    if(idx > -1) {
+        records.splice(idx, 1);
+        localStorage.setItem('attendance_records', JSON.stringify(records));
+        if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
+        renderAttendanceRegister();
+        if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
     }
 }
 
