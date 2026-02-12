@@ -274,7 +274,15 @@ function renderBuilder() {
                 </div>
             </div>
             <div style="margin-bottom:10px;">
-                <textarea placeholder="Admin/Marker Notes (Hidden from Trainee)" class="auto-expand" oninput="autoResize(this)" onchange="updateAdminNotes(${idx}, this.value)" style="font-size:0.85rem; color:var(--text-muted); border: 1px dashed var(--border-color); width:100%; min-height:40px;">${q.adminNotes || ''}</textarea>
+                <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:5px;">Admin/Marker Notes (Hidden from Trainee)</label>
+                <div class="rich-text-container">
+                    <div class="rich-toolbar" style="margin-bottom:0;">
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('bold')" title="Bold"><i class="fas fa-bold"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('italic')" title="Italic"><i class="fas fa-italic"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('insertUnorderedList')" title="Bullet List"><i class="fas fa-list-ul"></i></button>
+                    </div>
+                    <div class="rich-editor" contenteditable="true" oninput="updateAdminNotes(${idx}, this.innerHTML)" style="font-size:0.85rem; color:var(--text-muted); border: 1px dashed var(--border-color); border-top:none; width:100%; min-height:40px; padding: 10px; background: var(--bg-input); border-radius: 0 0 4px 4px;">${q.adminNotes || ''}</div>
+                </div>
             </div>
             <div style="margin-bottom:10px;">
                 <input type="text" placeholder="Reference Image/Page URL (Optional)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary);">
