@@ -377,6 +377,11 @@ function showTab(id, btn) {
   const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${id}')"]`);
   if(sidebarBtn) sidebarBtn.classList.add('active');
 
+  // --- ACTIVITY TRACKING ---
+  if (typeof StudyMonitor !== 'undefined') {
+      StudyMonitor.track(`Navigating: ${id.replace(/-/g, ' ')}`);
+  }
+
   // VISUAL FIX: Auto-resize textareas when tab becomes visible
   setTimeout(() => {
       document.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
@@ -387,7 +392,7 @@ function showTab(id, btn) {
 
   // NEW: Render Dashboard if Home Tab is clicked
   if(id === 'dashboard-view') {
-      if(typeof renderDashboard === 'function') renderDashboard();
+      if(typeof renderDashboard === 'function') setTimeout(renderDashboard, 0); // Async render to ensure container is ready
   }
 
   // === CORRECTED: Training Insight Tab ===
@@ -526,7 +531,15 @@ function showAdminSub(viewName, btn) {
 
 /* ================= HEADER BUTTONS ================= */
 
-function refreshApp() {
+async function refreshApp() {
+    // Visual Feedback
+    const btn = document.querySelector('.icon-btn[title="Refresh"] i');
+    if(btn) btn.classList.add('fa-spin');
+    
+    // Force Cloud Sync before reloading
+    if (typeof loadFromServer === 'function') {
+        await loadFromServer(true);
+    }
     location.reload();
 }
 

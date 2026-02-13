@@ -15,6 +15,28 @@ async function secureDashboardSave() {
     }
 }
 
+// --- DASHBOARD LAYOUT STATE ---
+let DASH_EDIT_MODE = false;
+const DEFAULT_LAYOUT_ADMIN = [
+    { id: 'stats', col: 1, row: 1 },
+    { id: 'schedule', col: 1, row: 1 },
+    { id: 'marking', col: 1, row: 1 },
+    { id: 'insight', col: 1, row: 1 },
+    { id: 'live', col: 1, row: 1 },
+    { id: 'attendance', col: 1, row: 1 },
+    { id: 'monitor', col: 1, row: 1 },
+    { id: 'sys_health', col: 2, row: 1 },
+    { id: 'active_users', col: 2, row: 1 }
+];
+
+const DEFAULT_LAYOUT_TRAINEE = [
+    { id: 'up_next', col: 2, row: 1 },
+    { id: 'live_upcoming', col: 1, row: 1 },
+    { id: 'recent_results', col: 1, row: 2 },
+    { id: 'available_tests', col: 1, row: 2 },
+    { id: 'notepad', col: 1, row: 1 }
+];
+
 function renderDashboard() {
     const container = document.getElementById('dashboard-view');
     if (!container) return;
@@ -32,9 +54,17 @@ function renderDashboard() {
     const header = document.createElement('div');
     header.className = 'dash-header';
     header.innerHTML = `
-        <div style="margin-bottom:20px;">
-            <h2 style="margin:0;">Hello, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
-            <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div>
+                <h2 style="margin:0;">Hello, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
+                <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
+            </div>
+            ${(role === 'admin' || role === 'trainee') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
+        </div>
+        <div id="dash-edit-controls" class="hidden" style="margin-bottom:15px; padding:10px; background:var(--bg-input); border:1px dashed var(--primary); border-radius:8px; text-align:center;">
+            <strong style="color:var(--primary);">Edit Mode Active</strong> - Drag items to reorder.
+            <button class="btn-primary btn-sm" style="margin-left:10px;" onclick="saveDashLayout()">Save Layout</button>
+            <button class="btn-secondary btn-sm" onclick="resetDashLayout()">Reset</button>
         </div>
     `;
     container.appendChild(header);
@@ -44,7 +74,7 @@ function renderDashboard() {
     content.className = 'dash-content-grid'; 
     
     if (role === 'admin' || role === 'special_viewer') {
-        content.innerHTML = buildAdminWidgets();
+        buildAdminWidgets(content); // Pass container to append widgets dynamically
         
         // Append Notice Manager for Admins (Bottom)
         const manager = document.createElement('div');
@@ -74,7 +104,7 @@ function renderDashboard() {
         const noticeHtml = buildNoticeBanners(role);
         container.innerHTML = noticeHtml + container.innerHTML;
         
-        content.innerHTML = buildTraineeWidgets();
+        buildTraineeWidgets(content);
         container.appendChild(content);
     }
 }
@@ -154,6 +184,11 @@ async function updateDashboardHealth() {
             }
         } else {
             throw error; // Propagate error to catch block
+        }
+        
+        // --- NEW: Update Activity Monitor Widget (if present) ---
+        if (typeof StudyMonitor !== 'undefined' && typeof StudyMonitor.updateWidget === 'function') {
+            StudyMonitor.updateWidget();
         }
     } catch (e) {
         console.error("Dashboard health check failed", e);
@@ -452,7 +487,7 @@ function showUrgentModal(notice) {
 }
 
 // --- ADMIN DASHBOARD ---
-function buildAdminWidgets() {
+function buildAdminWidgets(container) {
     const users = JSON.parse(localStorage.getItem('users') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     const records = JSON.parse(localStorage.getItem('records') || '[]');
@@ -534,19 +569,31 @@ function buildAdminWidgets() {
         </div>`
     ).slice(0, 10).join('') || '<div style="color:var(--text-muted); font-style:italic;">No upcoming bookings.</div>';
 
-    return `
-        <div class="dash-grid-main">
-            <!-- 1. Total Trainees (Static) -->
-            <div class="dash-card">
+    // Helper to wrap widget content with resize controls
+    const wrapWidget = (id, content, colSpan=1, rowSpan=1) => {
+        return `
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+                <div class="widget-controls">
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', -1, -1)" title="Shrink"><i class="fas fa-compress"></i></button>
+                </div>
+                ${content}
+            </div>`;
+    };
+
+    // WIDGET DEFINITIONS
+    // Note: Admin widgets defined here
+    const widgets = {
+        'stats': wrapWidget('stats', `
+            <div style="display:flex; align-items:center; gap:20px; height:100%;">
                 <div class="dash-icon"><i class="fas fa-users"></i></div>
                 <div class="dash-data">
                     <h3>${totalTrainees}</h3>
                     <p>Total Trainees</p>
                 </div>
-            </div>
-
-            <!-- 2. Agent on Schedule (Expandable) -->
-            <div class="dash-card dash-card-expandable">
+            </div>`),
+        'schedule': wrapWidget('schedule', `
                 <div class="dash-primary-content">
                     <div class="dash-icon"><i class="fas fa-clipboard-list"></i></div>
                     <div class="dash-data">
@@ -554,13 +601,9 @@ function buildAdminWidgets() {
                         <p>Agents on Schedule</p>
                     </div>
                 </div>
-                <div class="dash-details">
-                    ${schedDetailsHtml}
-                </div>
-            </div>
-
-            <!-- 3. Pending Marking (Expandable) -->
-            <div class="dash-card dash-card-expandable" onclick="showTab('test-manage')" style="cursor:pointer; position:relative;">
+                <div class="dash-details">${schedDetailsHtml}</div>`),
+        'marking': wrapWidget('marking', `
+            <div onclick="showTab('test-manage')" style="cursor:pointer; width:100%;">
                 <div class="dash-primary-content">
                     <div class="dash-icon"><i class="fas fa-highlighter"></i></div>
                     <div class="dash-data">
@@ -568,13 +611,10 @@ function buildAdminWidgets() {
                         <p>Pending Marking</p>
                     </div>
                 </div>
-                <div class="dash-details">
-                    ${pendingDetailsHtml}
-                </div>
-            </div>
-        
-            <!-- 4. Insight (Expandable) -->
-            <div class="dash-card dash-card-expandable" onclick="showTab('insights')" style="cursor:pointer; border:1px solid var(--primary); position:relative;">
+                <div class="dash-details">${pendingDetailsHtml}</div>
+            </div>`),
+        'insight': wrapWidget('insight', `
+            <div onclick="showTab('insights')" style="cursor:pointer; width:100%;">
                 ${badgeInsight}
                 <div class="dash-primary-content">
                     <div class="dash-icon"><i class="fas fa-search"></i></div>
@@ -587,10 +627,9 @@ function buildAdminWidgets() {
                     <div style="font-size:0.8rem; font-weight:bold; margin-bottom:5px; color:#e74c3c;">Action Required:</div>
                     ${insightDetailsHtml}
                 </div>
-            </div>
-
-            <!-- 5. Live Bookings (Expandable) -->
-            <div class="dash-card dash-card-expandable" onclick="showTab('live-assessment')" style="cursor:pointer; position:relative;">
+            </div>`),
+        'live': wrapWidget('live', `
+            <div onclick="showTab('live-assessment')" style="cursor:pointer; width:100%;">
                 ${badgeBooking}
                 <div class="dash-primary-content">
                     <div class="dash-icon"><i class="fas fa-calendar-check"></i></div>
@@ -599,74 +638,193 @@ function buildAdminWidgets() {
                         <p>Manage Sessions</p>
                     </div>
                 </div>
-                <div class="dash-details">
-                    ${bookingDetailsHtml}
-                </div>
-            </div>
-
-            <!-- 6. Attendance (Static) -->
-            <div class="dash-card" onclick="openAttendanceRegister()" style="cursor:pointer; position:relative;">
+                <div class="dash-details">${bookingDetailsHtml}</div>
+            </div>`),
+        'attendance': wrapWidget('attendance', `
+            <div onclick="openAttendanceRegister()" style="cursor:pointer; width:100%;">
                 ${badgeAtt}
                 <div class="dash-icon"><i class="fas fa-clock"></i></div>
                 <div class="dash-data">
                     <h3>Attendance</h3>
                     <p>Review Lates</p>
                 </div>
-            </div>
-        </div>
-
-        <!-- BOTTOM SECTION: System & Users -->
-        <div class="dash-grid-bottom">
-            
-            <!-- System Status (Reworked) -->
-            <div class="dash-panel">
+            </div>`),
+        'monitor': wrapWidget('monitor', `
+            <div onclick="openActivityMonitorModal()" style="cursor:pointer; width:100%;">
+                <div class="dash-icon"><i class="fas fa-binoculars"></i></div>
+                <div class="dash-data">
+                    <h3>Activity Monitor</h3>
+                    <p>View Detailed Logs</p>
+                </div>
+            </div>`),
+        'sys_health': wrapWidget('sys_health', `
+            <div style="width:100%;">
                 <h4><i class="fas fa-server"></i> System Health</h4>
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:15px;">
-                    <div class="status-item">
-                        <div style="font-size:0.8rem; color:var(--text-muted);">Storage</div>
-                        <strong id="dashStorage">...</strong>
-                    </div>
-                    <div class="status-item">
-                        <div style="font-size:0.8rem; color:var(--text-muted);">Latency</div>
-                        <strong id="dashLatency">...</strong>
-                    </div>
-                    <div class="status-item">
-                        <div style="font-size:0.8rem; color:var(--text-muted);">Sync</div>
-                        <strong id="dashLastSync">...</strong>
-                    </div>
-                    <div class="status-item">
-                        <div style="font-size:0.8rem; color:var(--text-muted);">Network</div>
-                        <strong id="statusConnection" style="color:var(--primary);">Checking...</strong>
-                    </div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Storage</div><strong id="dashStorage">...</strong></div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Latency</div><strong id="dashLatency">...</strong></div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Sync</div><strong id="dashLastSync">...</strong></div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Network</div><strong id="statusConnection" style="color:var(--primary);">Checking...</strong></div>
                 </div>
-            </div>
-
-            <!-- Active Users (Compressed) -->
-            <div class="dash-panel">
+            </div>`),
+        'active_users': wrapWidget('active_users', `
+            <div style="width:100%;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <h4><i class="fas fa-user-clock"></i> Active Users</h4>
                     <button class="btn-secondary btn-sm" onclick="updateDashboardHealth()"><i class="fas fa-sync"></i></button>
                 </div>
                 <div class="table-responsive" style="max-height:150px; overflow-y:auto; margin-top:10px;">
                     <table class="admin-table compressed-table">
-                        <thead>
-                            <tr>
-                                <th>User</th>
-                                <th>Role</th>
-                                <th>Status</th>
-                                <th>Idle</th>
-                            </tr>
-                        </thead>
-                        <tbody id="dashActiveUsersBody">
-                            <tr><td colspan="4" class="text-center">Loading...</td></tr>
-                        </tbody>
+                        <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Idle</th></tr></thead>
+                        <tbody id="dashActiveUsersBody"><tr><td colspan="4" class="text-center">Loading...</td></tr></tbody>
                     </table>
                 </div>
-            </div>
-        </div>
+            </div>`)
+    };
+
+    // LOAD LAYOUT
+    let layout = JSON.parse(localStorage.getItem('dashLayout_admin') || 'null');
+    
+    if (!layout) {
+        layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_ADMIN));
+    } else {
+        // SMART MERGE: Check for new widgets defined in code but missing in saved layout
+        const existingIds = new Set(layout.map(i => (typeof i === 'string' ? i : i.id)));
         
-        ${buildLinkRequestsWidget()}
-    `;
+        DEFAULT_LAYOUT_ADMIN.forEach(def => {
+            if (!existingIds.has(def.id)) {
+                layout.push(def); // Append new widget to the end
+            }
+        });
+    }
+    
+    let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
+    
+    layout.forEach(item => {
+        // Handle legacy string array or new object array
+        const key = typeof item === 'string' ? item : item.id;
+        const col = typeof item === 'object' ? item.col : 1;
+        const row = typeof item === 'object' ? item.row : 1;
+
+        if(widgets[key]) {
+            // Inject size classes dynamically if not already in template (though wrapWidget handles it)
+            // We need to replace the default class in the template with the saved one
+            let widgetHtml = widgets[key];
+            // Replace default w-col-1/w-row-1 with saved values
+            widgetHtml = widgetHtml.replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`);
+            // Update data attributes for logic
+            widgetHtml = widgetHtml.replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
+            
+            gridHtml += widgetHtml;
+        }
+    });
+    gridHtml += '</div>';
+
+    container.innerHTML = gridHtml + buildLinkRequestsWidget();
+    
+    // Re-apply edit mode if active
+    if(DASH_EDIT_MODE) enableDashEdit();
+}
+
+// --- DASHBOARD CUSTOMIZATION LOGIC ---
+
+function toggleDashEditMode() {
+    DASH_EDIT_MODE = !DASH_EDIT_MODE;
+    const controls = document.getElementById('dash-edit-controls');
+    if(DASH_EDIT_MODE) {
+        controls.classList.remove('hidden');
+        enableDashEdit();
+    } else {
+        controls.classList.add('hidden');
+        renderDashboard(); // Reset view to remove drag handlers
+    }
+}
+
+function resizeWidget(id, dCol, dRow) {
+    const el = document.getElementById(`widget-${id}`);
+    if(!el) return;
+    
+    let col = parseInt(el.dataset.col) || 1;
+    let row = parseInt(el.dataset.row) || 1;
+    
+    // Reset logic if both negative
+    if (dCol === -1 && dRow === -1) {
+        col = 1; row = 1;
+    } else {
+        col = Math.max(1, Math.min(4, col + dCol)); // Max 4 cols
+        row = Math.max(1, Math.min(3, row + dRow)); // Max 3 rows
+    }
+    
+    // Update Classes
+    el.className = el.className.replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`);
+    el.dataset.col = col;
+    el.dataset.row = row;
+}
+
+function enableDashEdit() {
+    const grid = document.getElementById('dash-grid-container');
+    if(!grid) return;
+    
+    const cards = grid.querySelectorAll('.dash-card');
+    cards.forEach(card => {
+        card.classList.add('editing');
+        card.setAttribute('draggable', 'true');
+        card.style.border = '2px dashed var(--primary)';
+        card.style.cursor = 'move';
+        card.onclick = (e) => e.preventDefault(); // Disable clicks
+        
+        card.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', card.id);
+            e.target.style.opacity = '0.5';
+        });
+        
+        card.addEventListener('dragend', (e) => {
+            e.target.style.opacity = '1';
+        });
+        
+        card.addEventListener('dragover', (e) => e.preventDefault());
+        
+        card.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const id = e.dataTransfer.getData('text/plain');
+            const draggable = document.getElementById(id);
+            const dropzone = e.target.closest('.dash-card');
+            
+            if (draggable && dropzone && draggable !== dropzone) {
+                // Swap logic: Insert before or after based on position
+                const rect = dropzone.getBoundingClientRect();
+                const next = (e.clientY - rect.top) / (rect.bottom - rect.top) > 0.5;
+                grid.insertBefore(draggable, next ? dropzone.nextSibling : dropzone);
+            }
+        });
+    });
+}
+
+function saveDashLayout() {
+    const grid = document.getElementById('dash-grid-container');
+    const cards = grid.querySelectorAll('.dash-card');
+    const layout = [];
+    
+    cards.forEach(c => {
+        const key = c.id.replace('widget-', '');
+        const col = parseInt(c.dataset.col) || 1;
+        const row = parseInt(c.dataset.row) || 1;
+        layout.push({ id: key, col: col, row: row });
+    });
+    
+    const roleKey = CURRENT_USER.role === 'admin' ? 'dashLayout_admin' : 'dashLayout_trainee';
+    localStorage.setItem(roleKey, JSON.stringify(layout));
+    toggleDashEditMode(); // Exit edit mode
+    if(typeof showToast === 'function') showToast("Dashboard layout saved.", "success");
+}
+
+function resetDashLayout() {
+    if(confirm("Reset dashboard to default layout?")) {
+        const roleKey = CURRENT_USER.role === 'admin' ? 'dashLayout_admin' : 'dashLayout_trainee';
+        localStorage.removeItem(roleKey);
+        toggleDashEditMode();
+        renderDashboard();
+    }
 }
 
 function buildLinkRequestsWidget() {
@@ -795,7 +953,7 @@ window.dismissLinkRequest = async function(requestId) {
 };
 
 // --- TRAINEE DASHBOARD ---
-function buildTraineeWidgets() {
+function buildTraineeWidgets(container) {
     // 1. Find Next Task
     let nextTask = "All Caught Up!";
     let nextDate = "";
@@ -822,10 +980,10 @@ function buildTraineeWidgets() {
     }
 
     // 2. Recent Results
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
-    const myRecords = records.filter(r => r.trainee === CURRENT_USER.user);
-    const lastRecord = myRecords.length > 0 ? myRecords[myRecords.length - 1] : null;
-
+    const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
+    const myRecords = allRecords.filter(r => r.trainee === CURRENT_USER.user);
+    // Sort by date desc (assuming records are appended, reverse is safer)
+    
     // 3. Attendance Status
     const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     const today = new Date().toISOString().split('T')[0];
@@ -856,41 +1014,131 @@ function buildTraineeWidgets() {
         </div>`;
     }
 
-    return `
-        ${liveBanner}
-        <div class="dash-panel main-panel">
-            <h4><i class="fas fa-tasks"></i> Up Next</h4>
-            <div style="margin-top:15px;">
-                <h2 style="color:var(--primary);">${nextTask}</h2>
-                <p style="color:var(--text-muted);">${nextDate}</p>
-                <button class="btn-primary" style="margin-top:15px;" onclick="showTab('assessment-schedule')">Go to Schedule</button>
+    // Helper to wrap widget content with resize controls
+    const wrapWidget = (id, content, colSpan=1, rowSpan=1) => {
+        return `
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+                <div class="widget-controls">
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', -1, -1)" title="Shrink"><i class="fas fa-compress"></i></button>
+                </div>
+                ${content}
+            </div>`;
+    };
+
+    // --- WIDGET CONTENT GENERATION ---
+
+    // 1. Up Next
+    const upNextHtml = `
+        <div style="display:flex; flex-direction:column; height:100%; justify-content:center;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <div class="dash-icon"><i class="fas fa-tasks"></i></div>
+                <h3 style="margin:0;">Up Next</h3>
+            </div>
+            <h2 style="color:var(--primary); margin:0;">${nextTask}</h2>
+            <p style="color:var(--text-muted); margin:5px 0;">${nextDate}</p>
+            <div style="margin-top:auto; display:flex; gap:10px;">
+                <button class="btn-primary btn-sm" onclick="showTab('assessment-schedule')">Go to Schedule</button>
                 ${clockOutBtn}
             </div>
-        </div>
+        </div>`;
 
-        <div class="dash-card">
-            <div class="dash-icon"><i class="fas fa-star"></i></div>
-            <div class="dash-data">
-                <h3>${lastRecord ? lastRecord.score + '%' : '-'}</h3>
-                <p>Last Score</p>
-                <small>${lastRecord ? lastRecord.assessment : 'No records yet'}</small>
-            </div>
-        </div>
+    // 2. Live Upcoming
+    const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const myUpcomingLive = liveBookings.filter(b => b.trainee === CURRENT_USER.user && b.status === 'Booked' && b.date >= todayStr).sort((a,b) => a.date.localeCompare(b.date));
+    
+    let liveHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-calendar-check"></i></div><h3 style="margin:0;">Live Bookings</h3></div>`;
+    if (myUpcomingLive.length === 0) {
+        liveHtml += `<div style="text-align:center; color:var(--text-muted); padding:10px;">No upcoming sessions.<br><button class="btn-secondary btn-sm" style="margin-top:5px;" onclick="showTab('live-assessment')">Book Now</button></div>`;
+    } else {
+        liveHtml += `<div style="overflow-y:auto; flex:1;">${myUpcomingLive.map(b => `
+            <div style="padding:8px; border-bottom:1px solid var(--border-color); font-size:0.9rem;">
+                <div style="font-weight:bold; color:var(--primary);">${b.date} @ ${b.time}</div>
+                <div>${b.assessment}</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">Trainer: ${b.trainer}</div>
+            </div>`).join('')}</div>`;
+    }
 
-        <div class="dash-card" onclick="showTab('my-tests')" style="cursor:pointer;">
-            <div class="dash-icon"><i class="fas fa-pen-alt"></i></div>
-            <div class="dash-data">
-                <h3>Tests</h3>
-                <p>Take Assessment</p>
-            </div>
-        </div>
+    // 3. Recent Results (Expanded)
+    const recent = myRecords.slice(-5).reverse(); // Last 5
+    let resultsHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-trophy"></i></div><h3 style="margin:0;">Recent Results</h3></div>`;
+    
+    if (recent.length === 0) {
+        resultsHtml += `<div style="text-align:center; color:var(--text-muted); padding:10px;">No results yet. Good luck!</div>`;
+    } else {
+        resultsHtml += `<div style="overflow-y:auto; flex:1;">${recent.map(r => {
+            let icon = '👍';
+            let color = 'var(--text-main)';
+            if (r.score >= 90) { icon = '🏆'; color = '#2ecc71'; }
+            else if (r.score >= 80) { icon = '🔥'; color = '#f1c40f'; }
+            else if (r.score < 60) { icon = '💪'; color = '#ff5252'; }
+            
+            return `
+            <div class="result-item">
+                <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:10px;">${r.assessment}</div>
+                <div style="font-weight:bold; color:${color}; white-space:nowrap;">${r.score}% ${icon}</div>
+            </div>`;
+        }).join('')}</div>`;
+    }
 
-        <div class="dash-card" onclick="showTab('live-assessment')" style="cursor:pointer;">
-            <div class="dash-icon"><i class="fas fa-calendar-check"></i></div>
-            <div class="dash-data">
-                <h3>Book Live</h3>
-                <p>Schedule Assessment</p>
+    // 4. Available Tests
+    // We reuse logic from assessment_trainee.js to find unlocked tests
+    // For dashboard, we just show a quick list
+    let availableHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-unlock"></i></div><h3 style="margin:0;">Available Now</h3></div>`;
+    availableHtml += `<div style="text-align:center; padding:10px;"><button class="btn-primary" onclick="showTab('my-tests')">View All Assessments</button></div>`;
+
+    // 5. Notepad
+    const savedNote = localStorage.getItem('user_notes_' + CURRENT_USER.user) || '';
+    const notepadHtml = `
+        <div style="display:flex; flex-direction:column; height:100%;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">
+                <i class="fas fa-sticky-note" style="color:#f1c40f; font-size:1.2rem;"></i>
+                <h4 style="margin:0;">My Notes</h4>
             </div>
-        </div>
-    `;
+            <textarea class="notepad-area" placeholder="Type your notes here..." oninput="localStorage.setItem('user_notes_' + CURRENT_USER.user, this.value)">${savedNote}</textarea>
+        </div>`;
+
+    // WIDGET MAP
+    const widgets = {
+        'up_next': wrapWidget('up_next', upNextHtml),
+        'live_upcoming': wrapWidget('live_upcoming', liveHtml),
+        'recent_results': wrapWidget('recent_results', resultsHtml),
+        'available_tests': wrapWidget('available_tests', availableHtml),
+        'notepad': wrapWidget('notepad', notepadHtml)
+    };
+
+    // LOAD LAYOUT
+    let layout = JSON.parse(localStorage.getItem('dashLayout_trainee') || 'null');
+    
+    if (!layout) {
+        layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_TRAINEE));
+    } else {
+        // Smart Merge
+        const existingIds = new Set(layout.map(i => (typeof i === 'string' ? i : i.id)));
+        DEFAULT_LAYOUT_TRAINEE.forEach(def => {
+            if (!existingIds.has(def.id)) {
+                layout.push(def);
+            }
+        });
+    }
+
+    let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
+    layout.forEach(item => {
+        const key = typeof item === 'string' ? item : item.id;
+        const col = typeof item === 'object' ? item.col : 1;
+        const row = typeof item === 'object' ? item.row : 1;
+
+        if(widgets[key]) {
+            let widgetHtml = widgets[key];
+            widgetHtml = widgetHtml.replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`);
+            widgetHtml = widgetHtml.replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
+            gridHtml += widgetHtml;
+        }
+    });
+    gridHtml += '</div>';
+
+    container.innerHTML = liveBanner + gridHtml;
+    
+    if(DASH_EDIT_MODE) enableDashEdit();
 }

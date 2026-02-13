@@ -15,6 +15,8 @@
 
 <body>
 
+<div class="drag-handle-top"></div>
+
 <div id="login-screen" class="login-page">
   <div class="login-wrapper">
     <div class="login-header">
@@ -219,6 +221,34 @@
             <button class="btn-secondary" onclick="closeResetModal()">Cancel</button>
             <button class="btn-danger" onclick="executeFactoryReset()">ERASE EVERYTHING</button>
         </div>
+    </div>
+</div>
+
+<div id="activityMonitorModal" class="modal-overlay hidden" style="z-index: 3500;">
+    <div class="modal-box" style="width: 95%; max-width: 1400px; height: 90vh; display: flex; flex-direction: column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h3><i class="fas fa-binoculars"></i> Agent Activity Monitor</h3>
+            <div style="display:flex; gap:10px;">
+                <button class="btn-warning btn-sm" onclick="StudyMonitor.archiveLog()"><i class="fas fa-archive"></i> Archive/Clear History</button>
+                <button class="btn-secondary btn-sm" onclick="closeActivityMonitorModal()"><i class="fas fa-times"></i></button>
+            </div>
+        </div>
+        <div id="activityMonitorContent" style="max-height:70vh; overflow-y:auto;"></div>
+    </div>
+</div>
+
+<!-- STUDY MONITOR OVERLAY -->
+<div id="study-overlay" class="hidden" style="position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-app); z-index:6000; display:flex; flex-direction:column;">
+    <div style="padding:10px 20px; background:var(--bg-header); border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; align-items:center; gap:15px;">
+            <button id="study-home-btn" class="btn-secondary btn-sm" onclick="StudyMonitor.closeStudyWindow()" title="Home (Return to Schedule)"><i class="fas fa-home"></i> Home</button>
+            <button id="study-reload-btn" class="btn-secondary btn-sm" onclick="StudyMonitor.reload()" title="Reload"><i class="fas fa-sync"></i></button>
+            <h3 id="study-title" style="margin:0; font-size:1.1rem; color:var(--primary);">Study Material</h3>
+        </div>
+        <button class="btn-danger btn-sm" onclick="StudyMonitor.closeStudyWindow()">Close & Return</button>
+    </div>
+    <div id="study-webview-container" style="flex:1; background:#fff;">
+        <!-- Webview injected here -->
     </div>
 </div>
 
@@ -1007,6 +1037,7 @@
 <script src="js/agent_search.js"></script>
 <script src="js/admin_history.js"></script>
 <script src="js/attendance.js"></script>
+<script src="js/study_monitor.js"></script>
 
 <script src="js/main.js"></script>
 

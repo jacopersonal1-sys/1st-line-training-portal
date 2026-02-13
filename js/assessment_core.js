@@ -131,9 +131,13 @@ function recordAnswer(qIdx, val) {
             if (!session.answers) session.answers = {};
             session.answers[qIdx] = val;
             localStorage.setItem('liveSession', JSON.stringify(session));
-            // SYNC TO SERVER IMMEDIATELY
-            if (typeof saveToServer === 'function') {
-                saveToServer(['liveSession'], false); // Safe merge, fire-and-forget
+            
+            // SYNC TO SERVER IMMEDIATELY (Use correct array updater)
+            if (typeof updateGlobalSessionArray === 'function') {
+                updateGlobalSessionArray(session, false);
+            } else if (typeof saveToServer === 'function') {
+                // Fallback (Legacy)
+                saveToServer(['liveSession'], false); 
             }
         }
     }

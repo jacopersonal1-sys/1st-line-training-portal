@@ -228,7 +228,8 @@ function buildTimeline(items, isAdmin) {
                     materialLinkHtml = `<div style="margin-top:10px;"><span class="btn-link" style="font-size:0.9rem; cursor:not-allowed; opacity:0.5; color:var(--text-muted);"><i class="fas fa-lock"></i> Study Material (Locked)</span></div>`;
                 } else {
                     // Render standard link
-                    materialLinkHtml = `<div style="margin-top:10px;"><a href="${item.materialLink}" target="_blank" class="btn-link" style="font-size:0.9rem;"><i class="fas fa-book-open"></i> Study Material</a></div>`;
+                    // UPDATED: Use StudyMonitor to open internally
+                    materialLinkHtml = `<div style="margin-top:10px;"><button onclick="StudyMonitor.openStudyWindow('${item.materialLink}', '${item.courseName.replace(/'/g, "\\'")}')" class="btn-link" style="font-size:0.9rem; cursor:pointer; background:transparent; border:1px solid var(--border-color); color:var(--text-main);"><i class="fas fa-book-open"></i> Study Material</button></div>`;
                 }
             }
             // -------------------------------------

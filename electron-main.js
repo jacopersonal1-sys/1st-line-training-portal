@@ -6,6 +6,13 @@ const { exec } = require('child_process');
 // Enable logging for the auto-updater (helps debug "nothing happening")
 autoUpdater.logger = console;
 
+// DATA ISOLATION: Separate Dev vs Prod
+// This ensures your "Test Version" doesn't use the same LocalStorage/Cache as your "Installed Version".
+if (!app.isPackaged) {
+    const userDataPath = app.getPath('userData');
+    app.setPath('userData', userDataPath + '-Dev');
+}
+
 let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
 
@@ -14,7 +21,7 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1920,
         height: 1080,
-        title: "1st Line Training Portal",
+        title: app.isPackaged ? "1st Line Training Portal" : "1st Line Training Portal (DEV MODE)",
         icon: path.join(__dirname, 'ico.ico'), // Updated to new icon file
         titleBarStyle: 'hidden',
         titleBarOverlay: {

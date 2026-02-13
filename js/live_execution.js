@@ -119,6 +119,16 @@ async function syncLiveSessionState() {
             myServerSession = allSessions.find(s => s.trainee === CURRENT_USER.user && s.active) || { active: false };
         }
 
+        // PRESERVE LOCAL ANSWERS (Trainee Only)
+        // The Trainee is the source of truth for their own answers. 
+        // We must not overwrite local answers with stale server data.
+        if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
+            const currentLocal = JSON.parse(localStorage.getItem('liveSession') || '{}');
+            if (currentLocal.answers) {
+                myServerSession.answers = { ...myServerSession.answers, ...currentLocal.answers };
+            }
+        }
+
         // Update the local "Active Session" proxy for UI rendering
         const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
         
@@ -837,7 +847,7 @@ async function endLiveSession() {
 }
 
 // --- HELPER: SYNC LOCAL SESSION TO GLOBAL ARRAY ---
-async function updateGlobalSessionArray(localSession, force = true) {
+window.updateGlobalSessionArray = async function(localSession, force = true) {
     let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
     
     // Remove old version of this session

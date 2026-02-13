@@ -30,7 +30,8 @@ const DB_SCHEMA = {
     linkRequests: [], // Requests from TLs for assessment links
     agentNotes: {}, // Private notes on agents { "username": "note content" }
     liveSessions: [], // CHANGED: Array to support multiple concurrent sessions
-    forbiddenApps: [] // Dynamic list of blacklisted processes
+    forbiddenApps: [], // Dynamic list of blacklisted processes
+    monitor_data: {} // Real-time activity tracking { username: { current, history: [] } }
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -166,7 +167,7 @@ function updateSyncUI(status) {
 
 // 3. SMART SAVE (Using supabaseClient)
 // UPDATED: Accepts 'targetKeys' array to save only specific parts (e.g. ['users'])
-async function saveToServer(targetKeys = null, force = false) {
+async function saveToServer(targetKeys = null, force = false, silent = false) {
     try {
         // Legacy support: if first arg is boolean, treat as force for ALL keys
         if (typeof targetKeys === 'boolean') {
@@ -176,7 +177,7 @@ async function saveToServer(targetKeys = null, force = false) {
 
         if (!window.supabaseClient) {
             console.warn("Supabase client not ready. Offline?");
-            updateSyncUI('error');
+            if(!silent) updateSyncUI('error');
             return;
         }
 
@@ -184,7 +185,7 @@ async function saveToServer(targetKeys = null, force = false) {
         // If targetKeys is null, we save EVERYTHING (Heavy, use sparingly)
         const keysToSave = targetKeys || Object.keys(DB_SCHEMA);
 
-        updateSyncUI('busy');
+        if(!silent) updateSyncUI('busy');
 
         for (const key of keysToSave) {
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
@@ -225,11 +226,11 @@ async function saveToServer(targetKeys = null, force = false) {
         }
 
         console.log(`Synced keys: ${keysToSave.join(', ')}`);
-        updateSyncUI('success');
+        if(!silent) updateSyncUI('success');
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
 
     } catch (err) {
-        updateSyncUI('error');
+        if(!silent) updateSyncUI('error');
         console.error("Cloud Sync Error:", err);
         
         let msg = err.message || "Check Console for details";
@@ -239,7 +240,7 @@ async function saveToServer(targetKeys = null, force = false) {
             console.warn("FIX: Go to Supabase > SQL Editor and run: CREATE POLICY \"Allow All\" ON app_documents FOR ALL USING (true);");
         }
         
-        if(typeof showToast === 'function') showToast("Save Failed: " + msg, 'error');
+        if(typeof showToast === 'function' && !silent) showToast("Save Failed: " + msg, 'error');
     }
 }
 
