@@ -225,8 +225,12 @@ async function confirmLate(recordId) {
     const reason = rec.lateData ? rec.lateData.reason : "No reason provided.";
     const informed = rec.lateData && rec.lateData.informed ? `Informed: ${rec.lateData.contact}` : "Did not inform.";
     
-    if(confirm(`Review Late Entry for ${rec.user}:\n\nDate: ${rec.date}\nTime: ${rec.clockIn}\nReason: ${reason}\n${informed}\n\nConfirm this late entry?`)) {
+    const message = `Review Late Entry for ${rec.user}:\n\nDate: ${rec.date}\nTime: ${rec.clockIn}\nReason: ${reason}\n${informed}\n\nEnter Admin Comment (Optional):`;
+    const comment = await customPrompt("Confirm Late Entry", message, "");
+
+    if(comment !== null) {
         rec.lateConfirmed = true;
+        rec.adminComment = comment; // Save persistent comment
         localStorage.setItem('attendance_records', JSON.stringify(records));
         if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
         
@@ -272,12 +276,13 @@ function manageAgentAttendance(username) {
         myRecs.forEach(r => {
             const status = r.isLate ? '<span style="color:#ff5252;">Late</span>' : '<span style="color:#2ecc71;">On Time</span>';
             const safeUser = username.replace(/'/g, "\\'");
+            const commentHtml = r.adminComment ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px; font-style:italic;">Admin: ${r.adminComment}</div>` : '';
             html += `
                 <tr>
                     <td>${r.date}</td>
                     <td>${r.clockIn}</td>
                     <td>${r.clockOut || '-'}</td>
-                    <td>${status}</td>
+                    <td>${status}${commentHtml}</td>
                     <td>
                         <button class="btn-danger btn-sm" onclick="deleteAttendanceRecord('${r.id}', '${safeUser}')" title="Delete Record"><i class="fas fa-trash"></i></button>
                     </td>

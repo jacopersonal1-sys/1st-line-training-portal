@@ -9,6 +9,7 @@ const StudyMonitor = {
     clickCount: 0, // New: Track clicks
     isStudyOpen: false,
     activeWebview: null,
+    viewMode: 'list', // 'list' or 'summary'
 
     init: function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
@@ -278,6 +279,10 @@ const StudyMonitor = {
     }
 };
 
+StudyMonitor.toggleSummary = function() {
+    this.viewMode = this.viewMode === 'list' ? 'summary' : 'list';
+    renderActivityMonitorContent();
+};
 
 // --- ADMIN ACTIVITY MONITOR MODAL ---
 
@@ -303,6 +308,12 @@ window.closeActivityMonitorModal = function() {
 function renderActivityMonitorContent() {
     const container = document.getElementById('activityMonitorContent');
     if(!container) return;
+
+    // Redirect to Summary View if active
+    if (StudyMonitor.viewMode === 'summary') {
+        renderActivitySummary(container);
+        return;
+    }
 
     // 1. Fetch Data
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
@@ -406,6 +417,111 @@ function renderActivityMonitorContent() {
             child.remove();
         }
     });
+}
+
+function renderActivitySummary(container) {
+    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const targetAgents = StudyMonitor.getScheduledAgents();
+    
+    if(targetAgents.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">No agents found to summarize.</div>';
+        return;
+    }
+
+    let html = '<div class="summary-grid">';
+    
+    targetAgents.sort().forEach(agent => {
+        const activity = data[agent] || { history: [], current: 'No Data', since: Date.now() };
+        
+        // 1. Aggregate Data
+        let totalMs = 0;
+        let studyMs = 0;
+        let extMs = 0;
+        let idleMs = 0;
+        let totalClicks = 0;
+        
+        // Combine history + current active session
+        const allSegments = [...(activity.history || [])];
+        
+        // Add current session as a segment
+        const currentDuration = Date.now() - activity.since;
+        if (currentDuration > 1000) {
+            allSegments.push({
+                activity: activity.current,
+                duration: currentDuration,
+                clicks: StudyMonitor.clickCount || 0 // Approximate for current
+            });
+        }
+
+        allSegments.forEach(seg => {
+            totalMs += seg.duration;
+            totalClicks += (seg.clicks || 0);
+            
+            const act = seg.activity.toLowerCase();
+            if (act.includes('studying')) {
+                studyMs += seg.duration;
+            } else if (act.includes('external') || act.includes('background')) {
+                extMs += seg.duration;
+            } else {
+                idleMs += seg.duration;
+            }
+        });
+
+        // 2. Calculate Stats
+        const focusScore = totalMs > 0 ? Math.round((studyMs / totalMs) * 100) : 0;
+        const studyTimeStr = Math.round(studyMs / 60000) + 'm';
+        const extTimeStr = Math.round(extMs / 60000) + 'm';
+        
+        let scoreColor = '#2ecc71';
+        if (focusScore < 50) scoreColor = '#ff5252';
+        else if (focusScore < 80) scoreColor = '#f1c40f';
+
+        // 3. Build Timeline Bar
+        // Normalize segments to percentages
+        let timelineHtml = '';
+        if (totalMs > 0) {
+            allSegments.forEach(seg => {
+                const pct = (seg.duration / totalMs) * 100;
+                if (pct < 1) return; // Skip tiny slivers
+                
+                let typeClass = 'seg-idle';
+                const act = seg.activity.toLowerCase();
+                if (act.includes('studying')) typeClass = 'seg-study';
+                else if (act.includes('external')) typeClass = 'seg-ext';
+                
+                timelineHtml += `<div class="timeline-seg ${typeClass}" style="width:${pct}%;" title="${seg.activity} (${Math.round(seg.duration/1000)}s)"></div>`;
+            });
+        } else {
+            timelineHtml = '<div style="width:100%; text-align:center; font-size:0.7rem; color:var(--text-muted); padding-top:2px;">No activity recorded</div>';
+        }
+
+        html += `
+        <div class="summary-card">
+            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:15px;">
+                <div>
+                    <h3 style="margin:0;">${agent}</h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Total Tracked: ${Math.round(totalMs/60000)} mins</div>
+                </div>
+                <div style="text-align:right;">
+                    <div class="focus-score-large" style="color:${scoreColor};">${focusScore}%</div>
+                    <div style="font-size:0.7rem; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">Focus Score</div>
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; text-align:center; font-size:0.85rem; margin-bottom:10px;">
+                <div style="background:rgba(46, 204, 113, 0.1); padding:5px; border-radius:4px; color:#2ecc71;"><strong>${studyTimeStr}</strong><br>Study</div>
+                <div style="background:rgba(231, 76, 60, 0.1); padding:5px; border-radius:4px; color:#e74c3c;"><strong>${extTimeStr}</strong><br>External</div>
+                <div style="background:var(--bg-input); padding:5px; border-radius:4px;"><strong>${totalClicks}</strong><br>Clicks</div>
+            </div>
+            <div class="timeline-visual">${timelineHtml}</div>
+            <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:5px;">
+                <span>Start</span>
+                <span>Current</span>
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
 }
 
 StudyMonitor.forceShowAll = function() {

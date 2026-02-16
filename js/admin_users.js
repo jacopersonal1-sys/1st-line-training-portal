@@ -446,6 +446,7 @@ function loadAdminUsers() {
             let actions = '';
             // Escape single quotes for onclick handler safety
             const safeUser = u.user.replace(/'/g, "\\'");
+            const displayUser = (typeof escapeHTML === 'function') ? escapeHTML(u.user) : u.user;
             
             if (CURRENT_USER.role === 'admin' && u.user !== 'admin') {
                 const hasReport = savedReports.some(r => r.trainee.toLowerCase() === u.user.toLowerCase());
@@ -478,7 +479,7 @@ function loadAdminUsers() {
             const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '-';
             const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '-';
 
-            return `<tr><td>${u.user}</td><td>${u.role}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
+            return `<tr><td>${displayUser}</td><td>${u.role}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
         }).join(''); 
     }
 }

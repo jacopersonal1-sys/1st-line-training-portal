@@ -291,9 +291,12 @@ function applyRolePermissions() {
         if(document.getElementById('filterTraineeDiv')) document.getElementById('filterTraineeDiv').classList.remove('hidden');
         if(document.getElementById('filterMonthDiv')) document.getElementById('filterMonthDiv').classList.remove('hidden');
         
-        // Hide sections except Report Card and now Admin Panel (Settings)
+        // ALLOWED SECTIONS FOR TL: Report Card, Admin Panel (Settings), Test Records, Insights, Agent Search, Capture (No), Manage (No)
+        // Note: Monthly, Schedule are public sections so they are visible by default.
+        const allowedSections = ['report-card', 'admin-panel', 'test-records', 'insights', 'agent-search'];
+        
         sections.forEach(s => {
-            if(s.id !== 'report-card' && s.id !== 'admin-panel') s.classList.add('hidden'); 
+            if(!allowedSections.includes(s.id)) s.classList.add('hidden'); 
         }); 
         
         if(myTestsNav) myTestsNav.classList.add('hidden');

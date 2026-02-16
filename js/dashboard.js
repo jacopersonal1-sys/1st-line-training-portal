@@ -15,6 +15,54 @@ async function secureDashboardSave() {
     }
 }
 
+// --- SKELETON DASHBOARD (Initial Load) ---
+function renderLoadingDashboard() {
+    const container = document.getElementById('dashboard-view');
+    if (!container || !CURRENT_USER) return;
+    
+    container.innerHTML = '';
+    
+    // Header Skeleton
+    container.innerHTML += `
+        <div class="dash-header">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <div>
+                    <h2 style="margin:0; width:200px;" class="skeleton skeleton-text">Loading...</h2>
+                    <p class="skeleton skeleton-text" style="width:150px; margin-top:5px;">...</p>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Grid Skeleton
+    let layout = CURRENT_USER.role === 'admin' ? DEFAULT_LAYOUT_ADMIN : DEFAULT_LAYOUT_TRAINEE;
+    // Try to load saved layout if possible
+    try {
+        const roleKey = CURRENT_USER.role === 'admin' ? 'dashLayout_admin' : 'dashLayout_trainee';
+        const saved = JSON.parse(localStorage.getItem(roleKey));
+        if(saved) layout = saved;
+    } catch(e) {}
+
+    let gridHtml = '<div class="dash-grid-main">';
+    layout.forEach(item => {
+        const col = item.col || 1;
+        const row = item.row || 1;
+        gridHtml += `
+            <div class="dash-card w-col-${col} w-row-${row}" style="display:flex; flex-direction:column; justify-content:center; gap:10px;">
+                <div style="display:flex; align-items:center; gap:20px;">
+                    <div class="skeleton skeleton-circle"></div>
+                    <div style="flex:1;">
+                        <div class="skeleton skeleton-text" style="width:60%;"></div>
+                        <div class="skeleton skeleton-text" style="width:40%;"></div>
+                    </div>
+                </div>
+            </div>`;
+    });
+    gridHtml += '</div>';
+    
+    container.innerHTML += gridHtml;
+}
+
 // --- DASHBOARD LAYOUT STATE ---
 let DASH_EDIT_MODE = false;
 const DEFAULT_LAYOUT_ADMIN = [
@@ -25,6 +73,7 @@ const DEFAULT_LAYOUT_ADMIN = [
     { id: 'live', col: 1, row: 1 },
     { id: 'attendance', col: 1, row: 1 },
     { id: 'monitor', col: 1, row: 1 },
+    { id: 'leaderboard', col: 1, row: 1 },
     { id: 'sys_health', col: 2, row: 1 },
     { id: 'active_users', col: 2, row: 1 }
 ];
@@ -36,7 +85,15 @@ const DEFAULT_LAYOUT_TRAINEE = [
     { id: 'available_tests', col: 1, row: 2 },
     { id: 'notepad', col: 1, row: 1 },
     { id: 'daily_tip', col: 1, row: 1 },
-    { id: 'help', col: 1, row: 1 }
+    { id: 'help', col: 1, row: 1 },
+    { id: 'badges', col: 2, row: 1 }
+];
+
+const DEFAULT_LAYOUT_TL = [
+    { id: 'tl_overview', col: 2, row: 1 },
+    { id: 'schedule', col: 1, row: 1 },
+    { id: 'active_users', col: 1, row: 1 },
+    { id: 'quick_links', col: 2, row: 1 }
 ];
 
 function renderDashboard() {
@@ -61,7 +118,7 @@ function renderDashboard() {
                 <h2 style="margin:0;">Hello, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
                 <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
             </div>
-            ${(role === 'admin' || role === 'trainee') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
+            ${(role === 'admin' || role === 'trainee' || role === 'teamleader') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
         </div>
         <div id="dash-edit-controls" class="hidden" style="margin-bottom:15px; padding:10px; background:var(--bg-input); border:1px dashed var(--primary); border-radius:8px; text-align:center;">
             <strong style="color:var(--primary);">Edit Mode Active</strong> - Drag items to reorder.
@@ -99,7 +156,7 @@ function renderDashboard() {
         const noticeHtml = buildNoticeBanners(role);
         container.innerHTML = noticeHtml + container.innerHTML;
         
-        content.innerHTML = buildTLWidgets();
+        buildTLWidgets(content);
         container.appendChild(content);
     } else {
         // Urgent Notices (Top for Trainee)
@@ -571,6 +628,9 @@ function buildAdminWidgets(container) {
         </div>`
     ).slice(0, 10).join('') || '<div style="color:var(--text-muted); font-style:italic;">No upcoming bookings.</div>';
 
+    // 5. Leaderboard
+    const leaderboardHtml = buildLeaderboardWidget(users, records, attRecords);
+
     // Helper to wrap widget content with resize controls
     const wrapWidget = (id, content, colSpan=1, rowSpan=1) => {
         return `
@@ -659,14 +719,15 @@ function buildAdminWidgets(container) {
                     <p>View Detailed Logs</p>
                 </div>
             </div>`),
+        'leaderboard': wrapWidget('leaderboard', leaderboardHtml),
         'sys_health': wrapWidget('sys_health', `
             <div style="width:100%;">
                 <h4><i class="fas fa-server"></i> System Health</h4>
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:15px;">
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Storage</div><strong id="dashStorage">...</strong></div>
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Latency</div><strong id="dashLatency">...</strong></div>
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Sync</div><strong id="dashLastSync">...</strong></div>
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Network</div><strong id="statusConnection" style="color:var(--primary);">Checking...</strong></div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Storage</div><strong id="dashStorage"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Latency</div><strong id="dashLatency"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Sync</div><strong id="dashLastSync"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
+                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Network</div><strong id="statusConnection" style="color:var(--primary);"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
                 </div>
             </div>`),
         'active_users': wrapWidget('active_users', `
@@ -678,7 +739,11 @@ function buildAdminWidgets(container) {
                 <div class="table-responsive" style="max-height:150px; overflow-y:auto; margin-top:10px;">
                     <table class="admin-table compressed-table">
                         <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Idle</th></tr></thead>
-                        <tbody id="dashActiveUsersBody"><tr><td colspan="4" class="text-center">Loading...</td></tr></tbody>
+                        <tbody id="dashActiveUsersBody">
+                            <tr><td colspan="4"><div class="skeleton skeleton-text"></div></td></tr>
+                            <tr><td colspan="4"><div class="skeleton skeleton-text"></div></td></tr>
+                            <tr><td colspan="4"><div class="skeleton skeleton-text"></div></td></tr>
+                        </tbody>
                     </table>
                 </div>
             </div>`)
@@ -722,7 +787,7 @@ function buildAdminWidgets(container) {
     });
     gridHtml += '</div>';
 
-    container.innerHTML = gridHtml + buildLinkRequestsWidget();
+    container.innerHTML = gridHtml + (role === 'admin' ? buildLinkRequestsWidget() : '');
     
     // Re-apply edit mode if active
     if(DASH_EDIT_MODE) enableDashEdit();
@@ -814,7 +879,10 @@ function saveDashLayout() {
         layout.push({ id: key, col: col, row: row });
     });
     
-    const roleKey = CURRENT_USER.role === 'admin' ? 'dashLayout_admin' : 'dashLayout_trainee';
+    let roleKey = 'dashLayout_trainee';
+    if (CURRENT_USER.role === 'admin') roleKey = 'dashLayout_admin';
+    if (CURRENT_USER.role === 'teamleader') roleKey = 'dashLayout_tl';
+    
     localStorage.setItem(roleKey, JSON.stringify(layout));
     toggleDashEditMode(); // Exit edit mode
     if(typeof showToast === 'function') showToast("Dashboard layout saved.", "success");
@@ -822,7 +890,10 @@ function saveDashLayout() {
 
 function resetDashLayout() {
     if(confirm("Reset dashboard to default layout?")) {
-        const roleKey = CURRENT_USER.role === 'admin' ? 'dashLayout_admin' : 'dashLayout_trainee';
+        let roleKey = 'dashLayout_trainee';
+        if (CURRENT_USER.role === 'admin') roleKey = 'dashLayout_admin';
+        if (CURRENT_USER.role === 'teamleader') roleKey = 'dashLayout_tl';
+        
         localStorage.removeItem(roleKey);
         toggleDashEditMode();
         renderDashboard();
@@ -867,48 +938,95 @@ function buildLinkRequestsWidget() {
 }
 
 // --- TEAM LEADER DASHBOARD ---
-function buildTLWidgets() {
-    const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const today = new Date().toISOString().split('T')[0].replace(/-/g, '/');
-    
-    // Filter bookings for today/future
-    const upcoming = liveBookings.filter(b => b.date >= today && b.status !== 'Cancelled').sort((a,b) => a.date.localeCompare(b.date));
-    
-    let bookingList = '<p style="color:var(--text-muted);">No upcoming assessments.</p>';
-    if(upcoming.length > 0) {
-        bookingList = `<ul class="dash-list">
-            ${upcoming.slice(0, 5).map(b => `
-                <li>
-                    <span class="date">${b.date} ${b.time}</span>
-                    <span class="main">${b.trainee}</span>
-                    <span class="sub">${b.assessment}</span>
-                </li>
-            `).join('')}
-        </ul>`;
-    }
+function buildTLWidgets(container) {
+    // Helper to wrap widget content with resize controls
+    const wrapWidget = (id, content, colSpan=1, rowSpan=1) => {
+        return `
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+                <div class="widget-controls">
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', -1, -1)" title="Shrink"><i class="fas fa-compress"></i></button>
+                </div>
+                ${content}
+            </div>`;
+    };
 
-    return `
-        <div class="dash-panel full-width">
-            <h4><i class="fas fa-chalkboard-teacher"></i> Live Assessment Overview</h4>
-            ${bookingList}
+    // 1. Overview Stats
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const trainees = users.filter(u => u.role === 'trainee').length;
+    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const today = new Date().toISOString().split('T')[0];
+    const latesToday = attRecords.filter(r => r.date === today && r.isLate).length;
+
+    const overviewHtml = `
+        <div style="display:flex; justify-content:space-around; align-items:center; height:100%; width:100%;">
+            <div style="text-align:center;">
+                <div style="font-size:2rem; font-weight:bold; color:var(--primary);">${trainees}</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">Total Trainees</div>
             </div>
-        
-        <div class="dash-card" onclick="showTab('report-card')" style="cursor:pointer;">
-            <div class="dash-icon"><i class="fas fa-clipboard-list"></i></div>
-            <div class="dash-data">
-                <h3>Reports</h3>
-                <p>View Trainee Scores</p>
+            <div style="width:1px; height:40px; background:var(--border-color);"></div>
+            <div style="text-align:center;">
+                <div style="font-size:2rem; font-weight:bold; color:${latesToday > 0 ? '#ff5252' : '#2ecc71'};">${latesToday}</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">Lates Today</div>
             </div>
-        </div>
-        
-        <div class="dash-card" onclick="showTab('assessment-schedule')" style="cursor:pointer;">
-            <div class="dash-icon"><i class="fas fa-calendar-alt"></i></div>
-            <div class="dash-data">
-                <h3>Schedule</h3>
-                <p>Check Timelines</p>
-            </div>
-        </div>
-    `;
+        </div>`;
+
+    // 2. Quick Links
+    const linksHtml = `
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; width:100%;">
+            <button class="btn-secondary" onclick="showTab('report-card')" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;">
+                <i class="fas fa-file-invoice" style="font-size:1.5rem; color:var(--primary);"></i>
+                <span>Saved Reports</span>
+            </button>
+            <button class="btn-secondary" onclick="showTab('agent-search')" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;">
+                <i class="fas fa-search" style="font-size:1.5rem; color:#3498db;"></i>
+                <span>Agent Search</span>
+            </button>
+        </div>`;
+
+    // WIDGET MAP
+    const widgets = {
+        'tl_overview': wrapWidget('tl_overview', overviewHtml),
+        'schedule': wrapWidget('schedule', `
+            <div onclick="showTab('assessment-schedule')" style="cursor:pointer; width:100%; display:flex; align-items:center; gap:20px;">
+                <div class="dash-icon"><i class="fas fa-calendar-alt"></i></div>
+                <div class="dash-data"><h3>Schedule</h3><p>View Timelines</p></div>
+            </div>`),
+        'active_users': wrapWidget('active_users', `
+            <div style="width:100%;">
+                <h4><i class="fas fa-user-clock"></i> Active Users</h4>
+                <div class="table-responsive" style="max-height:150px; overflow-y:auto; margin-top:10px;">
+                    <table class="admin-table compressed-table">
+                        <thead><tr><th>User</th><th>Status</th><th>Idle</th></tr></thead>
+                        <tbody id="dashActiveUsersBody"><tr><td colspan="3"><div class="skeleton skeleton-text"></div></td></tr></tbody>
+                    </table>
+                </div>
+            </div>`),
+        'quick_links': wrapWidget('quick_links', linksHtml)
+    };
+
+    // LOAD LAYOUT
+    let layout = JSON.parse(localStorage.getItem('dashLayout_tl') || 'null');
+    if (!layout) layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_TL));
+
+    let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
+    layout.forEach(item => {
+        const key = typeof item === 'string' ? item : item.id;
+        const col = typeof item === 'object' ? item.col : 1;
+        const row = typeof item === 'object' ? item.row : 1;
+        if(widgets[key]) {
+            let widgetHtml = widgets[key].replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`).replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
+            gridHtml += widgetHtml;
+        }
+    });
+    gridHtml += '</div>';
+
+    container.innerHTML = gridHtml;
+    if(DASH_EDIT_MODE) enableDashEdit();
+    
+    // Trigger active users fetch
+    if(typeof updateDashboardHealth === 'function') updateDashboardHealth();
 }
 
 // --- ADMIN ACTIONS FOR REQUESTS ---
@@ -1023,6 +1141,104 @@ window.submitHelpRequest = async function() {
         alert("Help request sent to your Team Leader/Admin.");
     }
 };
+
+// --- BADGE LOGIC ---
+function getTraineeBadges(user, records, attendance) {
+    const badges = [];
+
+    // 1. ACADEMIC
+    const perfectScores = records.filter(r => r.score === 100).length;
+    if (perfectScores >= 1) badges.push({ icon: '🎯', title: 'Sharpshooter', desc: 'Scored 100% on a test', type: 'gold' });
+    if (perfectScores >= 5) badges.push({ icon: '👑', title: 'Legend', desc: '5+ Perfect Scores', type: 'mythic' });
+
+    const passedTests = records.filter(r => r.score >= 90).length;
+    if (passedTests >= 3) badges.push({ icon: '🔥', title: 'On Fire', desc: '3+ Tests Passed with Distinction', type: 'silver' });
+
+    const vettingPassed = records.some(r => r.phase.includes('Vetting') && r.score >= 80);
+    if (vettingPassed) badges.push({ icon: '🛡️', title: 'Guardian', desc: 'Passed a Vetting Test', type: 'gold' });
+
+    const totalTests = records.length;
+    if (totalTests >= 10) badges.push({ icon: '📚', title: 'Scholar', desc: 'Completed 10+ Assessments', type: 'bronze' });
+
+    // 2. ATTENDANCE
+    const onTimes = attendance.filter(r => !r.isLate).length;
+    if (onTimes >= 5) badges.push({ icon: '⏰', title: 'Early Bird', desc: '5 Days On Time', type: 'bronze' });
+    if (onTimes >= 20) badges.push({ icon: '⚡', title: 'Reliable', desc: '20 Days On Time', type: 'gold' });
+
+    // 3. NEGATIVE (Shame Badges)
+    const lates = attendance.filter(r => r.isLate).length;
+    if (lates >= 3) badges.push({ icon: '🐌', title: 'Snail', desc: 'Late 3+ times', type: 'shame' });
+    
+    const missedClockOuts = attendance.filter(r => !r.clockOut).length;
+    if (missedClockOuts >= 3) badges.push({ icon: '🧟', title: 'Zombie', desc: 'Forgot to Clock Out 3+ times', type: 'shame' });
+
+    return badges;
+}
+
+function checkForNewBadges(currentBadges) {
+    const key = 'earned_badges_' + CURRENT_USER.user;
+    const stored = JSON.parse(localStorage.getItem(key) || '[]');
+    const currentTitles = currentBadges.map(b => b.title);
+    
+    // Find badges in current that are NOT in stored
+    const newBadges = currentBadges.filter(b => !stored.includes(b.title));
+    
+    if (newBadges.length > 0) {
+        // Trigger Confetti Celebration
+        if(typeof triggerConfetti === 'function') triggerConfetti();
+
+        // Notify for each new badge
+        newBadges.forEach(b => {
+            if(typeof showToast === 'function') {
+                showToast(`🏆 New Badge Unlocked: ${b.title}`, "success");
+            }
+        });
+        
+        // Update storage with ALL current badges (so we don't notify again)
+        localStorage.setItem(key, JSON.stringify(currentTitles));
+    }
+}
+
+function buildLeaderboardWidget(users, allRecords, allAttendance) {
+    const trainees = users.filter(u => u.role === 'trainee');
+    const leaderboard = [];
+
+    trainees.forEach(u => {
+        const uRecords = allRecords.filter(r => r.trainee === u.user);
+        const uAtt = allAttendance.filter(r => r.user === u.user);
+        const badges = getTraineeBadges(u.user, uRecords, uAtt);
+        
+        // Count only positive badges (exclude 'shame' type)
+        const positiveBadges = badges.filter(b => b.type !== 'shame');
+        
+        if (positiveBadges.length > 0) {
+            leaderboard.push({ user: u.user, count: positiveBadges.length, badges: positiveBadges });
+        }
+    });
+
+    leaderboard.sort((a, b) => b.count - a.count);
+    const top10 = leaderboard.slice(0, 10);
+
+    let html = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <div class="dash-icon"><i class="fas fa-trophy"></i></div>
+        <h3 style="margin:0;">Leaderboard</h3>
+    </div>
+    <div class="table-responsive" style="max-height:200px; overflow-y:auto;">
+        <table class="admin-table compressed-table">
+            <thead><tr><th>Rank</th><th>Trainee</th><th>Badges</th></tr></thead>
+            <tbody>`;
+
+    if (top10.length === 0) {
+        html += `<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No badges earned yet.</td></tr>`;
+    } else {
+        top10.forEach((item, idx) => {
+            const rankIcon = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : `#${idx + 1}`));
+            const badgeIcons = item.badges.slice(0, 3).map(b => b.icon).join(' ');
+            html += `<tr><td style="font-weight:bold; font-size:1.1rem;">${rankIcon}</td><td>${item.user}</td><td><span style="font-weight:bold;">${item.count}</span> <span style="font-size:0.8rem;">${badgeIcons}</span></td></tr>`;
+        });
+    }
+    return html + `</tbody></table></div>`;
+}
 
 // --- TRAINEE DASHBOARD ---
 function buildTraineeWidgets(container) {
@@ -1162,13 +1378,14 @@ function buildTraineeWidgets(container) {
 
     // 5. Notepad
     const savedNote = localStorage.getItem('user_notes_' + CURRENT_USER.user) || '';
+    const safeNote = (typeof escapeHTML === 'function') ? escapeHTML(savedNote) : savedNote;
     const notepadHtml = `
         <div style="display:flex; flex-direction:column; height:100%;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">
                 <i class="fas fa-sticky-note" style="color:#f1c40f; font-size:1.2rem;"></i>
                 <h4 style="margin:0;">My Notes</h4>
             </div>
-            <textarea class="notepad-area" placeholder="Type your notes here..." oninput="localStorage.setItem('user_notes_' + CURRENT_USER.user, this.value)">${savedNote}</textarea>
+            <textarea class="notepad-area" placeholder="Type your notes here..." oninput="localStorage.setItem('user_notes_' + CURRENT_USER.user, this.value)">${safeNote}</textarea>
         </div>`;
 
     // 6. Daily Tip
@@ -1206,6 +1423,36 @@ function buildTraineeWidgets(container) {
             <button class="btn-secondary btn-sm" onclick="submitHelpRequest()">Request Assistance</button>
         </div>`;
 
+    // 8. Badges & Rewards
+    const badges = getTraineeBadges(CURRENT_USER.user, myRecords, attRecords);
+    let badgesHtml = '';
+    checkForNewBadges(badges); // Check and notify if new
+    
+    if (badges.length === 0) {
+        badgesHtml = `
+            <div style="display:flex; flex-direction:column; height:100%; justify-content:center; align-items:center; text-align:center; color:var(--text-muted);">
+                <i class="fas fa-medal" style="font-size:2rem; margin-bottom:10px; opacity:0.3;"></i>
+                <p style="margin:0;">No badges earned yet.</p>
+                <small>Complete tests and attend on time to earn rewards!</small>
+            </div>`;
+    } else {
+        badgesHtml = `
+            <div style="display:flex; flex-direction:column; height:100%;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <i class="fas fa-award" style="color:#f1c40f; font-size:1.2rem;"></i>
+                    <h3 style="margin:0;">My Badges</h3>
+                </div>
+                <div class="badge-grid" style="overflow-y:auto; flex:1; align-content:start;">
+                    ${badges.map(b => `
+                        <div class="badge-reward badge-${b.type}" title="${b.desc}">
+                            <div class="badge-icon">${b.icon}</div>
+                            <div class="badge-title">${b.title}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+    }
+
     // WIDGET MAP
     const widgets = {
         'up_next': wrapWidget('up_next', upNextHtml),
@@ -1214,7 +1461,9 @@ function buildTraineeWidgets(container) {
         'available_tests': wrapWidget('available_tests', availableHtml),
         'notepad': wrapWidget('notepad', notepadHtml),
         'daily_tip': wrapWidget('daily_tip', tipHtml),
-        'help': wrapWidget('help', helpHtml)
+        'help': wrapWidget('help', helpHtml),
+        'badges': wrapWidget('badges', badgesHtml),
+        'my_stats': wrapWidget('my_stats', statsHtml)
     };
 
     // LOAD LAYOUT

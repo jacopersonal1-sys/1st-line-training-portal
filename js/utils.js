@@ -33,6 +33,19 @@ async function hashPassword(plainText) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// --- SECURITY: HTML SANITIZER ---
+window.escapeHTML = function(str) {
+    if (!str) return "";
+    return str.replace(/[&<>'"]/g, 
+        tag => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            "'": '&#39;',
+            '"': '&quot;'
+        }[tag]));
+};
+
 // --- UI: CUSTOM PROMPT (Electron Compatible) ---
 window.customPrompt = function(title, message, defaultValue = "") {
     return new Promise((resolve) => {
@@ -194,3 +207,65 @@ function getTraineeCycle(traineeName, currentGroupId) {
     if (previousCount === 2) return "Retrain 2";
     return "Retrain " + previousCount;
 }
+
+// --- CONFETTI FX ---
+window.triggerConfetti = function() {
+    const canvas = document.createElement('canvas');
+    canvas.style.position = 'fixed';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.zIndex = '9999';
+    document.body.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    let w = canvas.width = window.innerWidth;
+    let h = canvas.height = window.innerHeight;
+    
+    const particles = [];
+    const colors = ['#f1c40f', '#e74c3c', '#3498db', '#2ecc71', '#9b59b6'];
+    
+    for(let i=0; i<200; i++) {
+        particles.push({
+            x: Math.random() * w,
+            y: Math.random() * h - h, // Start above screen
+            vx: Math.random() * 4 - 2,
+            vy: Math.random() * 5 + 2,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            size: Math.random() * 10 + 5,
+            rot: Math.random() * 360,
+            rotSpeed: Math.random() * 10 - 5
+        });
+    }
+
+    function animate() {
+        if(!document.body.contains(canvas)) return;
+        ctx.clearRect(0, 0, w, h);
+        let active = false;
+        
+        particles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.rot += p.rotSpeed;
+            
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rot * Math.PI / 180);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+            ctx.restore();
+            
+            if(p.y < h) active = true;
+        });
+        
+        if(active) requestAnimationFrame(animate);
+        else canvas.remove();
+    }
+    
+    animate();
+    
+    // Safety cleanup
+    setTimeout(() => { if(document.body.contains(canvas)) canvas.remove(); }, 8000);
+};

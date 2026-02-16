@@ -41,6 +41,11 @@ function renderInsightDashboard() {
     grid.className = ''; 
     grid.style.display = 'block'; 
     
+    // TEAM LEADER RESTRICTION: Force 'all' view
+    if (CURRENT_USER.role === 'teamleader') {
+        INSIGHT_VIEW_MODE = 'all';
+    }
+
     // 4. Render Sub-Navigation
     const navHTML = `
         <div class="admin-sub-nav" style="margin-bottom:15px; border-bottom:1px solid var(--border-color); display:flex; gap:10px; flex-wrap:wrap;">
@@ -59,17 +64,23 @@ function renderInsightDashboard() {
         </div>
     `;
 
+    // Hide Nav for TL
+    let finalNavHTML = navHTML;
+    if (CURRENT_USER.role === 'teamleader') {
+        finalNavHTML = `<div style="margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;"><strong>Full Overview</strong></div>`;
+    }
+
     // 5. Get Current Filter
     const filterSelect = document.getElementById('insightGroupFilter');
     const currentFilterVal = filterSelect ? filterSelect.value : '';
 
     if(!currentFilterVal || currentFilterVal === 'Loading...') {
-        grid.innerHTML = navHTML + '<div style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-arrow-up" style="margin-bottom:10px;"></i><br>Please select a Training Group from the top-right dropdown.</div>';
+        grid.innerHTML = finalNavHTML + '<div style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-arrow-up" style="margin-bottom:10px;"></i><br>Please select a Training Group from the top-right dropdown.</div>';
         return;
     }
 
     if(INSIGHT_VIEW_MODE === 'dept') {
-        grid.innerHTML = navHTML + `
+        grid.innerHTML = finalNavHTML + `
             <div style="text-align:center; padding:50px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:12px; margin-top:20px;">
                 <i class="fas fa-hard-hat" style="font-size:3rem; color:var(--primary); margin-bottom:15px;"></i>
                 <h3>Under Construction</h3>
@@ -88,15 +99,15 @@ function renderInsightDashboard() {
     members.sort(); 
 
     if(members.length === 0) {
-        grid.innerHTML = navHTML + '<p style="color:var(--text-muted); padding:20px;">No members found in this group.</p>';
+        grid.innerHTML = finalNavHTML + '<p style="color:var(--text-muted); padding:20px;">No members found in this group.</p>';
         return;
     }
 
     // Render the specific view
     if(INSIGHT_VIEW_MODE === 'progress') {
-        renderProgressView(members, currentFilterVal, grid, navHTML);
+        renderProgressView(members, currentFilterVal, grid, finalNavHTML);
     } else {
-        renderStandardView(members, currentFilterVal, grid, navHTML);
+        renderStandardView(members, currentFilterVal, grid, finalNavHTML);
     }
 }
 

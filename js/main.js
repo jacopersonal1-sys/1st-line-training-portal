@@ -24,7 +24,22 @@ window.onload = async function() {
         const { ipcRenderer } = require('electron');
         ipcRenderer.invoke('get-app-version').then(ver => {
             window.APP_VERSION = ver;
+            // NEW: Check for release notes
+            if (typeof checkReleaseNotes === 'function') checkReleaseNotes(ver);
         });
+    }
+
+    // 0. EARLY RENDER: Show Skeleton Dashboard if session exists
+    // This provides immediate visual feedback while waiting for Cloud Sync
+    const earlySession = sessionStorage.getItem('currentUser');
+    if (earlySession) {
+        try {
+            window.CURRENT_USER = JSON.parse(earlySession);
+            // Render Skeletons
+            if (typeof renderLoadingDashboard === 'function') renderLoadingDashboard();
+            // Hide Loader immediately so user sees the skeleton UI
+            if(loader) loader.classList.add('hidden');
+        } catch(e) { console.error("Early render failed", e); }
     }
 
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
@@ -798,4 +813,55 @@ function checkForDrafts() {
             localStorage.removeItem('draft_builder');
         }
     }
+}
+
+// --- RELEASE NOTES SYSTEM ---
+function checkReleaseNotes(currentVersion) {
+    const lastVersion = localStorage.getItem('last_seen_version');
+    const hasUsers = localStorage.getItem('users'); // Check if app was used before (not a fresh install)
+
+    // Show notes if:
+    // 1. We have a last version and it differs from current (Standard Update)
+    // 2. We have NO last version but we DO have users (Existing user getting this feature for the first time)
+    if ((lastVersion && lastVersion !== currentVersion) || (!lastVersion && hasUsers)) {
+        showReleaseNotes(currentVersion);
+    }
+    
+    // Update storage to current
+    localStorage.setItem('last_seen_version', currentVersion);
+}
+
+function showReleaseNotes(version) {
+    const modal = document.getElementById('releaseNotesModal');
+    const content = document.getElementById('releaseNotesContent');
+    const title = document.getElementById('releaseNotesTitle');
+    
+    if(modal && content) {
+        title.innerText = `What's New in v${version}`;
+        content.innerHTML = getChangelog(version);
+        modal.classList.remove('hidden');
+    }
+}
+
+function getChangelog(version) {
+    const logs = {
+        "2.1.21": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Team Leader Dashboard overhaul with customizable widgets.</li>
+                <li style="margin-bottom: 8px;"><strong>Visuals:</strong> Added Loading Skeleton animations for smoother experience.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Refined Team Leader permissions for Schedule and Insights.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved display issues in Insight Dashboard.</li>
+            </ul>`,
+        "2.1.20": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Replaced system prompts with custom modals for better compatibility.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Admins couldn't add links to Assessment Records.</li>
+                <li style="margin-bottom: 8px;"><strong>New:</strong> Trainee Dashboard widgets (Daily Tip, Request Help).</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Activity Monitor reliability.</li>
+            </ul>`,
+        "default": `
+            <p>Performance improvements and bug fixes.</p>
+        `
+    };
+    return logs[version] || logs["default"];
 }

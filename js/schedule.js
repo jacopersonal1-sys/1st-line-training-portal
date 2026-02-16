@@ -91,7 +91,7 @@ function renderSchedule() {
         }
     }
 
-    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer');
+    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader');
     const isTL = (CURRENT_USER.role === 'teamleader');
     
     if (!isAdmin && !isTL) {
@@ -146,12 +146,12 @@ function buildTabs(schedules, isAdmin) {
         return `<button class="sched-tab-btn ${isActive}" onclick="switchScheduleTab('${key}')" style="padding: 8px 15px; border:1px solid var(--border-color); background:var(--bg-card); cursor:pointer; border-radius:6px; min-width:100px; text-align:left;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:bold; font-size:0.9rem;">Schedule ${key}</span>
-                ${isAdmin && CURRENT_USER.role !== 'special_viewer' ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
+                ${isAdmin && CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader' ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
             </div>
             <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
         </button>`;
     }).join('');
-    if (isAdmin && CURRENT_USER.role !== 'special_viewer') html += `<button onclick="createNewSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Schedule Group"><i class="fas fa-plus"></i></button>`;
+    if (isAdmin && CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader') html += `<button onclick="createNewSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Schedule Group"><i class="fas fa-plus"></i></button>`;
     return html;
 }
 
@@ -162,9 +162,9 @@ function buildToolbar(scheduleData, isAdmin) {
     }
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')" style="margin-left:5px;">Unassign</button>`}</div></div>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div>${(CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader') ? '<span style="color:var(--text-muted);">View Only</span>' : `<button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')" style="margin-left:5px;">Unassign</button>`}</div></div>`;
     } else {
-        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span>${CURRENT_USER.role === 'special_viewer' ? '<span style="color:var(--text-muted);">View Only</span>' : `<select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button>`}</div>`;
+        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span>${(CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader') ? '<span style="color:var(--text-muted);">View Only</span>' : `<select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button>`}</div>`;
     }
 }
 
@@ -181,7 +181,7 @@ function buildTimeline(items, isAdmin) {
 
             let actions = '';
             if (isAdmin) {
-                if (CURRENT_USER.role === 'special_viewer') {
+                if (CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader') {
                     actions = '';
                 } else {
                     actions = `
@@ -234,7 +234,7 @@ function buildTimeline(items, isAdmin) {
             }
             // -------------------------------------
 
-            return `<div class="timeline-item ${timelineClass}" draggable="${isAdmin}" ondragstart="schedDragStart(event, ${index})" ondragover="schedDragOver(event)" ondrop="schedDrop(event, ${index})" style="position:relative; padding-left:20px; border-left:2px solid var(--border-color); margin-bottom:20px;">
+            return `<div class="timeline-item ${timelineClass}" draggable="${isAdmin && CURRENT_USER.role !== 'teamleader'}" ondragstart="schedDragStart(event, ${index})" ondragover="schedDragOver(event)" ondrop="schedDrop(event, ${index})" style="position:relative; padding-left:20px; border-left:2px solid var(--border-color); margin-bottom:20px;">
                 <div class="timeline-marker"></div>
                 <div class="timeline-content" style="background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -247,7 +247,7 @@ function buildTimeline(items, isAdmin) {
         }).join('');
     }
 
-    if (isAdmin && CURRENT_USER.role !== 'special_viewer') {
+    if (isAdmin && CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader') {
         timelineHTML += `<div style="text-align:center; margin-top:20px;"><button class="btn-secondary" onclick="addTimelineItem()">+ Add Timeline Item</button></div>`;
     }
 

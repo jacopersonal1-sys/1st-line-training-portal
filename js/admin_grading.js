@@ -266,7 +266,7 @@ function loadTestRecords() {
                 let actionBtn = `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'view')">View</button>`;
                 
                 // ADMIN ONLY ACTIONS
-                if (CURRENT_USER.role === 'admin') {
+                if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'teamleader') {
                     actionBtn += ` <button class="btn-primary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'edit')" title="Edit Score"><i class="fas fa-pen"></i></button>`;
                     actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;
                     
