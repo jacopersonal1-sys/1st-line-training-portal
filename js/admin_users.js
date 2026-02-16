@@ -40,11 +40,11 @@ function restrictTraineeMenu() {
     if(!nav) return;
     
     const btns = nav.querySelectorAll('.sub-tab-btn');
-    const isTrainee = CURRENT_USER.role === 'trainee';
+    const isRestricted = (CURRENT_USER.role === 'trainee' || CURRENT_USER.role === 'teamleader');
 
     btns.forEach(btn => {
         const txt = btn.innerText;
-        if(isTrainee) {
+        if(isRestricted) {
             if (txt.includes("Manage Users") || txt.includes("Theme Settings") || txt.includes("System Updates")) {
                 btn.style.display = ''; 
             } else {

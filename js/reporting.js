@@ -122,7 +122,7 @@ function renderMonthly() {
   
   if (CURRENT_USER.role !== 'trainee') {
       if (fMonth === "" && fAssess === "" && fPhase === "" && fTrainee === "") {
-          tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="color:var(--text-muted);">Please select a filter to view records.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="color:var(--text-muted);">Please select a filter to view records.</td></tr>';
           return;
       }
   }
@@ -203,10 +203,10 @@ function renderMonthly() {
         }
     }
 
-    html += `<tr>${checkHtml}<td>${groupDisplay}</td><td><span style="font-weight:600; color:var(--primary);">${r.trainee}</span></td><td>${r.assessment}</td><td>${r.phase}</td><td>${r.score}%</td><td class="status-badge status-${s}">${t}</td>${actionHtml}</tr>`;
+    html += `<tr>${checkHtml}<td>${r.date || '-'}</td><td>${groupDisplay}</td><td><span style="font-weight:600; color:var(--primary);">${r.trainee}</span></td><td>${r.assessment}</td><td>${r.phase}</td><td>${r.score}%</td><td class="status-badge status-${s}">${t}</td>${actionHtml}</tr>`;
   });
   
-  if (html === '') tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="color:var(--text-muted);">No records found matching filters.</td></tr>';
+  if (html === '') tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="color:var(--text-muted);">No records found matching filters.</td></tr>';
   else tbody.innerHTML = html;
 
   if(CURRENT_USER.role === 'admin') document.querySelectorAll('.admin-only').forEach(e => e.classList.remove('hidden')); 

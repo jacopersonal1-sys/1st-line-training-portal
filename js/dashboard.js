@@ -175,8 +175,6 @@ async function updateDashboardHealth() {
     const syncEl = document.getElementById('dashLastSync'); 
     const activeTableBody = document.getElementById('dashActiveUsersBody'); 
 
-    if (!latencyEl) return; 
-
     const start = Date.now();
     try {
         // FIX: Use 'supabaseClient' (defined in config.js) to avoid naming conflict
@@ -787,7 +785,7 @@ function buildAdminWidgets(container) {
     });
     gridHtml += '</div>';
 
-    container.innerHTML = gridHtml + (role === 'admin' ? buildLinkRequestsWidget() : '');
+    container.innerHTML = gridHtml + (CURRENT_USER.role === 'admin' ? buildLinkRequestsWidget() : '');
     
     // Re-apply edit mode if active
     if(DASH_EDIT_MODE) enableDashEdit();
@@ -832,6 +830,18 @@ function enableDashEdit() {
     const grid = document.getElementById('dash-grid-container');
     if(!grid) return;
     
+    // Allow dropping on empty space to append to end
+    grid.addEventListener('dragover', (e) => e.preventDefault());
+    grid.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const id = e.dataTransfer.getData('text/plain');
+        const draggable = document.getElementById(id);
+        // Only if dropped directly on grid (not on another card)
+        if (draggable && e.target === grid) {
+            grid.appendChild(draggable);
+        }
+    });
+
     const cards = grid.querySelectorAll('.dash-card');
     cards.forEach(card => {
         card.classList.add('editing');
@@ -853,6 +863,7 @@ function enableDashEdit() {
         
         card.addEventListener('drop', (e) => {
             e.preventDefault();
+            e.stopPropagation(); // Prevent grid drop
             const id = e.dataTransfer.getData('text/plain');
             const draggable = document.getElementById(id);
             const dropzone = e.target.closest('.dash-card');
@@ -1026,7 +1037,7 @@ function buildTLWidgets(container) {
     if(DASH_EDIT_MODE) enableDashEdit();
     
     // Trigger active users fetch
-    if(typeof updateDashboardHealth === 'function') updateDashboardHealth();
+    if(typeof updateDashboardHealth === 'function') setTimeout(updateDashboardHealth, 100);
 }
 
 // --- ADMIN ACTIONS FOR REQUESTS ---

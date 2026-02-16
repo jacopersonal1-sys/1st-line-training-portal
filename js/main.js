@@ -371,7 +371,7 @@ function updateSidebarVisibility() {
         } 
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
-            const hiddenForTL = ['admin-panel', 'test-manage', 'my-tests', 'live-assessment', 'live-execution'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -385,7 +385,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'admin-panel'];
+      const forbidden = ['test-manage', 'my-tests', 'live-assessment'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -845,6 +845,14 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.22": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Restored Admin Panel access for Team Leaders (Profile & Settings).</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Admin Dashboard rendering error.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Dashboard layout issues (squashed widgets).</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Dashboard customization (drag to empty space).</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Added Date column to Assessment Records view.</li>
+            </ul>`,
         "2.1.21": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Team Leader Dashboard overhaul with customizable widgets.</li>
