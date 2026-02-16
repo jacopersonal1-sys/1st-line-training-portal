@@ -558,7 +558,7 @@ async function copyTest(id) {
     const original = tests.find(t => t.id == id);
     if (!original) return;
 
-    const newName = prompt("Enter name for the copy:", original.title + " (Copy)");
+    const newName = await customPrompt("Copy Assessment", "Enter name for the copy:", original.title + " (Copy)");
     if (!newName) return;
 
     const copy = JSON.parse(JSON.stringify(original));

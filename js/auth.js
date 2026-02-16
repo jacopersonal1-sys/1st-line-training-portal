@@ -176,6 +176,11 @@ async function autoLogin() {
   // RESTART SYNC ENGINE (To apply role-based polling rates)
   if (typeof startRealtimeSync === 'function') startRealtimeSync();
 
+  // --- START ACTIVITY MONITOR (Fresh Login) ---
+  if (typeof StudyMonitor !== 'undefined') {
+      StudyMonitor.init();
+  }
+
   // Redirect based on role
   if(CURRENT_USER.role === 'admin') showTab('dashboard-view'); 
   else if(CURRENT_USER.role === 'trainee') showTab('dashboard-view');

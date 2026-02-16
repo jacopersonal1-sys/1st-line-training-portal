@@ -1000,14 +1000,22 @@ window.handleRecordLinkClick = async function(recordId, currentLink, trainee, as
             alert("Request sent to Admin.");
         }
     } else if (CURRENT_USER.role === 'admin') {
-        alert("No link present. Use the 'Edit' button to add a URL manually.");
+        // FIX: Allow Admin to add link directly
+        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const idx = records.findIndex(r => r.id === recordId);
+        
+        if (idx !== -1 && typeof updateRecordLink === 'function') {
+            updateRecordLink(idx);
+        } else {
+            alert("Record not found or unable to edit.");
+        }
     } else {
         alert("No link available for this record.");
     }
 };
 
 window.submitHelpRequest = async function() {
-    const reason = prompt("What do you need help with?");
+    const reason = await customPrompt("Request Help", "What do you need help with?");
     if (reason) {
         // Reuse the Notice system to alert admins? Or just a simple alert for now.
         // For now, we'll simulate it as we don't have a dedicated "Help Ticket" system yet.

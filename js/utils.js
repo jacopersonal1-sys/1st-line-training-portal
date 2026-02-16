@@ -33,6 +33,58 @@ async function hashPassword(plainText) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// --- UI: CUSTOM PROMPT (Electron Compatible) ---
+window.customPrompt = function(title, message, defaultValue = "") {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('genericInputModal');
+        if (!modal) {
+            console.error("Generic Input Modal not found in DOM");
+            alert("Error: Input modal missing. Cannot prompt for input.");
+            resolve(null);
+            return;
+        }
+
+        const titleEl = document.getElementById('genericInputTitle');
+        const msgEl = document.getElementById('genericInputMessage');
+        const inputEl = document.getElementById('genericInputValue');
+        const confirmBtn = document.getElementById('btnGenericInputConfirm');
+        const cancelBtn = document.getElementById('btnGenericInputCancel');
+
+        titleEl.innerText = title;
+        msgEl.innerText = message;
+        inputEl.value = defaultValue;
+
+        const cleanup = () => {
+            modal.classList.add('hidden');
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+            inputEl.onkeydown = null;
+        };
+
+        const confirmAction = () => {
+            const val = inputEl.value;
+            cleanup();
+            resolve(val);
+        };
+
+        const cancelAction = () => {
+            cleanup();
+            resolve(null);
+        };
+
+        confirmBtn.onclick = confirmAction;
+        cancelBtn.onclick = cancelAction;
+        
+        inputEl.onkeydown = (e) => {
+            if(e.key === 'Enter') confirmAction();
+            if(e.key === 'Escape') cancelAction();
+        };
+
+        modal.classList.remove('hidden');
+        setTimeout(() => inputEl.focus(), 50);
+    });
+};
+
 // --- EXISTING UTILITIES ---
 
 function getGroupLabel(groupId, count) {

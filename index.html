@@ -224,6 +224,18 @@
     </div>
 </div>
 
+<div id="genericInputModal" class="modal-overlay hidden" style="z-index: 6000;">
+    <div class="modal-box" style="max-width: 500px;">
+        <h3 id="genericInputTitle">Input Required</h3>
+        <p id="genericInputMessage" style="margin-bottom:15px; color:var(--text-muted);"></p>
+        <input type="text" id="genericInputValue" style="width:100%; margin-bottom:20px;" autocomplete="off">
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button class="btn-secondary" id="btnGenericInputCancel">Cancel</button>
+            <button class="btn-primary" id="btnGenericInputConfirm">Confirm</button>
+        </div>
+    </div>
+</div>
+
 <div id="activityMonitorModal" class="modal-overlay hidden" style="z-index: 3500;">
     <div class="modal-box" style="width: 95%; max-width: 1400px; height: 90vh; display: flex; flex-direction: column;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">

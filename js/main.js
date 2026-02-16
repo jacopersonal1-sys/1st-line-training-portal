@@ -113,6 +113,11 @@ window.onload = async function() {
                     // Update Sidebar based on Role
                     updateSidebarVisibility();
                     
+                    // --- START ACTIVITY MONITOR ---
+                    if (typeof StudyMonitor !== 'undefined') {
+                        StudyMonitor.init();
+                    }
+                    
                     if (typeof autoLogin === 'function') autoLogin();
                 } else {
                     sessionStorage.removeItem('currentUser'); // Clear invalid session
@@ -128,6 +133,12 @@ window.onload = async function() {
              if (expTheme) applyExperimentalTheme(expTheme);
 
              updateSidebarVisibility();
+             
+             // --- START ACTIVITY MONITOR ---
+             if (typeof StudyMonitor !== 'undefined') {
+                 StudyMonitor.init();
+             }
+
              if (typeof autoLogin === 'function') autoLogin();
         }
     } else {

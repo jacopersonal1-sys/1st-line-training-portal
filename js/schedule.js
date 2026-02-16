@@ -892,7 +892,7 @@ async function cloneSchedule(targetId) {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     const sources = Object.keys(schedules).filter(k => k !== targetId);
     if(sources.length === 0) return alert("No other schedules to copy from.");
-    const sourceId = prompt(`Enter the Schedule Letter to copy FROM (${sources.join(', ')}):`);
+    const sourceId = await customPrompt("Clone Schedule", `Enter the Schedule Letter to copy FROM (${sources.join(', ')}):`);
     if(!sourceId || !schedules[sourceId]) return alert("Invalid source.");
 
     if(confirm(`Overwrite Schedule ${targetId} with content from Schedule ${sourceId}?`)) {

@@ -6,13 +6,67 @@ const StudyMonitor = {
     startTime: Date.now(),
     history: [],
     syncInterval: null,
+    clickCount: 0, // New: Track clicks
     isStudyOpen: false,
     activeWebview: null,
 
     init: function() {
+        if (this.syncInterval) clearInterval(this.syncInterval);
+        
         // Start periodic sync (every 10s)
         this.syncInterval = setInterval(() => this.sync(), 10000);
         this.track("System: App Loaded");
+
+        // --- FAIL-SAFE: RECOVER UNSYNCED EXIT DATA ---
+        // If the app closed before syncing the last event, recover it now.
+        const unsynced = localStorage.getItem('monitor_unsynced');
+        if (unsynced) {
+            try {
+                const payload = JSON.parse(unsynced);
+                // Merge into current data
+                let monitorData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                monitorData[payload.user] = payload;
+                localStorage.setItem('monitor_data', JSON.stringify(monitorData));
+                
+                // Clear the emergency flag and force sync
+                localStorage.removeItem('monitor_unsynced');
+                this.sync(); 
+            } catch(e) { console.error("Monitor Recovery Failed", e); }
+        }
+
+        // --- TRACK EXTERNAL ACTIVITY ---
+        window.addEventListener('blur', () => {
+            if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+                this.track("External Activity (App Backgrounded)");
+            }
+        });
+        window.addEventListener('focus', () => {
+            if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+                this.track("Resumed App Activity");
+            }
+        });
+
+        // --- NEW: CAPTURE EXIT ---
+        window.addEventListener('beforeunload', () => {
+            if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+                this.track("App Closed / Refreshed");
+                // Attempt synchronous local save to ensure data isn't lost
+                const payload = {
+                    user: CURRENT_USER.user,
+                    current: this.currentActivity,
+                    since: this.startTime,
+                    isStudyOpen: this.isStudyOpen,
+                    history: this.history
+                };
+                
+                // Save to emergency key to survive the next Cloud Pull
+                localStorage.setItem('monitor_unsynced', JSON.stringify(payload));
+                // Also try standard save just in case
+                let md = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                md[CURRENT_USER.user] = payload;
+                localStorage.setItem('monitor_data', JSON.stringify(md));
+            }
+        });
     },
 
     // --- CORE TRACKING ---
@@ -26,7 +80,8 @@ const StudyMonitor = {
                 activity: this.currentActivity,
                 start: this.startTime,
                 end: now,
-                duration: duration
+                duration: duration,
+                clicks: this.clickCount // Save clicks for this session
             });
         }
 
@@ -35,9 +90,14 @@ const StudyMonitor = {
 
         this.currentActivity = activityName;
         this.startTime = now;
+        this.clickCount = 0; // Reset click count for new activity
         
         // Instant local save (optional)
         // this.sync(); 
+    },
+
+    recordClick: function() {
+        this.clickCount++;
     },
 
     sync: async function() {
@@ -89,6 +149,7 @@ const StudyMonitor = {
         this.isStudyOpen = true;
         this.track(`Studying: ${title}`);
 
+        this.clickCount = 0; // Reset for this material
         titleEl.innerText = title;
         container.innerHTML = ''; // Clear previous
 
@@ -132,6 +193,20 @@ const StudyMonitor = {
         webview.addEventListener('new-window', (e) => {
             e.preventDefault();
             webview.src = this.cleanUrl(e.url);
+        });
+
+        // --- NEW: CLICK TRACKING INJECTION ---
+        webview.addEventListener('dom-ready', () => {
+            // Inject script to detect clicks and log a specific message
+            webview.executeJavaScript(`
+                document.addEventListener('click', () => { console.log('__STUDY_CLICK__'); });
+            `);
+        });
+
+        webview.addEventListener('console-message', (e) => {
+            if (e.message === '__STUDY_CLICK__') {
+                this.recordClick();
+            }
         });
 
         container.appendChild(webview);
@@ -203,12 +278,6 @@ const StudyMonitor = {
     }
 };
 
-// Initialize on load
-window.addEventListener('DOMContentLoaded', () => {
-    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
-        StudyMonitor.init();
-    }
-});
 
 // --- ADMIN ACTIVITY MONITOR MODAL ---
 
@@ -268,6 +337,9 @@ function renderActivityMonitorContent() {
         // Timestamp
         const startTime = new Date(activity.since).toLocaleTimeString();
 
+        // Clicks (Current)
+        const clicks = StudyMonitor.clickCount || 0;
+
         // Check if card exists to update IN PLACE (prevents blinking)
         let card = document.getElementById(`mon_card_${safeId}`);
         
@@ -316,9 +388,10 @@ function renderActivityMonitorContent() {
                 ${recent.map(h => {
                     const dur = Math.round(h.duration / 1000) + 's';
                     const time = new Date(h.start).toLocaleTimeString();
+                    const clickInfo = h.clicks ? ` | <i class="fas fa-mouse-pointer" style="font-size:0.7rem;"></i> ${h.clicks}` : '';
                     return `<li style="border-bottom:1px solid var(--border-color); padding:4px 0; display:flex; justify-content:space-between;">
                         <span>${h.activity}</span>
-                        <span style="color:var(--text-muted); font-family:monospace;">${time} (${dur})</span>
+                        <span style="color:var(--text-muted); font-family:monospace;">${time} (${dur}${clickInfo})</span>
                     </li>`;
                 }).join('')}
             </ul>`;

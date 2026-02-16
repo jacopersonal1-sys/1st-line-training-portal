@@ -455,7 +455,7 @@ async function updateRecordLink(index) {
     const r = records[index];
     if (!r) return;
 
-    const newLink = prompt("Enter URL for Assessment (e.g. SharePoint/OneDrive link):", r.link && r.link.startsWith('http') ? r.link : "");
+    const newLink = await customPrompt("Update Link", "Enter URL for Assessment (e.g. SharePoint/OneDrive link):", r.link && r.link.startsWith('http') ? r.link : "");
     if (newLink === null) return; // Cancelled
 
     r.link = newLink.trim();
