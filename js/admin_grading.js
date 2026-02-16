@@ -87,6 +87,10 @@ async function saveScores() {
     const assessName = document.getElementById('assessment').value; 
     const phase = document.getElementById('phase').value; 
     let finalAssessName = assessName; 
+
+    // NEW: Capture Date from Input
+    const dateInput = document.getElementById('captureDate');
+    const captureDate = (dateInput && dateInput.value) ? dateInput.value : new Date().toISOString().split('T')[0];
     
     // If Phase is Vetting, construct name from Phase + Topic
     if(phase === '1st Vetting' || phase === 'Final Vetting') { 
@@ -132,6 +136,7 @@ async function saveScores() {
                 // UPDATE EXISTING RECORD
                 recs[existingIndex].score = Number(sc);
                 recs[existingIndex].cycle = cycleVal; // Update cycle if changed
+                recs[existingIndex].date = captureDate; // Update date
                 recs[existingIndex].docSaved = docChecked;
                 recs[existingIndex].videoSaved = videoChecked;
                 // Ensure ID exists (Migration for old records)
@@ -146,6 +151,7 @@ async function saveScores() {
                     assessment: finalAssessName, 
                     trainee: traineeName, 
                     score: Number(sc), 
+                    date: captureDate, // Save selected date
                     docSaved: docChecked, 
                     videoSaved: videoChecked, 
                     link: "" 

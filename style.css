@@ -1237,3 +1237,11 @@ input:checked + .slider:before {
     font-size: 0.9rem;
 }
 .result-item:last-child { border-bottom: none; }
+
+/* Daily Tip Widget */
+.tip-card-content {
+    background: linear-gradient(135deg, rgba(243, 112, 33, 0.1), rgba(243, 112, 33, 0.05));
+    border-left: 4px solid var(--primary);
+    padding: 15px;
+    border-radius: 8px;
+}

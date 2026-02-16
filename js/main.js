@@ -424,6 +424,9 @@ function showTab(id, btn) {
   if(id === 'capture') {
       if(typeof loadRostersToSelect === 'function') loadRostersToSelect('selectedGroup');
       if(typeof updateAssessmentDropdown === 'function') updateAssessmentDropdown();
+      // Set default date to today
+      const dateInput = document.getElementById('captureDate');
+      if(dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
   }
   
   if(id === 'monthly') {

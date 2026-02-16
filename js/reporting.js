@@ -165,22 +165,25 @@ function renderMonthly() {
              
              actionHtml += `<button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button>`;
         } 
-        else if (r.link && r.link.startsWith('http')) {
-             actionHtml += `<a href="${r.link}" target="_blank" class="btn-secondary btn-sm" style="text-decoration:none; display:inline-block; margin-right:5px;" title="Open Link"><i class="fas fa-external-link-alt"></i> Open</a>`;
-             if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'special_viewer') {
-                 actionHtml += `<button class="btn-secondary btn-sm" onclick="updateRecordLink(${originalIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
-             }
-        } else {
-             // No Link Present
-             if (CURRENT_USER.role === 'admin') {
-                 if (CURRENT_USER.role !== 'special_viewer') actionHtml += `<button class="btn-primary btn-sm" onclick="updateRecordLink(${originalIndex})"><i class="fas fa-link"></i> Add Link</button>`;
-             } else {
-                 // Team Leader: Request Link
-                 // Check if already requested
-                 const pending = requests.find(req => req.recordId === r.id && req.status === 'pending');
-                 if (pending) actionHtml += `<button class="btn-secondary btn-sm" disabled style="opacity:0.6; cursor:not-allowed;">Requested</button>`;
-                 else actionHtml += `<button class="btn-warning btn-sm" onclick="requestRecordLink('${r.id}', '${r.trainee}', '${r.assessment}')">Request Link</button>`;
-             }
+        else {
+            // SMART LINK BUTTON
+            const safeLink = (r.link || "").replace(/'/g, "\\'");
+            const safeTrainee = r.trainee.replace(/'/g, "\\'");
+            const safeAssess = r.assessment.replace(/'/g, "\\'");
+            
+            let btnClass = r.link && r.link.startsWith('http') ? 'btn-secondary' : 'btn-warning';
+            let btnIcon = r.link && r.link.startsWith('http') ? 'fa-external-link-alt' : 'fa-link';
+            let btnText = r.link && r.link.startsWith('http') ? 'Open' : 'Link';
+            
+            // If Admin, show "Add Link" style if missing
+            if (CURRENT_USER.role === 'admin' && !r.link) { btnClass = 'btn-primary'; btnIcon = 'fa-plus'; btnText = 'Add Link'; }
+
+            actionHtml += `<button class="${btnClass} btn-sm" onclick="handleRecordLinkClick('${r.id}', '${safeLink}', '${safeTrainee}', '${safeAssess}')"><i class="fas ${btnIcon}"></i> ${btnText}</button>`;
+            
+            // Admin Edit Button (Only if link exists)
+            if (CURRENT_USER.role === 'admin' && r.link) {
+                actionHtml += ` <button class="btn-secondary btn-sm" onclick="updateRecordLink(${originalIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
+            }
         }
         actionHtml += '</td>';
     }

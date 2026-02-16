@@ -192,7 +192,35 @@ function loadRostersList() {
     const list = document.getElementById('rosterList');
     if(list) {
         list.innerHTML = Object.keys(r).sort().reverse().map(k => {
-            return `<li><strong>${getGroupLabel(k, r[k].length)}</strong> <button class="btn-danger btn-sm" onclick="deleteGroup('${k}')" style="margin-left:10px; font-size:0.7rem;">Delete</button></li>`;
+            const memberCount = r[k] ? r[k].length : 0;
+            const label = (typeof getGroupLabel === 'function') ? getGroupLabel(k, memberCount) : k;
+            const safeId = k.replace(/[^a-zA-Z0-9]/g, '_');
+            
+            // Generate member list HTML
+            const members = r[k] || [];
+            const membersHtml = members.map(m => {
+                const safeName = m.replace(/'/g, "\\'");
+                return `<li style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid var(--border-color); font-size:0.85rem;">
+                    <span>${m}</span>
+                    <button class="btn-danger btn-sm" onclick="deleteAgentFromSystem('${safeName}', '${k}')" style="padding:2px 6px; font-size:0.7rem;" title="Permanently Delete Agent & Data"><i class="fas fa-trash"></i></button>
+                </li>`;
+            }).join('');
+
+            return `
+            <li style="margin-bottom:10px; background:var(--bg-input); padding:10px; border-radius:6px; border:1px solid var(--border-color);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong>${label}</strong>
+                    <div>
+                        <button class="btn-secondary btn-sm" onclick="document.getElementById('members_${safeId}').classList.toggle('hidden')" style="margin-right:5px; font-size:0.7rem;">Manage Agents</button>
+                        <button class="btn-danger btn-sm" onclick="deleteGroup('${k}')" style="font-size:0.7rem;">Delete Group</button>
+                    </div>
+                </div>
+                <div id="members_${safeId}" class="hidden" style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-color);">
+                    <ul style="list-style:none; padding:0; margin:0;">
+                        ${membersHtml.length > 0 ? membersHtml : '<li style="color:var(--text-muted); font-style:italic;">No agents in this group.</li>'}
+                    </ul>
+                </div>
+            </li>`;
         }).join(''); 
     }
 }
@@ -207,6 +235,72 @@ async function deleteGroup(groupId) {
     await secureUserSave();
     
     refreshAllDropdowns();
+}
+
+async function deleteAgentFromSystem(agentName, groupId) {
+    if(!confirm(`CRITICAL WARNING:\n\nYou are about to permanently delete '${agentName}' from the system.\n\nThis will remove:\n- User Account\n- Assessment Records\n- Attendance History\n- Reports & Notes\n- Everything associated with this agent.\n\nThis action CANNOT be undone.\n\nProceed?`)) return;
+    
+    // 1. Remove from Roster
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    if(rosters[groupId]) {
+        rosters[groupId] = rosters[groupId].filter(m => m !== agentName);
+        localStorage.setItem('rosters', JSON.stringify(rosters));
+    }
+    
+    // 2. Remove User Account
+    let users = JSON.parse(localStorage.getItem('users') || '[]');
+    users = users.filter(u => u.user !== agentName);
+    localStorage.setItem('users', JSON.stringify(users));
+    
+    // 3. Add to Revoked (Blacklist)
+    let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    if(!revoked.includes(agentName)) {
+        revoked.push(agentName);
+        localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+    }
+    
+    // 4. Wipe Data
+    const wipeData = (key, userField) => {
+        let data = JSON.parse(localStorage.getItem(key) || '[]');
+        if(Array.isArray(data)) {
+            const originalLen = data.length;
+            data = data.filter(item => item[userField] !== agentName);
+            if(data.length !== originalLen) localStorage.setItem(key, JSON.stringify(data));
+        }
+    };
+    
+    wipeData('records', 'trainee');
+    wipeData('submissions', 'trainee');
+    wipeData('attendance_records', 'user');
+    wipeData('liveBookings', 'trainee');
+    wipeData('savedReports', 'trainee');
+    wipeData('insightReviews', 'trainee');
+    wipeData('exemptions', 'trainee');
+    wipeData('linkRequests', 'trainee');
+    
+    // Object based data
+    const wipeObjectData = (key) => {
+        let data = JSON.parse(localStorage.getItem(key) || '{}');
+        if(data[agentName]) {
+            delete data[agentName];
+            localStorage.setItem(key, JSON.stringify(data));
+        }
+    };
+    wipeObjectData('agentNotes');
+    wipeObjectData('monitor_data');
+    wipeObjectData('cancellationCounts');
+    
+    // 5. Force Sync
+    if(typeof saveToServer === 'function') {
+        await saveToServer([
+            'rosters', 'users', 'revokedUsers', 'records', 'submissions', 
+            'attendance_records', 'liveBookings', 'savedReports', 
+            'insightReviews', 'exemptions', 'agentNotes', 'monitor_data', 'linkRequests', 'cancellationCounts'
+        ], true);
+    }
+    
+    refreshAllDropdowns();
+    if(typeof showToast === 'function') showToast(`Agent ${agentName} obliterated.`, "success");
 }
 
 function loadRostersToSelect(elementId = 'selectedGroup') { 

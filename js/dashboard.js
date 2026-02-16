@@ -34,7 +34,9 @@ const DEFAULT_LAYOUT_TRAINEE = [
     { id: 'live_upcoming', col: 1, row: 1 },
     { id: 'recent_results', col: 1, row: 2 },
     { id: 'available_tests', col: 1, row: 2 },
-    { id: 'notepad', col: 1, row: 1 }
+    { id: 'notepad', col: 1, row: 1 },
+    { id: 'daily_tip', col: 1, row: 1 },
+    { id: 'help', col: 1, row: 1 }
 ];
 
 function renderDashboard() {
@@ -952,6 +954,68 @@ window.dismissLinkRequest = async function(requestId) {
     }
 };
 
+// --- GLOBAL: RECORD LINK HANDLER ---
+// Used by Assessment Records (Monthly) to handle the "Link" button
+window.handleRecordLinkClick = async function(recordId, currentLink, trainee, assessment) {
+    // Safety: Ensure currentLink is a string
+    if (!currentLink || currentLink === 'null' || currentLink === 'undefined') currentLink = "";
+
+    // 1. If a valid link exists, open it
+    if (currentLink && currentLink.startsWith('http')) {
+        window.open(currentLink, '_blank');
+        return;
+    }
+
+    // 2. If internal link (Digital/Live), handle accordingly (usually View button handles this)
+    if (currentLink === 'Digital-Assessment' || currentLink === 'Live-Session') {
+        alert("This is a digital record. Use the 'View' button to see details.");
+        return;
+    }
+
+    // 3. If no link, handle Request Logic
+    if (CURRENT_USER.role === 'teamleader') {
+        // Check if request already exists
+        const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+        const existing = requests.find(r => r.recordId === recordId && r.status === 'pending');
+        
+        if (existing) {
+            alert("A request for this link is already pending with the Admin.");
+            return;
+        }
+
+        if (confirm("No link available. Request Admin to add one?")) {
+            requests.push({
+                id: Date.now().toString(),
+                recordId: recordId,
+                requestedBy: CURRENT_USER.user,
+                trainee: trainee,
+                assessment: assessment,
+                date: new Date().toISOString(),
+                status: 'pending'
+            });
+            
+            localStorage.setItem('linkRequests', JSON.stringify(requests));
+            if (typeof saveToServer === 'function') await saveToServer(['linkRequests'], false);
+            
+            alert("Request sent to Admin.");
+        }
+    } else if (CURRENT_USER.role === 'admin') {
+        alert("No link present. Use the 'Edit' button to add a URL manually.");
+    } else {
+        alert("No link available for this record.");
+    }
+};
+
+window.submitHelpRequest = async function() {
+    const reason = prompt("What do you need help with?");
+    if (reason) {
+        // Reuse the Notice system to alert admins? Or just a simple alert for now.
+        // For now, we'll simulate it as we don't have a dedicated "Help Ticket" system yet.
+        // Ideally, this would write to a 'tickets' table.
+        alert("Help request sent to your Team Leader/Admin.");
+    }
+};
+
 // --- TRAINEE DASHBOARD ---
 function buildTraineeWidgets(container) {
     // 1. Find Next Task
@@ -1099,13 +1163,50 @@ function buildTraineeWidgets(container) {
             <textarea class="notepad-area" placeholder="Type your notes here..." oninput="localStorage.setItem('user_notes_' + CURRENT_USER.user, this.value)">${savedNote}</textarea>
         </div>`;
 
+    // 6. Daily Tip
+    const tips = [
+        "Consistency is key. A little study every day adds up!",
+        "Don't forget to take breaks. Your brain needs rest to absorb info.",
+        "Review your past assessments to see where you can improve.",
+        "Ask questions! Your Team Leader is there to help.",
+        "Stay hydrated while studying.",
+        "Focus on understanding, not just memorizing.",
+        "Check the schedule daily for updates."
+    ];
+    // Pick a random tip every time the dashboard loads
+    const tipOfTheDay = tips[Math.floor(Math.random() * tips.length)];
+
+    const tipHtml = `
+        <div style="display:flex; flex-direction:column; height:100%; justify-content:center;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <i class="fas fa-lightbulb" style="color:#f39c12; font-size:1.2rem;"></i>
+                <h3 style="margin:0;">Daily Tip</h3>
+            </div>
+            <div class="tip-card-content">
+                <p style="font-style:italic; color:var(--text-main); margin:0;">"${tipOfTheDay}"</p>
+            </div>
+        </div>`;
+
+    // 7. Request Help
+    const helpHtml = `
+        <div style="display:flex; flex-direction:column; height:100%; justify-content:center; align-items:center; text-align:center;">
+            <div class="dash-icon" style="background:rgba(52, 152, 219, 0.1); color:#3498db; margin-bottom:10px;">
+                <i class="fas fa-hand-paper"></i>
+            </div>
+            <h3 style="margin:0; margin-bottom:5px;">Need Help?</h3>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Stuck on a topic or issue?</p>
+            <button class="btn-secondary btn-sm" onclick="submitHelpRequest()">Request Assistance</button>
+        </div>`;
+
     // WIDGET MAP
     const widgets = {
         'up_next': wrapWidget('up_next', upNextHtml),
         'live_upcoming': wrapWidget('live_upcoming', liveHtml),
         'recent_results': wrapWidget('recent_results', resultsHtml),
         'available_tests': wrapWidget('available_tests', availableHtml),
-        'notepad': wrapWidget('notepad', notepadHtml)
+        'notepad': wrapWidget('notepad', notepadHtml),
+        'daily_tip': wrapWidget('daily_tip', tipHtml),
+        'help': wrapWidget('help', helpHtml)
     };
 
     // LOAD LAYOUT
