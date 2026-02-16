@@ -18,6 +18,9 @@ const StudyMonitor = {
         this.syncInterval = setInterval(() => this.sync(), 10000);
         this.track("System: App Loaded");
 
+        // --- DAILY ARCHIVE CHECK ---
+        this.checkDailyReset();
+
         // --- FAIL-SAFE: RECOVER UNSYNCED EXIT DATA ---
         // If the app closed before syncing the last event, recover it now.
         const unsynced = localStorage.getItem('monitor_unsynced');
@@ -135,6 +138,50 @@ const StudyMonitor = {
                 
             } catch (e) {
                 console.error("Monitor Sync Error", e);
+            }
+        }
+    },
+
+    // --- DAILY ARCHIVE LOGIC ---
+    checkDailyReset: async function() {
+        if (!CURRENT_USER || CURRENT_USER.role === 'admin') return;
+        
+        let monitorData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        let myData = monitorData[CURRENT_USER.user];
+        
+        if (myData) {
+            // Check if data is from a previous day
+            const lastDate = myData.date || new Date(myData.since).toISOString().split('T')[0];
+            const today = new Date().toISOString().split('T')[0];
+            
+            if (lastDate !== today) {
+                console.log("New Day Detected. Archiving Activity Log...");
+                let history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+                
+                // Calculate summary stats for the archive
+                let totalMs = 0, studyMs = 0, extMs = 0, idleMs = 0;
+                (myData.history || []).forEach(h => {
+                    totalMs += h.duration;
+                    if(h.activity.toLowerCase().includes('studying')) studyMs += h.duration;
+                    else if(h.activity.toLowerCase().includes('external')) extMs += h.duration;
+                    else idleMs += h.duration;
+                });
+
+                history.push({
+                    date: lastDate,
+                    user: CURRENT_USER.user,
+                    summary: { study: studyMs, external: extMs, idle: idleMs, total: totalMs },
+                    details: myData.history // Archive full details
+                });
+                
+                localStorage.setItem('monitor_history', JSON.stringify(history));
+                
+                // Reset Live Data for Today
+                monitorData[CURRENT_USER.user] = { current: 'System: New Day Start', since: Date.now(), isStudyOpen: false, history: [], date: today };
+                localStorage.setItem('monitor_data', JSON.stringify(monitorData));
+                
+                // ROBUSTNESS FIX: Use 'false' (Safe Merge) to prevent overwriting other users' history entries
+                if (typeof saveToServer === 'function') await saveToServer(['monitor_data', 'monitor_history'], false);
             }
         }
     },
@@ -423,22 +470,28 @@ function renderActivitySummary(container) {
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
     const targetAgents = StudyMonitor.getScheduledAgents();
     
+    // Ensure container has a grid wrapper if empty
+    if (!container.querySelector('.summary-grid')) {
+        container.innerHTML = '<div class="summary-grid" id="summaryGridContainer"></div>';
+    }
+    const grid = document.getElementById('summaryGridContainer');
+    
     if(targetAgents.length === 0) {
-        container.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted);">No agents found to summarize.</div>';
+        grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:40px; color:var(--text-muted);">No agents found to summarize.</div>';
         return;
     }
 
-    let html = '<div class="summary-grid">';
+    const activeIds = new Set();
     
     targetAgents.sort().forEach(agent => {
         const activity = data[agent] || { history: [], current: 'No Data', since: Date.now() };
-        
+        const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
         // 1. Aggregate Data
         let totalMs = 0;
         let studyMs = 0;
         let extMs = 0;
         let idleMs = 0;
-        let totalClicks = 0;
+        const topicMap = {};
         
         // Combine history + current active session
         const allSegments = [...(activity.history || [])];
@@ -449,17 +502,17 @@ function renderActivitySummary(container) {
             allSegments.push({
                 activity: activity.current,
                 duration: currentDuration,
-                clicks: StudyMonitor.clickCount || 0 // Approximate for current
             });
         }
 
         allSegments.forEach(seg => {
             totalMs += seg.duration;
-            totalClicks += (seg.clicks || 0);
-            
             const act = seg.activity.toLowerCase();
             if (act.includes('studying')) {
                 studyMs += seg.duration;
+                // Track specific topics
+                const topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
+                topicMap[topic] = (topicMap[topic] || 0) + seg.duration;
             } else if (act.includes('external') || act.includes('background')) {
                 extMs += seg.duration;
             } else {
@@ -471,12 +524,31 @@ function renderActivitySummary(container) {
         const focusScore = totalMs > 0 ? Math.round((studyMs / totalMs) * 100) : 0;
         const studyTimeStr = Math.round(studyMs / 60000) + 'm';
         const extTimeStr = Math.round(extMs / 60000) + 'm';
+        const idleTimeStr = Math.round(idleMs / 60000) + 'm';
         
         let scoreColor = '#2ecc71';
         if (focusScore < 50) scoreColor = '#ff5252';
         else if (focusScore < 80) scoreColor = '#f1c40f';
 
-        // 3. Build Timeline Bar
+        // 3. Top Activities Breakdown
+        const sortedTopics = Object.entries(topicMap)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3); // Top 3
+            
+        let breakdownHtml = '<div class="topic-breakdown">';
+        if (sortedTopics.length > 0) {
+            breakdownHtml += sortedTopics.map(([topic, ms]) => 
+                `<div class="topic-row">
+                    <span class="topic-name" title="${topic}">${topic}</span>
+                    <span class="topic-time">${Math.round(ms/60000)}m</span>
+                </div>`
+            ).join('');
+        } else {
+            breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem;">No study activity recorded.</div>';
+        }
+        breakdownHtml += '</div>';
+
+        // 4. Build Timeline Bar
         // Normalize segments to percentages
         let timelineHtml = '';
         if (totalMs > 0) {
@@ -495,33 +567,74 @@ function renderActivitySummary(container) {
             timelineHtml = '<div style="width:100%; text-align:center; font-size:0.7rem; color:var(--text-muted); padding-top:2px;">No activity recorded</div>';
         }
 
-        html += `
-        <div class="summary-card">
-            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:15px;">
-                <div>
-                    <h3 style="margin:0;">${agent}</h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Total Tracked: ${Math.round(totalMs/60000)} mins</div>
+        // 5. DOM Update (Silent / No Flicker)
+        const cardId = `sum_card_${safeId}`;
+        activeIds.add(cardId);
+
+        let card = document.getElementById(cardId);
+        if (!card) {
+            // Create Skeleton Structure ONCE
+            card = document.createElement('div');
+            card.id = cardId;
+            card.className = 'summary-card';
+            card.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:15px;">
+                    <div>
+                        <h3 style="margin:0;">${agent}</h3>
+                        <div id="sum_total_${safeId}" style="font-size:0.8rem; color:var(--text-muted);"></div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div id="sum_score_${safeId}" class="focus-score-large"></div>
+                        <div style="font-size:0.7rem; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">Focus Score</div>
+                    </div>
                 </div>
-                <div style="text-align:right;">
-                    <div class="focus-score-large" style="color:${scoreColor};">${focusScore}%</div>
-                    <div style="font-size:0.7rem; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">Focus Score</div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; text-align:center; font-size:0.85rem; margin-bottom:15px;">
+                    <div style="background:rgba(46, 204, 113, 0.1); padding:8px; border-radius:6px; color:#2ecc71;">
+                        <div id="sum_study_${safeId}" style="font-weight:bold; font-size:1.1rem;"></div>
+                        <div style="font-size:0.7rem; opacity:0.8;">Study</div>
+                    </div>
+                    <div style="background:rgba(231, 76, 60, 0.1); padding:8px; border-radius:6px; color:#e74c3c;">
+                        <div id="sum_ext_${safeId}" style="font-weight:bold; font-size:1.1rem;"></div>
+                        <div style="font-size:0.7rem; opacity:0.8;">External</div>
+                    </div>
+                    <div style="background:var(--bg-input); padding:8px; border-radius:6px; color:var(--text-muted);">
+                        <div id="sum_idle_${safeId}" style="font-weight:bold; font-size:1.1rem;"></div>
+                        <div style="font-size:0.7rem; opacity:0.8;">Idle</div>
+                    </div>
                 </div>
-            </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; text-align:center; font-size:0.85rem; margin-bottom:10px;">
-                <div style="background:rgba(46, 204, 113, 0.1); padding:5px; border-radius:4px; color:#2ecc71;"><strong>${studyTimeStr}</strong><br>Study</div>
-                <div style="background:rgba(231, 76, 60, 0.1); padding:5px; border-radius:4px; color:#e74c3c;"><strong>${extTimeStr}</strong><br>External</div>
-                <div style="background:var(--bg-input); padding:5px; border-radius:4px;"><strong>${totalClicks}</strong><br>Clicks</div>
-            </div>
-            <div class="timeline-visual">${timelineHtml}</div>
-            <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:5px;">
-                <span>Start</span>
-                <span>Current</span>
-            </div>
-        </div>`;
+                <div style="margin-bottom:15px;">
+                    <div style="font-size:0.75rem; font-weight:bold; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase;">Top Activities</div>
+                    <div id="sum_topics_${safeId}" class="topic-breakdown"></div>
+                </div>
+                <div id="sum_timeline_${safeId}" class="timeline-visual"></div>
+                <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:5px;">
+                    <span>Start</span>
+                    <span>Current</span>
+                </div>`;
+            grid.appendChild(card);
+        }
+
+        // Granular Updates (No Flicker)
+        document.getElementById(`sum_total_${safeId}`).innerText = `Total Tracked: ${Math.round(totalMs/60000)} mins`;
+        const scoreEl = document.getElementById(`sum_score_${safeId}`);
+        scoreEl.innerText = `${focusScore}%`;
+        scoreEl.style.color = scoreColor;
+        
+        document.getElementById(`sum_study_${safeId}`).innerText = studyTimeStr;
+        document.getElementById(`sum_ext_${safeId}`).innerText = extTimeStr;
+        document.getElementById(`sum_idle_${safeId}`).innerText = idleTimeStr;
+        
+        // InnerHTML for complex children is fine if container is stable
+        document.getElementById(`sum_topics_${safeId}`).innerHTML = breakdownHtml;
+        document.getElementById(`sum_timeline_${safeId}`).innerHTML = timelineHtml;
     });
 
-    html += '</div>';
-    container.innerHTML = html;
+    // Cleanup Stale Cards
+    Array.from(grid.children).forEach(child => {
+        if (child.id && child.id.startsWith('sum_card_') && !activeIds.has(child.id)) {
+            child.remove();
+        }
+    });
 }
 
 StudyMonitor.forceShowAll = function() {

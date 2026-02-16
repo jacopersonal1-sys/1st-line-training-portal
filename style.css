@@ -1337,3 +1337,17 @@ input:checked + .slider:before {
 .seg-study { background: #2ecc71; } /* Green */
 .seg-ext { background: #e74c3c; }   /* Red */
 .seg-idle { background: #95a5a6; }  /* Grey */
+
+/* Topic Breakdown in Summary */
+.topic-breakdown { background: var(--bg-input); border-radius: 6px; padding: 5px; }
+.topic-row { 
+    display: flex; justify-content: space-between; 
+    padding: 6px 10px; 
+    border-bottom: 1px solid var(--border-color); 
+    font-size: 0.85rem; 
+}
+.topic-row:last-child { border-bottom: none; }
+.topic-name { 
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; 
+}
+.topic-time { font-weight: bold; color: var(--primary); }

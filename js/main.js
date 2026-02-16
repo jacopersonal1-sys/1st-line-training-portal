@@ -845,6 +845,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.23": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Daily Activity History to Agent Search profile.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Refined Activity Monitor (Silent updates, Idle tracking).</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Robust daily archiving for activity logs.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Prevented data conflicts during morning syncs.</li>
+            </ul>`,
         "2.1.22": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Restored Admin Panel access for Team Leaders (Profile & Settings).</li>

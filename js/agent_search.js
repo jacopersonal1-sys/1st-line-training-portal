@@ -219,6 +219,36 @@ function renderAgentDashboard(agentName) {
         </div>
     `;
 
+    // --- ACTIVITY HISTORY (NEW) ---
+    const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+    const agentHistory = history.filter(h => h.user === agentName).sort((a,b) => new Date(b.date) - new Date(a.date));
+    
+    let activityHtml = `
+        <div class="card">
+            <h3><i class="fas fa-chart-line" style="color:var(--primary); margin-right:10px;"></i>Activity History</h3>
+            <div style="max-height:250px; overflow-y:auto;">
+                <table class="admin-table">
+                    <thead><tr><th>Date</th><th>Study</th><th>External</th><th>Idle</th><th>Focus Score</th></tr></thead>
+                    <tbody>
+                        ${agentHistory.length > 0 ? agentHistory.map(h => {
+                            const s = h.summary;
+                            const focus = s.total > 0 ? Math.round((s.study / s.total) * 100) : 0;
+                            let scoreColor = '#2ecc71';
+                            if(focus < 50) scoreColor = '#ff5252'; else if(focus < 80) scoreColor = '#f1c40f';
+                            
+                            return `<tr>
+                                <td>${h.date}</td>
+                                <td>${Math.round(s.study/60000)}m</td>
+                                <td>${Math.round(s.external/60000)}m</td>
+                                <td>${Math.round(s.idle/60000)}m</td>
+                                <td style="font-weight:bold; color:${scoreColor};">${focus}%</td>
+                            </tr>`;
+                        }).join('') : '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No archived activity logs found.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
     // --- PRIVATE NOTES ---
     const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
     const agentNote = notes[agentName] || "";
@@ -235,7 +265,7 @@ function renderAgentDashboard(agentName) {
         </div>
     `;
     
-    container.innerHTML = headerHtml + reviewHtml + recordsHtml + reportHtml + attHtml + notesHtml;
+    container.innerHTML = headerHtml + reviewHtml + recordsHtml + reportHtml + attHtml + activityHtml + notesHtml;
 }
 
 async function saveAgentNote(agentName) {

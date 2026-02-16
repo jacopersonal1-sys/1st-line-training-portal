@@ -31,7 +31,8 @@ const DB_SCHEMA = {
     agentNotes: {}, // Private notes on agents { "username": "note content" }
     liveSessions: [], // CHANGED: Array to support multiple concurrent sessions
     forbiddenApps: [], // Dynamic list of blacklisted processes
-    monitor_data: {} // Real-time activity tracking { username: { current, history: [] } }
+    monitor_data: {}, // Real-time activity tracking { username: { current, history: [] } }
+    monitor_history: [] // Archived daily activity logs
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
