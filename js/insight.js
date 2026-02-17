@@ -257,6 +257,14 @@ function renderProgressView(members, filter, grid, navHTML) {
     requiredItems.push({ name: "Onboard Report", type: 'report' });
     requiredItems.push({ name: "Insight Review", type: 'review' });
 
+    // SORT: Assessments -> Reports/Reviews -> Vetting
+    requiredItems.sort((a, b) => {
+        const typeOrder = { 'assessment': 1, 'report': 2, 'review': 2, 'vetting': 3 };
+        const orderA = typeOrder[a.type] || 99;
+        const orderB = typeOrder[b.type] || 99;
+        return orderA - orderB;
+    });
+
     let html = '<div style="margin-top:15px; display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:20px;">';
 
     members.forEach(trainee => {
@@ -341,8 +349,8 @@ function renderProgressView(members, filter, grid, navHTML) {
             revokeBtnHTML = `
                 <div style="margin-top:15px; padding-top:15px; border-top:1px dashed var(--border-color); text-align:center;">
                     <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:5px;">Training Complete</p>
-                    <button class="btn-danger btn-sm" style="width:100%;" onclick="revokeUserAccess('${trainee}')">
-                        <i class="fas fa-user-slash"></i> Revoke Access & Graduate
+                    <button class="btn-success btn-sm" style="width:100%;" onclick="graduateTrainee('${trainee}')">
+                        <i class="fas fa-graduation-cap"></i> Graduate Trainee (Retire & Archive)
                     </button>
                 </div>
             `;

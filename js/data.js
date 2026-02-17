@@ -34,7 +34,8 @@ const DB_SCHEMA = {
     monitor_data: {}, // Real-time activity tracking { username: { current, history: [] } }
     monitor_history: [], // Archived daily activity logs
     nps_surveys: [], // Admin defined surveys
-    nps_responses: [] // Trainee responses
+    nps_responses: [], // Trainee responses
+    graduated_agents: [] // Archived data for graduated trainees
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
