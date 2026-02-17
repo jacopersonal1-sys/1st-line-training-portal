@@ -133,6 +133,16 @@ async function loadFromServer(silent = false) {
     }
 }
 
+// Export for Jest testing (Node.js environment)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        DB_SCHEMA,
+        loadFromServer,
+        saveToServer,
+        performSmartMerge
+    };
+}
+
 // MIGRATION: One-time move from 'app_data' (Blob) to 'app_documents' (Split)
 async function migrateToSplitSchema() {
     console.log("Migrating to Split Schema...");
@@ -889,4 +899,14 @@ async function executeFactoryReset() {
         console.error("Reset Failed:", err);
         alert("Factory Reset Failed: " + err.message);
     }
+}
+
+// Export for Jest testing (Node.js environment)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        DB_SCHEMA,
+        loadFromServer,
+        saveToServer,
+        performSmartMerge
+    };
 }

@@ -365,21 +365,36 @@ const AnalyticsEngine = {
         // Filter responses for this group
         const groupResponses = responses.filter(r => trainees.some(t => t.user === r.user));
         
-        const npsStats = surveys.map(s => {
+        const npsStats = [];
+        
+        surveys.forEach(s => {
             const sResps = groupResponses.filter(r => r.surveyId === s.id);
-            if (sResps.length === 0) return null;
+            if (sResps.length === 0) return;
             
-            const promoters = sResps.filter(r => r.rating >= 9).length;
-            const detractors = sResps.filter(r => r.rating <= 6).length;
-            const total = sResps.length;
-            const score = Math.round(((promoters - detractors) / total) * 100);
+            const qList = s.questions || [s.question];
             
-            let avg = 0;
-            sResps.forEach(r => avg += r.rating);
-            avg = (avg / total).toFixed(1);
+            qList.forEach((qText, qIdx) => {
+                // Extract ratings for this specific question index
+                const qRatings = sResps.map(r => {
+                    if (r.ratings && r.ratings[qIdx] !== undefined) return r.ratings[qIdx];
+                    if (r.rating !== undefined && qIdx === 0) return r.rating; // Legacy fallback
+                    return null;
+                }).filter(v => v !== null);
+                
+                if (qRatings.length === 0) return;
 
-            return { name: s.contextName, score: score, avg: avg, count: total };
-        }).filter(s => s !== null);
+                const promoters = qRatings.filter(v => v >= 9).length;
+                const detractors = qRatings.filter(v => v <= 6).length;
+                const total = qRatings.length;
+                const score = Math.round(((promoters - detractors) / total) * 100);
+                
+                let avg = 0;
+                qRatings.forEach(v => avg += v);
+                avg = (avg / total).toFixed(1);
+
+                npsStats.push({ name: s.contextName, question: qText, score: score, avg: avg, count: total });
+            });
+        });
 
         const npsHtml = npsStats.length > 0 ? npsStats.map(s => {
             let color = '#f1c40f';
@@ -389,7 +404,8 @@ const AnalyticsEngine = {
             return `
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border-color);">
                     <div>
-                        <div style="font-weight:bold;">${s.name}</div>
+                        <div style="font-weight:bold; font-size:0.9rem;">${s.name}</div>
+                        <div style="font-size:0.8rem; color:var(--text-main); margin-bottom:2px;">${s.question}</div>
                         <div style="font-size:0.8rem; color:var(--text-muted);">${s.count} Responses | Avg: ${s.avg}</div>
                     </div>
                     <div style="text-align:right;">
@@ -695,3 +711,8 @@ const AnalyticsEngine = {
         container.insertAdjacentHTML('beforeend', html);
     }
 };
+
+// Export for Jest testing (Node.js environment)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = AnalyticsEngine;
+}

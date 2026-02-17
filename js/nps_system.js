@@ -77,23 +77,34 @@ const NPSSystem = {
         div.style.zIndex = '6000'; // High z-index for mandatory feel
         div.style.background = 'rgba(0,0,0,0.85)';
         
+        // Handle legacy single question vs new array
+        const qList = survey.questions || [survey.question];
+        
+        const questionsHtml = qList.map((q, idx) => `
+            <div class="nps-q-block" style="margin-bottom:25px; text-align:left;">
+                <p style="font-size:1rem; margin-bottom:10px; font-weight:600;">${q}</p>
+                <div style="display:flex; justify-content:center; gap:5px; margin-bottom:5px;">
+                    ${Array.from({length: 10}, (_, i) => i + 1).map(n => `
+                        <button class="btn-nps q-${idx}" onclick="NPSSystem.selectRating(this, ${idx}, ${n})" style="width:35px; height:35px; border-radius:50%; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); cursor:pointer; transition:0.2s;">${n}</button>
+                    `).join('')}
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); padding:0 10px;">
+                    <span>Not Likely</span>
+                    <span>Extremely Likely</span>
+                </div>
+                <input type="hidden" class="nps-rating-value" id="rating-${idx}">
+            </div>
+        `).join('');
+
         div.innerHTML = `
-            <div class="modal-box" style="max-width:500px; text-align:center; border-top:5px solid var(--primary); animation: modalPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);">
+            <div class="modal-box" style="max-width:600px; text-align:center; border-top:5px solid var(--primary); animation: modalPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);">
                 <h3 style="margin-top:0; color:var(--primary);"><i class="fas fa-star"></i> Feedback Required</h3>
-                <p style="font-size:1.1rem; margin-bottom:20px;">${survey.question}</p>
                 <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:15px;">
                     Topic: <strong>${survey.contextName}</strong>
                 </div>
                 
-                <div style="display:flex; justify-content:center; gap:5px; margin-bottom:20px;">
-                    ${Array.from({length: 10}, (_, i) => i + 1).map(n => `
-                        <button class="btn-nps" onclick="NPSSystem.selectRating(this, )" style="width:35px; height:35px; border-radius:50%; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); cursor:pointer; transition:0.2s;"></button>
-                    `).join('')}
-                </div>
-                
-                <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-bottom:20px; padding:0 20px;">
-                    <span>Not Likely</span>
-                    <span>Extremely Likely</span>
+                <div style="max-height:400px; overflow-y:auto; padding:0 10px; margin-bottom:15px;">
+                    ${questionsHtml}
                 </div>
 
                 <textarea id="npsComment" placeholder="Optional: Tell us more..." style="width:100%; height:60px; margin-bottom:15px; font-size:0.9rem;"></textarea>
@@ -105,9 +116,10 @@ const NPSSystem = {
         document.body.appendChild(div);
     },
 
-    selectRating: function(btn, rating) {
-        // Visual selection
-        document.querySelectorAll('.btn-nps').forEach(b => {
+    selectRating: function(btn, qIdx, rating) {
+        // Visual selection (Scoped to question index)
+        const container = btn.closest('.nps-q-block');
+        container.querySelectorAll('.btn-nps').forEach(b => {
             b.style.background = 'var(--bg-input)';
             b.style.color = 'var(--text-main)';
             b.style.borderColor = 'var(--border-color)';
@@ -124,24 +136,31 @@ const NPSSystem = {
         btn.style.borderColor = color;
         btn.style.transform = 'scale(1.2)';
         
-        // Enable submit
+        // Store value
+        document.getElementById(`rating-${qIdx}`).value = rating;
+
+        // Enable submit if ALL questions answered
+        const allInputs = document.querySelectorAll('.nps-rating-value');
+        const allFilled = Array.from(allInputs).every(i => i.value !== "");
+        
         const submitBtn = document.getElementById('btnSubmitNPS');
-        submitBtn.disabled = false;
-        submitBtn.style.opacity = '1';
-        submitBtn.style.cursor = 'pointer';
-        submitBtn.dataset.rating = rating;
+        if (allFilled) {
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
+            submitBtn.style.cursor = 'pointer';
+        }
     },
 
     submitResponse: async function(surveyId) {
-        const btn = document.getElementById('btnSubmitNPS');
-        const rating = parseInt(btn.dataset.rating);
+        const ratingInputs = document.querySelectorAll('.nps-rating-value');
+        const ratings = Array.from(ratingInputs).map(i => parseInt(i.value));
         const comment = document.getElementById('npsComment').value;
         
         const response = {
             id: Date.now().toString(),
             surveyId: surveyId,
             user: CURRENT_USER.user,
-            rating: rating,
+            ratings: ratings, // Array of ratings
             comment: comment,
             date: new Date().toISOString()
         };
@@ -192,9 +211,14 @@ NPSSystem.renderAdminPanel = function() {
             const triggerDisplay = s.triggerType === 'completion' ? 'On Completion' : `Time: ${new Date(s.triggerTime).toLocaleString()}`;
             const statusBadge = s.active ? '<span class="status-badge status-pass">Active</span>' : '<span class="status-badge status-fail">Inactive</span>';
             
+            const qList = s.questions || [s.question];
+            const qDisplay = qList.length > 1 
+                ? `<div style="font-weight:bold;">${qList[0]}</div><div style="font-size:0.8rem; color:var(--text-muted);">+ ${qList.length - 1} more questions</div>`
+                : qList[0];
+
             html += `
                 <tr>
-                    <td>${s.question}</td>
+                    <td>${qDisplay}</td>
                     <td>${s.contextName} <span style="font-size:0.8rem; color:var(--text-muted);">(${s.contextType})</span></td>
                     <td>${triggerDisplay}</td>
                     <td>${statusBadge}</td>
@@ -231,10 +255,17 @@ NPSSystem.openBuilder = function() {
 
     const modalHtml = `
         <div id="npsBuilderModal" class="modal-overlay">
-            <div class="modal-box">
+            <div class="modal-box" style="width:600px;">
                 <h3>Configure NPS Survey</h3>
-                <label>Question</label>
-                <input type="text" id="npsQuestion" placeholder="e.g. How would you rate this module?" value="How would you rate this learning experience?">
+                
+                <label>Questions (1-10 Rating)</label>
+                <div id="npsQuestionsList" style="max-height:200px; overflow-y:auto; margin-bottom:10px; padding-right:5px;">
+                    <div class="nps-q-row" style="display:flex; gap:5px; margin-bottom:5px;">
+                        <input type="text" class="nps-q-input" placeholder="e.g. How would you rate this module?" value="How would you rate this learning experience?">
+                    </div>
+                </div>
+                <button class="btn-secondary btn-sm" onclick="NPSSystem.addBuilderQuestion()">+ Add Question</button>
+
                 <label>Link To (Context)</label>
                 <select id="npsContext" onchange="document.getElementById('npsTrigger').disabled = this.value.startsWith('schedule:')">
                     <option value="">-- Select Context --</option>
@@ -260,12 +291,22 @@ NPSSystem.openBuilder = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+NPSSystem.addBuilderQuestion = function() {
+    const container = document.getElementById('npsQuestionsList');
+    const div = document.createElement('div');
+    div.className = 'nps-q-row';
+    div.style.cssText = 'display:flex; gap:5px; margin-bottom:5px;';
+    div.innerHTML = `<input type="text" class="nps-q-input" placeholder="Enter question..."><button class="btn-danger btn-sm" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>`;
+    container.appendChild(div);
+};
+
 NPSSystem.saveSurvey = async function() {
-    const question = document.getElementById('npsQuestion').value;
+    const qInputs = document.querySelectorAll('.nps-q-input');
+    const questions = Array.from(qInputs).map(i => i.value.trim()).filter(v => v);
     const contextVal = document.getElementById('npsContext').value;
     const triggerType = document.getElementById('npsTrigger').value;
     
-    if (!question || !contextVal) return alert("Please fill all fields.");
+    if (questions.length === 0 || !contextVal) return alert("Please add at least one question and select a context.");
     
     let contextType, contextId, contextName;
     
@@ -285,7 +326,7 @@ NPSSystem.saveSurvey = async function() {
 
     const newSurvey = {
         id: Date.now().toString(),
-        question, contextType, contextId, contextName, triggerType,
+        questions, contextType, contextId, contextName, triggerType,
         triggerTime: triggerType === 'time' ? document.getElementById('npsDateTime').value : null,
         active: true,
         created: new Date().toISOString()
@@ -322,7 +363,13 @@ NPSSystem.cloneSurvey = async function(id) {
 
     const clone = JSON.parse(JSON.stringify(original));
     clone.id = Date.now().toString();
-    clone.question += " (Copy)";
+    
+    if (clone.questions) {
+        clone.questions = clone.questions.map(q => q + " (Copy)");
+    } else {
+        clone.questions = [clone.question + " (Copy)"];
+    }
+    
     clone.active = false; 
     clone.created = new Date().toISOString();
     

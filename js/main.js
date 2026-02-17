@@ -846,6 +846,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.26": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added support for multiple questions in NPS Surveys.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Live Assessment Timer for Admins.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Restored Rich Text Editor visibility in Test Builder.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Analytics Dashboard to break down NPS scores per question.</li>
+            </ul>`,
         "2.1.25": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added NPS Rating System for trainee feedback.</li>

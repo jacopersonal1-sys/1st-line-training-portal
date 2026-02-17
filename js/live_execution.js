@@ -6,6 +6,7 @@ let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
 let LIVE_REALTIME_UNSUB = null;
 let LIVE_FALLBACK_POLLER = null;
 let LIVE_CONN_INTERVAL = null;
+let LIVE_TIMER_INTERVAL = null;
 
 function loadLiveExecution() {
     if (LIVE_POLLER) clearInterval(LIVE_POLLER);
@@ -13,6 +14,9 @@ function loadLiveExecution() {
     if (LIVE_REALTIME_UNSUB) { try { LIVE_REALTIME_UNSUB(); } catch (e) {} LIVE_REALTIME_UNSUB = null; }
     if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
     
+    if (LIVE_TIMER_INTERVAL) clearInterval(LIVE_TIMER_INTERVAL);
+    LIVE_TIMER_INTERVAL = setInterval(updateTimerDisplays, 1000);
+
     const container = document.getElementById('live-execution-content');
     if (!container) return;
 
@@ -226,6 +230,11 @@ function renderAdminLivePanel(container) {
         // Reference Button
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="margin-top:5px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
+        // Timer Logic
+        const timer = session.timer || { active: false, duration: 300, start: null };
+        const timeLeft = calculateTimeLeft(timer);
+        const timerDisplay = formatTimer(timeLeft);
+
         mainHtml = `
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; height:100%;">
                 <div class="card" style="overflow-y:auto;">
@@ -240,6 +249,18 @@ function renderAdminLivePanel(container) {
                 </div>
                 
                 <div class="card admin-interaction-active" style="display:flex; flex-direction:column; gap:15px;">
+                    <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                            <label style="font-size:0.8rem; font-weight:bold; margin:0;">Question Timer</label>
+                            <span id="adminTimerDisplay" style="font-family:monospace; font-weight:bold; font-size:1.1rem; color:${timer.active ? '#e74c3c' : 'var(--text-main)'};">${timerDisplay}</span>
+                        </div>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <input type="number" id="liveTimerInput" value="${Math.ceil(timer.duration/60)}" min="1" style="width:70px; margin:0;" ${timer.active ? 'disabled' : ''}>
+                            <span style="font-size:0.8rem; color:var(--text-muted);">min</span>
+                            <button class="btn-sm ${timer.active ? 'btn-danger' : 'btn-success'}" onclick="toggleLiveTimer()" style="flex:1;">${timer.active ? 'Stop' : 'Start'}</button>
+                        </div>
+                    </div>
+
                     <div id="live-admin-answer-box" style="background:#000; color:#0f0; padding:10px; border-radius:4px; font-family:monospace; min-height:60px;">
                         <strong>TRAINEE ANSWER:</strong><br>
                         ${formatAdminAnswerPreview(q, rawAns)}
@@ -305,6 +326,16 @@ function updateAdminLiveView() {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
     if (!test) return;
+
+    // Update Timer Button State if changed remotely
+    const timer = session.timer || { active: false };
+    const timerBtn = document.querySelector('button[onclick="toggleLiveTimer()"]');
+    const timerInput = document.getElementById('liveTimerInput');
+    if (timerBtn) {
+        timerBtn.className = `btn-sm ${timer.active ? 'btn-danger' : 'btn-success'}`;
+        timerBtn.innerText = timer.active ? 'Stop' : 'Start';
+    }
+    if (timerInput) timerInput.disabled = timer.active;
     
     // 1. Update Answer Box (Current Question)
     if (session.currentQ !== -1) {
@@ -470,6 +501,9 @@ function renderTraineeLivePanel(container) {
     
     // Reference Button
     const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
+    
+    // Timer
+    const timer = session.timer || { active: false };
 
     container.innerHTML = `
         <div style="max-width:95%; margin:0 auto; padding:20px;">
@@ -477,6 +511,9 @@ function renderTraineeLivePanel(container) {
                 <h2 style="margin:0;">Live Assessment</h2>
                 <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
                     Checking connection...
+                </div>
+                <div id="traineeTimerDisplay" style="text-align:center; font-size:1.5rem; font-weight:bold; color:#e74c3c; margin-top:10px; ${timer.active ? '' : 'display:none;'}">
+                    ${formatTimer(calculateTimeLeft(timer))}
                 </div>
             </div>
             <div class="progress-track" style="margin-bottom:20px;">
@@ -588,6 +625,13 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
 async function adminPushQuestion(idx) {
     const session = JSON.parse(localStorage.getItem('liveSession'));
     session.currentQ = idx;
+    
+    // Reset Timer on new question
+    if (session.timer) {
+        session.timer.active = false;
+        session.timer.start = null;
+    }
+
     localStorage.setItem('liveSession', JSON.stringify(session));
     
     await updateGlobalSessionArray(session, false);
@@ -861,5 +905,70 @@ window.updateGlobalSessionArray = async function(localSession, force = true) {
     
     if (typeof saveToServer === 'function') {
         await saveToServer(['liveSessions'], force);
+    }
+}
+
+// --- TIMER LOGIC ---
+
+function toggleLiveTimer() {
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    if (!session.timer) session.timer = { active: false, duration: 300, start: null };
+    
+    if (session.timer.active) {
+        // Stop
+        session.timer.active = false;
+        session.timer.start = null;
+    } else {
+        // Start
+        const mins = parseInt(document.getElementById('liveTimerInput').value) || 5;
+        session.timer.duration = mins * 60;
+        session.timer.start = Date.now();
+        session.timer.active = true;
+    }
+    
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    updateGlobalSessionArray(session, false);
+    
+    // Immediate UI update
+    const container = document.getElementById('live-execution-content');
+    if (container) renderAdminLivePanel(container);
+}
+
+function calculateTimeLeft(timer) {
+    if (!timer || !timer.active || !timer.start) return timer ? timer.duration : 0;
+    const elapsed = Math.floor((Date.now() - timer.start) / 1000);
+    return Math.max(0, timer.duration - elapsed);
+}
+
+function formatTimer(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function updateTimerDisplays() {
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    if (!session || !session.timer) return;
+    
+    const timeLeft = calculateTimeLeft(session.timer);
+    const text = formatTimer(timeLeft);
+    
+    const adminDisplay = document.getElementById('adminTimerDisplay');
+    if (adminDisplay) {
+        adminDisplay.innerText = text;
+        if (timeLeft === 0 && session.timer.active) adminDisplay.style.color = 'red';
+        else if (session.timer.active) adminDisplay.style.color = '#e74c3c';
+        else adminDisplay.style.color = 'var(--text-main)';
+    }
+    
+    const traineeDisplay = document.getElementById('traineeTimerDisplay');
+    if (traineeDisplay) {
+        traineeDisplay.innerText = text;
+        if (session.timer.active) {
+            traineeDisplay.style.display = 'block';
+            if (timeLeft <= 30) traineeDisplay.style.color = 'red'; // Warn last 30s
+        } else {
+            traineeDisplay.style.display = 'none';
+        }
     }
 }
