@@ -32,7 +32,9 @@ const DB_SCHEMA = {
     liveSessions: [], // CHANGED: Array to support multiple concurrent sessions
     forbiddenApps: [], // Dynamic list of blacklisted processes
     monitor_data: {}, // Real-time activity tracking { username: { current, history: [] } }
-    monitor_history: [] // Archived daily activity logs
+    monitor_history: [], // Archived daily activity logs
+    nps_surveys: [], // Admin defined surveys
+    nps_responses: [] // Trainee responses
 };
 
 // --- GLOBAL INTERACTION TRACKER ---

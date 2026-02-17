@@ -230,3 +230,23 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
         });
     });
 });
+
+// --- ACTIVE WINDOW TRACKING (Activity Monitor) ---
+ipcMain.handle('get-active-window', async () => {
+    return new Promise((resolve) => {
+        if (process.platform === 'win32') {
+            // PowerShell script to get Foreground Window Title and Process Name
+            const cmd = `powershell -NoProfile -Command "try { $code = '[DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\")] public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);'; $type = Add-Type -MemberDefinition $code -Name Win32 -Namespace Win32 -PassThru; $hwnd = $type::GetForegroundWindow(); $pidOut = 0; $type::GetWindowThreadProcessId($hwnd, [ref]$pidOut) | Out-Null; $p = Get-Process -Id $pidOut; if ($p.MainWindowTitle) { $p.MainWindowTitle + ' [' + $p.ProcessName + ']' } else { $p.ProcessName } } catch { 'Unknown External App' }"`;
+            
+            exec(cmd, (err, stdout, stderr) => {
+                if (err) {
+                    resolve("External Activity (Unknown)");
+                } else {
+                    resolve(stdout.trim() || "External Activity");
+                }
+            });
+        } else {
+            resolve("External Activity (OS Not Supported)");
+        }
+    });
+});

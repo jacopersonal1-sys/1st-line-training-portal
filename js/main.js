@@ -787,7 +787,8 @@ window.cacheAndLogout = async function() {
         if (typeof saveBuilderDraft === 'function') saveBuilderDraft();
     }
 
-    alert("You have been logged out due to inactivity (20 mins).\n\nYour current work has been cached locally and will be restored when you log back in.");
+    const limit = (CURRENT_USER && CURRENT_USER.idleTimeout) ? CURRENT_USER.idleTimeout : 15;
+    alert(`You have been logged out due to inactivity (${limit} mins).\n\nYour current work has been cached locally and will be restored when you log back in.`);
     
     sessionStorage.removeItem('currentUser');
     window.location.reload();
@@ -845,6 +846,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.25": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added NPS Rating System for trainee feedback.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added NPS Control Panel for Admins (Create, Clone, Preview).</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Activity Monitor with precise external app tracking.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Idle Timeout setting not applying to specific users.</li>
+            </ul>`,
         "2.1.24": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Enhanced Department Overview with Effort vs Performance matrix.</li>

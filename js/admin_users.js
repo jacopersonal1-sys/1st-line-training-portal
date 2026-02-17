@@ -687,6 +687,12 @@ async function saveUserEdit() {
     users[editTargetIndex].idleTimeout = (timeoutVal && timeoutVal > 0) ? timeoutVal : 15;
     
     localStorage.setItem('users', JSON.stringify(users));
+
+    // FIX: Update current session if editing self
+    if (CURRENT_USER && users[editTargetIndex].user === CURRENT_USER.user) {
+        CURRENT_USER.idleTimeout = users[editTargetIndex].idleTimeout;
+        sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
+    }
     
     await secureUserSave();
     

@@ -553,6 +553,7 @@
             <div class="admin-sub-nav">
                 <button class="sub-tab-btn active" onclick="showTestEngineSub('overview', this)">Overview & Manage</button>
                 <button class="sub-tab-btn" onclick="showTestEngineSub('history', this)">Completed Assessments (History)</button>
+                <button class="sub-tab-btn" onclick="showTestEngineSub('nps', this)">NPS Feedback Config</button>
             </div>
 
             <div id="engine-view-overview">
@@ -579,6 +580,12 @@
                     <div class="table-responsive" style="max-height:600px; overflow-y:auto;">
                         <div id="completedHistoryList"></div>
                     </div>
+                </div>
+            </div>
+
+            <div id="engine-view-nps" class="hidden">
+                <div id="npsConfigContainer">
+                    <!-- NPS Control Panel injected here -->
                 </div>
             </div>
         </section>
@@ -1066,6 +1073,7 @@
 <script src="js/attendance.js"></script>
 <script src="js/study_monitor.js"></script>
 <script src="js/analyticsDashboard.js"></script>
+<script src="js/nps_system.js"></script>
 
 <script src="js/main.js"></script>
 

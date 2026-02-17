@@ -358,6 +358,47 @@ const AnalyticsEngine = {
             </div>
         `).join('') : '<div style="padding:15px; text-align:center; color:var(--text-muted);">No global pain points detected.</div>';
 
+        // --- 4. NPS FEEDBACK OVERVIEW ---
+        const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
+        const responses = JSON.parse(localStorage.getItem('nps_responses') || '[]');
+        
+        // Filter responses for this group
+        const groupResponses = responses.filter(r => trainees.some(t => t.user === r.user));
+        
+        const npsStats = surveys.map(s => {
+            const sResps = groupResponses.filter(r => r.surveyId === s.id);
+            if (sResps.length === 0) return null;
+            
+            const promoters = sResps.filter(r => r.rating >= 9).length;
+            const detractors = sResps.filter(r => r.rating <= 6).length;
+            const total = sResps.length;
+            const score = Math.round(((promoters - detractors) / total) * 100);
+            
+            let avg = 0;
+            sResps.forEach(r => avg += r.rating);
+            avg = (avg / total).toFixed(1);
+
+            return { name: s.contextName, score: score, avg: avg, count: total };
+        }).filter(s => s !== null);
+
+        const npsHtml = npsStats.length > 0 ? npsStats.map(s => {
+            let color = '#f1c40f';
+            if (s.score > 50) color = '#2ecc71';
+            if (s.score < 0) color = '#ff5252';
+            
+            return `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border-color);">
+                    <div>
+                        <div style="font-weight:bold;">${s.name}</div>
+                        <div style="font-size:0.8rem; color:var(--text-muted);">${s.count} Responses | Avg: ${s.avg}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:1.2rem; font-weight:bold; color:${color};">${s.score}</div>
+                        <div style="font-size:0.7rem; color:var(--text-muted);">NPS</div>
+                    </div>
+                </div>`;
+        }).join('') : '<div style="padding:15px; text-align:center; color:var(--text-muted);">No feedback collected yet.</div>';
+
         // Calculate Top Performers
         const performerStats = trainees.map(t => {
             const myRecords = groupRecords.filter(r => r.trainee === t.user && r.phase === 'Assessment');
@@ -439,6 +480,14 @@ const AnalyticsEngine = {
                         <div style="max-height:250px; overflow-y:auto;">
                             ${globalPainHtml}
                         </div>
+                    </div>
+                </div>
+
+                <!-- Row 4: NPS Feedback -->
+                <div class="card" style="margin-top:20px;">
+                    <h3><i class="fas fa-star" style="color:#f1c40f; margin-right:10px;"></i>Training Feedback (NPS)</h3>
+                    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:15px;">
+                        ${npsHtml}
                     </div>
                 </div>
             </div>

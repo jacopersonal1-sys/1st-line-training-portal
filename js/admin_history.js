@@ -5,6 +5,7 @@ function showTestEngineSub(viewName, btn) {
     // Toggle Views
     document.getElementById('engine-view-overview').classList.add('hidden');
     document.getElementById('engine-view-history').classList.add('hidden');
+    if(document.getElementById('engine-view-nps')) document.getElementById('engine-view-nps').classList.add('hidden');
     
     document.getElementById('engine-view-' + viewName).classList.remove('hidden');
     
@@ -17,6 +18,11 @@ function showTestEngineSub(viewName, btn) {
     if (viewName === 'history') {
         populateHistoryFilters();
         loadCompletedHistory();
+    }
+    if (viewName === 'nps') {
+        if (typeof NPSSystem !== 'undefined' && typeof NPSSystem.renderAdminPanel === 'function') {
+            NPSSystem.renderAdminPanel();
+        }
     }
 }
 

@@ -433,6 +433,11 @@ async function submitTest(forceSubmit = false) {
 
     if (finalStatus === 'completed') {
         if(typeof showToast === 'function') showToast(`Assessment Complete! You scored: %`, "success");
+        
+        // --- TRIGGER NPS SURVEY ---
+        if (typeof NPSSystem !== 'undefined') {
+            NPSSystem.triggerCompletionSurvey('assessment', window.CURRENT_TEST.id);
+        }
     } else {
         if(typeof showToast === 'function') showToast("Submitted Successfully! Results pending Admin review.", "info");
     }

@@ -10,6 +10,7 @@ const StudyMonitor = {
     isStudyOpen: false,
     activeWebview: null,
     viewMode: 'list', // 'list' or 'summary'
+    externalPoller: null, // Track the interval for external monitoring
 
     init: function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
@@ -42,11 +43,13 @@ const StudyMonitor = {
         window.addEventListener('blur', () => {
             if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
                 this.track("External Activity (App Backgrounded)");
+                this.startExternalMonitoring();
             }
         });
         window.addEventListener('focus', () => {
             if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
                 this.track("Resumed App Activity");
+                this.stopExternalMonitoring();
             }
         });
 
@@ -71,6 +74,48 @@ const StudyMonitor = {
                 localStorage.setItem('monitor_data', JSON.stringify(md));
             }
         });
+    },
+
+    // --- EXTERNAL APP POLLING ---
+    startExternalMonitoring: function() {
+        if (this.externalPoller) clearInterval(this.externalPoller);
+        
+        // Poll every 5 seconds to check what app they are using
+        this.externalPoller = setInterval(async () => {
+            if (typeof require !== 'undefined') {
+                try {
+                    const { ipcRenderer } = require('electron');
+                    const activeWindow = await ipcRenderer.invoke('get-active-window');
+                    
+                    // Only track if it's different from current to avoid spamming history
+                    let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
+
+                    // --- WORK SITES WHITELIST ---
+                    const workSites = [
+                        'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
+                        'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
+                        'cp1.herotel.com', 'cp2.herotel.com'
+                    ];
+
+                    // Check if window title contains any of the work sites
+                    const matchedSite = workSites.find(site => activeWindow.toLowerCase().includes(site.toLowerCase()));
+                    
+                    if (matchedSite) {
+                        // Classify as "Studying" (or Work) so it counts towards Focus Score
+                        activityLabel = `Studying: ${matchedSite} (Work System)`;
+                    }
+
+                    if (this.currentActivity !== activityLabel) {
+                        this.track(activityLabel);
+                    }
+                } catch (e) { console.error("External Monitor Error:", e); }
+            }
+        }, 5000);
+    },
+
+    stopExternalMonitoring: function() {
+        if (this.externalPoller) clearInterval(this.externalPoller);
+        this.externalPoller = null;
     },
 
     // --- CORE TRACKING ---
@@ -515,6 +560,12 @@ function renderActivitySummary(container) {
                 topicMap[topic] = (topicMap[topic] || 0) + seg.duration;
             } else if (act.includes('external') || act.includes('background')) {
                 extMs += seg.duration;
+                // Track external apps in breakdown
+                let topic = seg.activity;
+                if (topic.startsWith('External: ')) {
+                    topic = topic.replace('External: ', '').trim();
+                }
+                topicMap[topic] = (topicMap[topic] || 0) + seg.duration;
             } else {
                 idleMs += seg.duration;
             }
