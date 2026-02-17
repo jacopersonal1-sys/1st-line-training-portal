@@ -265,7 +265,13 @@ function renderAgentDashboard(agentName) {
         </div>
     `;
     
-    container.innerHTML = headerHtml + reviewHtml + recordsHtml + reportHtml + attHtml + activityHtml + notesHtml;
+    container.innerHTML = headerHtml + reviewHtml + `<div id="agent-analytics-profile"></div>` + recordsHtml + reportHtml + attHtml + activityHtml + notesHtml;
+
+    // Inject Individual Analytics (Risk Score & Timeline)
+    if (typeof AnalyticsEngine !== 'undefined' && typeof AnalyticsEngine.renderIndividualProfile === 'function') {
+        const profileContainer = document.getElementById('agent-analytics-profile');
+        if(profileContainer) AnalyticsEngine.renderIndividualProfile(profileContainer, agentName);
+    }
 }
 
 async function saveAgentNote(agentName) {

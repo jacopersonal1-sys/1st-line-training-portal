@@ -845,12 +845,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
-        "2.1.23": `
+        "2.1.24": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Daily Activity History to Agent Search profile.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Refined Activity Monitor (Silent updates, Idle tracking).</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Robust daily archiving for activity logs.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Prevented data conflicts during morning syncs.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Enhanced Department Overview with Effort vs Performance matrix.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Group Knowledge Gap Heatmap with test filtering.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Individual At-Risk Score and Activity Timeline in Agent Search.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Added fail-safe to prevent overwriting existing manual scores.</li>
             </ul>`,
         "2.1.22": `
             <ul style="padding-left: 20px; margin: 0;">

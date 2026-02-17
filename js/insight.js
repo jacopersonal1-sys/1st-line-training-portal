@@ -80,12 +80,15 @@ function renderInsightDashboard() {
     }
 
     if(INSIGHT_VIEW_MODE === 'dept') {
-        grid.innerHTML = finalNavHTML + `
-            <div style="text-align:center; padding:50px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:12px; margin-top:20px;">
-                <i class="fas fa-hard-hat" style="font-size:3rem; color:var(--primary); margin-bottom:15px;"></i>
-                <h3>Under Construction</h3>
-                <p style="color:var(--text-muted);">The Department Overview module is currently being built.</p>
-            </div>`;
+        if (typeof AnalyticsEngine !== 'undefined' && typeof AnalyticsEngine.renderDepartmentDashboard === 'function') {
+            AnalyticsEngine.renderDepartmentDashboard(grid, finalNavHTML, currentFilterVal);
+        } else {
+            grid.innerHTML = finalNavHTML + `
+                <div style="text-align:center; padding:50px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:12px; margin-top:20px;">
+                    <i class="fas fa-spinner fa-spin" style="font-size:3rem; color:var(--primary); margin-bottom:15px;"></i>
+                    <h3>Loading Analytics...</h3>
+                </div>`;
+        }
         return;
     }
 
@@ -192,7 +195,13 @@ function renderStandardView(members, filter, grid, navHTML) {
         grid.innerHTML = navHTML + `<div style="grid-column:1/-1; text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-check-circle" style="font-size:3rem; color:#27ae60; margin-bottom:15px;"></i><br>${emptyMsg}</div>`;
     } else {
         // Use 'compact-grid' class for tighter layout
-        grid.innerHTML = navHTML + `<div class="insight-grid compact-grid" style="margin-top:15px;">${cardsHTML}</div>`;
+        grid.innerHTML = navHTML + `<div id="group-stats-container"></div>` + `<div class="insight-grid compact-grid" style="margin-top:15px;">${cardsHTML}</div>`;
+        
+        // Inject Group Analytics
+        if (typeof AnalyticsEngine !== 'undefined' && typeof AnalyticsEngine.renderGroupDashboard === 'function') {
+            const statsContainer = document.getElementById('group-stats-container');
+            if(statsContainer) AnalyticsEngine.renderGroupDashboard(statsContainer, filter);
+        }
     }
 }
 
@@ -345,7 +354,13 @@ function renderProgressView(members, filter, grid, navHTML) {
     });
 
     html += '</div>';
-    grid.innerHTML = navHTML + html;
+    grid.innerHTML = navHTML + `<div id="group-stats-container"></div>` + html;
+
+    // Inject Group Analytics
+    if (typeof AnalyticsEngine !== 'undefined' && typeof AnalyticsEngine.renderGroupDashboard === 'function') {
+        const statsContainer = document.getElementById('group-stats-container');
+        if(statsContainer) AnalyticsEngine.renderGroupDashboard(statsContainer, filter);
+    }
 }
 
 function toggleChecklist(id) {

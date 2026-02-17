@@ -103,6 +103,29 @@ async function saveScores() {
     } 
     
     const recs = JSON.parse(localStorage.getItem('records')||'[]'); 
+
+    // --- FAIL-SAFE: Check for existing scores to prevent overwrites ---
+    const conflicts = [];
+    document.querySelectorAll('#captureTable tr').forEach(r => {
+        const scInput = r.querySelector('.score-input');
+        const sc = scInput ? scInput.value : '';
+        
+        if(sc !== "" && sc !== undefined && sc !== null) {
+            const traineeName = r.dataset.trainee;
+            if(traineeName) {
+                // Check if a record already exists for this exact combination
+                const exists = recs.some(item => item.trainee === traineeName && item.assessment === finalAssessName && item.groupID === gid && item.phase === phase);
+                if(exists) conflicts.push(traineeName);
+            }
+        }
+    });
+
+    if(conflicts.length > 0) {
+        alert(`⚠️ SAVE FAILED: SCORES ALREADY EXIST\n\nThe following trainees already have a score for "${finalAssessName}":\n\n${conflicts.join(', ')}\n\nTo prevent accidental overwrites, this action has been blocked.\nPlease edit these records individually in the 'Assessment Records' tab if you intended to update them.`);
+        return;
+    }
+    // -----------------------------------------------------------------
+
     let savedCount = 0;
 
     document.querySelectorAll('#captureTable tr').forEach(r => { 
