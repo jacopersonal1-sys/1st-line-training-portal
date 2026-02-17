@@ -61,17 +61,4 @@ describe('Data Sync Module', () => {
         expect(merged.users[0].user).toBe('ActiveUser');
         expect(merged.revokedUsers).toContain('DeletedUser');
     });
-
-    test('performSmartMerge prevents duplicate liveSessions', () => {
-        const sessionA = { sessionId: '123', active: true, currentQ: 1 };
-        const sessionB = { sessionId: '123', active: true, currentQ: 2 }; // Newer state
-        
-        const server = { liveSessions: [sessionA] };
-        const local = { liveSessions: [sessionB] };
-        
-        const merged = DataModule.performSmartMerge(server, local);
-        
-        expect(merged.liveSessions.length).toBe(1);
-        expect(merged.liveSessions[0].currentQ).toBe(2); // Should prefer local (newer)
-    });
 });

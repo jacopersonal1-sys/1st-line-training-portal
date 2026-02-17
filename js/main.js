@@ -457,7 +457,6 @@ function showTab(id, btn) {
   
   if(id === 'monthly') {
       if(typeof loadAllDataViews === 'function') loadAllDataViews(); 
-      populateFetchFilters();
   }
   
   if(id === 'report-card') {
@@ -846,6 +845,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.28": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Vetting Tests were missing from Agent Progress checklist.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Live Assessment Timer visibility for trainees.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced fuzzy matching for Vetting Topic completion detection.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Removed duplicate code blocks in data sync logic.</li>
+            </ul>`,
         "2.1.27": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where input fields froze after submitting scores in Capture Scores.</li>

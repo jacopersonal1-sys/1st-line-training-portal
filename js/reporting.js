@@ -44,22 +44,25 @@ function populateMonthlyFilters() {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
     const groupSel = document.getElementById('filterMonth');
     const assessSel = document.getElementById('filterAssessment');
+    const phaseSel = document.getElementById('filterPhase');
     
-    if(!groupSel || !assessSel) return;
+    if(!groupSel || !assessSel || !phaseSel) return;
 
     // --- FOCUS PROTECTION ---
     // If the user is currently interacting with these dropdowns, 
     // do not refresh them, or the menu will close unexpectedly.
-    if (document.activeElement && (document.activeElement === groupSel || document.activeElement === assessSel)) {
+    if (document.activeElement && (document.activeElement === groupSel || document.activeElement === assessSel || document.activeElement === phaseSel)) {
         return;
     }
 
     const currentGroup = groupSel.value;
     const currentAssess = assessSel.value;
+    const currentPhase = phaseSel.value;
 
     // FIX: Filter out null/undefined/empty strings to prevent blank options
     const uniqueGroups = [...new Set(recs.map(r => r.groupID))].filter(g => g && g.trim() !== "").sort().reverse();
     const uniqueAssess = [...new Set(recs.map(r => r.assessment))].filter(a => a && a.trim() !== "").sort();
+    const uniquePhases = [...new Set(recs.map(r => r.phase))].filter(p => p && p.trim() !== "").sort();
     
     groupSel.innerHTML = '<option value="">-- None --</option>';
     uniqueGroups.forEach(g => { 
@@ -72,9 +75,15 @@ function populateMonthlyFilters() {
     uniqueAssess.forEach(a => { 
         assessSel.add(new Option(a, a)); 
     });
+
+    phaseSel.innerHTML = '<option value="">-- None --</option>';
+    uniquePhases.forEach(p => {
+        phaseSel.add(new Option(p, p));
+    });
     
     if(uniqueGroups.includes(currentGroup)) groupSel.value = currentGroup;
     if(uniqueAssess.includes(currentAssess)) assessSel.value = currentAssess;
+    if(uniquePhases.includes(currentPhase)) phaseSel.value = currentPhase;
 }
 
 function renderMonthly() {

@@ -221,33 +221,91 @@ async function saveScores() {
 
 function loadTestRecords() {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     
     // Filters
+    const groupFilter = document.getElementById('filterTestGroup').value;
     const nameFilter = document.getElementById('filterTestName').value;
     const statusFilter = document.getElementById('filterTestStatus').value;
     const traineeFilter = document.getElementById('filterTestTrainee').value.toLowerCase();
     
-    // Populate Name Dropdown if empty
+    // --- 1. MERGE DATA SOURCES (Digital + Manual Vetting) ---
+    let combinedData = [];
+
+    // A. Digital Submissions (Vetting Only)
+    subs.forEach(s => {
+        // Check if it's a vetting test
+        const testDef = tests.find(t => t.id == s.testId || t.title === s.testTitle);
+        const isVetting = (testDef && testDef.type === 'vetting') || s.testTitle.toLowerCase().includes('vetting');
+        
+        if (isVetting) {
+            combinedData.push({
+                id: s.id,
+                date: s.date,
+                trainee: s.trainee,
+                testTitle: s.testTitle,
+                score: s.score,
+                status: s.status,
+                source: 'digital'
+            });
+        }
+    });
+
+    // B. Manual Records (Vetting Only)
+    records.forEach(r => {
+        // Only include if phase is Vetting AND it's NOT a digital record (avoid duplicates)
+        if (r.phase && r.phase.includes('Vetting') && r.link !== 'Digital-Assessment' && r.link !== 'Live-Session') {
+            combinedData.push({
+                id: r.id,
+                date: r.date,
+                trainee: r.trainee,
+                testTitle: r.assessment,
+                score: r.score,
+                status: 'completed', // Manual records are always completed
+                source: 'manual'
+            });
+        }
+    });
+
+    // --- 2. POPULATE FILTERS DYNAMICALLY ---
     const nameSelect = document.getElementById('filterTestName');
-    if (nameSelect && nameSelect.options.length === 1) {
-        tests.forEach(t => nameSelect.add(new Option(t.title, t.title)));
+    const groupSelect = document.getElementById('filterTestGroup');
+
+    if (nameSelect && groupSelect) {
+        // Only repopulate if not currently focused (prevents UI glitch while typing/selecting)
+        if (document.activeElement !== nameSelect && document.activeElement !== groupSelect) {
+            const uniqueTests = [...new Set(combinedData.map(d => d.testTitle))].sort();
+            const uniqueGroups = Object.keys(rosters).sort().reverse();
+
+            nameSelect.innerHTML = '<option value="">All Tests</option>';
+            uniqueTests.forEach(t => nameSelect.add(new Option(t, t)));
+            if (nameFilter && uniqueTests.includes(nameFilter)) nameSelect.value = nameFilter;
+
+            groupSelect.innerHTML = '<option value="">All Groups</option>';
+            uniqueGroups.forEach(g => {
+                const label = (typeof getGroupLabel === 'function') ? getGroupLabel(g, rosters[g].length) : g;
+                groupSelect.add(new Option(label, g));
+            });
+            if (groupFilter && uniqueGroups.includes(groupFilter)) groupSelect.value = groupFilter;
+        }
     }
 
     const tbody = document.querySelector('#testRecordsTable tbody');
     if(tbody) {
         tbody.innerHTML = '';
         
-        const filtered = subs.filter(s => {
+        const filtered = combinedData.filter(s => {
             if(nameFilter && s.testTitle !== nameFilter) return false;
             if(statusFilter && s.status !== statusFilter) return false;
             if(traineeFilter && !s.trainee.toLowerCase().includes(traineeFilter)) return false;
             
-            // VETTING ONLY FILTER (As requested)
-            const testDef = tests.find(t => t.id == s.testId || t.title === s.testTitle);
-            if (testDef && testDef.type !== 'vetting') return false;
-            if (!testDef && !s.testTitle.toLowerCase().includes('vetting')) return false; // Fallback
+            // Group Filter
+            if (groupFilter) {
+                const members = rosters[groupFilter] || [];
+                if (!members.some(m => m.toLowerCase() === s.trainee.toLowerCase())) return false;
+            }
             
             return true;
         });
@@ -255,7 +313,9 @@ function loadTestRecords() {
         if(filtered.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#888;">No records found.</td></tr>';
         } else {
-            filtered.sort((a,b) => b.id - a.id); // Newest first
+            // Sort by Date Descending
+            filtered.sort((a,b) => new Date(b.date) - new Date(a.date));
+            
             filtered.forEach(s => {
                 // Find Group
                 let groupID = "Unknown";
@@ -284,18 +344,29 @@ function loadTestRecords() {
                 const safeTrainee = s.trainee.replace(/'/g, "\\'");
                 const safeTitle = s.testTitle.replace(/'/g, "\\'");
 
-                // Link to 'assessment.js' viewer
-                // Note: 'viewCompletedTest' calls 'openAdminMarking' in assessment.js
-                let actionBtn = `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'view')">View</button>`;
+                let actionBtn = '';
+
+                if (s.source === 'digital') {
+                    // Link to 'assessment.js' viewer
+                    actionBtn = `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'view')">View</button>`;
+                } else {
+                    actionBtn = `<span style="font-size:0.8rem; color:var(--text-muted); font-style:italic;">Manual</span>`;
+                }
                 
                 // ADMIN ONLY ACTIONS
                 if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'teamleader') {
-                    actionBtn += ` <button class="btn-primary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'edit')" title="Edit Score"><i class="fas fa-pen"></i></button>`;
-                    actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;
-                    
-                    // Allow Retake if not already archived
-                    if (s.status === 'completed' || s.status === 'pending') {
-                        actionBtn += ` <button class="btn-warning btn-sm" onclick="allowRetake('${s.id}')" title="Allow Retake"><i class="fas fa-redo"></i></button>`;
+                    if (s.source === 'digital') {
+                        actionBtn += ` <button class="btn-primary btn-sm" onclick="viewCompletedTest('${safeTrainee}', '${safeTitle}', 'edit')" title="Edit Score"><i class="fas fa-pen"></i></button>`;
+                        actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;
+                        
+                        // Allow Retake if not already archived
+                        if (s.status === 'completed' || s.status === 'pending') {
+                            actionBtn += ` <button class="btn-warning btn-sm" onclick="allowRetake('${s.id}')" title="Allow Retake"><i class="fas fa-redo"></i></button>`;
+                        }
+                    } else {
+                        // Manual Record Actions (Limited)
+                        // We don't have a direct delete here because it's a record, not a submission.
+                        // Users should go to "Assessment Records" to manage manual records.
                     }
                 }
 

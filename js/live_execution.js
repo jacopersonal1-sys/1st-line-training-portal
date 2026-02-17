@@ -503,7 +503,7 @@ function renderTraineeLivePanel(container) {
     const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
     
     // Timer
-    const timer = session.timer || { active: false };
+    const timer = session.timer || { active: false, duration: 300, start: null };
 
     container.innerHTML = `
         <div style="max-width:95%; margin:0 auto; padding:20px;">
@@ -512,7 +512,7 @@ function renderTraineeLivePanel(container) {
                 <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
                     Checking connection...
                 </div>
-                <div id="traineeTimerDisplay" style="text-align:center; font-size:1.5rem; font-weight:bold; color:#e74c3c; margin-top:10px; ${timer.active ? '' : 'display:none;'}">
+                <div id="traineeTimerDisplay" style="text-align:center; font-size:1.5rem; font-weight:bold; color:${timer.active ? '#e74c3c' : 'var(--text-muted)'}; margin-top:10px;">
                     ${formatTimer(calculateTimeLeft(timer))}
                 </div>
             </div>

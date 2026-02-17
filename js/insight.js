@@ -237,14 +237,20 @@ function renderProgressView(members, filter, grid, navHTML) {
     
     // 1. Standard Assessments
     assessments.forEach(a => {
-        if(!a.name.toLowerCase().includes("vetting")) requiredItems.push({ name: a.name, type: 'assessment' });
+        // Include ALL assessments (Standard + Live) except explicit Vetting Tests
+        // Vetting Tests are handled via Topics to avoid duplication
+        if(!a.name.toLowerCase().includes("vetting test")) {
+             requiredItems.push({ name: a.name, type: 'assessment' });
+        }
     });
 
     // 2. Vetting Sub-Tests
-    // STRICT DYNAMIC: Only use topics defined in Admin > Vetting Topics
     topics.forEach(t => {
-        requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
-        requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
+        // Only generate variations if it's a raw topic name
+        if (!t.toLowerCase().includes('vetting')) {
+            requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
+            requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
+        }
     });
 
     // 3. Misc Items
@@ -284,12 +290,20 @@ function renderProgressView(members, filter, grid, navHTML) {
                 }
                 else {
                     // Check Records (Exact Match first, then fuzzy)
-                    const match = myRecords.find(r => r.assessment === itemName);
+                    // UPDATED: Robust check for Vetting items that might have variable naming
+                    const match = myRecords.find(r => {
+                        if (r.assessment === itemName) return true;
+                        if (req.type === 'vetting' && r.assessment.toLowerCase().includes(itemName.toLowerCase().replace('1st vetting - ', '').replace('final vetting - ', ''))) return true;
+                        return false;
+                    });
                     if (match) status = 'completed';
                     
                     if (status !== 'completed') {
                         // Check Submissions (Digital)
-                        const subMatch = mySubs.find(s => s.testTitle === itemName && s.status === 'completed');
+                        const subMatch = mySubs.find(s => {
+                            if (s.testTitle === itemName && s.status === 'completed') return true;
+                            return req.type === 'vetting' && s.testTitle.toLowerCase().includes(itemName.toLowerCase().replace('1st vetting - ', '').replace('final vetting - ', '')) && s.status === 'completed';
+                        });
                         if (subMatch) status = 'completed';
                     }
                 }
@@ -394,7 +408,10 @@ function calculateAgentStats(traineeName, records) {
     
     let requiredItems = [];
     assessments.forEach(a => {
-        if(!a.name.toLowerCase().includes("vetting")) requiredItems.push({ name: a.name, type: 'assessment' });
+        // Include ALL assessments (Standard + Live) except explicit Vetting Tests
+        if(!a.name.toLowerCase().includes("vetting test")) {
+            requiredItems.push({ name: a.name, type: 'assessment' });
+        }
     });
     
     topics.forEach(t => {
@@ -426,9 +443,20 @@ function calculateAgentStats(traineeName, records) {
         }
         else {
              // Check Records
-             if (records.some(r => r.assessment === itemName)) isDone = true;
+             if (records.some(r => {
+                 if (r.assessment === itemName) return true;
+                 if (req.type === 'vetting' && r.assessment.toLowerCase().includes(itemName.toLowerCase().replace('1st vetting - ', '').replace('final vetting - ', ''))) return true;
+                 return false;
+             })) isDone = true;
+
              // Check Digital Subs
-             if (!isDone && submissions.some(s => s.trainee === traineeName && s.testTitle === itemName && s.status === 'completed')) isDone = true;
+             if (!isDone && submissions.some(s => {
+                 if (s.trainee === traineeName && s.status === 'completed') {
+                     if (s.testTitle === itemName) return true;
+                     if (req.type === 'vetting' && s.testTitle.toLowerCase().includes(itemName.toLowerCase().replace('1st vetting - ', '').replace('final vetting - ', ''))) return true;
+                 }
+                 return false;
+             })) isDone = true;
         }
         
         if(isDone) completedCount++;

@@ -531,9 +531,10 @@
         <div style="display:flex; justify-content:space-between;"><h2>Vetting Test Submissions</h2></div>
         <div class="card">
             <div class="grid-4">
+                <div><label for="filterTestGroup">Group</label><select id="filterTestGroup" onchange="loadTestRecords()"><option value="">All Groups</option></select></div>
                 <div><label for="filterTestName">Test Name</label><select id="filterTestName" onchange="loadTestRecords()"><option value="">All Tests</option></select></div>
                 <div><label for="filterTestStatus">Status</label><select id="filterTestStatus" onchange="loadTestRecords()"><option value="">All</option><option value="completed">Completed</option><option value="pending_review">Pending Review</option></select></div>
-                <div style="grid-column: span 2;"><label for="filterTestTrainee">Search Trainee</label><input type="text" id="filterTestTrainee" placeholder="Search..." onkeyup="loadTestRecords()" style="margin-bottom:0;" aria-label="Search Test Records"></div>
+                <div><label for="filterTestTrainee">Search Trainee</label><input type="text" id="filterTestTrainee" placeholder="Search..." onkeyup="loadTestRecords()" style="margin-bottom:0;" aria-label="Search Test Records"></div>
             </div>
             <div class="table-responsive">
             <table id="testRecordsTable">
