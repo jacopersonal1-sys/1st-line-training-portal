@@ -188,7 +188,7 @@ async function saveScores() {
     localStorage.setItem('records', JSON.stringify(recs)); 
     
     // Ensure users exist if we just added records for them
-    if(typeof scanAndGenerateUsers === 'function') scanAndGenerateUsers(); 
+    if(typeof scanAndGenerateUsers === 'function') scanAndGenerateUsers(true); 
     
     // --- CLOUD SYNC START ---
     // OPTIMISTIC SAVE: Don't block the UI. Sync in background.

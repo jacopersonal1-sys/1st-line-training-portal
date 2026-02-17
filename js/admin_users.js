@@ -336,7 +336,7 @@ function populateTraineeDropdown() {
 
 // --- USER & TRAINEE MANAGEMENT ---
 
-async function scanAndGenerateUsers() { 
+async function scanAndGenerateUsers(silent = false) { 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
     const records = JSON.parse(localStorage.getItem('records') || '[]'); 
@@ -388,11 +388,11 @@ async function scanAndGenerateUsers() {
 
         // FIX: Ensure cloud sync happens immediately
         await secureUserSave();
-        alert(`Generated ${createdCount} missing accounts (${resurrectedCount} restored from deletion).`); 
+        if(!silent) alert(`Generated ${createdCount} missing accounts (${resurrectedCount} restored from deletion).`); 
         loadAdminUsers(); 
         populateTraineeDropdown(); 
     } else {
-        alert("No missing users found based on current Rosters/Records.");
+        if(!silent) alert("No missing users found based on current Rosters/Records.");
     }
 }
 

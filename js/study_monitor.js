@@ -14,6 +14,27 @@ const StudyMonitor = {
 
     init: function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
+
+        // 1. RESTORE HISTORY (Persist across reloads)
+        if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+            try {
+                // Check unsynced first (crash/close recovery)
+                const unsynced = localStorage.getItem('monitor_unsynced');
+                if (unsynced) {
+                    const payload = JSON.parse(unsynced);
+                    if (payload.user === CURRENT_USER.user && Array.isArray(payload.history)) {
+                        this.history = payload.history;
+                    }
+                    localStorage.removeItem('monitor_unsynced');
+                } else {
+                    // Normal restore
+                    const md = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                    if (md[CURRENT_USER.user] && Array.isArray(md[CURRENT_USER.user].history)) {
+                        this.history = md[CURRENT_USER.user].history;
+                    }
+                }
+            } catch(e) { console.error("History Restore Error", e); }
+        }
         
         // Start periodic sync (every 10s)
         this.syncInterval = setInterval(() => this.sync(), 10000);
@@ -21,23 +42,6 @@ const StudyMonitor = {
 
         // --- DAILY ARCHIVE CHECK ---
         this.checkDailyReset();
-
-        // --- FAIL-SAFE: RECOVER UNSYNCED EXIT DATA ---
-        // If the app closed before syncing the last event, recover it now.
-        const unsynced = localStorage.getItem('monitor_unsynced');
-        if (unsynced) {
-            try {
-                const payload = JSON.parse(unsynced);
-                // Merge into current data
-                let monitorData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-                monitorData[payload.user] = payload;
-                localStorage.setItem('monitor_data', JSON.stringify(monitorData));
-                
-                // Clear the emergency flag and force sync
-                localStorage.removeItem('monitor_unsynced');
-                this.sync(); 
-            } catch(e) { console.error("Monitor Recovery Failed", e); }
-        }
 
         // --- TRACK EXTERNAL ACTIVITY ---
         window.addEventListener('blur', () => {
@@ -134,9 +138,6 @@ const StudyMonitor = {
             });
         }
 
-        // Prune history (Keep last 50 entries to save bandwidth)
-        if (this.history.length > 50) this.history.shift();
-
         this.currentActivity = activityName;
         this.startTime = now;
         this.clickCount = 0; // Reset click count for new activity
@@ -224,6 +225,9 @@ const StudyMonitor = {
                 // Reset Live Data for Today
                 monitorData[CURRENT_USER.user] = { current: 'System: New Day Start', since: Date.now(), isStudyOpen: false, history: [], date: today };
                 localStorage.setItem('monitor_data', JSON.stringify(monitorData));
+                
+                // RESET MEMORY
+                this.history = [];
                 
                 // ROBUSTNESS FIX: Use 'false' (Safe Merge) to prevent overwriting other users' history entries
                 if (typeof saveToServer === 'function') await saveToServer(['monitor_data', 'monitor_history'], false);

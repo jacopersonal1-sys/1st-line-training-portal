@@ -846,6 +846,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.27": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where input fields froze after submitting scores in Capture Scores.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Improved background user generation to be silent during score capture.</li>
+            </ul>`,
         "2.1.26": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added support for multiple questions in NPS Surveys.</li>
