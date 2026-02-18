@@ -749,6 +749,13 @@ if (typeof require !== 'undefined') {
     ipcRenderer.on('update-downloaded', (event) => {
         if(typeof showToast === 'function') showToast("Update downloaded. Restart to apply.", "success");
         
+        // NEW: Check if this was a Forced Update from Admin
+        if (sessionStorage.getItem('force_update_active') === 'true') {
+            sessionStorage.removeItem('force_update_active');
+            restartAndInstall();
+            return;
+        }
+
         // Add a restart button to the footer for easy access
         const footer = document.getElementById('user-footer');
         if (footer) {
@@ -845,6 +852,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.33": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Pre-Production Feedback persisted between different trainees in Onboard Reports.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Included Live Assessments (e.g. Course 2) in the main Assessment Scores table.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Force Update' auto-install capability for remote admin updates.</li>
+            </ul>`,
         "2.1.32": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Activity Monitor list flickering/resetting by implementing Smart Merge sync.</li>

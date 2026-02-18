@@ -582,6 +582,8 @@ async function sendHeartbeat() {
                 if (typeof triggerForceRestart === 'function') triggerForceRestart();
             } else if (sessionData.pending_action === 'force_update') {
                 if (typeof require !== 'undefined') {
+                    // NEW: Set flag so main.js knows to auto-install when download completes
+                    sessionStorage.setItem('force_update_active', 'true');
                     const { ipcRenderer } = require('electron');
                     ipcRenderer.send('manual-update-check');
                     if(typeof showToast === 'function') showToast("System Update Check Initiated by Admin", "info");

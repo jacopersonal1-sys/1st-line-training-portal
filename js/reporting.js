@@ -292,9 +292,9 @@ function generateReport() {
 
   // 1. STANDARD ASSESSMENTS (Dynamic)
   const assessList = JSON.parse(localStorage.getItem('assessments') || '[]');
-  // Filter out Vetting Tests AND Live Assessments from the main assessment list
+  // Filter out Vetting Tests (Include Live Assessments in main report)
   const standardAssessments = assessList.filter(a => 
-      !a.name.toLowerCase().includes('vetting test') && !a.live
+      !a.name.toLowerCase().includes('vetting test')
   );
   
   let goalHtml = ''; let scoreHtml = '';
@@ -333,6 +333,10 @@ function generateReport() {
   if(decisions[name]) {
       document.getElementById('repFeedback').innerText = decisions[name].comment || "";
       document.getElementById('repDeploy').innerText = decisions[name].status || "";
+  } else {
+      // Clear fields if no decision exists to prevent data leakage between trainees
+      document.getElementById('repFeedback').innerText = "";
+      document.getElementById('repDeploy').innerText = "";
   }
 }
 
