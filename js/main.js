@@ -852,6 +852,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.35": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where classified 'External' activities would reappear in the Review Queue.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Implemented 'Reviewed' list to permanently dismiss classified items across all admins.</li>
+            </ul>`,
         "2.1.34": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>System:</strong> Improved Activity Monitor robustness (Idle detection & Data retention).</li>

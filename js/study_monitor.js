@@ -581,6 +581,7 @@ StudyMonitor.toggleQueueItem = function(val, checked) {
 function renderReviewQueue(container) {
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
     const whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
+    const reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]');
     const groups = {}; // Group by Process ID [proc]
     const ungrouped = new Set();
     
@@ -591,6 +592,8 @@ function renderReviewQueue(container) {
                 
                 // Check if already whitelisted (Partial match)
                 if (whitelist.some(w => raw.toLowerCase().includes(w.trim().toLowerCase()))) return;
+                // Check if already reviewed/dismissed (Partial match)
+                if (reviewed.some(r => raw.toLowerCase().includes(r.trim().toLowerCase()))) return;
 
                 const match = raw.match(/\[(.*?)\]$/); // Extract [process]
                 if (match) {
@@ -923,6 +926,7 @@ StudyMonitor.confirmClassification = async function() {
         newPrefix = "Studying: ";
         // Add to whitelist for future
         let whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
+        let reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]');
         if (whitelist.length === 0) whitelist = ['acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com', 'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com', 'cp1.herotel.com', 'cp2.herotel.com'];
         
         let wlChanged = false;
@@ -931,18 +935,45 @@ StudyMonitor.confirmClassification = async function() {
                 whitelist.push(t);
                 wlChanged = true;
             }
+            // Remove from reviewed if it was previously dismissed
+            const revIdx = reviewed.indexOf(t);
+            if (revIdx > -1) {
+                reviewed.splice(revIdx, 1);
+                wlChanged = true;
+            }
         });
         
         if (wlChanged) {
             localStorage.setItem('monitor_whitelist', JSON.stringify(whitelist));
-            if(typeof saveToServer === 'function') await saveToServer(['monitor_whitelist'], false);
+            localStorage.setItem('monitor_reviewed', JSON.stringify(reviewed));
+            if(typeof saveToServer === 'function') await saveToServer(['monitor_whitelist', 'monitor_reviewed'], false);
         }
-    } else if (type === "2") {
-        newPrefix = "External: ";
-        // Remove from whitelist if present
-        // ... (logic to remove if needed)
-    } else if (type === "3") {
-        newPrefix = "Idle: ";
+    } else if (type === "2" || type === "3") {
+        newPrefix = (type === "2") ? "External: " : "Idle: ";
+        
+        // Add to 'reviewed' list so it doesn't pop up again
+        let reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]');
+        let whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
+        let revChanged = false;
+
+        topics.forEach(t => {
+            if (!reviewed.includes(t)) {
+                reviewed.push(t);
+                revChanged = true;
+            }
+            // Remove from whitelist if present
+            const wlIdx = whitelist.indexOf(t);
+            if (wlIdx > -1) {
+                whitelist.splice(wlIdx, 1);
+                revChanged = true;
+            }
+        });
+
+        if (revChanged) {
+            localStorage.setItem('monitor_reviewed', JSON.stringify(reviewed));
+            localStorage.setItem('monitor_whitelist', JSON.stringify(whitelist));
+            if(typeof saveToServer === 'function') await saveToServer(['monitor_reviewed', 'monitor_whitelist'], false);
+        }
     } else {
         return;
     }

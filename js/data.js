@@ -36,7 +36,8 @@ const DB_SCHEMA = {
     nps_surveys: [], // Admin defined surveys
     nps_responses: [], // Trainee responses
     graduated_agents: [], // Archived data for graduated trainees
-    monitor_whitelist: [] // Custom whitelist for work-related apps
+    monitor_whitelist: [], // Custom whitelist for work-related apps
+    monitor_reviewed: [] // Apps confirmed as External/Idle (Dismissed from queue)
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -102,7 +103,7 @@ async function loadFromServer(silent = false) {
             docs.forEach(doc => {
                 // SMART PULL: Merge specific keys instead of overwriting
                 // This prevents the "Fresh List" issue where background sync wipes local pending data
-                const mergeKeys = ['monitor_data', 'monitor_history'];
+                const mergeKeys = ['monitor_data', 'monitor_history', 'monitor_whitelist', 'monitor_reviewed'];
                 
                 if (mergeKeys.includes(doc.key)) {
                     const localVal = JSON.parse(localStorage.getItem(doc.key));
@@ -311,8 +312,8 @@ function performSmartMerge(server, local) {
                         return localItem.name.trim().toLowerCase() === serverItem.name.trim().toLowerCase();
                     }
 
-                    // 4. Vetting Topics & Whitelist (Strings) - FIXES DUPLICATION
-                    if ((key === 'vettingTopics' || key === 'monitor_whitelist') && typeof localItem === 'string' && typeof serverItem === 'string') {
+                    // 4. Vetting Topics, Whitelist & Reviewed (Strings) - FIXES DUPLICATION
+                    if ((key === 'vettingTopics' || key === 'monitor_whitelist' || key === 'monitor_reviewed') && typeof localItem === 'string' && typeof serverItem === 'string') {
                         return localItem.trim().toLowerCase() === serverItem.trim().toLowerCase();
                     }
 
