@@ -520,32 +520,71 @@ function openMoveUserModal(username) {
 async function confirmMoveUser() {
     const targetGid = document.getElementById('moveUserTargetSelect').value;
     if(!targetGid) return alert("Please select a destination group.");
-    
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    let moved = false;
 
-    for (const gid in rosters) {
-        const idx = rosters[gid].indexOf(userToMove);
-        if (idx > -1) {
-            rosters[gid].splice(idx, 1);
+    if(!confirm(`Move ${userToMove} to ${targetGid}?\n\nWARNING: This will ARCHIVE all their current progress, records, and attendance to start fresh in the new group (Retrain Mode).\n\nProceed?`)) return;
+
+    const btn = document.querySelector('#moveUserModal .btn-warning');
+    if(btn) { btn.innerText = "Moving & Archiving..."; btn.disabled = true; }
+
+    try {
+        // 1. ARCHIVE DATA (Snapshot)
+        const archiveData = {
+            user: userToMove,
+            graduatedDate: new Date().toISOString(), // Use standard key for compatibility
+            reason: 'Moved to ' + targetGid,
+            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => r.trainee === userToMove),
+            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => s.trainee === userToMove),
+            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => r.user === userToMove),
+            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => r.trainee === userToMove),
+            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => r.trainee === userToMove),
+            notes: (JSON.parse(localStorage.getItem('agentNotes') || '{}'))[userToMove] || null
+        };
+
+        let archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        archives.push(archiveData);
+        localStorage.setItem('graduated_agents', JSON.stringify(archives));
+
+        // 2. WIPE ACTIVE DATA (Clean Slate)
+        const wipe = (key, field) => {
+            let data = JSON.parse(localStorage.getItem(key) || '[]');
+            const newData = data.filter(item => item[field] !== userToMove);
+            if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
+        };
+        
+        wipe('records', 'trainee');
+        wipe('submissions', 'trainee');
+        wipe('attendance_records', 'user');
+        wipe('savedReports', 'trainee');
+        wipe('insightReviews', 'trainee');
+        
+        let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+        if(notes[userToMove]) { delete notes[userToMove]; localStorage.setItem('agentNotes', JSON.stringify(notes)); }
+
+        // 3. MOVE ROSTER
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        for (const gid in rosters) {
+            const idx = rosters[gid].indexOf(userToMove);
+            if (idx > -1) rosters[gid].splice(idx, 1);
         }
-    }
-    
-    if(!rosters[targetGid]) rosters[targetGid] = [];
-    if(!rosters[targetGid].includes(userToMove)) {
-        rosters[targetGid].push(userToMove);
-        moved = true;
-    }
-    
-    if(moved) {
+        if(!rosters[targetGid]) rosters[targetGid] = [];
+        if(!rosters[targetGid].includes(userToMove)) rosters[targetGid].push(userToMove);
         localStorage.setItem('rosters', JSON.stringify(rosters));
-        await secureUserSave();
-        alert(`${userToMove} moved successfully.`);
+
+        // 4. SYNC EVERYTHING
+        if(typeof saveToServer === 'function') {
+            await saveToServer(['rosters', 'graduated_agents', 'records', 'submissions', 'attendance_records', 'savedReports', 'insightReviews', 'agentNotes'], true);
+        }
+
+        alert(`${userToMove} moved to ${targetGid}. Previous data archived.`);
         document.getElementById('moveUserModal').classList.add('hidden');
         loadAdminUsers();
         refreshAllDropdowns();
-    } else {
-        alert("Error moving user.");
+
+    } catch(e) {
+        console.error("Move Error:", e);
+        alert("Error moving user: " + e.message);
+    } finally {
+        if(btn) { btn.innerText = "Confirm Move"; btn.disabled = false; }
     }
 }
 
@@ -724,6 +763,9 @@ function loadGraduatedAgents() {
         // Try to find group from archived records
         let group = "Unknown";
         if (g.records && g.records.length > 0) group = g.records[0].groupID || "Unknown";
+        
+        // Show Reason if available (e.g. Moved vs Graduated)
+        if (g.reason) group += ` <br><span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">${g.reason}</span>`;
         
         const safeUser = g.user.replace(/'/g, "\\'");
 

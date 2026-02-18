@@ -845,6 +845,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.31": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Robust 'Retrain' workflow when moving agents to a new group (Archives old data).</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Added 'Reason' field to Graduated Agents list (e.g. Moved vs Graduated).</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved context mismatch issues in Admin User management.</li>
+            </ul>`,
         "2.1.30": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Graduated Agents' tab to Admin Panel for archiving and restoring users.</li>
