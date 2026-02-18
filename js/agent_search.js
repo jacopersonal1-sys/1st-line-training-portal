@@ -58,11 +58,6 @@ function performAgentSearch(name) {
 function renderAgentDashboard(agentName) {
     const container = document.getElementById('agentSearchResults');
     
-    // 1. Fetch Data
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
-    const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
     // 1. Determine Source (Active vs Archived)
     const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
     const archivedData = graduates.find(g => g.user.toLowerCase() === agentName.toLowerCase());
@@ -87,13 +82,6 @@ function renderAgentDashboard(agentName) {
     }
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    
-    // Filter Data
-    const agentRecords = records.filter(r => r.trainee.toLowerCase() === agentName.toLowerCase());
-    const agentSubs = submissions.filter(s => s.trainee.toLowerCase() === agentName.toLowerCase());
-    const agentReport = reports.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
-    const agentReview = reviews.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
     // Filter Data (If active, filter from global. If archived, it's already filtered)
     const agentRecords = isArchived ? records : records.filter(r => r.trainee.toLowerCase() === agentName.toLowerCase());
     const agentSubs = isArchived ? submissions : submissions.filter(s => s.trainee.toLowerCase() === agentName.toLowerCase());
@@ -104,10 +92,6 @@ function renderAgentDashboard(agentName) {
     
     // Find Group
     let group = "Unknown Group";
-    for (const [gid, members] of Object.entries(rosters)) {
-        if (members.some(m => m.toLowerCase() === agentName.toLowerCase())) {
-            group = gid;
-            break;
     if (isArchived) {
         // Try to recover group from records, otherwise generic
         if (agentRecords.length > 0) group = agentRecords[0].groupID || "Graduated";
@@ -306,8 +290,6 @@ function renderAgentDashboard(agentName) {
         </div>`;
 
     // --- PRIVATE NOTES ---
-    const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
-    const agentNote = notes[agentName] || "";
     const agentNote = isArchived ? (archivedData.notes || "") : (notesMap[agentName] || "");
     const safeName = agentName.replace(/'/g, "\\'"); // Escape quotes for onclick
 
@@ -334,10 +316,7 @@ function renderAgentDashboard(agentName) {
                 <div style="text-align:right; margin-top:10px;">
                     <button class="btn-primary btn-sm" onclick="saveAgentNote('${safeName}')">Save Note</button>
                 </div>
-            </div>
-        </div>
-    `;
-        `;
+            </div>`;
     }
     
     container.innerHTML = headerHtml + reviewHtml + `<div id="agent-analytics-profile"></div>` + recordsHtml + reportHtml + attHtml + activityHtml + notesHtml;
@@ -347,20 +326,4 @@ function renderAgentDashboard(agentName) {
         const profileContainer = document.getElementById('agent-analytics-profile');
         if(profileContainer) AnalyticsEngine.renderIndividualProfile(profileContainer, agentName);
     }
-}
-
-async function saveAgentNote(agentName) {
-    const note = document.getElementById('agentPrivateNote').value;
-    const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
-    
-    notes[agentName] = note;
-    localStorage.setItem('agentNotes', JSON.stringify(notes));
-    
-    const btn = document.activeElement;
-    if(btn) { btn.innerText = "Saving..."; btn.disabled = true; }
-    
-    if(typeof saveToServer === 'function') await saveToServer(['agentNotes'], false);
-    
-    if(btn) { btn.innerText = "Save Note"; btn.disabled = false; }
-    if(typeof showToast === 'function') showToast("Note saved successfully.", "success");
 }

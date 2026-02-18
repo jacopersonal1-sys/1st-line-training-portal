@@ -10,7 +10,10 @@ const StudyMonitor = {
     isStudyOpen: false,
     activeWebview: null,
     viewMode: 'list', // 'list' or 'summary'
+    pendingTopic: null, // For classification modal
     externalPoller: null, // Track the interval for external monitoring
+    queueSelection: new Set(), // Persist selections across refreshes
+    cachedWhitelist: [], // Cache for performance
 
     init: function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
@@ -95,11 +98,12 @@ const StudyMonitor = {
                     let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
 
                     // --- WORK SITES WHITELIST ---
-                    const workSites = [
+                    const defaultSites = [
                         'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
                         'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
                         'cp1.herotel.com', 'cp2.herotel.com'
                     ];
+                    const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
 
                     // Check if window title contains any of the work sites
                     const matchedSite = workSites.find(site => activeWindow.toLowerCase().includes(site.toLowerCase()));
@@ -166,7 +170,8 @@ const StudyMonitor = {
         if (window.supabaseClient) {
             try {
                 // 1. Get current monitor data (Optimistic)
-                let monitorData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                // Ensure we don't get null if localstorage was wiped
+                let monitorData = JSON.parse(localStorage.getItem('monitor_data')) || {};
                 
                 // 2. Update my entry
                 monitorData[CURRENT_USER.user] = payload;
@@ -188,9 +193,33 @@ const StudyMonitor = {
         }
     },
 
+    updateWhitelistCache: function() {
+        // Filter out empty strings to prevent false positive matches
+        this.cachedWhitelist = (JSON.parse(localStorage.getItem('monitor_whitelist') || '[]')).filter(w => w && w.trim().length > 0);
+    },
+
+    // --- HELPER: CENTRALIZED CLASSIFICATION ---
+    getCategory: function(activityString) {
+        if (!activityString) return 'idle';
+        const act = activityString.toLowerCase();
+        
+        // 1. Dynamic Whitelist Check (Overrides "External" label)
+        // Strip prefixes to match raw content against whitelist
+        const raw = act.replace(/^external:\s*/, '').replace(/^studying:\s*/, '').trim();
+        if (this.cachedWhitelist.some(w => raw.includes(w.toLowerCase()))) {
+            return 'study';
+        }
+        
+        if (act.startsWith('studying:') || (act.includes('studying') && !act.startsWith('external:')) || act.includes('system:') || act.includes('navigating:')) return 'study';
+        if (act.startsWith('external:') || act.includes('external') || act.includes('background')) return 'external';
+        if (act.startsWith('idle:')) return 'idle';
+        return 'idle'; // Default
+    },
+
     // --- DAILY ARCHIVE LOGIC ---
     checkDailyReset: async function() {
         if (!CURRENT_USER || CURRENT_USER.role === 'admin') return;
+        this.updateWhitelistCache(); // Ensure we use latest rules for archiving
         
         let monitorData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
         let myData = monitorData[CURRENT_USER.user];
@@ -208,8 +237,9 @@ const StudyMonitor = {
                 let totalMs = 0, studyMs = 0, extMs = 0, idleMs = 0;
                 (myData.history || []).forEach(h => {
                     totalMs += h.duration;
-                    if(h.activity.toLowerCase().includes('studying')) studyMs += h.duration;
-                    else if(h.activity.toLowerCase().includes('external')) extMs += h.duration;
+                    const cat = this.getCategory(h.activity);
+                    if (cat === 'study') studyMs += h.duration;
+                    else if (cat === 'external') extMs += h.duration;
                     else idleMs += h.duration;
                 });
 
@@ -405,9 +435,16 @@ function renderActivityMonitorContent() {
     const container = document.getElementById('activityMonitorContent');
     if(!container) return;
 
+    // STOP AUTO-REFRESH if in Queue Mode to prevent losing selections
+    if (StudyMonitor.viewMode === 'queue' && !StudyMonitor.forceRefresh) return;
+
     // Redirect to Summary View if active
     if (StudyMonitor.viewMode === 'summary') {
         renderActivitySummary(container);
+        return;
+    }
+    if (StudyMonitor.viewMode === 'queue') {
+        renderReviewQueue(container);
         return;
     }
 
@@ -513,9 +550,105 @@ function renderActivityMonitorContent() {
             child.remove();
         }
     });
+    
+    StudyMonitor.forceRefresh = false; // Reset flag
+}
+
+// --- QUEUE SELECTION HELPERS ---
+StudyMonitor.toggleQueueItem = function(val, checked) {
+    if (checked) this.queueSelection.add(val);
+    else this.queueSelection.delete(val);
+    // Update button text
+    const btn = document.getElementById('btnBulkClassify');
+    if(btn) btn.innerText = `Classify Selected (${this.queueSelection.size})`;
+};
+
+function renderReviewQueue(container) {
+    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
+    const groups = {}; // Group by Process ID [proc]
+    const ungrouped = new Set();
+    
+    Object.values(data).forEach(userActivity => {
+        const processItem = (act) => {
+            if (act.startsWith('External: ') && !act.includes('(Reclassified)')) {
+                const raw = act.replace('External: ', '').trim();
+                
+                // Check if already whitelisted (Partial match)
+                if (whitelist.some(w => raw.toLowerCase().includes(w.trim().toLowerCase()))) return;
+
+                const match = raw.match(/\[(.*?)\]$/); // Extract [process]
+                if (match) {
+                    const proc = match[1].toLowerCase();
+                    if (!groups[proc]) groups[proc] = new Set();
+                    groups[proc].add(raw);
+                } else {
+                    ungrouped.add(raw);
+                }
+            }
+        };
+
+        (userActivity.history || []).forEach(h => processItem(h.activity));
+        processItem(userActivity.current);
+    });
+    
+    let html = `
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3>Unclassified Activities (External)</h3>
+                <button id="btnBulkClassify" class="btn-primary btn-sm" onclick="StudyMonitor.bulkClassifyAction()">Classify Selected (${StudyMonitor.queueSelection.size})</button>
+            </div>
+            <p style="color:var(--text-muted); margin-bottom:15px;">Grouped by Application. Classifying a process will whitelist it for everyone.</p>
+    `;
+    
+    const sortedProcs = Object.keys(groups).sort();
+    
+    if (sortedProcs.length === 0 && ungrouped.size === 0) {
+        html += `<div style="text-align:center; padding:20px; color:var(--text-muted);">No unclassified external activities found.</div>`;
+    } else {
+        // Render Process Groups
+        sortedProcs.forEach(proc => {
+            const items = Array.from(groups[proc]);
+            // Check if all items in this group are selected (optional UI polish, skipping for simplicity)
+            
+            html += `
+            <div style="margin-bottom:15px; border:1px solid var(--border-color); border-radius:6px; overflow:hidden;">
+                <div style="background:var(--bg-input); padding:10px; display:flex; justify-content:space-between; align-items:center;">
+                    <strong><i class="fas fa-cog"></i> ${proc.toUpperCase()}</strong>
+                    <button class="btn-secondary btn-sm" onclick="StudyMonitor.classifyActivity('[${proc}]')">Whitelist App</button>
+                </div>
+                <div style="padding:5px;">
+                    ${items.map(item => {
+                        const isChecked = StudyMonitor.queueSelection.has(item) ? 'checked' : '';
+                        return `
+                        <div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px dashed var(--border-color); font-size:0.85rem;">
+                            <label style="display:flex; align-items:center; gap:10px; cursor:pointer; flex:1; margin:0;"><input type="checkbox" class="q-check" value="${item.replace(/"/g, '&quot;')}" onchange="StudyMonitor.toggleQueueItem(this.value, this.checked)" ${isChecked}> ${item}</label>
+                            <button class="btn-secondary btn-sm" style="padding:0 5px; font-size:0.7rem;" onclick="StudyMonitor.classifyActivity('${item.replace(/'/g, "\\'")}')">Classify This</button>
+                        </div>
+                    `}).join('')}
+                </div>
+            </div>`;
+        });
+
+        // Render Ungrouped
+        if (ungrouped.size > 0) {
+            html += `<div style="margin-top:15px;"><strong>Other</strong></div>`;
+            Array.from(ungrouped).forEach(item => {
+                const isChecked = StudyMonitor.queueSelection.has(item) ? 'checked' : '';
+                html += `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid var(--border-color);">
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; flex:1; margin:0;"><input type="checkbox" class="q-check" value="${item.replace(/"/g, '&quot;')}" onchange="StudyMonitor.toggleQueueItem(this.value, this.checked)" ${isChecked}> ${item}</label>
+                    <button class="btn-secondary btn-sm" onclick="StudyMonitor.classifyActivity('${item.replace(/'/g, "\\'")}')">Classify</button>
+                </div>`;
+            });
+        }
+    }
+    
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
 function renderActivitySummary(container) {
+    StudyMonitor.updateWhitelistCache(); // Refresh cache before rendering
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
     const targetAgents = StudyMonitor.getScheduledAgents();
     
@@ -556,20 +689,19 @@ function renderActivitySummary(container) {
 
         allSegments.forEach(seg => {
             totalMs += seg.duration;
-            const act = seg.activity.toLowerCase();
-            if (act.includes('studying')) {
+            const category = StudyMonitor.getCategory(seg.activity);
+            
+            if (category === 'study') {
                 studyMs += seg.duration;
                 // Track specific topics
                 const topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
-                topicMap[topic] = (topicMap[topic] || 0) + seg.duration;
-            } else if (act.includes('external') || act.includes('background')) {
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' };
+                topicMap[topic].ms += seg.duration;
+            } else if (category === 'external') {
                 extMs += seg.duration;
-                // Track external apps in breakdown
-                let topic = seg.activity;
-                if (topic.startsWith('External: ')) {
-                    topic = topic.replace('External: ', '').trim();
-                }
-                topicMap[topic] = (topicMap[topic] || 0) + seg.duration;
+                let topic = seg.activity.replace('External: ', '').trim();
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'external' };
+                topicMap[topic].ms += seg.duration;
             } else {
                 idleMs += seg.duration;
             }
@@ -587,17 +719,27 @@ function renderActivitySummary(container) {
 
         // 3. Top Activities Breakdown
         const sortedTopics = Object.entries(topicMap)
-            .sort((a, b) => b[1] - a[1])
+            .sort((a, b) => b[1].ms - a[1].ms)
             .slice(0, 3); // Top 3
             
         let breakdownHtml = '<div class="topic-breakdown">';
         if (sortedTopics.length > 0) {
-            breakdownHtml += sortedTopics.map(([topic, ms]) => 
-                `<div class="topic-row">
+            breakdownHtml += sortedTopics.map(([topic, data]) => {
+                const isExternal = data.type === 'external';
+                const ms = data.ms;
+                
+                const actionBtn = isExternal 
+                    ? `<button class="btn-secondary btn-sm" style="padding:0 4px; font-size:0.6rem;" onclick="StudyMonitor.classifyActivity('${topic.replace(/'/g, "\\'")}')" title="Classify Activity"><i class="fas fa-edit"></i></button>`
+                    : '';
+                
+                return `<div class="topic-row">
                     <span class="topic-name" title="${topic}">${topic}</span>
-                    <span class="topic-time">${Math.round(ms/60000)}m</span>
-                </div>`
-            ).join('');
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span class="topic-time">${Math.round(ms/60000)}m</span>
+                        ${actionBtn}
+                    </div>
+                </div>`;
+            }).join('');
         } else {
             breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem;">No study activity recorded.</div>';
         }
@@ -611,10 +753,10 @@ function renderActivitySummary(container) {
                 const pct = (seg.duration / totalMs) * 100;
                 if (pct < 1) return; // Skip tiny slivers
                 
-                let typeClass = 'seg-idle';
-                const act = seg.activity.toLowerCase();
-                if (act.includes('studying')) typeClass = 'seg-study';
-                else if (act.includes('external')) typeClass = 'seg-ext';
+                const cat = StudyMonitor.getCategory(seg.activity);
+                let typeClass = 'seg-idle'; // Default
+                if (cat === 'study') typeClass = 'seg-study';
+                else if (cat === 'external') typeClass = 'seg-ext';
                 
                 timelineHtml += `<div class="timeline-seg ${typeClass}" style="width:${pct}%;" title="${seg.activity} (${Math.round(seg.duration/1000)}s)"></div>`;
             });
@@ -713,6 +855,134 @@ StudyMonitor.archiveLog = async function() {
     renderActivityMonitorContent();
     alert("Activity logs cleared.");
 }
+
+StudyMonitor.classifyActivity = async function(fullActivityString) {
+    // Smart Suggestion Logic
+    let suggestion = fullActivityString;
+    
+    // 1. Strip "External: " prefix if present
+    suggestion = suggestion.replace(/^External:\s*/, '');
+    
+    // 2. Check for Process ID [proc]
+    const procMatch = suggestion.match(/\[(.*?)\]$/);
+    if (procMatch) {
+        const proc = procMatch[1].toLowerCase();
+        const browsers = ['chrome', 'msedge', 'firefox', 'brave', 'opera', 'safari'];
+        
+        if (browsers.includes(proc)) {
+            // Browser: Suggest Title (remove process)
+            suggestion = suggestion.replace(/\[(.*?)\]$/, '').trim();
+            suggestion = suggestion.replace(/ - \w+$/, '').trim(); // Try remove suffix like " - Google Chrome"
+        } else {
+            // App: Suggest Process ID for broad matching
+            suggestion = `[${proc}]`; 
+        }
+    }
+
+    // 3. Prompt User
+    const keyword = await customPrompt("Classify Activity", "Enter keyword to whitelist (matches any window title containing this):", suggestion);
+    if (!keyword) return;
+
+    this.pendingTopic = keyword.trim();
+    document.getElementById('classifyTargetName').innerText = keyword;
+    document.getElementById('activityClassifyModal').classList.remove('hidden');
+};
+
+StudyMonitor.bulkClassifyAction = function() {
+    if (this.queueSelection.size === 0) return alert("Please select items to classify.");
+    const topics = Array.from(this.queueSelection);
+    this.pendingTopic = topics; // Pass array
+    document.getElementById('classifyTargetName').innerText = `${topics.length} Selected Items`;
+    document.getElementById('activityClassifyModal').classList.remove('hidden');
+};
+
+StudyMonitor.confirmClassification = async function() {
+    const type = document.getElementById('classifySelect').value;
+    // Handle both single string and array of strings
+    const topics = Array.isArray(this.pendingTopic) ? this.pendingTopic : [this.pendingTopic];
+    
+    if (!topics || topics.length === 0) return;
+    
+    let newPrefix = "";
+    if (type === "1") {
+        newPrefix = "Studying: ";
+        // Add to whitelist for future
+        let whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
+        if (whitelist.length === 0) whitelist = ['acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com', 'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com', 'cp1.herotel.com', 'cp2.herotel.com'];
+        
+        let wlChanged = false;
+        topics.forEach(t => {
+            if (!whitelist.includes(t)) {
+                whitelist.push(t);
+                wlChanged = true;
+            }
+        });
+        
+        if (wlChanged) {
+            localStorage.setItem('monitor_whitelist', JSON.stringify(whitelist));
+            if(typeof saveToServer === 'function') await saveToServer(['monitor_whitelist'], false);
+        }
+    } else if (type === "2") {
+        newPrefix = "External: ";
+        // Remove from whitelist if present
+        // ... (logic to remove if needed)
+    } else if (type === "3") {
+        newPrefix = "Idle: ";
+    } else {
+        return;
+    }
+    
+    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    let changed = false;
+    
+    Object.keys(data).forEach(user => {
+        const activity = data[user];
+        if (activity.history) {
+            activity.history.forEach(h => {
+                topics.forEach(topicName => {
+                    if (h.activity.includes(topicName) && !h.activity.includes('(Reclassified)')) {
+                        h.activity = `${newPrefix}${topicName} (Reclassified)`;
+                        changed = true;
+                    }
+                });
+            });
+        }
+        // Also update current if matches
+        if (topics.some(t => activity.current.includes(t)) && !activity.current.includes('(Reclassified)')) {
+            // Find which topic matched to construct label
+            const match = topics.find(t => activity.current.includes(t));
+            activity.current = `${newPrefix}${match} (Reclassified)`;
+            changed = true;
+        }
+    });
+    
+    if (changed) {
+        localStorage.setItem('monitor_data', JSON.stringify(data));
+        // Mark as locally updated immediately to prevent overwrite on reload if sync is slow
+        localStorage.setItem('sync_ts_monitor_data', new Date().toISOString());
+        
+        // OPTIMISTIC SAVE: Don't await. Let it sync in background to prevent UI freeze.
+        if(typeof saveToServer === 'function') saveToServer(['monitor_data'], false); 
+    }
+    
+    // Clear selection
+    this.queueSelection.clear();
+    
+    document.getElementById('activityClassifyModal').classList.add('hidden');
+    this.pendingTopic = null;
+    this.forceRefresh = true; // Allow refresh to show updates
+    renderActivityMonitorContent(); // Refresh UI
+};
+
+StudyMonitor.toggleReviewQueue = function() {
+    if (this.viewMode === 'queue') {
+        this.viewMode = 'list';
+    } else {
+        this.viewMode = 'queue';
+        this.forceRefresh = true; // Force initial render of queue
+    }
+    renderActivityMonitorContent();
+};
 
 // Hook for dashboard.js to trigger updates if modal is open
 StudyMonitor.updateWidget = function() {

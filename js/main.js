@@ -845,6 +845,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.32": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Activity Monitor list flickering/resetting by implementing Smart Merge sync.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Fixed issue where classified apps would reappear as 'External' after refresh.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced whitelist logic to prioritize Admin classification over raw trainee logs.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Optimized background data synchronization for stability.</li>
+            </ul>`,
         "2.1.31": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Robust 'Retrain' workflow when moving agents to a new group (Archives old data).</li>

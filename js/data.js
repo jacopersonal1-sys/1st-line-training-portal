@@ -35,7 +35,8 @@ const DB_SCHEMA = {
     monitor_history: [], // Archived daily activity logs
     nps_surveys: [], // Admin defined surveys
     nps_responses: [], // Trainee responses
-    graduated_agents: [] // Archived data for graduated trainees
+    graduated_agents: [], // Archived data for graduated trainees
+    monitor_whitelist: [] // Custom whitelist for work-related apps
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -99,7 +100,24 @@ async function loadFromServer(silent = false) {
             if (fetchErr) throw fetchErr;
 
             docs.forEach(doc => {
-                localStorage.setItem(doc.key, JSON.stringify(doc.content));
+                // SMART PULL: Merge specific keys instead of overwriting
+                // This prevents the "Fresh List" issue where background sync wipes local pending data
+                const mergeKeys = ['monitor_data', 'monitor_history'];
+                
+                if (mergeKeys.includes(doc.key)) {
+                    const localVal = JSON.parse(localStorage.getItem(doc.key));
+                    if (localVal) {
+                        const serverObj = { [doc.key]: doc.content };
+                        const localObj = { [doc.key]: localVal };
+                        // Merge Server into Local (Preserving Local edits)
+                        const merged = performSmartMerge(serverObj, localObj);
+                        localStorage.setItem(doc.key, JSON.stringify(merged[doc.key]));
+                    } else {
+                        localStorage.setItem(doc.key, JSON.stringify(doc.content));
+                    }
+                } else {
+                    localStorage.setItem(doc.key, JSON.stringify(doc.content));
+                }
                 localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
             });
             
@@ -293,8 +311,8 @@ function performSmartMerge(server, local) {
                         return localItem.name.trim().toLowerCase() === serverItem.name.trim().toLowerCase();
                     }
 
-                    // 4. Vetting Topics (Strings) - FIXES TOPIC DUPLICATION
-                    if (key === 'vettingTopics' && typeof localItem === 'string' && typeof serverItem === 'string') {
+                    // 4. Vetting Topics & Whitelist (Strings) - FIXES DUPLICATION
+                    if ((key === 'vettingTopics' || key === 'monitor_whitelist') && typeof localItem === 'string' && typeof serverItem === 'string') {
                         return localItem.trim().toLowerCase() === serverItem.trim().toLowerCase();
                     }
 
