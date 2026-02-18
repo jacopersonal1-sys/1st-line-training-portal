@@ -9,6 +9,7 @@ function loadAgentSearch() {
     // Populate Datalist
     const users = JSON.parse(localStorage.getItem('users') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
     
     const allAgents = new Set();
     
@@ -19,6 +20,9 @@ function loadAgentSearch() {
     Object.values(rosters).forEach(list => {
         list.forEach(name => allAgents.add(name));
     });
+    
+    // Add from Graduates (Archived)
+    graduates.forEach(g => allAgents.add(g.user));
     
     datalist.innerHTML = '';
     Array.from(allAgents).sort().forEach(name => {
@@ -34,8 +38,16 @@ function loadAgentSearch() {
 function performAgentSearch(name) {
     if(!name) return;
     
+    // Check if archived to update loading message
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const isArchived = graduates.some(g => g.user.toLowerCase() === name.toLowerCase());
+    
+    const loadingMsg = isArchived 
+        ? '<div class="spinner"></div><div style="margin-top:10px; color:var(--text-muted);">Fetching from Archive...</div>'
+        : '<div class="spinner"></div>';
+
     const container = document.getElementById('agentSearchResults');
-    container.innerHTML = '<div style="text-align:center; padding:50px;"><div class="spinner"></div></div>';
+    container.innerHTML = `<div style="text-align:center; padding:50px;">${loadingMsg}</div>`;
     container.classList.remove('hidden');
     
     setTimeout(() => {
@@ -51,6 +63,29 @@ function renderAgentDashboard(agentName) {
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
     const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
+    // 1. Determine Source (Active vs Archived)
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const archivedData = graduates.find(g => g.user.toLowerCase() === agentName.toLowerCase());
+    const isArchived = !!archivedData;
+
+    let records, submissions, reports, reviews, attRecords, notesMap;
+
+    if (isArchived) {
+        records = archivedData.records || [];
+        submissions = archivedData.submissions || [];
+        reports = archivedData.reports || [];
+        reviews = archivedData.reviews || [];
+        attRecords = archivedData.attendance || [];
+        // Notes in archive are stored as a single string, handled below
+    } else {
+        records = JSON.parse(localStorage.getItem('records') || '[]');
+        submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+        reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
+        attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+        notesMap = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+    }
+
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     
@@ -59,6 +94,13 @@ function renderAgentDashboard(agentName) {
     const agentSubs = submissions.filter(s => s.trainee.toLowerCase() === agentName.toLowerCase());
     const agentReport = reports.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
     const agentReview = reviews.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
+    // Filter Data (If active, filter from global. If archived, it's already filtered)
+    const agentRecords = isArchived ? records : records.filter(r => r.trainee.toLowerCase() === agentName.toLowerCase());
+    const agentSubs = isArchived ? submissions : submissions.filter(s => s.trainee.toLowerCase() === agentName.toLowerCase());
+    
+    // Reports/Reviews: Active uses .find(), Archive has array
+    const agentReport = isArchived ? (reports[0] || null) : reports.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
+    const agentReview = isArchived ? (reviews[0] || null) : reviews.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
     
     // Find Group
     let group = "Unknown Group";
@@ -66,6 +108,16 @@ function renderAgentDashboard(agentName) {
         if (members.some(m => m.toLowerCase() === agentName.toLowerCase())) {
             group = gid;
             break;
+    if (isArchived) {
+        // Try to recover group from records, otherwise generic
+        if (agentRecords.length > 0) group = agentRecords[0].groupID || "Graduated";
+        else group = "Graduated / Archived";
+    } else {
+        for (const [gid, members] of Object.entries(rosters)) {
+            if (members.some(m => m.toLowerCase() === agentName.toLowerCase())) {
+                group = gid;
+                break;
+            }
         }
     }
     
@@ -83,12 +135,15 @@ function renderAgentDashboard(agentName) {
     
     // 3. Build UI
     
+    const headerBadge = isArchived ? '<span class="status-badge status-pass" style="margin-left:10px; font-size:1rem;"><i class="fas fa-graduation-cap"></i> Graduated</span>' : '';
+
     // --- HEADER ---
     let headerHtml = `
         <div class="card" style="border-left: 5px solid var(--primary);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
                     <h2 style="margin:0; border:none;">${agentName}</h2>
+                    <h2 style="margin:0; border:none;">${agentName} ${headerBadge}</h2>
                     <div style="color:var(--text-muted); margin-top:5px;">${group}</div>
                 </div>
                 <div style="text-align:right;">
@@ -183,6 +238,7 @@ function renderAgentDashboard(agentName) {
     
     // --- ATTENDANCE HISTORY ---
     const agentAtt = attRecords.filter(r => r.user.toLowerCase() === agentName.toLowerCase());
+    const agentAtt = isArchived ? attRecords : attRecords.filter(r => r.user.toLowerCase() === agentName.toLowerCase());
     agentAtt.sort((a,b) => new Date(b.date) - new Date(a.date)); // Newest first
     
     const totalDays = agentAtt.length;
@@ -252,6 +308,7 @@ function renderAgentDashboard(agentName) {
     // --- PRIVATE NOTES ---
     const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
     const agentNote = notes[agentName] || "";
+    const agentNote = isArchived ? (archivedData.notes || "") : (notesMap[agentName] || "");
     const safeName = agentName.replace(/'/g, "\\'"); // Escape quotes for onclick
 
     let notesHtml = `
@@ -261,9 +318,27 @@ function renderAgentDashboard(agentName) {
             <textarea id="agentPrivateNote" style="width:100%; height:100px; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); font-family:inherit;" placeholder="Enter notes about this agent...">${agentNote}</textarea>
             <div style="text-align:right; margin-top:10px;">
                 <button class="btn-primary btn-sm" onclick="saveAgentNote('${safeName}')">Save Note</button>
+    let notesHtml = '';
+    if (isArchived) {
+        notesHtml = `
+            <div class="card">
+                <h3><i class="fas fa-sticky-note" style="color:var(--primary); margin-right:10px;"></i>Private Notes (Archived)</h3>
+                <div style="background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color); min-height:100px; white-space:pre-wrap;">${agentNote || 'No notes archived.'}</div>
+            </div>`;
+    } else {
+        notesHtml = `
+            <div class="card">
+                <h3><i class="fas fa-sticky-note" style="color:var(--primary); margin-right:10px;"></i>Private Notes</h3>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">These notes are only visible to Admins and Team Leaders.</p>
+                <textarea id="agentPrivateNote" style="width:100%; height:100px; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); font-family:inherit;" placeholder="Enter notes about this agent...">${agentNote}</textarea>
+                <div style="text-align:right; margin-top:10px;">
+                    <button class="btn-primary btn-sm" onclick="saveAgentNote('${safeName}')">Save Note</button>
+                </div>
             </div>
         </div>
     `;
+        `;
+    }
     
     container.innerHTML = headerHtml + reviewHtml + `<div id="agent-analytics-profile"></div>` + recordsHtml + reportHtml + attHtml + activityHtml + notesHtml;
 

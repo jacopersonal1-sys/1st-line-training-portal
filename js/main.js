@@ -845,6 +845,20 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.30": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Graduated Agents' tab to Admin Panel for archiving and restoring users.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Onboard Report visuals and print formatting.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Auto-mark 'Absent' for weekdays with no login activity in Attendance Register.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Vetting Test separation in Onboard Report tables.</li>
+            </ul>`,
+        "2.1.29": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Graduate Trainee' workflow to archive completed agents.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected answer display for Multiple Choice questions in Live Arena (Admin View).</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Implemented robust data archiving for graduated users.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Sorted Agent Progress checklist (Vetting at bottom).</li>
+            </ul>`,
         "2.1.28": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Vetting Tests were missing from Agent Progress checklist.</li>

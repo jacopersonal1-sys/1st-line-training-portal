@@ -290,13 +290,24 @@ function generateReport() {
   const myRecs = allRecs.filter(r => r.trainee && r.trainee.toLowerCase() === name.toLowerCase());
   const mySubs = submissions.filter(s => s.trainee && s.trainee.toLowerCase() === name.toLowerCase() && s.status === 'completed');
 
+  // 1. STANDARD ASSESSMENTS (Dynamic)
   const assessList = JSON.parse(localStorage.getItem('assessments') || '[]');
-  const standardAssessments = assessList.filter(a => !a.name.includes('Vetting Test'));
+  // Filter out Vetting Tests AND Live Assessments from the main assessment list
+  const standardAssessments = assessList.filter(a => 
+      !a.name.toLowerCase().includes('vetting test') && !a.live
+  );
   
   let goalHtml = ''; let scoreHtml = '';
   standardAssessments.forEach(a => {
-      // Find matching score from either source
-      const rec = myRecs.find(r => r.assessment === a.name);
+      // Find matching score from either source (Robust Fuzzy Match)
+      const rec = myRecs.find(r => {
+          // Exact match
+          if (r.assessment === a.name) return true;
+          // Fuzzy match (ignore case/trim)
+          if (r.assessment.trim().toLowerCase() === a.name.trim().toLowerCase()) return true;
+          return false;
+      });
+
       const sub = mySubs.find(s => s.testTitle === a.name);
       const score = Math.max(rec ? rec.score : -1, sub ? sub.score : -1);
 
@@ -313,9 +324,9 @@ function generateReport() {
   document.getElementById('repGoalBody').innerHTML = goalHtml;
   document.getElementById('repScoreBody').innerHTML = scoreHtml;
   
-  // Vetting Tables
-  renderVettingTable('1st Vetting', [...myRecs, ...mySubs.map(s=>({assessment:s.testTitle, score:s.score}))], 'repVetting1Body');
-  renderVettingTable(['Final Vetting', '2nd Vetting'], [...myRecs, ...mySubs.map(s=>({assessment:s.testTitle, score:s.score}))], 'repVetting2Body');
+  // 2. VETTING TABLES (Strict Separation)
+  renderVettingTable('1st Vetting', myRecs, mySubs, 'repVetting1Body');
+  renderVettingTable('Final Vetting', myRecs, mySubs, 'repVetting2Body');
 
   // PRE-FILL ADMIN DECISIONS (If any)
   const decisions = JSON.parse(localStorage.getItem('adminDecisions') || '{}');
@@ -325,14 +336,44 @@ function generateReport() {
   }
 }
 
-function renderVettingTable(searchKeys, records, tableId) {
-    const keys = Array.isArray(searchKeys) ? searchKeys : [searchKeys];
-    const vettingRecs = records.filter(r => r.assessment && keys.some(k => r.assessment.includes(k)));
-    let html = '';
+function renderVettingTable(phaseKey, records, submissions, tableId) {
     const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
+    let html = '';
+
     topics.forEach(topic => {
-        const rec = vettingRecs.find(r => r.assessment.includes(topic));
-        const score = rec ? rec.score : null;
+        // FILTER: Ensure topic belongs in this table
+        // If topic has "Final Vetting" in name, skip it for "1st Vetting" table
+        if (phaseKey === '1st Vetting' && topic.toLowerCase().includes('final vetting')) return;
+        // If topic has "1st Vetting" in name, skip it for "Final Vetting" table
+        if (phaseKey === 'Final Vetting' && topic.toLowerCase().includes('1st vetting')) return;
+
+        // Clean the topic name for searching (remove any existing prefixes if they exist in the definition)
+        // This ensures we search for the core subject name + the specific phase key
+        const searchTopic = topic.replace(/1st Vetting - /gi, '').replace(/Final Vetting - /gi, '').trim();
+
+        // Find best score for this Topic + Phase combination
+        let score = -1;
+
+        // Check Manual Records
+        const rec = records.find(r => {
+            if (!r.assessment) return false;
+            const name = r.assessment.toLowerCase();
+            // STRICT CHECK: Must contain Phase Key AND Topic Name
+            return name.includes(phaseKey.toLowerCase()) && name.includes(searchTopic.toLowerCase()) && !name.includes(phaseKey === '1st Vetting' ? 'final' : '1st');
+        });
+        if (rec) score = Math.max(score, rec.score);
+
+        // Check Digital Submissions
+        const sub = submissions.find(s => {
+            if (!s.testTitle) return false;
+            const name = s.testTitle.toLowerCase();
+            // STRICT CHECK: Must contain Phase Key AND Topic Name
+            return name.includes(phaseKey.toLowerCase()) && name.includes(searchTopic.toLowerCase()) && !name.includes(phaseKey === '1st Vetting' ? 'final' : '1st');
+        });
+        if (sub) score = Math.max(score, sub.score);
+
+        if (score === -1) score = null; // No record found
+
         let v1='', v2='', v3='', v4='';
         if(score !== null) {
             if(score === 100) v4 = '&#8226;'; else if(score >= 80) v3 = '&#8226;'; else if(score >= 60) v2 = '&#8226;'; else v1 = '&#8226;';

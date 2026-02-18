@@ -225,7 +225,7 @@ function renderAdminLivePanel(container) {
         const currentComment = session.comments[currentQ] || '';
         
         // Admin Note Display
-        const adminNote = q.adminNotes ? `<div style="margin-bottom:15px; padding:10px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.9rem;"><strong>Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        const adminNote = q.adminNotes ? `<div class="live-marker-note"><strong>Marker Note:</strong> ${q.adminNotes}</div>` : '';
         
         // Reference Button
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="margin-top:5px;"><i class="fas fa-image"></i> View Reference</button>` : '';
@@ -425,6 +425,17 @@ function formatAdminAnswerPreview(q, ans) {
         });
         html += '</table>';
         return html;
+    }
+
+    // FIX: Multiple Choice / Multi Select - Show Text instead of Index
+    if (q.type === 'multiple_choice' && q.options && q.options[ans] !== undefined) {
+        const optText = q.options[ans];
+        return `${optText} <span style="color:var(--text-muted); font-size:0.8rem;">(Option ${parseInt(ans)+1})</span>`;
+    }
+
+    if (q.type === 'multi_select' && q.options && Array.isArray(ans)) {
+        const texts = ans.map(idx => q.options[idx] || `Option ${parseInt(idx)+1}`);
+        return texts.join(', ');
     }
     
     if (typeof ans === 'object') return JSON.stringify(ans);

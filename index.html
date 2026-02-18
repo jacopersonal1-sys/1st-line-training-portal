@@ -750,6 +750,7 @@
             <button class="sub-tab-btn" id="btn-sub-status" onclick="showAdminSub('status', this)">System Status</button>
             <button class="sub-tab-btn" id="btn-sub-updates" onclick="showAdminSub('updates', this)">System Updates</button>
             <button class="sub-tab-btn" id="btn-sub-theme" onclick="showAdminSub('theme', this)">Theme Settings</button> 
+            <button class="sub-tab-btn" id="btn-sub-graduates" onclick="showAdminSub('graduates', this)">Graduated Agents</button>
         </div>
         
         <div id="admin-view-users" class="admin-view active">
@@ -1039,6 +1040,15 @@
                 </div>
                 
                 <button class="btn-danger" style="margin-top:15px; width:auto;" onclick="applyExperimentalTheme(null)"><i class="fas fa-undo"></i> Reset to Original</button>
+            </div>
+        </div>
+
+        <div id="admin-view-graduates" class="admin-view">
+            <div class="card">
+                <h3>Graduated / Archived Agents</h3>
+                <p style="color:var(--text-muted); margin-bottom:15px;">These agents have completed training and their data has been archived. You can restore them if needed.</p>
+                <input type="text" id="graduateSearch" placeholder="Search Archives..." onkeyup="loadGraduatedAgents()" style="margin-bottom:10px;">
+                <div style="max-height:500px; overflow-y:auto;"><table class="admin-table"><thead><tr><th>Name</th><th>Graduated Date</th><th>Group</th><th>Action</th></tr></thead><tbody id="graduateList"></tbody></table></div>
             </div>
         </div>
 

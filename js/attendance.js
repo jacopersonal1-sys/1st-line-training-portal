@@ -255,7 +255,36 @@ async function deleteLateEntry(recordId) {
 function manageAgentAttendance(username) {
     const container = document.getElementById('attAdminContent');
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const myRecs = records.filter(r => r.user === username);
+    let myRecs = records.filter(r => r.user === username);
+    
+    // --- AUTO-GENERATE ABSENTEEISM ---
+    // Scan last 30 days for missing weekdays
+    const today = new Date();
+    const cutoff = new Date();
+    cutoff.setDate(today.getDate() - 30); // Look back 30 days
+
+    const existingDates = new Set(myRecs.map(r => r.date));
+    const absents = [];
+
+    for (let d = new Date(cutoff); d < today; d.setDate(d.getDate() + 1)) {
+        const dayOfWeek = d.getDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) continue; // Skip Sat/Sun
+        
+        const dateStr = d.toISOString().split('T')[0];
+        if (!existingDates.has(dateStr)) {
+            absents.push({
+                id: 'absent_' + dateStr,
+                date: dateStr,
+                user: username,
+                clockIn: '-',
+                clockOut: '-',
+                isAbsent: true
+            });
+        }
+    }
+    
+    // Merge real records with generated absents
+    myRecs = [...myRecs, ...absents];
     
     myRecs.sort((a,b) => new Date(b.date) - new Date(a.date));
 
@@ -274,7 +303,11 @@ function manageAgentAttendance(username) {
         html += `<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No records found.</td></tr>`;
     } else {
         myRecs.forEach(r => {
-            const status = r.isLate ? '<span style="color:#ff5252;">Late</span>' : '<span style="color:#2ecc71;">On Time</span>';
+            let status = '';
+            if (r.isAbsent) status = '<span style="color:#e74c3c; font-weight:bold;">Absent</span>';
+            else if (r.isLate) status = '<span style="color:#ff5252;">Late</span>';
+            else status = '<span style="color:#2ecc71;">On Time</span>';
+
             const safeUser = username.replace(/'/g, "\\'");
             const commentHtml = r.adminComment ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px; font-style:italic;">Admin: ${r.adminComment}</div>` : '';
             html += `
@@ -284,7 +317,7 @@ function manageAgentAttendance(username) {
                     <td>${r.clockOut || '-'}</td>
                     <td>${status}${commentHtml}</td>
                     <td>
-                        <button class="btn-danger btn-sm" onclick="deleteAttendanceRecord('${r.id}', '${safeUser}')" title="Delete Record"><i class="fas fa-trash"></i></button>
+                        ${!r.isAbsent ? `<button class="btn-danger btn-sm" onclick="deleteAttendanceRecord('${r.id}', '${safeUser}')" title="Delete Record"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
             `;

@@ -700,6 +700,224 @@ async function saveUserEdit() {
     loadAdminUsers();
 }
 
+// --- GRADUATED AGENTS MANAGEMENT ---
+
+function loadGraduatedAgents() {
+    const container = document.getElementById('graduateList');
+    if (!container) return;
+
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const search = document.getElementById('graduateSearch') ? document.getElementById('graduateSearch').value.toLowerCase() : '';
+
+    const filtered = graduates.filter(g => g.user.toLowerCase().includes(search));
+    
+    // Sort by graduation date desc
+    filtered.sort((a,b) => new Date(b.graduatedDate) - new Date(a.graduatedDate));
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No archived agents found.</td></tr>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(g => {
+        const dateStr = new Date(g.graduatedDate).toLocaleDateString();
+        // Try to find group from archived records
+        let group = "Unknown";
+        if (g.records && g.records.length > 0) group = g.records[0].groupID || "Unknown";
+        
+        const safeUser = g.user.replace(/'/g, "\\'");
+
+        return `
+            <tr>
+                <td><strong>${g.user}</strong></td>
+                <td>${dateStr}</td>
+                <td>${group}</td>
+                <td>
+                    <button class="btn-warning btn-sm" onclick="restoreAgent('${safeUser}')"><i class="fas fa-undo"></i> Restore</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function restoreAgent(username) {
+    if(!confirm(`Restore ${username} to active duty?\n\nThis will move their data back to the active database and re-enable login access.`)) return;
+
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const idx = graduates.findIndex(g => g.user === username);
+    
+    if (idx === -1) return alert("Agent not found in archive.");
+    
+    const agentData = graduates[idx];
+    
+    // 1. Restore Data
+    const restore = (key, data) => {
+        if (!data || data.length === 0) return;
+        const current = JSON.parse(localStorage.getItem(key) || '[]');
+        // Merge avoiding duplicates (simple ID check if available, else push)
+        data.forEach(item => {
+            if (item.id) {
+                if (!current.some(c => c.id === item.id)) current.push(item);
+            } else {
+                current.push(item);
+            }
+        });
+        localStorage.setItem(key, JSON.stringify(current));
+    };
+
+    restore('records', agentData.records);
+    restore('submissions', agentData.submissions);
+    restore('attendance_records', agentData.attendance);
+    restore('savedReports', agentData.reports);
+    restore('insightReviews', agentData.reviews);
+    
+    if (agentData.notes) {
+        const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+        notes[username] = agentData.notes;
+        localStorage.setItem('agentNotes', JSON.stringify(notes));
+    }
+
+    // 2. Restore User Account (Re-create)
+    let users = JSON.parse(localStorage.getItem('users') || '[]');
+    if (!users.some(u => u.user === username)) {
+        // Generate temp pin
+        const pin = Math.floor(1000 + Math.random() * 9000).toString();
+        users.push({ user: username, pass: pin, role: 'trainee' });
+        localStorage.setItem('users', JSON.stringify(users));
+        alert(`User restored. Temporary PIN: ${pin}`);
+    }
+
+    // 3. Remove from Blacklist
+    let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    revoked = revoked.filter(u => u !== username);
+    localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+
+    // 4. Remove from Archive
+    graduates.splice(idx, 1);
+    localStorage.setItem('graduated_agents', JSON.stringify(graduates));
+
+    // 5. Sync
+    if(typeof saveToServer === 'function') {
+        await saveToServer([
+            'records', 'submissions', 'attendance_records', 'savedReports', 
+            'insightReviews', 'agentNotes', 'users', 'revokedUsers', 'graduated_agents'
+        ], true);
+    }
+
+    loadGraduatedAgents();
+    if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+    if(typeof showToast === 'function') showToast("Agent restored successfully.", "success");
+}
+
+// --- GRADUATED AGENTS MANAGEMENT ---
+
+function loadGraduatedAgents() {
+    const container = document.getElementById('graduateList');
+    if (!container) return;
+
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const search = document.getElementById('graduateSearch') ? document.getElementById('graduateSearch').value.toLowerCase() : '';
+
+    const filtered = graduates.filter(g => g.user.toLowerCase().includes(search));
+    
+    // Sort by graduation date desc
+    filtered.sort((a,b) => new Date(b.graduatedDate) - new Date(a.graduatedDate));
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No archived agents found.</td></tr>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(g => {
+        const dateStr = new Date(g.graduatedDate).toLocaleDateString();
+        // Try to find group from archived records
+        let group = "Unknown";
+        if (g.records && g.records.length > 0) group = g.records[0].groupID || "Unknown";
+        
+        const safeUser = g.user.replace(/'/g, "\\'");
+
+        return `
+            <tr>
+                <td><strong>${g.user}</strong></td>
+                <td>${dateStr}</td>
+                <td>${group}</td>
+                <td>
+                    <button class="btn-warning btn-sm" onclick="restoreAgent('${safeUser}')"><i class="fas fa-undo"></i> Restore</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function restoreAgent(username) {
+    if(!confirm(`Restore ${username} to active duty?\n\nThis will move their data back to the active database and re-enable login access.`)) return;
+
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const idx = graduates.findIndex(g => g.user === username);
+    
+    if (idx === -1) return alert("Agent not found in archive.");
+    
+    const agentData = graduates[idx];
+    
+    // 1. Restore Data
+    const restore = (key, data) => {
+        if (!data || data.length === 0) return;
+        const current = JSON.parse(localStorage.getItem(key) || '[]');
+        // Merge avoiding duplicates (simple ID check if available, else push)
+        data.forEach(item => {
+            if (item.id) {
+                if (!current.some(c => c.id === item.id)) current.push(item);
+            } else {
+                current.push(item);
+            }
+        });
+        localStorage.setItem(key, JSON.stringify(current));
+    };
+
+    restore('records', agentData.records);
+    restore('submissions', agentData.submissions);
+    restore('attendance_records', agentData.attendance);
+    restore('savedReports', agentData.reports);
+    restore('insightReviews', agentData.reviews);
+    
+    if (agentData.notes) {
+        const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+        notes[username] = agentData.notes;
+        localStorage.setItem('agentNotes', JSON.stringify(notes));
+    }
+
+    // 2. Restore User Account (Re-create)
+    let users = JSON.parse(localStorage.getItem('users') || '[]');
+    if (!users.some(u => u.user === username)) {
+        // Generate temp pin
+        const pin = Math.floor(1000 + Math.random() * 9000).toString();
+        users.push({ user: username, pass: pin, role: 'trainee' });
+        localStorage.setItem('users', JSON.stringify(users));
+        alert(`User restored. Temporary PIN: ${pin}`);
+    }
+
+    // 3. Remove from Blacklist
+    let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    revoked = revoked.filter(u => u !== username);
+    localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+
+    // 4. Remove from Archive
+    graduates.splice(idx, 1);
+    localStorage.setItem('graduated_agents', JSON.stringify(graduates));
+
+    // 5. Sync
+    if(typeof saveToServer === 'function') {
+        await saveToServer([
+            'records', 'submissions', 'attendance_records', 'savedReports', 
+            'insightReviews', 'agentNotes', 'users', 'revokedUsers', 'graduated_agents'
+        ], true);
+    }
+
+    loadGraduatedAgents();
+    if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+    if(typeof showToast === 'function') showToast("Agent restored successfully.", "success");
+}
+
 // --- EMAIL AUTOMATION ---
 function generateOnboardingEmail(emails) {
     if (!emails || emails.length === 0) return;
