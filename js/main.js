@@ -852,6 +852,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.36": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Agent Search loading error.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Enabled 'Save Note' functionality in Agent Profile.</li>
+            </ul>`,
         "2.1.35": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where classified 'External' activities would reappear in the Review Queue.</li>

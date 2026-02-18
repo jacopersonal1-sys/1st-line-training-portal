@@ -156,16 +156,29 @@ const StudyMonitor = {
         this.startTime = now;
         this.clickCount = 0; // Reset click count for new activity
         
+        // SAFETY: Prevent infinite array growth (Memory Protection)
+        if (this.history.length > 2000) {
+            // Keep start, slice end to maintain recent context
+            const first = this.history[0];
+            const recent = this.history.slice(-1000);
+            this.history = [first, ...recent];
+        }
+
         // Instant local save (optional)
         // this.sync(); 
     },
 
     recordClick: function() {
         this.clickCount++;
+        // FIX: Ensure study activity counts as global interaction to prevent "Idle" status
+        if (typeof window !== 'undefined') window.LAST_INTERACTION = Date.now();
     },
 
     sync: async function() {
         if (!CURRENT_USER || CURRENT_USER.role === 'admin') return; // Don't track admins
+
+        // ROBUSTNESS: Check for day rollover dynamically (e.g. user left app open overnight)
+        await this.checkDailyReset();
 
         const payload = {
             user: CURRENT_USER.user,
@@ -265,7 +278,19 @@ const StudyMonitor = {
                     history = history.slice(history.length - 30);
                 }
                 
-                localStorage.setItem('monitor_history', JSON.stringify(history));
+                // SAFETY: Handle QuotaExceededError (Storage Full)
+                try {
+                    localStorage.setItem('monitor_history', JSON.stringify(history));
+                } catch (e) {
+                    console.warn("Storage Quota Exceeded. Stripping details from archive.");
+                    // Fallback: Save only summaries, remove details from older entries
+                    history.forEach(h => delete h.details);
+                    try {
+                        localStorage.setItem('monitor_history', JSON.stringify(history));
+                    } catch (e2) {
+                        console.error("Critical Storage Error: Could not save history.", e2);
+                    }
+                }
                 
                 // Reset Live Data for Today
                 monitorData[CURRENT_USER.user] = { current: 'System: New Day Start', since: Date.now(), isStudyOpen: false, history: [], date: today };
@@ -335,6 +360,12 @@ const StudyMonitor = {
         webview.addEventListener('new-window', (e) => {
             e.preventDefault();
             webview.src = this.cleanUrl(e.url);
+        });
+
+        // SAFETY: Handle Crashes
+        webview.addEventListener('crashed', () => {
+            this.track("System: Study Window Crashed");
+            this.closeStudyWindow();
         });
 
         // --- NEW: CLICK TRACKING INJECTION ---
@@ -436,7 +467,7 @@ window.openActivityMonitorModal = function() {
         renderActivityMonitorContent();
         // Start 30s auto-refresh
         if(ACTIVITY_MONITOR_INTERVAL) clearInterval(ACTIVITY_MONITOR_INTERVAL);
-        ACTIVITY_MONITOR_INTERVAL = setInterval(renderActivityMonitorContent, 30000);
+        ACTIVITY_MONITOR_INTERVAL = setInterval(renderActivityMonitorContent, 180000); // 3 Minutes
     }
 };
 
@@ -701,39 +732,80 @@ function renderActivitySummary(container) {
         if (currentDuration > 1000) {
             allSegments.push({
                 activity: activity.current,
-                duration: currentDuration,
+                start: activity.since, // Need start time for working hours calc
+                end: Date.now(),
+                duration: currentDuration
             });
         }
 
         allSegments.forEach(seg => {
-            totalMs += seg.duration;
+            // --- WORKING HOURS LOGIC (8am-5pm, Lunch 12-1) ---
+            // Calculate effective duration within working hours
+            const segStart = seg.start || (seg.end - seg.duration);
+            const segEnd = seg.end || (segStart + seg.duration);
+            
+            const dateStr = new Date(segStart).toISOString().split('T')[0];
+            const workStart = new Date(`${dateStr}T08:00:00`).getTime();
+            const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
+            const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
+            const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
+
+            // 1. Morning Session (08:00 - 12:00)
+            const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
+            // 2. Afternoon Session (13:00 - 17:00)
+            const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
+            
+            const effectiveDuration = morningOverlap + afternoonOverlap;
+            
+            if (effectiveDuration <= 0) return; // Skip non-working hours
+
+            totalMs += effectiveDuration;
             const category = StudyMonitor.getCategory(seg.activity);
             
+            // TOLERANCE: Activities < 3 mins are considered "Quick Checks" or "Thinking" (Productive)
+            // Only > 3 mins counts as Distraction/Idle (Concern)
+            const TOLERANCE = 180000; 
+            
             if (category === 'study') {
-                studyMs += seg.duration;
+                studyMs += effectiveDuration;
                 // Track specific topics
                 const topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' };
-                topicMap[topic].ms += seg.duration;
+                topicMap[topic].ms += effectiveDuration;
             } else if (category === 'external') {
-                extMs += seg.duration;
                 let topic = seg.activity.replace('External: ', '').trim();
-                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'external' };
-                topicMap[topic].ms += seg.duration;
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' }; // Default to neutral
+                
+                if (effectiveDuration > TOLERANCE) {
+                    extMs += effectiveDuration;
+                    topicMap[topic].type = 'external'; // Flag as concern
+                } else {
+                    studyMs += effectiveDuration; // Tolerated
+                }
+                topicMap[topic].ms += effectiveDuration;
             } else {
-                idleMs += seg.duration;
+                if (effectiveDuration > TOLERANCE) idleMs += effectiveDuration;
+                else studyMs += effectiveDuration; // Thinking time
             }
         });
 
         // 2. Calculate Stats
-        const focusScore = totalMs > 0 ? Math.round((studyMs / totalMs) * 100) : 0;
+        // FIX: Handle 0ms (e.g. before 8am) to show N/A instead of 0% Fail
+        let focusScore = 0;
+        let scoreText = 'N/A';
+        let scoreColor = 'var(--text-muted)'; // Default Grey
+
+        if (totalMs > 0) {
+            focusScore = Math.round((studyMs / totalMs) * 100);
+            scoreText = focusScore + '%';
+            if (focusScore < 50) scoreColor = '#ff5252';
+            else if (focusScore < 80) scoreColor = '#f1c40f';
+            else scoreColor = '#2ecc71';
+        }
+
         const studyTimeStr = Math.round(studyMs / 60000) + 'm';
         const extTimeStr = Math.round(extMs / 60000) + 'm';
         const idleTimeStr = Math.round(idleMs / 60000) + 'm';
-        
-        let scoreColor = '#2ecc71';
-        if (focusScore < 50) scoreColor = '#ff5252';
-        else if (focusScore < 80) scoreColor = '#f1c40f';
 
         // 3. Top Activities Breakdown
         const sortedTopics = Object.entries(topicMap)
@@ -753,7 +825,7 @@ function renderActivitySummary(container) {
                 return `<div class="topic-row">
                     <span class="topic-name" title="${topic}">${topic}</span>
                     <div style="display:flex; align-items:center; gap:5px;">
-                        <span class="topic-time">${Math.round(ms/60000)}m</span>
+                        <span class="topic-time">${ms < 60000 ? '< 1m' : Math.round(ms/60000) + 'm'}</span>
                         ${actionBtn}
                     </div>
                 </div>`;
@@ -768,15 +840,54 @@ function renderActivitySummary(container) {
         let timelineHtml = '';
         if (totalMs > 0) {
             allSegments.forEach(seg => {
-                const pct = (seg.duration / totalMs) * 100;
-                if (pct < 1) return; // Skip tiny slivers
+                // --- WORKING HOURS LOGIC (Re-calc for Timeline accuracy) ---
+                const segStart = seg.start || (seg.end - seg.duration);
+                const segEnd = seg.end || (segStart + seg.duration);
+                
+                const dateStr = new Date(segStart).toISOString().split('T')[0];
+                const workStart = new Date(`${dateStr}T08:00:00`).getTime();
+                const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
+                const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
+                const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
+
+                const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
+                const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
+                
+                const effectiveDuration = morningOverlap + afternoonOverlap;
+                
+                if (effectiveDuration <= 0) return;
+
+                const pct = (effectiveDuration / totalMs) * 100;
+                if (pct < 0.5) return; // Skip tiny slivers
                 
                 const cat = StudyMonitor.getCategory(seg.activity);
-                let typeClass = 'seg-idle'; // Default
-                if (cat === 'study') typeClass = 'seg-study';
-                else if (cat === 'external') typeClass = 'seg-ext';
+                const TOLERANCE = 180000; // 3 mins
                 
-                timelineHtml += `<div class="timeline-seg ${typeClass}" style="width:${pct}%;" title="${seg.activity} (${Math.round(seg.duration/1000)}s)"></div>`;
+                let typeClass = 'seg-idle'; // Default
+                let style = `width:${pct}%;`;
+                let title = `${seg.activity} (${Math.round(effectiveDuration/1000)}s)`;
+                
+                if (cat === 'study') {
+                    typeClass = 'seg-study';
+                } else if (cat === 'external') {
+                    if (effectiveDuration > TOLERANCE) {
+                        typeClass = 'seg-ext';
+                    } else {
+                        // Tolerated External -> Striped Green/Orange
+                        style += `background: repeating-linear-gradient(45deg, #2ecc71, #2ecc71 5px, #f1c40f 5px, #f1c40f 10px);`;
+                        title = `[Tolerated] ${seg.activity} (${Math.round(effectiveDuration/1000)}s)`;
+                    }
+                } else {
+                    if (effectiveDuration > TOLERANCE) {
+                        typeClass = 'seg-idle';
+                    } else {
+                        // Tolerated Idle -> Striped Green/Grey
+                        style += `background: repeating-linear-gradient(45deg, #2ecc71, #2ecc71 5px, #95a5a6 5px, #95a5a6 10px);`;
+                        title = `[Thinking] ${seg.activity} (${Math.round(effectiveDuration/1000)}s)`;
+                    }
+                }
+                
+                timelineHtml += `<div class="timeline-seg ${typeClass}" style="${style}" title="${title}"></div>`;
             });
         } else {
             timelineHtml = '<div style="width:100%; text-align:center; font-size:0.7rem; color:var(--text-muted); padding-top:2px;">No activity recorded</div>';
@@ -832,7 +943,7 @@ function renderActivitySummary(container) {
         // Granular Updates (No Flicker)
         document.getElementById(`sum_total_${safeId}`).innerText = `Total Tracked: ${Math.round(totalMs/60000)} mins`;
         const scoreEl = document.getElementById(`sum_score_${safeId}`);
-        scoreEl.innerText = `${focusScore}%`;
+        scoreEl.innerText = scoreText;
         scoreEl.style.color = scoreColor;
         
         document.getElementById(`sum_study_${safeId}`).innerText = studyTimeStr;

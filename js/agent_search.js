@@ -221,7 +221,6 @@ function renderAgentDashboard(agentName) {
     }
     
     // --- ATTENDANCE HISTORY ---
-    const agentAtt = attRecords.filter(r => r.user.toLowerCase() === agentName.toLowerCase());
     const agentAtt = isArchived ? attRecords : attRecords.filter(r => r.user.toLowerCase() === agentName.toLowerCase());
     agentAtt.sort((a,b) => new Date(b.date) - new Date(a.date)); // Newest first
     
@@ -293,13 +292,6 @@ function renderAgentDashboard(agentName) {
     const agentNote = isArchived ? (archivedData.notes || "") : (notesMap[agentName] || "");
     const safeName = agentName.replace(/'/g, "\\'"); // Escape quotes for onclick
 
-    let notesHtml = `
-        <div class="card">
-            <h3><i class="fas fa-sticky-note" style="color:var(--primary); margin-right:10px;"></i>Private Notes</h3>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">These notes are only visible to Admins and Team Leaders.</p>
-            <textarea id="agentPrivateNote" style="width:100%; height:100px; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); font-family:inherit;" placeholder="Enter notes about this agent...">${agentNote}</textarea>
-            <div style="text-align:right; margin-top:10px;">
-                <button class="btn-primary btn-sm" onclick="saveAgentNote('${safeName}')">Save Note</button>
     let notesHtml = '';
     if (isArchived) {
         notesHtml = `
@@ -326,4 +318,20 @@ function renderAgentDashboard(agentName) {
         const profileContainer = document.getElementById('agent-analytics-profile');
         if(profileContainer) AnalyticsEngine.renderIndividualProfile(profileContainer, agentName);
     }
+}
+
+async function saveAgentNote(username) {
+    const note = document.getElementById('agentPrivateNote').value;
+    const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+    notes[username] = note;
+    localStorage.setItem('agentNotes', JSON.stringify(notes));
+    
+    if(typeof saveToServer === 'function') {
+        const btn = document.activeElement;
+        if(btn) { btn.innerText = "Saving..."; btn.disabled = true; }
+        await saveToServer(['agentNotes'], false);
+        if(btn) { btn.innerText = "Save Note"; btn.disabled = false; }
+    }
+    
+    if(typeof showToast === 'function') showToast("Note saved.", "success");
 }
