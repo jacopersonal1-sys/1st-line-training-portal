@@ -94,23 +94,33 @@ const StudyMonitor = {
                     const { ipcRenderer } = require('electron');
                     const activeWindow = await ipcRenderer.invoke('get-active-window');
                     
+                    // NEW: Check Idle State from Global Tracker
+                    // We use the global LAST_INTERACTION timestamp updated by data.js
+                    const lastInteract = window.LAST_INTERACTION || Date.now();
+                    const idleThreshold = 60000; // 1 minute (matches config)
+                    const isPhysicallyIdle = (Date.now() - lastInteract) > idleThreshold;
+
                     // Only track if it's different from current to avoid spamming history
                     let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
 
-                    // --- WORK SITES WHITELIST ---
-                    const defaultSites = [
-                        'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
-                        'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
-                        'cp1.herotel.com', 'cp2.herotel.com'
-                    ];
-                    const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
+                    if (isPhysicallyIdle) {
+                        activityLabel = "Idle: Away (No Input)";
+                    } else {
+                        // --- WORK SITES WHITELIST ---
+                        const defaultSites = [
+                            'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
+                            'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
+                            'cp1.herotel.com', 'cp2.herotel.com'
+                        ];
+                        const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
 
-                    // Check if window title contains any of the work sites
-                    const matchedSite = workSites.find(site => activeWindow.toLowerCase().includes(site.toLowerCase()));
-                    
-                    if (matchedSite) {
-                        // Classify as "Studying" (or Work) so it counts towards Focus Score
-                        activityLabel = `Studying: ${matchedSite} (Work System)`;
+                        // Check if window title contains any of the work sites
+                        const matchedSite = workSites.find(site => activeWindow.toLowerCase().includes(site.toLowerCase()));
+                        
+                        if (matchedSite) {
+                            // Classify as "Studying" (or Work) so it counts towards Focus Score
+                            activityLabel = `Studying: ${matchedSite} (Work System)`;
+                        }
                     }
 
                     if (this.currentActivity !== activityLabel) {
@@ -249,6 +259,11 @@ const StudyMonitor = {
                     summary: { study: studyMs, external: extMs, idle: idleMs, total: totalMs },
                     details: myData.history // Archive full details
                 });
+                
+                // NEW: Retention Policy (Keep last 30 days locally to prevent bloat)
+                if (history.length > 30) {
+                    history = history.slice(history.length - 30);
+                }
                 
                 localStorage.setItem('monitor_history', JSON.stringify(history));
                 

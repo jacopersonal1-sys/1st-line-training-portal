@@ -255,89 +255,112 @@ function toggleReportDetails(section, isYes) {
 function generateReport() {
   const name = document.getElementById('reportTraineeSelect').value;
   if(!name) return;
-  document.getElementById('repName').innerText = name;
   
-  const users = JSON.parse(localStorage.getItem('users') || '[]');
-  const trainee = users.find(u => u.user === name);
-  if(trainee && trainee.traineeData) {
-      document.getElementById('repContact').innerText = trainee.traineeData.contact || "";
-      document.getElementById('repKnowledge').innerText = trainee.traineeData.knowledge || "";
-  } else {
-      document.getElementById('repContact').innerText = "Not filled";
-      document.getElementById('repKnowledge').innerText = "Not filled";
+  // --- 1. RESET FORM FIELDS (Fixes persistence issue) ---
+  document.querySelectorAll('input[name="repBehavior"]').forEach(el => el.checked = false);
+  document.querySelectorAll('input[name="repObserve"]').forEach(el => el.checked = false);
+  if(typeof toggleReportDetails === 'function') {
+      toggleReportDetails('behavior', false);
+      toggleReportDetails('observe', false);
   }
-
-  const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-  let group = "Unknown";
-  for (const [gid, members] of Object.entries(rosters)) {
-      if (members.map(m=>m.toLowerCase()).includes(name.toLowerCase())) {
-          const parts = gid.split('-');
-          if(parts.length >= 2) {
-              const y = parseInt(parts[0]); const m = parseInt(parts[1]);
-              const startDate = new Date(y, m-1); const endDate = new Date(y, m);
-              group = `${startDate.toLocaleString('default', { month: 'long', year: 'numeric' })} to ${endDate.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
-          } else { group = gid; }
-          break;
-      }
-  }
-  document.getElementById('repPeriod').innerText = group;
-  
-  // DATA AGGREGATION: Manual Records + Approved Digital Submissions
-  const allRecs = JSON.parse(localStorage.getItem('records') || '[]');
-  const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-  
-  // Filter for this trainee (Safe check for nulls)
-  const myRecs = allRecs.filter(r => r.trainee && r.trainee.toLowerCase() === name.toLowerCase());
-  const mySubs = submissions.filter(s => s.trainee && s.trainee.toLowerCase() === name.toLowerCase() && s.status === 'completed');
-
-  // 1. STANDARD ASSESSMENTS (Dynamic)
-  const assessList = JSON.parse(localStorage.getItem('assessments') || '[]');
-  // Filter out Vetting Tests (Include Live Assessments in main report)
-  const standardAssessments = assessList.filter(a => 
-      !a.name.toLowerCase().includes('vetting test')
-  );
-  
-  let goalHtml = ''; let scoreHtml = '';
-  standardAssessments.forEach(a => {
-      // Find matching score from either source (Robust Fuzzy Match)
-      const rec = myRecs.find(r => {
-          // Exact match
-          if (r.assessment === a.name) return true;
-          // Fuzzy match (ignore case/trim)
-          if (r.assessment.trim().toLowerCase() === a.name.trim().toLowerCase()) return true;
-          return false;
-      });
-
-      const sub = mySubs.find(s => s.testTitle === a.name);
-      const score = Math.max(rec ? rec.score : -1, sub ? sub.score : -1);
-
-      let g1='', g2='', g3='', s1='', s2='', s3='';
-      if(score !== -1) {
-          if(score >= 90) { g1 = '&#8226;'; s3 = '&#8226;'; }
-          else if(score >= 60) { g2 = '&#8226;'; s2 = '&#8226;'; }
-          else { g3 = '&#8226;'; s1 = '&#8226;'; }
-      }
-      goalHtml += `<tr><td>${a.name}</td><td class="center report-check">${g1}</td><td class="center report-check">${g2}</td><td class="center report-check">${g3}</td></tr>`;
-      scoreHtml += `<tr><td>${a.name}</td><td class="center report-check">${s1}</td><td class="center report-check">${s2}</td><td class="center report-check">${s3}</td></tr>`;
+  ['repProbText', 'repProbLink', 'repObsText', 'repObsLink'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.innerHTML = '';
   });
-  
-  document.getElementById('repGoalBody').innerHTML = goalHtml;
-  document.getElementById('repScoreBody').innerHTML = scoreHtml;
-  
-  // 2. VETTING TABLES (Strict Separation)
-  renderVettingTable('1st Vetting', myRecs, mySubs, 'repVetting1Body');
-  renderVettingTable('Final Vetting', myRecs, mySubs, 'repVetting2Body');
+  ['repPass1', 'repPass2', 'repPass3'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.checked = false;
+  });
 
-  // PRE-FILL ADMIN DECISIONS (If any)
-  const decisions = JSON.parse(localStorage.getItem('adminDecisions') || '{}');
-  if(decisions[name]) {
-      document.getElementById('repFeedback').innerText = decisions[name].comment || "";
-      document.getElementById('repDeploy').innerText = decisions[name].status || "";
-  } else {
-      // Clear fields if no decision exists to prevent data leakage between trainees
-      document.getElementById('repFeedback').innerText = "";
-      document.getElementById('repDeploy').innerText = "";
-  }
+  // --- 2. LOADING STATE ---
+  document.getElementById('repName').innerHTML = '<span style="color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin"></i> Generating...</span>';
+
+  // --- 3. EXECUTE (Async to allow UI update) ---
+  setTimeout(() => {
+      document.getElementById('repName').innerText = name;
+      
+      const users = JSON.parse(localStorage.getItem('users') || '[]');
+      const trainee = users.find(u => u.user === name);
+      if(trainee && trainee.traineeData) {
+          document.getElementById('repContact').innerText = trainee.traineeData.contact || "";
+          document.getElementById('repKnowledge').innerText = trainee.traineeData.knowledge || "";
+      } else {
+          document.getElementById('repContact').innerText = "Not filled";
+          document.getElementById('repKnowledge').innerText = "Not filled";
+      }
+
+      const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+      let group = "Unknown";
+      for (const [gid, members] of Object.entries(rosters)) {
+          if (members.map(m=>m.toLowerCase()).includes(name.toLowerCase())) {
+              const parts = gid.split('-');
+              if(parts.length >= 2) {
+                  const y = parseInt(parts[0]); const m = parseInt(parts[1]);
+                  const startDate = new Date(y, m-1); const endDate = new Date(y, m);
+                  group = `${startDate.toLocaleString('default', { month: 'long', year: 'numeric' })} to ${endDate.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
+              } else { group = gid; }
+              break;
+          }
+      }
+      document.getElementById('repPeriod').innerText = group;
+      
+      // DATA AGGREGATION: Manual Records + Approved Digital Submissions
+      const allRecs = JSON.parse(localStorage.getItem('records') || '[]');
+      const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+      
+      // Filter for this trainee (Safe check for nulls)
+      const myRecs = allRecs.filter(r => r.trainee && r.trainee.toLowerCase() === name.toLowerCase());
+      const mySubs = submissions.filter(s => s.trainee && s.trainee.toLowerCase() === name.toLowerCase() && s.status === 'completed');
+
+      // 1. STANDARD ASSESSMENTS (Dynamic)
+      const assessList = JSON.parse(localStorage.getItem('assessments') || '[]');
+      // Filter out Vetting Tests (Include Live Assessments in main report)
+      const standardAssessments = assessList.filter(a => 
+          !a.name.toLowerCase().includes('vetting test')
+      );
+      
+      let goalHtml = ''; let scoreHtml = '';
+      standardAssessments.forEach(a => {
+          // Find matching score from either source (Robust Fuzzy Match)
+          const rec = myRecs.find(r => {
+              // Exact match
+              if (r.assessment === a.name) return true;
+              // Fuzzy match (ignore case/trim)
+              if (r.assessment.trim().toLowerCase() === a.name.trim().toLowerCase()) return true;
+              return false;
+          });
+
+          const sub = mySubs.find(s => s.testTitle === a.name);
+          const score = Math.max(rec ? rec.score : -1, sub ? sub.score : -1);
+
+          let g1='', g2='', g3='', s1='', s2='', s3='';
+          if(score !== -1) {
+              if(score >= 90) { g1 = '&#8226;'; s3 = '&#8226;'; }
+              else if(score >= 60) { g2 = '&#8226;'; s2 = '&#8226;'; }
+              else { g3 = '&#8226;'; s1 = '&#8226;'; }
+          }
+          goalHtml += `<tr><td>${a.name}</td><td class="center report-check">${g1}</td><td class="center report-check">${g2}</td><td class="center report-check">${g3}</td></tr>`;
+          scoreHtml += `<tr><td>${a.name}</td><td class="center report-check">${s1}</td><td class="center report-check">${s2}</td><td class="center report-check">${s3}</td></tr>`;
+      });
+      
+      document.getElementById('repGoalBody').innerHTML = goalHtml;
+      document.getElementById('repScoreBody').innerHTML = scoreHtml;
+      
+      // 2. VETTING TABLES (Strict Separation)
+      renderVettingTable('1st Vetting', myRecs, mySubs, 'repVetting1Body');
+      renderVettingTable('Final Vetting', myRecs, mySubs, 'repVetting2Body');
+
+      // PRE-FILL ADMIN DECISIONS (If any)
+      const decisions = JSON.parse(localStorage.getItem('adminDecisions') || '{}');
+      if(decisions[name]) {
+          document.getElementById('repFeedback').innerText = decisions[name].comment || "";
+          document.getElementById('repDeploy').innerText = decisions[name].status || "";
+      } else {
+          // Clear fields if no decision exists to prevent data leakage between trainees
+          document.getElementById('repFeedback').innerText = "";
+          document.getElementById('repDeploy').innerText = "";
+      }
+  }, 200);
 }
 
 function renderVettingTable(phaseKey, records, submissions, tableId) {
@@ -439,14 +462,68 @@ function renderSavedReportsList() {
         return;
     }
 
+    // --- INJECT FILTER DROPDOWN IF MISSING ---
+    const searchInput = document.getElementById('savedReportSearch');
+    if (searchInput && !document.getElementById('savedReportGroupFilter')) {
+        const select = document.createElement('select');
+        select.id = 'savedReportGroupFilter';
+        select.style.cssText = "padding: 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-input); color: var(--text-main); margin-right: 10px; height: 32px; vertical-align: middle; max-width: 200px;";
+        select.onchange = () => renderSavedReportsList();
+        
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        select.innerHTML = '<option value="">All Groups</option>';
+        Object.keys(rosters).sort().reverse().forEach(gid => {
+            const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
+            select.add(new Option(label, gid));
+        });
+
+        // Insert before search input
+        searchInput.parentNode.insertBefore(select, searchInput);
+    }
+
     const saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
-    const search = document.getElementById('savedReportSearch').value.toLowerCase();
+    const search = searchInput ? searchInput.value.toLowerCase() : '';
+    const groupFilter = document.getElementById('savedReportGroupFilter') ? document.getElementById('savedReportGroupFilter').value : '';
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+
     const tbody = document.getElementById('savedReportsList');
     if(!tbody) return;
     tbody.innerHTML = '';
-    saved.filter(r => r.trainee.toLowerCase().includes(search)).reverse().forEach(r => {
-        tbody.innerHTML += `<tr><td>${r.date}</td><td>${r.trainee}</td><td>${r.savedBy}</td><td><button class="btn-primary" onclick="viewSavedReport(${r.id})" aria-label="View Saved Report for ${r.trainee}">View</button></td></tr>`;
+    
+    const filtered = saved.filter(r => {
+        if (search && !r.trainee.toLowerCase().includes(search)) return false;
+        if (groupFilter) {
+            const members = rosters[groupFilter] || [];
+            if (!members.some(m => m.toLowerCase() === r.trainee.toLowerCase())) return false;
+        }
+        return true;
     });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No reports found.</td></tr>';
+        return;
+    }
+
+    filtered.reverse().forEach(r => {
+        tbody.innerHTML += `<tr>
+            <td>${r.date}</td>
+            <td>${r.trainee}</td>
+            <td>${r.savedBy}</td>
+            <td>
+                <button class="btn-primary" onclick="viewSavedReport(${r.id})" aria-label="View Saved Report for ${r.trainee}">View</button>
+                <button class="btn-danger" onclick="deleteSavedReport(${r.id})" style="margin-left:5px;" title="Delete Report"><i class="fas fa-trash"></i></button>
+            </td>
+        </tr>`;
+    });
+}
+
+async function deleteSavedReport(id) {
+    if(!confirm("Are you sure you want to delete this saved report?")) return;
+    let saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    saved = saved.filter(r => r.id !== id);
+    localStorage.setItem('savedReports', JSON.stringify(saved));
+    await secureReportSave();
+    renderSavedReportsList();
 }
 
 function viewSavedReport(id) {

@@ -382,6 +382,22 @@ function performSmartMerge(server, local) {
                 };
             }
         }
+        // Case 2b: Monitor Data (User-Specific Merge)
+        // Prevents "War for Data" where local stale data overwrites other users' fresh server data
+        else if (key === 'monitor_data' && typeof sVal === 'object' && typeof lVal === 'object') {
+             // 1. Start with Server data (Source of truth for everyone else)
+             merged[key] = { ...sVal };
+             
+             // 2. Enforce MY local version is kept (Source of truth for me)
+             if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) {
+                 if (lVal[CURRENT_USER.user]) {
+                     merged[key][CURRENT_USER.user] = lVal[CURRENT_USER.user];
+                 }
+             } else {
+                 // Fallback: Standard merge if no user logged in
+                 merged[key] = { ...sVal, ...lVal };
+             }
+        }
         // Case 2: Objects (Rosters, Schedules)
         else if (typeof sVal === 'object' && sVal !== null && typeof lVal === 'object' && lVal !== null) {
             merged[key] = { ...sVal, ...lVal };

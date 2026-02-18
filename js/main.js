@@ -852,6 +852,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.34": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Improved Activity Monitor robustness (Idle detection & Data retention).</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved data sync conflicts where users could overwrite each other's status.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added auto-away status when no mouse/keyboard input is detected for 1 minute.</li>
+            </ul>`,
         "2.1.33": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Pre-Production Feedback persisted between different trainees in Onboard Reports.</li>
