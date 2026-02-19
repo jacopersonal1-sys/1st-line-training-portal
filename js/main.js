@@ -852,6 +852,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.40": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Conflict Resolution' modal. You can now choose between Server or Local versions when a data conflict is detected during sync.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Enhanced sync logic to pause and wait for user input on critical data mismatches (Tests, Rosters, Settings).</li>
+            </ul>`,
         "2.1.39": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>System:</strong> Major Sync Engine upgrade. Fixed data reversion issues by implementing 'Server-Wins' (Pull) vs 'Local-Wins' (Push) merge strategies.</li>

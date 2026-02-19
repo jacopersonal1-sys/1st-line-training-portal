@@ -59,6 +59,9 @@ function isUserTyping() {
     return (tag === 'input' || tag === 'textarea' || tag === 'select');
 }
 
+// Keys that trigger a manual conflict resolution prompt if data differs
+const CRITICAL_KEYS = ['tests', 'rosters', 'liveScheduleSettings', 'vettingTopics', 'assessments'];
+
 // --- NETWORK STATE LISTENERS (Auto-Recovery) ---
 window.addEventListener('online', () => {
     console.log("Network Online. Resuming sync...");
@@ -110,24 +113,48 @@ async function loadFromServer(silent = false) {
             
             if (fetchErr) throw fetchErr;
 
-            docs.forEach(doc => {
+            // UPDATED: Use for...of to allow await (Conflict Modal)
+            for (const doc of docs) {
                 // SMART PULL: Always try to merge JSON data to prevent overwriting local unsaved drafts
                 // We use 'server_wins' strategy here: If an item exists in both, Server version is the truth.
                 const localVal = JSON.parse(localStorage.getItem(doc.key));
                 
                 if (localVal && (Array.isArray(localVal) || typeof localVal === 'object')) {
+                    let strategy = 'server_wins';
+                    
+                    // CONFLICT CHECK (Only on Manual Sync + Critical Keys)
+                    if (!silent && CRITICAL_KEYS.includes(doc.key)) {
+                        // Check if content actually differs
+                        if (JSON.stringify(localVal) !== JSON.stringify(doc.content)) {
+                            console.warn(`Conflict detected for ${doc.key}`);
+                            const choice = await showConflictModal(doc.key);
+                            
+                            if (choice === 'local') {
+                                console.log(`Keeping local version of ${doc.key}`);
+                                // We keep local, but we MUST update the timestamp to stop future pulls
+                                // We effectively "touch" the local version to make it newer
+                                localStorage.setItem('sync_ts_' + doc.key, new Date().toISOString());
+                                // Trigger a background save to enforce this decision on server
+                                saveToServer([doc.key], true, true); 
+                                continue; // Skip the merge/overwrite below
+                            } else if (choice === 'server') {
+                                console.log(`Accepting server version of ${doc.key}`);
+                                // Fall through to standard logic (Server Wins)
+                            }
+                            // If 'merge', we proceed with standard performSmartMerge
+                        }
+                    }
+
                     const serverObj = { [doc.key]: doc.content };
                     const localObj = { [doc.key]: localVal };
-                    
-                    // STRATEGY: 'server_wins' ensures we accept updates from others
-                    const merged = performSmartMerge(serverObj, localObj, 'server_wins');
+                    const merged = performSmartMerge(serverObj, localObj, strategy);
                     localStorage.setItem(doc.key, JSON.stringify(merged[doc.key]));
                 } else {
                     // Fallback for primitives or empty local data
                     localStorage.setItem(doc.key, JSON.stringify(doc.content));
                 }
                 localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
-            });
+            }
             
             // Refresh UI if needed
             if(silent && typeof refreshAllDropdowns === 'function') {
@@ -255,6 +282,59 @@ function updateSyncUI(status) {
     } else if (status === 'pending') {
         el.innerHTML = '<i class="fas fa-pen" style="color:#f1c40f;"></i> Unsaved...';
     }
+}
+
+// --- CONFLICT RESOLUTION MODAL ---
+function createConflictModal() {
+    if (document.getElementById('conflictModal')) return;
+    
+    const div = document.createElement('div');
+    div.id = 'conflictModal';
+    div.className = 'modal-overlay hidden';
+    div.style.zIndex = '10000'; // Topmost
+    div.innerHTML = `
+        <div class="modal-box" style="max-width:500px; border-left: 5px solid #f1c40f;">
+            <h3 style="color:#f1c40f; margin-top:0;"><i class="fas fa-exclamation-triangle"></i> Data Conflict Detected</h3>
+            <p>A newer version of <strong><span id="conflictKeyName"></span></strong> exists on the server.</p>
+            <p style="font-size:0.9rem; color:var(--text-muted);">Your local version differs from the server version. How would you like to proceed?</p>
+            
+            <div style="display:flex; flex-direction:column; gap:10px; margin-top:20px;">
+                <button class="btn-primary" id="btnConflictServer">
+                    <div style="font-weight:bold;">Accept Server Version</div>
+                    <div style="font-size:0.75rem; opacity:0.8;">Discard my local changes (Recommended)</div>
+                </button>
+                <button class="btn-secondary" id="btnConflictMerge">
+                    <div style="font-weight:bold;">Attempt Smart Merge</div>
+                    <div style="font-size:0.75rem; opacity:0.8;">Combine both (May result in duplicates)</div>
+                </button>
+                <button class="btn-secondary" id="btnConflictLocal" style="border:1px solid #f1c40f; color:#f1c40f;">
+                    <div style="font-weight:bold;">Keep My Local Version</div>
+                    <div style="font-size:0.75rem; opacity:0.8;">Overwrite the server with my data</div>
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(div);
+}
+
+function showConflictModal(key) {
+    createConflictModal();
+    const modal = document.getElementById('conflictModal');
+    const keySpan = document.getElementById('conflictKeyName');
+    keySpan.innerText = key.replace(/_/g, ' ').toUpperCase();
+    
+    return new Promise((resolve) => {
+        modal.classList.remove('hidden');
+        
+        const handleChoice = (choice) => {
+            modal.classList.add('hidden');
+            resolve(choice);
+        };
+
+        document.getElementById('btnConflictServer').onclick = () => handleChoice('server');
+        document.getElementById('btnConflictLocal').onclick = () => handleChoice('local');
+        document.getElementById('btnConflictMerge').onclick = () => handleChoice('merge');
+    });
 }
 
 // 3. SMART SAVE (Using supabaseClient)
