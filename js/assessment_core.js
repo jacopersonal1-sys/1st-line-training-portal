@@ -106,7 +106,7 @@ function renderQuestionInput(q, idx) {
             return `
             <label class="taking-radio opt-label-large">
                 <input type="checkbox" name="q_${idx}" value="${oIdx}" onchange="updateMultiSelect(${idx}, ${oIdx}, this.checked)" ${isChecked}>
-                <span style="margin-left:8px;">${opt}</span>
+                <span>${opt}</span>
             </label>
         `}).join('');
     }
@@ -116,14 +116,28 @@ function renderQuestionInput(q, idx) {
         return `
         <label class="taking-radio opt-label-large">
             <input type="radio" name="q_${idx}" value="${oIdx}" onchange="recordAnswer(${idx}, ${oIdx})" ${isChecked}>
-            <span style="margin-left:8px;">${opt}</span>
+            <span>${opt}</span>
         </label>
     `}).join('');
+}
+
+// --- VISUAL HELPER ---
+function updateCardVisual(qIdx, val) {
+    const card = document.getElementById(`card_q_${qIdx}`);
+    if (card) {
+        let isAnswered = false;
+        if (Array.isArray(val)) isAnswered = val.length > 0;
+        else if (typeof val === 'object' && val !== null) isAnswered = Object.keys(val).length > 0;
+        else isAnswered = (val !== undefined && val !== null && val !== "");
+        
+        if (isAnswered) card.classList.add('answered'); else card.classList.remove('answered');
+    }
 }
 
 // --- HELPERS ---
 function recordAnswer(qIdx, val) { 
     window.USER_ANSWERS[qIdx] = val;
+    updateCardVisual(qIdx, val);
     // Live Arena: Persist answer locally to session immediately
     if (window.IS_LIVE_ARENA) {
         const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
@@ -145,12 +159,14 @@ function recordAnswer(qIdx, val) {
 function updateMatchingAnswer(qIdx, rowIdx, val) {
     if(!window.USER_ANSWERS[qIdx]) window.USER_ANSWERS[qIdx] = [];
     window.USER_ANSWERS[qIdx][rowIdx] = val;
+    updateCardVisual(qIdx, window.USER_ANSWERS[qIdx]);
     // Live Arena: Persist
     if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
 function updateMatrixAnswer(qIdx, rowIdx, colIdx) {
     if(!window.USER_ANSWERS[qIdx]) window.USER_ANSWERS[qIdx] = {};
     window.USER_ANSWERS[qIdx][rowIdx] = colIdx;
+    updateCardVisual(qIdx, window.USER_ANSWERS[qIdx]);
     // Live Arena: Persist
     if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
@@ -164,6 +180,7 @@ function updateMultiSelect(qIdx, optIdx, isChecked) {
     } else {
         window.USER_ANSWERS[qIdx] = window.USER_ANSWERS[qIdx].filter(i => i !== optIdx);
     }
+    updateCardVisual(qIdx, window.USER_ANSWERS[qIdx]);
     // Live Arena: Persist
     if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }

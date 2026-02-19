@@ -142,6 +142,8 @@ The app uses a **"Smart Split Sync"** with Conflict Resolution:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.1.45**: **Visual Overhaul**: Comprehensive UI/UX upgrade including glassmorphism login with particle effects, animated dashboard entry, and modern assessment interface. **Feedback Systems**: Added skeleton loaders, enhanced toast notifications, and dynamic activity monitor grid. **Polish**: Implemented smooth tab transitions, tactile button responses, and interactive table rows.
+- **v2.1.44**: **Login Security**: Filtered out Graduated Agents from the Trainee Login list. **User Management**: Prevented system from regenerating accounts for archived graduates.
 - **v2.1.43**: **Daily Tip Management**: Added Admin widget to customize tips. **Sync Hardening**: Removed conflict prompts, added retry logic, and improved nested merge. **Stability**: Fixed Trainee Dashboard crash.
 - **v2.1.42**: **Reporting & Search Enhancements**: Added 'Date Graduated' to Agent Search profile. Improved Onboard Report auto-fill logic with fuzzy matching for assessment names.
 - **v2.1.41**: **Archived Reports Fix**: Resolved issue where 'View Full Report' failed for graduated agents. Added archive lookup logic to the report viewer.

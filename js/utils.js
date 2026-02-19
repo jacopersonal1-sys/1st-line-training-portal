@@ -19,6 +19,17 @@ function formatDuration(ms) {
         : `${seconds}s`;
 }
 
+// --- UI: SKELETON LOADER GENERATOR ---
+function getSkeletonRows(cols = 4, rows = 3) {
+    let html = '';
+    for(let i=0; i<rows; i++) {
+        html += `<tr class="skeleton-row">`;
+        for(let j=0; j<cols; j++) html += `<td></td>`;
+        html += `</tr>`;
+    }
+    return html;
+}
+
 // --- SECURITY: HASHING HELPER ---
 /**
  * Hashes a plaintext password using SHA-256.

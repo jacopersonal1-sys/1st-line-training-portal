@@ -499,6 +499,10 @@ function renderActivityMonitorContent() {
     const targetAgents = StudyMonitor.getScheduledAgents();
     
     if(targetAgents.length === 0) {
+        // Clear grid if it exists
+        if (container.querySelector('.monitor-grid')) {
+            container.querySelector('.monitor-grid').innerHTML = '';
+        }
         container.innerHTML = `
             <div style="text-align:center; padding:20px; color:var(--text-muted);">
                 <i class="fas fa-calendar-times" style="font-size:2rem; margin-bottom:10px;"></i><br>
@@ -507,6 +511,12 @@ function renderActivityMonitorContent() {
             </div>`;
         return;
     }
+
+    // Ensure container has a grid wrapper if empty
+    if (!container.querySelector('.monitor-grid')) {
+        container.innerHTML = '<div class="monitor-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:20px;"></div>';
+    }
+    const grid = container.querySelector('.monitor-grid');
 
     const activeIds = new Set();
 
@@ -537,33 +547,42 @@ function renderActivityMonitorContent() {
             // Create new card structure
             card = document.createElement('div');
             card.id = `mon_card_${safeId}`;
-            card.className = 'card';
-            card.style.marginBottom = '15px';
-            card.style.padding = '15px';
-            card.style.cursor = 'pointer';
-            card.onclick = function(e) {
-                // Toggle details if not clicking a button
-                if(e.target.tagName !== 'BUTTON') {
-                    const det = document.getElementById(`mon_det_${safeId}`);
-                    if(det) det.classList.toggle('hidden');
-                }
-            };
+            card.className = 'card monitor-card';
+            card.style.marginBottom = '0'; // Grid handles gap
+            card.style.padding = '20px';
+            card.style.borderLeft = '4px solid transparent';
+            card.style.transition = 'all 0.3s ease';
 
             card.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <h4 style="margin:0;">${agent}</h4>
-                        <div id="mon_curr_${safeId}" style="font-size:0.8rem; color:var(--text-muted);"></div>
+                <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:15px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="width:35px; height:35px; background:var(--bg-input); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; color:var(--text-muted);">${agent.charAt(0)}</div>
+                        <h4 style="margin:0; font-size:1.1rem;">${agent}</h4>
                     </div>
                     <div id="mon_badge_${safeId}"></div>
                 </div>
-                <div id="mon_det_${safeId}" class="hidden" style="margin-top:15px; padding-top:10px; border-top:1px solid var(--border-color);">
-                    <strong style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:5px;">Activity History</strong>
-                    <div id="mon_hist_${safeId}" style="background:var(--bg-input); padding:10px; border-radius:6px; max-height:200px; overflow-y:auto;"></div>
+                
+                <div style="background:var(--bg-input); padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border-color);">
+                    <div id="mon_curr_${safeId}" style="font-size:0.9rem; line-height:1.5;"></div>
+                </div>
+
+                <button class="btn-secondary btn-sm" style="width:100%;" onclick="event.stopPropagation(); document.getElementById('mon_det_${safeId}').classList.toggle('hidden')">
+                    <i class="fas fa-history"></i> View History
+                </button>
+                
+                <div id="mon_det_${safeId}" class="hidden" style="margin-top:15px; padding-top:10px; border-top:1px dashed var(--border-color);">
+                    <strong style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:8px;">Recent Activity</strong>
+                    <div id="mon_hist_${safeId}" style="max-height:150px; overflow-y:auto; padding-right:5px;"></div>
                 </div>
             `;
-            container.appendChild(card);
+            grid.appendChild(card);
         }
+
+        // Dynamic Border Color update
+        if (activity.isStudyOpen) card.style.borderLeftColor = '#2ecc71';
+        else if (activity.current.includes('Idle')) card.style.borderLeftColor = '#95a5a6';
+        else if (activity.current.includes('External')) card.style.borderLeftColor = '#ff5252';
+        else card.style.borderLeftColor = '#f1c40f';
 
         // Update Content
         document.getElementById(`mon_curr_${safeId}`).innerHTML = `Current: <strong>${activity.current}</strong> <span style="opacity:0.7;">(Since ${startTime})</span> for ${durationStr}`;
@@ -591,7 +610,7 @@ function renderActivityMonitorContent() {
     });
 
     // Cleanup Stale Cards (Agents no longer in filter)
-    Array.from(container.children).forEach(child => {
+    Array.from(grid.children).forEach(child => {
         if (child.id && child.id.startsWith('mon_card_') && !activeIds.has(child.id)) {
             child.remove();
         }

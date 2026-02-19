@@ -320,11 +320,14 @@ function loadRostersToSelect(elementId = 'selectedGroup') {
 
 function populateTraineeDropdown() { 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const gradNames = new Set(graduates.map(g => g.user.toLowerCase()));
     const list = document.getElementById('traineeOptions'); 
     
     if(list) {
         list.innerHTML = ''; 
         users.filter(u => u.role === 'trainee')
+             .filter(u => !gradNames.has(u.user.toLowerCase()))
              .sort((a,b) => a.user.localeCompare(b.user))
              .forEach(u => { 
                 let opt = document.createElement('option'); 
@@ -341,6 +344,8 @@ async function scanAndGenerateUsers(silent = false) {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
     const records = JSON.parse(localStorage.getItem('records') || '[]'); 
     const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const gradNames = new Set(graduates.map(g => g.user.toLowerCase()));
 
     let allNames = new Set(); 
     
@@ -358,6 +363,9 @@ async function scanAndGenerateUsers(silent = false) {
     let resurrectedCount = 0;
     
     allNames.forEach(name => { 
+        // Skip if user is graduated (Archived)
+        if (gradNames.has(name.toLowerCase())) return;
+
         // Case-insensitive check
         const exists = users.find(u => u.user.toLowerCase() === name.toLowerCase());
         const revokedIdx = revoked.findIndex(r => r.toLowerCase() === name.toLowerCase());
@@ -448,6 +456,14 @@ function loadAdminUsers() {
             const safeUser = u.user.replace(/'/g, "\\'");
             const displayUser = (typeof escapeHTML === 'function') ? escapeHTML(u.user) : u.user;
             
+            // Generate Avatar
+            const initials = u.user.substring(0, 2).toUpperCase();
+            let hash = 0;
+            for (let j = 0; j < u.user.length; j++) hash = u.user.charCodeAt(j) + ((hash << 5) - hash);
+            const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+            const color = "#" + "00000".substring(0, 6 - c.length) + c;
+            const avatarHtml = `<div style="width:28px; height:28px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; margin-right:10px; vertical-align:middle; box-shadow:0 2px 4px rgba(0,0,0,0.2);">${initials}</div>`;
+
             if (CURRENT_USER.role === 'admin' && u.user !== 'admin') {
                 const hasReport = savedReports.some(r => r.trainee.toLowerCase() === u.user.toLowerCase());
                 const moveBtn = hasReport 
@@ -479,7 +495,7 @@ function loadAdminUsers() {
             const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '-';
             const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '-';
 
-            return `<tr><td>${displayUser}</td><td>${u.role}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
+            return `<tr><td>${avatarHtml}${displayUser}</td><td>${u.role}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
         }).join(''); 
     }
 }
@@ -879,7 +895,10 @@ async function graduateTrainee(username) {
         // 2. WIPE ACTIVE DATA
         const wipe = (key, field) => {
             let data = JSON.parse(localStorage.getItem(key) || '[]');
-            const newData = data.filter(item => item[field] !== username);
+            const newData = data.filter(item => {
+                const val = item[field];
+                return !val || val.toLowerCase() !== username.toLowerCase();
+            });
             if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
         };
         
@@ -905,8 +924,7 @@ async function graduateTrainee(username) {
 
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         for (const gid in rosters) {
-            const idx = rosters[gid].indexOf(username);
-            if (idx > -1) rosters[gid].splice(idx, 1);
+            rosters[gid] = rosters[gid].filter(m => m.toLowerCase() !== username.toLowerCase());
         }
         localStorage.setItem('rosters', JSON.stringify(rosters));
 

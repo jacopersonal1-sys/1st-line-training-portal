@@ -321,8 +321,14 @@ function renderTraineeArena() {
             </div>
 
             <div style="position:relative;">
-                <div id="securityCheckLog" class="security-log-box">
-                    <div><i class="fas fa-spinner fa-spin"></i> Checking System Requirements...</div>
+                <div id="securityCheckLog" class="security-log-box" style="min-height:80px;">
+                    <div style="display:flex; align-items:center; gap:15px; padding:15px; color:var(--primary); background:var(--bg-input); border-radius:6px; border:1px dashed var(--primary);">
+                        <i class="fas fa-circle-notch fa-spin" style="font-size:1.8rem;"></i>
+                        <div>
+                            <strong style="font-size:1.1rem;">Scanning System...</strong>
+                            <div style="font-size:0.9rem; color:var(--text-muted);">Verifying security protocols</div>
+                        </div>
+                    </div>
                 </div>
                 <button class="btn-secondary btn-sm" style="position:absolute; top:5px; right:5px;" onclick="checkSystemCompliance()" title="Force Re-check"><i class="fas fa-sync"></i></button>
             </div>
@@ -488,24 +494,64 @@ async function checkSystemCompliance() {
     // Update UI
     if (errors.length === 0) {
         if (isRelaxed) {
-            logBox.innerHTML = `<div class="sec-pass" style="color:#e67e22;"><i class="fas fa-unlock"></i> <strong>Security Relaxed.</strong> Strict rules disabled by Admin.</div>`;
+            logBox.innerHTML = `
+                <div class="sec-pass" style="color:#e67e22; background:rgba(230, 126, 34, 0.1); padding:15px; border-radius:6px; border:1px solid #e67e22;">
+                    <div style="display:flex; align-items:center; gap:15px;">
+                        <i class="fas fa-unlock" style="font-size:1.8rem;"></i>
+                        <div>
+                            <strong style="font-size:1.1rem;">Security Relaxed</strong>
+                            <div style="font-size:0.9rem; opacity:0.9;">Strict rules disabled by Admin.</div>
+                        </div>
+                    </div>
+                </div>`;
         } else {
-            logBox.innerHTML = `<div class="sec-pass"><i class="fas fa-check"></i> System Secure. Ready to start.</div>`;
+            logBox.innerHTML = `
+                <div class="sec-pass" style="color:#2ecc71; background:rgba(46, 204, 113, 0.1); padding:15px; border-radius:6px; border:1px solid #2ecc71;">
+                    <div style="display:flex; align-items:center; gap:15px;">
+                        <i class="fas fa-check-circle" style="font-size:1.8rem;"></i>
+                        <div>
+                            <strong style="font-size:1.1rem;">System Secure</strong>
+                            <div style="font-size:0.9rem; opacity:0.9;">All checks passed. Ready to start.</div>
+                        </div>
+                    </div>
+                </div>`;
         }
         btn.disabled = false;
         btn.style.opacity = '1';
         btn.style.cursor = 'pointer';
+        btn.style.animation = 'pulse 2s infinite'; // Visual cue
     } else if (isOverridden) {
-        logBox.innerHTML = `<div class="sec-warn"><i class="fas fa-exclamation-triangle"></i> <strong>Admin Override Active.</strong> Security checks bypassed.</div>` + 
-                           errors.map(e => `<div class="sec-fail" style="opacity:0.7;"><i class="fas fa-times"></i> ${e} (Ignored)</div>`).join('');
+        logBox.innerHTML = `
+            <div class="sec-warn" style="color:#f1c40f; background:rgba(241, 196, 15, 0.1); padding:15px; border-radius:6px; border:1px solid #f1c40f; margin-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <i class="fas fa-exclamation-triangle" style="font-size:1.8rem;"></i>
+                    <div>
+                        <strong style="font-size:1.1rem;">Admin Override Active</strong>
+                        <div style="font-size:0.9rem; opacity:0.9;">Security checks bypassed.</div>
+                    </div>
+                </div>
+            </div>` + 
+            errors.map(e => `
+                <div class="sec-fail" style="opacity:0.7; padding:8px 10px; border-bottom:1px solid var(--border-color); color:var(--text-muted); display:flex; align-items:center; gap:10px;">
+                    <i class="fas fa-times" style="color:#ff5252;"></i> <span>${e} (Ignored)</span>
+                </div>`).join('');
         btn.disabled = false;
         btn.style.opacity = '1';
         btn.style.cursor = 'pointer';
+        btn.style.animation = 'none';
     } else {
-        logBox.innerHTML = errors.map(e => `<div class="sec-fail"><i class="fas fa-times"></i> ${e}</div>`).join('');
+        logBox.innerHTML = errors.map(e => `
+            <div class="sec-fail" style="background:rgba(255, 82, 82, 0.1); color:#ff5252; padding:15px; border-radius:6px; border:1px solid #ff5252; margin-bottom:10px; display:flex; align-items:center; gap:15px;">
+                <i class="fas fa-ban" style="font-size:1.5rem;"></i>
+                <div>
+                    <strong style="font-size:1.1rem;">Security Violation</strong>
+                    <div style="font-size:0.9rem; opacity:0.9;">${e}</div>
+                </div>
+            </div>`).join('');
         btn.disabled = true;
         btn.style.opacity = '0.5';
         btn.style.cursor = 'not-allowed';
+        btn.style.animation = 'none';
     }
 
     // Report to Server if Status Changed (e.g. Waiting -> Blocked or Waiting -> Ready)

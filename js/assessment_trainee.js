@@ -213,23 +213,44 @@ function renderTestPaper(containerId = 'takingQuestions') {
     if (!content) return;
     content.innerHTML = ''; 
 
+    // Inject Card Styles
+    if (!document.getElementById('assessment-card-styles')) {
+        const style = document.createElement('style');
+        style.id = 'assessment-card-styles';
+        style.innerHTML = `
+            .taking-card { transition: transform 0.2s, box-shadow 0.2s, border-left-color 0.3s; border-left: 4px solid transparent; position: relative; }
+            .taking-card:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+            .taking-card.answered { border-left-color: #2ecc71; }
+            .taking-card.answered::after {
+                content: '\\f00c'; font-family: 'Font Awesome 5 Free'; font-weight: 900;
+                position: absolute; top: 15px; right: 15px; color: #2ecc71; font-size: 1.2rem; opacity: 0.5;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
     if (window.CURRENT_TEST.type === 'vetting' && window.CURRENT_TEST.duration) {
         startTestTimer(parseInt(window.CURRENT_TEST.duration));
     }
 
     let html = `
     <div class="test-paper">
-        <div style="text-align:center; margin-bottom:40px; padding-bottom:20px;">
-            <p style="color:var(--text-muted);">Answer all questions. Results will be submitted for review.</p>
+        <div style="text-align:center; margin-bottom:50px; padding-bottom:20px; border-bottom:1px dashed var(--border-color);">
+            <h2 style="color:var(--primary); margin-bottom:10px;">${window.CURRENT_TEST.title}</h2>
+            <p style="color:var(--text-muted); font-size:1.1rem;">Answer all questions below. Your progress is saved automatically.</p>
         </div>
     `;
 
     window.CURRENT_TEST.questions.forEach((q, idx) => {
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
+        
+        // Check initial state
+        const ans = window.USER_ANSWERS[idx];
+        const isAnswered = (ans !== undefined && ans !== null && ans !== "" && (Array.isArray(ans) ? ans.length > 0 : true));
 
         html += `
-        <div class="taking-card" style="margin-bottom:40px;">
-            <div class="q-text-large" style="font-weight:700; margin-bottom:15px;">
+        <div class="taking-card ${isAnswered ? 'answered' : ''}" id="card_q_${idx}" style="margin-bottom:40px;">
+            <div class="q-text-large" style="font-weight:700; font-size:1.3rem; margin-bottom:25px; line-height:1.5;">
                 ${idx + 1}. ${q.text} ${refBtn} <span style="font-size:0.8rem; font-weight:normal; color:var(--text-muted); float:right; margin-left:10px;">(${q.points||1} pts)</span>
             </div>
             <div class="question-input-area" id="q_area_${idx}">${renderQuestionInput(q, idx)}</div>

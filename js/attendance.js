@@ -183,7 +183,7 @@ function renderAttendanceRegister() {
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     const members = rosters[gid] || [];
 
-    let html = `<table class="admin-table"><thead><tr><th>Agent</th><th>Total Days</th><th>Lates</th><th>Unconfirmed Lates</th><th>Action</th></tr></thead><tbody>`;
+    let html = `<div class="card"><table class="admin-table"><thead><tr><th>Agent</th><th>Total Days</th><th>Lates</th><th>Unconfirmed Lates</th><th>Action</th></tr></thead><tbody>`;
 
     members.forEach(m => {
         const myRecs = records.filter(r => r.user === m);
@@ -193,6 +193,11 @@ function renderAttendanceRegister() {
         const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed);
         
         const safeUser = m.replace(/'/g, "\\'");
+        
+        const unconfDisplay = unconfirmed.length > 0 
+            ? `<span class="badge-count" style="position:static; background:#ff5252; font-size:0.85rem; padding:2px 8px; border-radius:12px;">${unconfirmed.length}</span>` 
+            : `<span style="color:var(--text-muted); opacity:0.5;">-</span>`;
+
         let actionBtn = `<button class="btn-secondary btn-sm" onclick="manageAgentAttendance('${safeUser}')">View/Edit</button>`;
 
         if(unconfirmed.length > 0) {
@@ -205,14 +210,14 @@ function renderAttendanceRegister() {
         }
 
         html += `<tr>
-            <td>${m}</td>
+            <td><div style="display:flex; align-items:center; gap:10px;"><div style="width:30px; height:30px; background:var(--bg-input); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; color:var(--primary);">${m.charAt(0)}</div> <strong>${m}</strong></div></td>
             <td>${total}</td>
-            <td>${lates}</td>
-            <td style="${unconfirmed.length > 0 ? 'color:#ff5252; font-weight:bold;' : ''}">${unconfirmed.length}</td>
+            <td>${lates > 0 ? `<span style="color:#f1c40f; font-weight:bold;">${lates}</span>` : lates}</td>
+            <td>${unconfDisplay}</td>
             <td>${actionBtn}</td>
         </tr>`;
     });
-    html += `</tbody></table>`;
+    html += `</tbody></table></div>`;
     container.innerHTML = html;
 }
 
@@ -289,14 +294,15 @@ function manageAgentAttendance(username) {
     myRecs.sort((a,b) => new Date(b.date) - new Date(a.date));
 
     let html = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <h4>Attendance History: ${username}</h4>
-            <button class="btn-secondary btn-sm" onclick="renderAttendanceRegister()">&larr; Back to Register</button>
-        </div>
-        <div style="max-height:50vh; overflow-y:auto;">
-        <table class="admin-table">
-            <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Status</th><th>Action</th></tr></thead>
-            <tbody>
+        <div class="card" style="border-top: 4px solid var(--primary);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:10px; border-bottom:1px solid var(--border-color);">
+                <h3 style="margin:0;"><i class="fas fa-history"></i> Attendance History: <span style="color:var(--primary);">${username}</span></h3>
+                <button class="btn-secondary btn-sm" onclick="renderAttendanceRegister()">&larr; Back to Register</button>
+            </div>
+            <div class="table-responsive" style="max-height:60vh; overflow-y:auto;">
+            <table class="admin-table">
+                <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
     `;
     
     if (myRecs.length === 0) {
@@ -324,7 +330,7 @@ function manageAgentAttendance(username) {
         });
     }
     
-    html += `</tbody></table></div>`;
+    html += `</tbody></table></div></div>`;
     container.innerHTML = html;
 }
 

@@ -33,10 +33,29 @@ async function hashPassword(message) {
 }
 
 function toggleLoginMode(mode) {
-  LOGIN_MODE = mode;
-  document.getElementById('loginError').innerText = "";
+  // --- VISUAL ENHANCEMENT: Apply classes dynamically ---
+  const ids = ['adminUsername', 'traineeUsername', 'password'];
+  ids.forEach(id => {
+      const el = document.getElementById(id);
+      if(el && !el.classList.contains('login-input')) el.classList.add('login-input');
+  });
+  
+  const btnLogin = document.querySelector('button[onclick="attemptLogin()"]');
+  if(btnLogin && !btnLogin.classList.contains('login-btn-main')) btnLogin.classList.add('login-btn-main');
+
   const btnAdmin = document.getElementById('btn-admin');
   const btnTrainee = document.getElementById('btn-trainee');
+  
+  // Style the toggle container
+  if(btnAdmin && btnAdmin.parentElement && !btnAdmin.parentElement.classList.contains('login-toggle-container')) {
+      btnAdmin.parentElement.classList.add('login-toggle-container');
+      btnAdmin.classList.add('login-toggle-btn');
+      btnTrainee.classList.add('login-toggle-btn');
+  }
+  // -----------------------------------------------------
+
+  LOGIN_MODE = mode;
+  document.getElementById('loginError').innerText = "";
   const inpAdmin = document.getElementById('adminUsername');
   const inpTrainee = document.getElementById('traineeUsername');
   const lblUser = document.getElementById('lbl-username');
@@ -46,12 +65,24 @@ function toggleLoginMode(mode) {
     btnTrainee.classList.remove('active');
     inpAdmin.classList.remove('hidden');
     inpTrainee.classList.add('hidden');
+    
+    // Animation
+    inpAdmin.classList.remove('fade-in-up');
+    void inpAdmin.offsetWidth; // Trigger reflow
+    inpAdmin.classList.add('fade-in-up');
+    
     lblUser.innerText = "Username";
   } else {
     btnAdmin.classList.remove('active');
     btnTrainee.classList.add('active');
     inpAdmin.classList.add('hidden');
     inpTrainee.classList.remove('hidden');
+    
+    // Animation
+    inpTrainee.classList.remove('fade-in-up');
+    void inpTrainee.offsetWidth; // Trigger reflow
+    inpTrainee.classList.add('fade-in-up');
+    
     lblUser.innerText = "Select Your Name";
     
     // DYNAMIC REFRESH: Ensure the dropdown has the latest users
@@ -142,6 +173,13 @@ async function attemptLogin() {
     autoLogin();
   } else {
     document.getElementById('loginError').innerText = "Incorrect credentials.";
+    // Visual Feedback: Shake
+    const box = document.querySelector('.login-box');
+    if(box) {
+        box.classList.remove('shake-anim'); // Reset
+        void box.offsetWidth; // Trigger reflow
+        box.classList.add('shake-anim');
+    }
   }
 }
 
@@ -151,8 +189,33 @@ async function autoLogin() {
   if(!accessGranted) return; 
   // ---------------------------------------------------------------
 
-  document.getElementById('login-screen').classList.add('hidden');
-  document.getElementById('app').style.display = 'flex';
+  // --- COOL TRANSITION START ---
+  const loginScreen = document.getElementById('login-screen');
+  const appScreen = document.getElementById('app');
+  
+  // Prepare App (Show it behind, invisible first)
+  appScreen.style.opacity = '0';
+  appScreen.style.display = 'flex';
+  
+  // Trigger Login Exit Animation
+  loginScreen.classList.add('login-exit-anim');
+  
+  // Fade In App
+  setTimeout(() => {
+      appScreen.style.transition = 'opacity 1.8s ease-in-out';
+      appScreen.style.opacity = '1';
+  }, 200);
+
+  // Cleanup after animation finishes
+  setTimeout(() => {
+      loginScreen.classList.add('hidden');
+      loginScreen.classList.remove('login-exit-anim');
+      appScreen.style.transition = ''; // Reset
+      appScreen.style.opacity = '';
+      if(typeof stopLoginParticles === 'function') stopLoginParticles();
+  }, 2000);
+  // -----------------------------
+
   document.getElementById('user-footer').innerHTML = `Logged in as: <strong>${CURRENT_USER.user}</strong> (${CURRENT_USER.role}) <span id="sync-indicator" style="margin-left:15px; transition: opacity 0.5s; font-size: 0.9em;"></span>`;
   
   // LOG LOGIN
@@ -441,4 +504,123 @@ function filterUserListForTrainee() {
             row.style.display = 'none';
         }
     });
+}
+
+/* ================= VISUAL EFFECTS ================= */
+
+let PARTICLE_ID = null;
+let LOGIN_MOUSE_MOVE = null;
+let LOGIN_MOUSE_LEAVE = null;
+
+function initLoginParticles() {
+    const container = document.getElementById('login-screen');
+    if(!container) return;
+    
+    // Prevent duplicates
+    if(document.getElementById('login-particles-canvas')) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.id = 'login-particles-canvas';
+    canvas.style.position = 'absolute';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.zIndex = '0'; // Behind wrapper
+    
+    // Insert as first child to sit behind content
+    container.insertBefore(canvas, container.firstChild);
+    
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    const particles = [];
+    
+    const resize = () => {
+        width = canvas.width = container.offsetWidth;
+        height = canvas.height = container.offsetHeight;
+    };
+    window.addEventListener('resize', resize);
+    resize();
+    
+    // Mouse tracking
+    let mouse = { x: null, y: null, radius: 150 };
+    
+    if (LOGIN_MOUSE_MOVE) container.removeEventListener('mousemove', LOGIN_MOUSE_MOVE);
+    if (LOGIN_MOUSE_LEAVE) container.removeEventListener('mouseleave', LOGIN_MOUSE_LEAVE);
+
+    LOGIN_MOUSE_MOVE = (e) => {
+        const rect = container.getBoundingClientRect();
+        mouse.x = e.clientX - rect.left;
+        mouse.y = e.clientY - rect.top;
+    };
+    LOGIN_MOUSE_LEAVE = () => { mouse.x = null; mouse.y = null; };
+
+    container.addEventListener('mousemove', LOGIN_MOUSE_MOVE);
+    container.addEventListener('mouseleave', LOGIN_MOUSE_LEAVE);
+    
+    // Init Particles (Subtle count)
+    for(let i=0; i<50; i++) {
+        particles.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            vx: (Math.random() - 0.5) * 0.3, // Slow movement
+            vy: (Math.random() - 0.5) * 0.3,
+            size: Math.random() * 2,
+            alpha: Math.random() * 0.5 + 0.1
+        });
+    }
+    
+    const animate = () => {
+        ctx.clearRect(0, 0, width, height);
+        
+        particles.forEach(p => {
+            // Mouse Interaction
+            if (mouse.x != null) {
+                let dx = mouse.x - p.x;
+                let dy = mouse.y - p.y;
+                let distance = Math.sqrt(dx*dx + dy*dy);
+                if (distance < mouse.radius) {
+                    const force = (mouse.radius - distance) / mouse.radius;
+                    const angle = Math.atan2(dy, dx);
+                    p.x -= Math.cos(angle) * force * 2; // Repel
+                    p.y -= Math.sin(angle) * force * 2;
+                    
+                    ctx.beginPath();
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 * force})`;
+                    ctx.lineWidth = 0.5;
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(mouse.x, mouse.y);
+                    ctx.stroke();
+                }
+            }
+
+            p.x += p.vx;
+            p.y += p.vy;
+            
+            // Wrap around
+            if(p.x < 0) p.x = width;
+            if(p.x > width) p.x = 0;
+            if(p.y < 0) p.y = height;
+            if(p.y > height) p.y = 0;
+            
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`;
+            ctx.fill();
+        });
+        
+        PARTICLE_ID = requestAnimationFrame(animate);
+    };
+    animate();
+}
+
+function stopLoginParticles() {
+    if(PARTICLE_ID) cancelAnimationFrame(PARTICLE_ID);
+    const c = document.getElementById('login-particles-canvas');
+    if(c) c.remove();
+    
+    const container = document.getElementById('login-screen');
+    if(container && LOGIN_MOUSE_MOVE) container.removeEventListener('mousemove', LOGIN_MOUSE_MOVE);
+    if(container && LOGIN_MOUSE_LEAVE) container.removeEventListener('mouseleave', LOGIN_MOUSE_LEAVE);
 }

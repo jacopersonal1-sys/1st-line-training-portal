@@ -15,6 +15,260 @@ async function secureInitSave() {
 }
 
 window.onload = async function() {
+    // --- INJECT GLOBAL VISUAL STYLES ---
+    if (!document.getElementById('global-visuals')) {
+        const style = document.createElement('style');
+        style.id = 'global-visuals';
+        style.innerHTML = `
+            @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+            @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); } 20%, 40%, 60%, 80% { transform: translateX(5px); } }
+            .shake-anim { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+            .toast {
+                animation: slideInRight 0.3s ease-out forwards;
+                position: relative; overflow: hidden;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 4px;
+                display: flex; flex-direction: column; justify-content: center;
+            }
+            .toast-progress {
+                position: absolute; bottom: 0; left: 0; height: 3px;
+                background: rgba(255,255,255,0.5); width: 100%;
+                transition: width 3s linear;
+            }
+            /* --- LOGIN SCREEN VISUALS --- */
+            .login-input {
+                width: 100%; padding: 12px 15px; margin-bottom: 15px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 6px; color: white;
+                transition: all 0.3s ease;
+            }
+            .login-input:focus {
+                background: rgba(255, 255, 255, 0.1);
+                border-color: var(--primary); outline: none;
+                box-shadow: 0 0 0 2px rgba(243, 112, 33, 0.2);
+            }
+            select.login-input {
+                appearance: none; cursor: pointer;
+                background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+                background-repeat: no-repeat; background-position: right .7em top 50%; background-size: .65em auto;
+            }
+            .login-toggle-container {
+                background: rgba(0,0,0,0.3); border-radius: 25px; padding: 4px;
+                display: flex; margin-bottom: 20px; position: relative;
+            }
+            .login-toggle-btn {
+                flex: 1; background: transparent; border: none; color: #aaa;
+                padding: 8px; border-radius: 20px; cursor: pointer;
+                transition: all 0.3s ease; font-weight: 600;
+            }
+            .login-toggle-btn.active {
+                background: var(--primary); color: white;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            }
+            .login-btn-main {
+                width: 100%; padding: 12px; border: none; border-radius: 6px;
+                background: var(--primary); color: white; font-weight: bold;
+                cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+            }
+            .login-btn-main:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(243, 112, 33, 0.3);
+            }
+            .fade-in-up { animation: fadeInUp 0.3s ease-out forwards; }
+            /* --- LOGIN EXIT ANIMATION --- */
+            @keyframes loginExit {
+                0% { opacity: 1; transform: scale(1); filter: blur(0); }
+                100% { opacity: 0; transform: scale(1.2); filter: blur(20px); }
+            }
+            .login-exit-anim {
+                animation: loginExit 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+                pointer-events: none;
+                will-change: opacity, transform, filter;
+            }
+            /* --- MODERN MINIMALIST LOGIN --- */
+            .login-box {
+                background: rgba(255, 255, 255, 0.02) !important;
+                backdrop-filter: blur(25px);
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                box-shadow: 0 30px 60px rgba(0,0,0,0.5) !important;
+                border-radius: 20px !important;
+                padding: 50px 40px !important;
+            }
+            .login-input {
+                background: transparent !important;
+                border: none !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.3) !important;
+                border-radius: 0 !important;
+                padding: 15px 5px !important;
+                font-size: 1.1rem !important;
+                margin-bottom: 25px !important;
+                transition: all 0.4s ease !important;
+            }
+            .login-input:focus {
+                border-bottom-color: var(--primary) !important;
+                background: linear-gradient(to bottom, transparent 95%, rgba(243, 112, 33, 0.1) 100%) !important;
+                padding-left: 10px !important;
+            }
+            .login-btn-main {
+                border-radius: 30px !important;
+                padding: 15px !important;
+                font-size: 1rem !important;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                background: linear-gradient(135deg, var(--primary), #e67e22) !important;
+                box-shadow: 0 10px 30px -10px rgba(243, 112, 33, 0.6) !important;
+                margin-top: 10px;
+            }
+            .login-btn-main:hover {
+                transform: translateY(-3px) scale(1.02) !important;
+                box-shadow: 0 15px 35px -10px rgba(243, 112, 33, 0.8) !important;
+            }
+            .login-toggle-container {
+                background: rgba(0,0,0,0.3) !important;
+                border-radius: 30px !important;
+                padding: 5px !important;
+                margin-bottom: 30px !important;
+            }
+            .login-toggle-btn {
+                border-radius: 25px !important;
+                font-weight: 500 !important;
+                letter-spacing: 1px;
+            }
+            .login-toggle-btn.active {
+                background: var(--primary) !important;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.3) !important;
+            }
+            .login-wrapper {
+                position: relative;
+                z-index: 1; /* Ensure form sits above particles */
+            }
+            /* --- TAB TRANSITIONS --- */
+            @keyframes tabExit {
+                0% { opacity: 1; transform: scale(1); filter: blur(0); }
+                100% { opacity: 0; transform: scale(0.95); filter: blur(10px); }
+            }
+            @keyframes tabEnter {
+                0% { opacity: 0; transform: translateY(20px) scale(0.98); filter: blur(10px); }
+                100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+            }
+            .tab-exit-anim { animation: tabExit 0.4s ease-in forwards; pointer-events: none; }
+            .tab-enter-anim { animation: tabEnter 0.6s ease-out forwards; }
+
+            /* --- GLOBAL INTERACTIVITY IMPROVEMENTS --- */
+            
+            /* 1. Table Row Lift & Highlight */
+            .admin-table tbody tr {
+                transition: transform 0.2s ease, background-color 0.2s, box-shadow 0.2s;
+                border-radius: 4px; /* Soften edges */
+            }
+            .admin-table tbody tr:hover {
+                transform: scale(1.01);
+                background-color: rgba(255,255,255,0.03) !important;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 1; position: relative; /* Bring to front */
+                border-color: transparent; /* Hide border to look like a card */
+            }
+            
+            /* 2. Tactile Button Press */
+            button:not(:disabled) {
+                transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s, box-shadow 0.2s;
+            }
+            button:not(:disabled):active {
+                transform: scale(0.95); /* Physical press feel */
+            }
+
+            /* 3. Springy Modal Entrance */
+            @keyframes modalSpring {
+                0% { opacity: 0; transform: scale(0.8) translateY(20px); }
+                100% { opacity: 1; transform: scale(1) translateY(0); }
+            }
+            .modal-box {
+                animation: modalSpring 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            }
+
+            /* 4. Custom Slim Scrollbars */
+            ::-webkit-scrollbar { width: 8px; height: 8px; }
+            ::-webkit-scrollbar-track { background: transparent; }
+            ::-webkit-scrollbar-thumb { background: rgba(150, 150, 150, 0.3); border-radius: 4px; }
+            ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+
+            /* --- 5. ACTIVE SIDEBAR GLOW --- */
+            .nav-item.active {
+                background: linear-gradient(90deg, var(--primary-soft) 0%, transparent 100%) !important;
+                color: var(--primary) !important;
+                border-right: 3px solid var(--primary) !important;
+                box-shadow: inset -5px 0 15px -5px var(--primary-soft), 0 0 10px rgba(243, 112, 33, 0.1);
+                text-shadow: 0 0 8px rgba(243, 112, 33, 0.4);
+                transition: all 0.3s ease;
+            }
+
+            /* --- 6. SKELETON LOADER ROWS --- */
+            .skeleton-row td {
+                position: relative;
+                overflow: hidden;
+                color: transparent !important;
+                pointer-events: none;
+            }
+            .skeleton-row td::after {
+                content: ''; position: absolute; top: 8px; left: 8px; right: 8px; bottom: 8px;
+                background: var(--bg-input); border-radius: 4px;
+                animation: skeleton-pulse 1.5s infinite ease-in-out;
+            }
+            @keyframes skeleton-pulse { 0% { opacity: 0.3; } 50% { opacity: 0.6; } 100% { opacity: 0.3; } }
+
+            /* --- 7. MODERN ASSESSMENT BUILDER --- */
+            .question-card {
+                border: 1px solid var(--border-color); background: var(--bg-card);
+                border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                transition: all 0.3s ease; overflow: hidden; margin-bottom: 25px;
+            }
+            .question-card:hover, .question-card:focus-within {
+                transform: translateY(-3px);
+                box-shadow: 0 12px 30px rgba(0,0,0,0.15);
+                border-color: var(--primary-soft);
+            }
+            .q-header {
+                background: linear-gradient(to right, var(--bg-input), var(--bg-card));
+                padding: 15px 25px; border-bottom: 1px solid var(--border-color);
+                display: flex; justify-content: space-between; align-items: center;
+            }
+            .opt-row {
+                background: var(--bg-input); padding: 8px 15px; border-radius: 8px;
+                margin-bottom: 8px; border: 1px solid transparent; transition: 0.2s;
+            }
+            .opt-row:focus-within { border-color: var(--primary); background: var(--bg-card); }
+
+            /* --- 8. MODERN TEST TAKER VIEW --- */
+            .test-paper { max-width: 900px; margin: 0 auto; }
+            .taking-card {
+                border: none !important; background: var(--bg-card);
+                box-shadow: 0 10px 30px rgba(0,0,0,0.08) !important;
+                border-radius: 20px !important; padding: 35px !important;
+                position: relative; overflow: hidden; margin-bottom: 40px !important;
+            }
+            .taking-card::before {
+                content: ''; position: absolute; top: 0; left: 0; width: 6px; height: 100%;
+                background: var(--border-color); transition: 0.3s;
+            }
+            .taking-card.answered::before { background: #2ecc71; box-shadow: 0 0 15px #2ecc71; }
+            
+            .taking-radio {
+                display: flex !important; align-items: center; padding: 18px 25px !important;
+                margin-bottom: 12px; border: 2px solid var(--border-color); border-radius: 12px !important;
+                background: var(--bg-input); transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                cursor: pointer; position: relative;
+            }
+            .taking-radio:hover { border-color: var(--primary); background: var(--bg-hover); transform: translateX(5px); }
+            .taking-radio:has(input:checked) {
+                border-color: var(--primary); background: var(--primary-soft);
+                box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            }
+            .taking-radio input { width: 22px; height: 22px; margin-right: 20px; accent-color: var(--primary); cursor: pointer; }
+            .taking-radio span { font-size: 1.05rem; font-weight: 500; }
+        `;
+        document.head.appendChild(style);
+    }
+
     // SHOW LOADER
     const loader = document.getElementById('global-loader');
     if(loader) loader.classList.remove('hidden');
@@ -184,6 +438,9 @@ window.onload = async function() {
                 }
             } catch(e) { console.error("Remember Me Failed", e); }
         }
+
+        // --- INIT LOGIN PARTICLES ---
+        if (typeof initLoginParticles === 'function') initLoginParticles();
     }
 
     // Auto Backup Toggle State
@@ -381,6 +638,8 @@ function updateSidebarVisibility() {
     });
 }
 
+let TAB_SWITCH_TIMEOUT = null;
+
 function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
@@ -391,157 +650,179 @@ function showTab(id, btn) {
       }
   }
 
-  // HIDDEN LOGIC: Reset views
-  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
-  const target = document.getElementById(id);
-  if(target) target.classList.add('active');
-  
-  // Update Sidebar
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-  
-  // Find button by onclick attribute (reliable for sidebar navigation)
-  const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${id}')"]`);
-  if(sidebarBtn) sidebarBtn.classList.add('active');
+  if (TAB_SWITCH_TIMEOUT) clearTimeout(TAB_SWITCH_TIMEOUT);
 
-  // --- ACTIVITY TRACKING ---
-  if (typeof StudyMonitor !== 'undefined') {
-      StudyMonitor.track(`Navigating: ${id.replace(/-/g, ' ')}`);
-  }
+  const current = document.querySelector('section.active');
+  if (current && current.id === id) return;
 
-  // VISUAL FIX: Auto-resize textareas when tab becomes visible
-  setTimeout(() => {
-      document.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
-  }, 50);
-    
-  // --- DYNAMIC DATA REFRESH ---
-  // Whenever a tab is shown, refresh its specific data/dropdowns
+  const executeSwitch = () => {
+      // HIDDEN LOGIC: Reset views
+      document.querySelectorAll('section').forEach(s => {
+          s.classList.remove('active');
+          s.classList.remove('tab-exit-anim');
+          s.classList.remove('tab-enter-anim');
+      });
+      
+      const target = document.getElementById(id);
+      if(target) {
+          target.classList.add('active');
+          target.classList.add('tab-enter-anim');
+      }
+      
+      // Update Sidebar
+      document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+      
+      // Find button by onclick attribute (reliable for sidebar navigation)
+      const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${id}')"]`);
+      if(sidebarBtn) sidebarBtn.classList.add('active');
 
-  // NEW: Render Dashboard if Home Tab is clicked
-  if(id === 'dashboard-view') {
-      if(typeof renderDashboard === 'function') setTimeout(renderDashboard, 0); // Async render to ensure container is ready
-  }
+      // --- ACTIVITY TRACKING ---
+      if (typeof StudyMonitor !== 'undefined') {
+          StudyMonitor.track(`Navigating: ${id.replace(/-/g, ' ')}`);
+      }
 
-  // === CORRECTED: Training Insight Tab ===
-  if(id === 'insights') {
-      // 1. Try to render the full dashboard
-      if(typeof renderInsightDashboard === 'function') {
-          try {
-            renderInsightDashboard();
-          } catch (e) {
-            console.error("Dashboard Render Failed:", e);
+      // VISUAL FIX: Auto-resize textareas when tab becomes visible
+      setTimeout(() => {
+          document.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
+      }, 50);
+        
+      // --- DYNAMIC DATA REFRESH ---
+      // Whenever a tab is shown, refresh its specific data/dropdowns
+
+      // NEW: Render Dashboard if Home Tab is clicked
+      if(id === 'dashboard-view') {
+          if(typeof renderDashboard === 'function') setTimeout(renderDashboard, 0); // Async render to ensure container is ready
+      }
+
+      // === CORRECTED: Training Insight Tab ===
+      if(id === 'insights') {
+          // 1. Try to render the full dashboard
+          if(typeof renderInsightDashboard === 'function') {
+              try {
+                renderInsightDashboard();
+              } catch (e) {
+                console.error("Dashboard Render Failed:", e);
+              }
+          }
+          
+          // 2. SAFETY: Explicitly populate the dropdown using the CORRECT function name
+          if(typeof populateInsightGroupFilter === 'function') {
+              try {
+                populateInsightGroupFilter();
+              } catch(e) {
+                console.error("populateInsightGroupFilter failed:", e);
+              }
           }
       }
       
-      // 2. SAFETY: Explicitly populate the dropdown using the CORRECT function name
-      if(typeof populateInsightGroupFilter === 'function') {
-          try {
-            populateInsightGroupFilter();
-          } catch(e) {
-            console.error("populateInsightGroupFilter failed:", e);
+      if(id === 'manage') {
+          if(typeof loadRostersList === 'function') loadRostersList();
+          if(typeof populateYearSelect === 'function') populateYearSelect(); 
+      }
+      
+      if(id === 'capture') {
+          if(typeof loadRostersToSelect === 'function') loadRostersToSelect('selectedGroup');
+          if(typeof updateAssessmentDropdown === 'function') updateAssessmentDropdown();
+          // Set default date to today
+          const dateInput = document.getElementById('captureDate');
+          if(dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
+      }
+      
+      if(id === 'monthly') {
+          if(typeof loadAllDataViews === 'function') loadAllDataViews(); 
+      }
+      
+      if(id === 'report-card') {
+          if(typeof loadReportTab === 'function') loadReportTab(); 
+          
+          // TEAM LEADER: Force View to Saved Reports Only
+          if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
+              setTimeout(() => {
+                  // Hide "Create New" button
+                  const btnCreate = document.getElementById('btn-rep-new');
+                  if(btnCreate) btnCreate.style.display = 'none';
+
+                  // Automatically click "Saved Reports"
+                  const btnSaved = document.getElementById('btn-rep-saved');
+                  if(btnSaved) btnSaved.click();
+              }, 50);
           }
       }
-  }
-  
-  if(id === 'manage') {
-      if(typeof loadRostersList === 'function') loadRostersList();
-      if(typeof populateYearSelect === 'function') populateYearSelect(); 
-  }
-  
-  if(id === 'capture') {
-      if(typeof loadRostersToSelect === 'function') loadRostersToSelect('selectedGroup');
-      if(typeof updateAssessmentDropdown === 'function') updateAssessmentDropdown();
-      // Set default date to today
-      const dateInput = document.getElementById('captureDate');
-      if(dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
-  }
-  
-  if(id === 'monthly') {
-      if(typeof loadAllDataViews === 'function') loadAllDataViews(); 
-  }
-  
-  if(id === 'report-card') {
-      if(typeof loadReportTab === 'function') loadReportTab(); 
-      
-      // TEAM LEADER: Force View to Saved Reports Only
-      if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
-          setTimeout(() => {
-              // Hide "Create New" button
-              const btnCreate = document.getElementById('btn-rep-new');
-              if(btnCreate) btnCreate.style.display = 'none';
 
-              // Automatically click "Saved Reports"
-              const btnSaved = document.getElementById('btn-rep-saved');
-              if(btnSaved) btnSaved.click();
-          }, 50);
-      }
-  }
-
-  if(id === 'agent-search') {
-      if(typeof loadAgentSearch === 'function') loadAgentSearch();
-  }
-  
-  if(id === 'live-assessment') {
-      if(typeof renderLiveTable === 'function') renderLiveTable();
-  }
-  
-  if(id === 'assessment-schedule') {
-      if(typeof renderSchedule === 'function') renderSchedule(); 
-  }
-
-  if(id === 'live-execution') {
-      if(typeof loadLiveExecution === 'function') {
-          loadLiveExecution();
-      } else {
-          // Fallback if script is still loading
-          setTimeout(() => {
-              if(typeof loadLiveExecution === 'function') loadLiveExecution();
-              else alert("Error: Live Execution script not loaded. Please refresh.");
-          }, 500);
-      }
-  }
-  
-  if(id === 'admin-panel') { 
-      if(typeof loadAdminUsers === 'function') loadAdminUsers(); 
-      if(typeof loadAdminAssessments === 'function') loadAdminAssessments(); 
-      if(typeof loadAdminVetting === 'function') loadAdminVetting();
-      if(typeof loadAdminDatabase === 'function') loadAdminDatabase(); 
-      if(typeof loadAdminAccess === 'function') loadAdminAccess(); 
-      if(typeof loadAdminTheme === 'function') loadAdminTheme(); 
-
-      // TRAINEE FILTER: Only show their own user in the list
-      if (CURRENT_USER && CURRENT_USER.role === 'trainee' && typeof filterUserListForTrainee === 'function') {
-          setTimeout(filterUserListForTrainee, 50); // Small delay to ensure table is populated
+      if(id === 'agent-search') {
+          if(typeof loadAgentSearch === 'function') loadAgentSearch();
       }
       
-      // NEW: Refresh System Status if that specific view is open
-      const statusView = document.getElementById('admin-view-status');
-      if(statusView && statusView.classList.contains('active')) {
-          if(typeof refreshSystemStatus === 'function') refreshSystemStatus();
+      if(id === 'live-assessment') {
+          if(typeof renderLiveTable === 'function') renderLiveTable();
       }
       
-      // NEW: Refresh Graduated Agents if that specific view is open
-      const gradView = document.getElementById('admin-view-graduated');
-      if(gradView && gradView.classList.contains('active')) {
-          if(typeof loadGraduatedAgents === 'function') loadGraduatedAgents();
+      if(id === 'assessment-schedule') {
+          if(typeof renderSchedule === 'function') renderSchedule(); 
       }
-  }
-  
-  if(id === 'test-manage') {
-      if(typeof loadManageTests === 'function') loadManageTests();
-      if(typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
-      if(typeof loadMarkingQueue === 'function') loadMarkingQueue();
-  }
-  
-  if(id === 'my-tests') {
-      if(typeof loadTraineeTests === 'function') loadTraineeTests();
-  }
-  
-  if(id === 'test-records') {
-      if(typeof loadTestRecords === 'function') loadTestRecords();
-  }
-  
-  if(id === 'vetting-arena') {
-      if(typeof loadVettingArena === 'function') loadVettingArena();
+
+      if(id === 'live-execution') {
+          if(typeof loadLiveExecution === 'function') {
+              loadLiveExecution();
+          } else {
+              // Fallback if script is still loading
+              setTimeout(() => {
+                  if(typeof loadLiveExecution === 'function') loadLiveExecution();
+                  else alert("Error: Live Execution script not loaded. Please refresh.");
+              }, 500);
+          }
+      }
+      
+      if(id === 'admin-panel') { 
+          if(typeof loadAdminUsers === 'function') loadAdminUsers(); 
+          if(typeof loadAdminAssessments === 'function') loadAdminAssessments(); 
+          if(typeof loadAdminVetting === 'function') loadAdminVetting();
+          if(typeof loadAdminDatabase === 'function') loadAdminDatabase(); 
+          if(typeof loadAdminAccess === 'function') loadAdminAccess(); 
+          if(typeof loadAdminTheme === 'function') loadAdminTheme(); 
+
+          // TRAINEE FILTER: Only show their own user in the list
+          if (CURRENT_USER && CURRENT_USER.role === 'trainee' && typeof filterUserListForTrainee === 'function') {
+              setTimeout(filterUserListForTrainee, 50); // Small delay to ensure table is populated
+          }
+          
+          // NEW: Refresh System Status if that specific view is open
+          const statusView = document.getElementById('admin-view-status');
+          if(statusView && statusView.classList.contains('active')) {
+              if(typeof refreshSystemStatus === 'function') refreshSystemStatus();
+          }
+          
+          // NEW: Refresh Graduated Agents if that specific view is open
+          const gradView = document.getElementById('admin-view-graduated');
+          if(gradView && gradView.classList.contains('active')) {
+              if(typeof loadGraduatedAgents === 'function') loadGraduatedAgents();
+          }
+      }
+      
+      if(id === 'test-manage') {
+          if(typeof loadManageTests === 'function') loadManageTests();
+          if(typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
+          if(typeof loadMarkingQueue === 'function') loadMarkingQueue();
+      }
+      
+      if(id === 'my-tests') {
+          if(typeof loadTraineeTests === 'function') loadTraineeTests();
+      }
+      
+      if(id === 'test-records') {
+          if(typeof loadTestRecords === 'function') loadTestRecords();
+      }
+      
+      if(id === 'vetting-arena') {
+          if(typeof loadVettingArena === 'function') loadVettingArena();
+      }
+  };
+
+  if (current) {
+      current.classList.add('tab-exit-anim');
+      TAB_SWITCH_TIMEOUT = setTimeout(executeSwitch, 350);
+  } else {
+      executeSwitch();
   }
 }
 
@@ -731,15 +1012,21 @@ function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.innerHTML = `
-        <i class="${type === 'success' ? 'fas fa-check-circle' : (type === 'error' ? 'fas fa-exclamation-circle' : 'fas fa-info-circle')}"></i>
-        <span>${message}</span>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <i class="${type === 'success' ? 'fas fa-check-circle' : (type === 'error' ? 'fas fa-exclamation-circle' : 'fas fa-info-circle')}"></i>
+            <span>${message}</span>
+        </div>
+        <div class="toast-progress"></div>
     `;
 
     container.appendChild(toast);
 
+    // Trigger progress bar
+    setTimeout(() => { const bar = toast.querySelector('.toast-progress'); if(bar) bar.style.width = '0%'; }, 50);
+
     // Remove after 3 seconds
     setTimeout(() => {
-        toast.style.opacity = '0';
+        toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
@@ -861,6 +1148,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.44": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Filtered out Graduated Agents from the Trainee Login list to prevent confusion.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Prevented auto-regeneration of user accounts if they exist in the Graduated Agents archive.</li>
+            </ul>`,
         "2.1.43": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Daily Tip Management' widget for Admins to customize trainee tips.</li>

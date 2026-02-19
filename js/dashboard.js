@@ -120,13 +120,38 @@ function renderDashboard() {
         if (typeof checkUrgentNoticesPopup === 'function') checkUrgentNoticesPopup();
     }
 
+    // 1. Inject Animation Styles
+    if (!document.getElementById('dash-animations')) {
+        const style = document.createElement('style');
+        style.id = 'dash-animations';
+        style.innerHTML = `
+            @keyframes dashEntry {
+                0% { opacity: 0; transform: translateY(50px) scale(0.9); }
+                100% { opacity: 1; transform: translateY(0) scale(1); }
+            }
+            .dash-card {
+                animation: dashEntry 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+                opacity: 0; /* Start hidden */
+                will-change: opacity, transform;
+            }
+            .dash-card.editing {
+                animation: none !important;
+                opacity: 1 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
     // 2. GREETING HEADER
+    const hour = new Date().getHours();
+    const timeGreeting = hour < 12 ? "Good Morning" : (hour < 18 ? "Good Afternoon" : "Good Evening");
+
     const header = document.createElement('div');
     header.className = 'dash-header';
     header.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
             <div>
-                <h2 style="margin:0;">Hello, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
+                <h2 style="margin:0;">${timeGreeting}, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
                 <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
             </div>
             ${(role === 'admin' || role === 'trainee' || role === 'teamleader') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
@@ -777,7 +802,7 @@ function buildAdminWidgets(container) {
     
     let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
     
-    layout.forEach(item => {
+    layout.forEach((item, index) => {
         // Handle legacy string array or new object array
         const key = typeof item === 'string' ? item : item.id;
         const col = typeof item === 'object' ? item.col : 1;
@@ -792,6 +817,10 @@ function buildAdminWidgets(container) {
             // Update data attributes for logic
             widgetHtml = widgetHtml.replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
             
+            // Inject Animation Delay
+            const delay = index * 0.2; // Even slower stagger
+            widgetHtml = widgetHtml.replace('draggable="false"', `style="animation-delay: ${delay}s" draggable="false"`);
+
             gridHtml += widgetHtml;
         }
     });
@@ -1034,12 +1063,17 @@ function buildTLWidgets(container) {
     if (!layout) layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_TL));
 
     let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
-    layout.forEach(item => {
+    layout.forEach((item, index) => {
         const key = typeof item === 'string' ? item : item.id;
         const col = typeof item === 'object' ? item.col : 1;
         const row = typeof item === 'object' ? item.row : 1;
         if(widgets[key]) {
             let widgetHtml = widgets[key].replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`).replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
+            
+            // Inject Animation Delay
+            const delay = index * 0.2;
+            widgetHtml = widgetHtml.replace('draggable="false"', `style="animation-delay: ${delay}s" draggable="false"`);
+            
             gridHtml += widgetHtml;
         }
     });
@@ -1498,7 +1532,7 @@ function buildTraineeWidgets(container) {
     }
 
     let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
-    layout.forEach(item => {
+    layout.forEach((item, index) => {
         const key = typeof item === 'string' ? item : item.id;
         const col = typeof item === 'object' ? item.col : 1;
         const row = typeof item === 'object' ? item.row : 1;
@@ -1507,6 +1541,11 @@ function buildTraineeWidgets(container) {
             let widgetHtml = widgets[key];
             widgetHtml = widgetHtml.replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`);
             widgetHtml = widgetHtml.replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
+            
+            // Inject Animation Delay
+            const delay = index * 0.2;
+            widgetHtml = widgetHtml.replace('draggable="false"', `style="animation-delay: ${delay}s" draggable="false"`);
+            
             gridHtml += widgetHtml;
         }
     });

@@ -150,13 +150,13 @@ function renderBuilder() {
         if (q.type === 'multiple_choice' || q.type === 'multi_select') {
             const isMulti = q.type === 'multi_select';
             innerHTML = `
-                <small>Options (Select correct answer):</small>
+                <div style="margin-bottom:10px; font-weight:600; color:var(--text-muted); font-size:0.85rem; text-transform:uppercase;">Answer Options</div>
                 ${(q.options || []).map((opt, oIdx) => `
                     <div class="opt-row">
                         <input type="${isMulti ? 'checkbox' : 'radio'}" name="correct_${idx}" 
                             ${isMulti ? (q.correct.includes(oIdx) ? 'checked' : '') : (q.correct == oIdx ? 'checked' : '')} 
-                            onchange="updateCorrect(${idx}, ${oIdx}, '${q.type}')">
-                        <input type="text" placeholder="Option ${oIdx + 1}" value="${opt}" onchange="updateOptText(${idx}, ${oIdx}, this.value)">
+                            onchange="updateCorrect(${idx}, ${oIdx}, '${q.type}')" style="width:20px; height:20px; margin-right:15px; cursor:pointer;">
+                        <input type="text" placeholder="Option ${oIdx + 1}" value="${opt}" onchange="updateOptText(${idx}, ${oIdx}, this.value)" style="border:none; background:transparent; flex:1; font-size:1rem; margin:0;">
                     </div>
                 `).join('')}
                 <button class="btn-secondary btn-sm" onclick="addOption(${idx})">+ Add Option</button>
@@ -257,7 +257,7 @@ function renderBuilder() {
         return `
         <div class="question-card">
             <div class="q-header">
-                <strong>Question ${idx + 1} (${q.type.replace('_', ' ')})</strong>
+                <div style="font-size:1.1rem; font-weight:bold; color:var(--primary);">Question ${idx + 1} <span style="color:var(--text-muted); font-weight:normal; font-size:0.9rem; margin-left:10px;">${q.type.replace('_', ' ').toUpperCase()}</span></div>
                 <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})"><i class="fas fa-times"></i></button>
             </div>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
