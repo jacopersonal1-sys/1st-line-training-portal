@@ -17,6 +17,12 @@ async function secureInitSave() {
 window.onload = async function() {
     // --- INJECT GLOBAL VISUAL STYLES ---
     if (!document.getElementById('global-visuals')) {
+        // --- CLIENT IDENTITY ---
+        if (!localStorage.getItem('client_id')) {
+            localStorage.setItem('client_id', 'CL-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 5).toUpperCase());
+        }
+        // -----------------------
+
         const style = document.createElement('style');
         style.id = 'global-visuals';
         style.innerHTML = `
@@ -420,7 +426,7 @@ window.onload = async function() {
                 const valid = allUsers.find(u => u.user === creds.user && u.pass === creds.pass);
                 if (valid) {
                     // PRE-FILL CREDENTIALS (No Auto-Login)
-                    if (valid.role === 'admin' || valid.role === 'teamleader') {
+                    if (valid.role === 'admin' || valid.role === 'teamleader' || valid.role === 'super_admin') {
                         if (typeof toggleLoginMode === 'function') toggleLoginMode('admin');
                         const adminInp = document.getElementById('adminUsername');
                         if(adminInp) adminInp.value = valid.user;
@@ -437,6 +443,10 @@ window.onload = async function() {
                     if(remCheck) remCheck.checked = true;
                 }
             } catch(e) { console.error("Remember Me Failed", e); }
+        }
+        else {
+            // FIX: Initialize Login UI State (Admin Default) if nothing remembered
+            if (typeof toggleLoginMode === 'function') toggleLoginMode('admin');
         }
 
         // --- INIT LOGIN PARTICLES ---
@@ -596,6 +606,28 @@ function updateSidebarVisibility() {
         liveExecBtn.setAttribute('title', (role === 'trainee') ? 'Take Live Assessment' : 'Live Session Arena');
     }
 
+    // --- INJECT SUPER ADMIN BUTTON ---
+    // Moved outside the loop to ensure it runs reliably
+    const existingSaBtn = document.getElementById('btn-super-admin');
+    if (role === 'super_admin') {
+        if (!existingSaBtn) {
+            // Target the main menu container directly
+            const menuContainer = document.querySelector('.sidebar-menu');
+            if (menuContainer) {
+                const btn = document.createElement('button');
+                btn.id = 'btn-super-admin';
+                btn.className = 'nav-item';
+                btn.innerHTML = '<i class="fas fa-user-astronaut"></i> <span class="nav-text">Super Admin</span>';
+                btn.onclick = function() { if(typeof openSuperAdminConfig === 'function') openSuperAdminConfig(); };
+                
+                // Append to the end of the menu
+                menuContainer.appendChild(btn);
+            }
+        }
+    } else if (existingSaBtn) {
+        existingSaBtn.remove();
+    }
+
     const allNavItems = document.querySelectorAll('.nav-item');
 
     allNavItems.forEach(btn => {
@@ -611,6 +643,19 @@ function updateSidebarVisibility() {
         
         if (!targetTab) return;
         
+        // --- DYNAMIC FEATURE FLAGS ---
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const features = config.features || {};
+
+        if (features.live_assessments === false && (targetTab === 'live-assessment' || targetTab === 'live-execution')) {
+            btn.classList.add('hidden');
+            return;
+        }
+        if (features.vetting_arena === false && targetTab === 'vetting-arena') {
+            btn.classList.add('hidden');
+            return;
+        }
+
         // Rules
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights

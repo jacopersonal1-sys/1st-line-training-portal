@@ -24,7 +24,20 @@ const DB_SCHEMA = {
         platforms: ["WhatsApp", "Microsoft Teams", "Call", "SMS"],
         contacts: ["Darren", "Netta", "Jaco", "Claudine"]
     },
+    // --- SUPER ADMIN CONFIGURATION ---
+    system_config: {
+        sync_rates: { admin: 10000, teamleader: 300000, trainee: 60000 },
+        heartbeat_rates: { admin: 5000, default: 60000 },
+        idle_thresholds: { warning: 60000, logout: 900000 },
+        attendance: { work_start: "08:00", late_cutoff: "08:15", work_end: "17:00", reminder_start: "16:45", allow_weekend_login: false },
+        security: { maintenance_mode: false, min_version: "0.0.0", force_kiosk_global: false, allowed_ips: [], banned_clients: [], client_whitelist: [] },
+        features: { vetting_arena: true, live_assessments: true, nps_surveys: true, daily_tips: true, disable_animations: false },
+        monitoring: { tolerance_ms: 180000, whitelist_strict: false },
+        announcement: { active: false, message: "", type: "info" },
+        broadcast: { id: 0, message: "" }
+    },
     revokedUsers: [], // Added to ensure blacklist syncs
+    auditLogs: [], // Critical Action History
     accessLogs: [], // Login/Logout/Timeout History
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
@@ -43,6 +56,7 @@ const DB_SCHEMA = {
 
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
+window.CURRENT_LATENCY = 0; // Track latency for health reporting
 ['click', 'mousemove', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
     window.addEventListener(evt, () => {
         window.LAST_INTERACTION = Date.now();
@@ -77,10 +91,12 @@ async function loadFromServer(silent = false) {
         if (window.supabaseClient) updateSyncUI('syncing');
         if (!window.supabaseClient) return;
 
+        const start = Date.now();
         // A. Fetch Metadata (Timestamps) for all keys
         const { data: meta, error } = await supabaseClient
             .from('app_documents')
             .select('key, updated_at');
+        window.CURRENT_LATENCY = Date.now() - start; // Measure RTT
         
         if (error) throw error;
 
@@ -130,6 +146,9 @@ async function loadFromServer(silent = false) {
                 }
                 localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
             }
+
+            // HOT RELOAD: Apply system config changes immediately
+            if (keysToFetch.includes('system_config')) applySystemConfig();
             
             // Refresh UI if needed
             if(silent && typeof refreshAllDropdowns === 'function') {
@@ -159,6 +178,55 @@ async function loadFromServer(silent = false) {
                 console.warn("DATABASE PERMISSION ERROR: Run the RLS Policy SQL in Supabase to allow access.");
             }
         }
+    }
+}
+
+// --- HOT RELOAD: APPLY SYSTEM CONFIG ---
+function applySystemConfig() {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    
+    // 1. Global Announcement
+    const bannerId = 'global-announcement-banner';
+    let banner = document.getElementById(bannerId);
+    
+    if (config.announcement && config.announcement.active && config.announcement.message) {
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = bannerId;
+            banner.style.cssText = "position:fixed; top:0; left:0; width:100%; padding:10px; text-align:center; z-index:99999; font-weight:bold; box-shadow:0 2px 5px rgba(0,0,0,0.2);";
+            document.body.prepend(banner);
+        }
+        
+        const typeColors = { info: '#3498db', warning: '#f1c40f', error: '#ff5252', success: '#2ecc71' };
+        banner.style.backgroundColor = typeColors[config.announcement.type] || '#3498db';
+        banner.style.color = '#fff';
+        banner.innerText = config.announcement.message;
+        banner.classList.remove('hidden');
+    } else if (banner) {
+        banner.classList.add('hidden');
+    }
+    
+    // 1.5 Broadcast Popup
+    if (config.broadcast && config.broadcast.message && config.broadcast.id) {
+        const lastId = localStorage.getItem('last_broadcast_id');
+        if (lastId != config.broadcast.id) {
+            localStorage.setItem('last_broadcast_id', config.broadcast.id);
+            // Show alert
+            alert("📢 SYSTEM BROADCAST:\n\n" + config.broadcast.message);
+            // Optional: Play sound
+            if (config.broadcast.sound) {
+                try {
+                    const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+                    audio.play().catch(e=>{});
+                } catch(e){}
+            }
+        }
+    }
+
+    // 2. Restart Sync Engine if rates changed (and we are logged in)
+    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
+        // We simply restart the engine, it will read the new config values
+        if (typeof startRealtimeSync === 'function') startRealtimeSync();
     }
 }
 
@@ -654,6 +722,36 @@ async function refreshAccessLogs() {
     }).join('');
 }
 
+// --- AUDIT LOGGING (Critical Actions) ---
+async function logAuditAction(username, action, details) {
+    if (!username) return;
+    
+    // 1. Load current logs
+    const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+    
+    const newLog = {
+        id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+        user: username,
+        action: action,
+        details: details,
+        date: new Date().toISOString()
+    };
+    
+    // 2. Prune > 60 days
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 60);
+    
+    const filteredLogs = logs.filter(l => new Date(l.date) > cutoff);
+    filteredLogs.push(newLog);
+    
+    localStorage.setItem('auditLogs', JSON.stringify(filteredLogs));
+    
+    // 3. Sync to Cloud (Safe Merge)
+    if(typeof saveToServer === 'function') {
+        await saveToServer(['auditLogs'], false);
+    }
+}
+
 // 5. SUPABASE: Send Heartbeat
 async function sendHeartbeat() {
     if (!CURRENT_USER || !window.supabaseClient) return;
@@ -663,6 +761,13 @@ async function sendHeartbeat() {
     const diff = now - last;
     const limit = (typeof IDLE_THRESHOLD !== 'undefined') ? IDLE_THRESHOLD : 60000;
     const isIdle = diff > limit;
+    
+    // Get extra info
+    const clientId = localStorage.getItem('client_id') || 'unknown';
+    let currentActivity = 'Idle';
+    if (typeof StudyMonitor !== 'undefined' && StudyMonitor.currentActivity) {
+        currentActivity = StudyMonitor.currentActivity;
+    }
 
     try {
         // 1. Send Heartbeat with Version
@@ -674,7 +779,9 @@ async function sendHeartbeat() {
                 version: window.APP_VERSION || 'Unknown',
                 idleTime: diff,
                 isIdle: isIdle,
-                lastSeen: new Date().toISOString()
+                lastSeen: new Date().toISOString(),
+                clientId: clientId,
+                activity: currentActivity
             });
             
         // 2. Check for Remote Commands (Pending Actions)
@@ -700,6 +807,9 @@ async function sendHeartbeat() {
                     ipcRenderer.send('manual-update-check');
                     if(typeof showToast === 'function') showToast("System Update Check Initiated by Admin", "info");
                 }
+            } else if (sessionData.pending_action.startsWith('msg:')) {
+                const msg = sessionData.pending_action.replace('msg:', '');
+                alert("💬 ADMIN MESSAGE:\n\n" + msg);
             }
         }
     } catch (e) { /* Silent fail */ }
@@ -759,7 +869,8 @@ function downloadCSVTemplate() {
     document.body.removeChild(a);
 }
 
-function importDatabase(input) {
+// --- BACKUP & RESTORE (v2.1.48) ---
+async function importDatabase(input) {
     const file = input.files[0];
     if(!file) return;
     
@@ -769,6 +880,8 @@ function importDatabase(input) {
             const data = JSON.parse(e.target.result);
             
             Object.keys(data).forEach(key => {
+                if (key === 'meta') return; // Skip metadata
+                
                 if (typeof data[key] === 'object') {
                     localStorage.setItem(key, JSON.stringify(data[key]));
                 } else {
@@ -777,34 +890,66 @@ function importDatabase(input) {
             });
 
             console.log("Restoring backup to cloud...");
-            await saveToServer(null, true); // Force save ALL keys
+            if (typeof saveToServer === 'function') await saveToServer(null, true); // Force save ALL keys
 
             alert("Database restored successfully.");
             location.reload();
         } catch (err) {
             console.error(err);
-            alert("Error parsing JSON file.");
+            alert("Error restoring database: " + err.message);
         }
     };
     reader.readAsText(file);
 }
 
-function exportDatabase() {
-    const d = {};
-    Object.keys(DB_SCHEMA).forEach(k => {
-        d[k] = JSON.parse(localStorage.getItem(k)) || DB_SCHEMA[k];
-    });
-    
-    d.theme = localStorage.getItem('theme') || 'dark';
-    d.autoBackup = localStorage.getItem('autoBackup') || 'false';
-  
-    const b = new Blob([JSON.stringify(d,null,2)],{type:'application/json'}); 
-    const a = document.createElement('a'); 
-    a.href = URL.createObjectURL(b); 
-    a.download = "1stLine_Backup_" + new Date().toISOString().slice(0,10) + ".json"; 
-    document.body.appendChild(a); 
-    a.click(); 
-    document.body.removeChild(a); 
+async function exportDatabase() {
+    const btn = document.querySelector('button[onclick="exportDatabase()"]');
+    let originalText = "";
+    if(btn) { originalText = btn.innerText; btn.innerText = "Syncing..."; btn.disabled = true; }
+
+    try {
+        console.log("Initiating Safe Cloud Export...");
+        
+        // 1. PULL LATEST DATA (Critical Step)
+        if(typeof loadFromServer === 'function') {
+            await loadFromServer(true);
+        }
+
+        // 2. GENERATE EXPORT BLOB
+        const d = {};
+        
+        // Metadata for version tracking
+        d.meta = {
+            version: window.APP_VERSION || '2.0',
+            date: new Date().toISOString(),
+            exportedBy: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.user : 'Unknown'
+        };
+
+        // Use DB_SCHEMA keys
+        const schemaKeys = (typeof DB_SCHEMA !== 'undefined') ? Object.keys(DB_SCHEMA) : ['records','users','assessments','rosters','schedules','liveBookings'];
+        
+        schemaKeys.forEach(k => {
+            d[k] = JSON.parse(localStorage.getItem(k)) || (typeof DB_SCHEMA !== 'undefined' ? DB_SCHEMA[k] : []);
+        });
+        
+        d.theme = localStorage.getItem('theme') || 'dark';
+        d.autoBackup = localStorage.getItem('autoBackup') || 'false';
+        d.local_theme_config = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+       
+        const b = new Blob([JSON.stringify(d,null,2)],{type:'application/json'}); 
+        const a = document.createElement('a'); 
+        a.href = URL.createObjectURL(b); 
+        a.download = "1stLine_Backup_" + new Date().toISOString().slice(0,10) + ".json"; 
+        document.body.appendChild(a); 
+        a.click(); 
+        document.body.removeChild(a); 
+        
+    } catch(e) {
+        console.error("Export Failed:", e);
+        alert("Export failed. Please check your internet connection.");
+    } finally {
+        if(btn) { btn.innerText = originalText || "Export Database"; btn.disabled = false; }
+    }
 }
 
 /* ================= BACKGROUND SYNC ================= */
@@ -879,18 +1024,21 @@ function startRealtimeSync() {
     if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);
     if (HEARTBEAT_INTERVAL_ID) clearInterval(HEARTBEAT_INTERVAL_ID);
 
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const rates = config.sync_rates || { admin: 10000, teamleader: 300000, trainee: 60000 };
+    const beats = config.heartbeat_rates || { admin: 5000, default: 60000 };
+
     // Default Rates (Trainee/Guest)
-    let syncRate = 60000; // 1 Minute
-    let beatRate = 60000; // 1 Minute (Optimized for Bandwidth)
+    let syncRate = rates.trainee; 
+    let beatRate = beats.default;
 
     // Role-Based Adjustment
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
-        if (CURRENT_USER.role === 'admin') {
-            syncRate = 10000; // 10 Seconds (High Speed for Admin)
-            beatRate = 5000; // 5 Seconds (Real-time Monitor)
+        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
+            syncRate = rates.admin; 
+            beatRate = beats.admin; 
         } else if (CURRENT_USER.role === 'teamleader') {
-            syncRate = 300000; // 5 Minutes (Save Bandwidth)
-            beatRate = 60000;  // 1 Minute
+            syncRate = rates.teamleader;
         }
     }
 
@@ -910,13 +1058,14 @@ function startRealtimeSync() {
         // --- AUTO LOGOUT CHECK ---
         if (CURRENT_USER) {
             const last = window.LAST_INTERACTION || Date.now();
-            const limitMinutes = CURRENT_USER.idleTimeout || 15;
-            if ((Date.now() - last) > (limitMinutes * 60 * 1000)) {
+            const idleConf = config.idle_thresholds || { logout: 900000 };
+            const limitMs = idleConf.logout;
+            if ((Date.now() - last) > limitMs) {
                 if (typeof window.cacheAndLogout === 'function') window.cacheAndLogout();
             }
         }
         
-        if(CURRENT_USER && CURRENT_USER.role === 'admin') {
+        if(CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin')) {
             const statusView = document.getElementById('admin-view-status');
             if(statusView && statusView.offsetParent !== null) {
                 fetchSystemStatus();
@@ -991,7 +1140,8 @@ async function executeFactoryReset() {
             insightReviews: [], 
             exemptions: [], 
             notices: [],
-            revokedUsers: []
+            revokedUsers: [],
+            system_config: DB_SCHEMA.system_config // Reset system settings to defaults
         };
 
         // 2. Overwrite Supabase Data & Sessions
@@ -1041,6 +1191,7 @@ if (typeof module !== 'undefined' && module.exports) {
         loadFromServer,
         saveToServer,
         performSmartMerge,
-        notifyUnsavedChanges
+        notifyUnsavedChanges,
+        logAuditAction
     };
 }

@@ -21,7 +21,7 @@ function loadLiveExecution() {
     if (!container) return;
 
     LAST_RENDERED_Q = -2; // Reset on load
-    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
         renderAdminLivePanel(container);
     } else {
         renderTraineeLivePanel(container);
@@ -39,7 +39,7 @@ function loadLiveExecution() {
             // Update my local "liveSession" proxy and UI using existing logic
             // (We reuse the same selector logic as the poller).
             let myServerSession = null;
-            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
                 const viewingId = localStorage.getItem('currentLiveSessionId');
                 if (viewingId) {
                     myServerSession = allSessions.find(s => s.sessionId === viewingId) || null;
@@ -61,7 +61,7 @@ function loadLiveExecution() {
                 localStorage.setItem('liveSession', JSON.stringify(myServerSession));
                 const c = document.getElementById('live-execution-content');
                 if (c) {
-                    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+                    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
                         if (!document.querySelector('.admin-interaction-active') || myServerSession.currentQ !== localSession.currentQ) {
                             renderAdminLivePanel(c);
                         } else {
@@ -105,7 +105,7 @@ async function syncLiveSessionState() {
 
         // FIND MY RELEVANT SESSION
         let myServerSession = null;
-        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
             // Admin: Prefer the session we are explicitly viewing
             const viewingId = localStorage.getItem('currentLiveSessionId');
             if (viewingId) {
@@ -126,7 +126,7 @@ async function syncLiveSessionState() {
         // PRESERVE LOCAL ANSWERS (Trainee Only)
         // The Trainee is the source of truth for their own answers. 
         // We must not overwrite local answers with stale server data.
-        if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
+        if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
             const currentLocal = JSON.parse(localStorage.getItem('liveSession') || '{}');
             if (currentLocal.answers) {
                 myServerSession.answers = { ...myServerSession.answers, ...currentLocal.answers };
@@ -142,7 +142,7 @@ async function syncLiveSessionState() {
             
             const container = document.getElementById('live-execution-content');
             if (container) {
-                if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+                if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
                     // Admin: Update view but try to preserve focus if typing
                     if (!document.querySelector('.admin-interaction-active') || myServerSession.currentQ !== localSession.currentQ) {
                         renderAdminLivePanel(container);

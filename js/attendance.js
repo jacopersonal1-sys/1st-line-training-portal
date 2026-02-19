@@ -3,16 +3,28 @@
 
 // --- TRAINEE LOGIC ---
 
+let attendanceMonitorInterval = null;
+
 function checkAttendanceStatus() {
     if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
+
+    // Start Clock-Out Monitor if not running
+    if (!attendanceMonitorInterval) {
+        attendanceMonitorInterval = setInterval(checkClockOutReminder, 60000);
+    }
 
     const now = new Date();
     const day = now.getDay(); // 0=Sun, 6=Sat
     const hour = now.getHours();
 
-    // RESTRICTION: Only pop up Mon-Fri (1-5) AND Before 08:00 AM
+    // DYNAMIC CONFIG
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const endHour = config.attendance ? parseInt(config.attendance.work_end.split(':')[0]) : 17;
+
+    // RESTRICTION: Only pop up Mon-Fri (1-5)
     if (day === 0 || day === 6) return; 
-    if (hour >= 8) return;
+    // CHANGED: Allow prompt until 1 hour before work end
+    if (hour >= (endHour - 1)) return;
 
     const today = now.toISOString().split('T')[0];
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
@@ -31,6 +43,37 @@ function checkAttendanceStatus() {
     }
 }
 
+function checkClockOutReminder() {
+    const now = new Date();
+    const day = now.getDay();
+    const hour = now.getHours();
+    const min = now.getMinutes();
+
+    if (day === 0 || day === 6) return;
+
+    // DYNAMIC CONFIG
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const remindTime = config.attendance ? config.attendance.reminder_start : "16:45";
+    const [remindH, remindM] = remindTime.split(':').map(Number);
+    const endH = config.attendance ? parseInt(config.attendance.work_end.split(':')[0]) : 17;
+
+    // Reminder Window: From Reminder Start until Work End
+    if (hour === remindH && min >= remindM) {
+        const today = now.toISOString().split('T')[0];
+        const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+        const myRecord = records.find(r => r.user === CURRENT_USER.user && r.date === today);
+
+        if (myRecord && !myRecord.clockOut) {
+            // Trigger every 5 mins
+            if (min % 5 === 0) {
+                if (typeof showToast === 'function') showToast(`⚠️ REMINDER: Please Clock Out before ${endH}:00!`, "warning");
+                // Stern Popup 5 mins before end
+                if (min >= (60 - 5)) alert(`⚠️ URGENT REMINDER\n\nPlease Clock Out now before the ${endH}:00 cutoff.`);
+            }
+        }
+    }
+}
+
 function openClockInModal() {
     const modal = document.getElementById('attendanceModal');
     if (!modal) return;
@@ -43,8 +86,11 @@ function openClockInModal() {
     
     // Check Time (8:00 AM Cutoff)
     const now = new Date();
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const startStr = config.attendance ? config.attendance.work_start : "08:00";
+    const [startH, startM] = startStr.split(':').map(Number);
     const cutoff = new Date();
-    cutoff.setHours(8, 0, 0, 0);
+    cutoff.setHours(startH, startM, 0, 0);
 
     if (now > cutoff) {
         document.getElementById('lateReasonSection').classList.remove('hidden');
@@ -85,7 +131,10 @@ async function submitClockIn() {
     
     // Late Check
     const cutoff = new Date();
-    cutoff.setHours(8, 0, 0, 0);
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const startStr = config.attendance ? config.attendance.work_start : "08:00";
+    const [startH, startM] = startStr.split(':').map(Number);
+    cutoff.setHours(startH, startM, 0, 0);
     const isLate = now > cutoff;
 
     let lateData = null;

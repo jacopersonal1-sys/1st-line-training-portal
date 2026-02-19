@@ -35,10 +35,10 @@ function renderLoadingDashboard() {
     `;
 
     // Grid Skeleton
-    let layout = CURRENT_USER.role === 'admin' ? DEFAULT_LAYOUT_ADMIN : DEFAULT_LAYOUT_TRAINEE;
+    let layout = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? DEFAULT_LAYOUT_ADMIN : DEFAULT_LAYOUT_TRAINEE;
     // Try to load saved layout if possible
     try {
-        const roleKey = CURRENT_USER.role === 'admin' ? 'dashLayout_admin' : 'dashLayout_trainee';
+        const roleKey = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? 'dashLayout_admin' : 'dashLayout_trainee';
         const saved = JSON.parse(localStorage.getItem(roleKey));
         if(saved) layout = saved;
     } catch(e) {}
@@ -86,7 +86,8 @@ const DEFAULT_LAYOUT_ADMIN = [
     { id: 'leaderboard', col: 1, row: 1 },
     { id: 'sys_health', col: 2, row: 1 },
     { id: 'active_users', col: 2, row: 1 },
-    { id: 'tip_manager', col: 2, row: 1 }
+    { id: 'tip_manager', col: 2, row: 1 },
+    { id: 'audit_log', col: 2, row: 1 }
 ];
 
 const DEFAULT_LAYOUT_TRAINEE = [
@@ -154,7 +155,7 @@ function renderDashboard() {
                 <h2 style="margin:0;">${timeGreeting}, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
                 <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
             </div>
-            ${(role === 'admin' || role === 'trainee' || role === 'teamleader') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
+            ${(role === 'admin' || role === 'super_admin' || role === 'trainee' || role === 'teamleader') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
         </div>
         <div id="dash-edit-controls" class="hidden" style="margin-bottom:15px; padding:10px; background:var(--bg-input); border:1px dashed var(--primary); border-radius:8px; text-align:center;">
             <strong style="color:var(--primary);">Edit Mode Active</strong> - Drag items to reorder.
@@ -168,7 +169,7 @@ function renderDashboard() {
     const content = document.createElement('div');
     content.className = 'dash-content-grid'; 
     
-    if (role === 'admin' || role === 'special_viewer') {
+    if (role === 'admin' || role === 'super_admin' || role === 'special_viewer') {
         buildAdminWidgets(content); // Pass container to append widgets dynamically
         
         // Append Notice Manager for Admins (Bottom)
@@ -309,7 +310,7 @@ function buildNoticeBanners(role) {
     activeNotices.forEach(n => {
         // Check if acknowledged
         const isAck = n.acks && n.acks.includes(CURRENT_USER.user);
-        if (isAck && role !== 'admin') return; // Hide if read (except for admin)
+        if (isAck && role !== 'admin' && role !== 'super_admin') return; // Hide if read (except for admin)
 
         const urgencyColor = n.type === 'critical' ? '#e74c3c' : '#f39c12'; // Red or Orange
         
@@ -320,7 +321,7 @@ function buildNoticeBanners(role) {
                 <div style="font-size:1.1rem; margin-top:5px;">${n.message}</div>
                 <div style="font-size:0.75rem; color:var(--text-muted); margin-top:5px;">Posted: ${n.date}</div>
             </div>
-            ${role !== 'admin' ? 
+            ${(role !== 'admin' && role !== 'super_admin') ? 
                 `<button class="btn-secondary btn-sm" onclick="acknowledgeNotice('${n.id}')"><i class="fas fa-check"></i> Mark as Read</button>` 
                 : `<span style="font-size:0.8rem; color:var(--text-muted);">Visible to ${n.targetRole}</span>`
             }
@@ -781,8 +782,16 @@ function buildAdminWidgets(container) {
                     </table>
                 </div>
             </div>`),
-        'tip_manager': wrapWidget('tip_manager', buildTipManagerHtml())
+        'tip_manager': wrapWidget('tip_manager', buildTipManagerHtml()),
+        'audit_log': wrapWidget('audit_log', buildAuditLogWidget())
     };
+
+    // --- DYNAMIC FEATURE FLAGS ---
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const features = config.features || {};
+    if (features.live_assessments === false) delete widgets['live'];
+    if (features.daily_tips === false) delete widgets['tip_manager'];
+    if (CURRENT_USER.role !== 'super_admin') delete widgets['audit_log'];
 
     // LOAD LAYOUT
     let layout = JSON.parse(localStorage.getItem('dashLayout_admin') || 'null');
@@ -826,7 +835,7 @@ function buildAdminWidgets(container) {
     });
     gridHtml += '</div>';
 
-    container.innerHTML = gridHtml + (CURRENT_USER.role === 'admin' ? buildLinkRequestsWidget() : '');
+    container.innerHTML = gridHtml + ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? buildLinkRequestsWidget() : '');
     
     // Re-apply edit mode if active
     if(DASH_EDIT_MODE) enableDashEdit();
@@ -932,7 +941,7 @@ function saveDashLayout() {
     });
     
     let roleKey = 'dashLayout_trainee';
-    if (CURRENT_USER.role === 'admin') roleKey = 'dashLayout_admin';
+    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') roleKey = 'dashLayout_admin';
     if (CURRENT_USER.role === 'teamleader') roleKey = 'dashLayout_tl';
     
     localStorage.setItem(roleKey, JSON.stringify(layout));
@@ -943,7 +952,7 @@ function saveDashLayout() {
 function resetDashLayout() {
     if(confirm("Reset dashboard to default layout?")) {
         let roleKey = 'dashLayout_trainee';
-        if (CURRENT_USER.role === 'admin') roleKey = 'dashLayout_admin';
+        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') roleKey = 'dashLayout_admin';
         if (CURRENT_USER.role === 'teamleader') roleKey = 'dashLayout_tl';
         
         localStorage.removeItem(roleKey);
@@ -1174,7 +1183,7 @@ window.handleRecordLinkClick = async function(recordId, currentLink, trainee, as
             
             alert("Request sent to Admin.");
         }
-    } else if (CURRENT_USER.role === 'admin') {
+    } else if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
         // FIX: Allow Admin to add link directly
         const records = JSON.parse(localStorage.getItem('records') || '[]');
         const idx = records.findIndex(r => r.id === recordId);
@@ -1516,6 +1525,12 @@ function buildTraineeWidgets(container) {
         'badges': wrapWidget('badges', badgesHtml)
     };
 
+    // --- DYNAMIC FEATURE FLAGS ---
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const features = config.features || {};
+    if (features.live_assessments === false) delete widgets['live_upcoming'];
+    if (features.daily_tips === false) delete widgets['daily_tip'];
+
     // LOAD LAYOUT
     let layout = JSON.parse(localStorage.getItem('dashLayout_trainee') || 'null');
     
@@ -1602,6 +1617,36 @@ async function enableTipEditing() {
     localStorage.setItem('dailyTips', JSON.stringify(DEFAULT_TIPS));
     if(typeof saveToServer === 'function') await saveToServer(['dailyTips'], false);
     renderDashboard();
+}
+
+function buildAuditLogWidget() {
+    const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+    // Sort desc
+    logs.sort((a,b) => new Date(b.date) - new Date(a.date));
+    
+    const rows = logs.slice(0, 20).map(l => `
+        <tr>
+            <td style="font-size:0.8rem; white-space:nowrap;">${new Date(l.date).toLocaleString()}</td>
+            <td><strong>${l.user}</strong></td>
+            <td>${l.action}</td>
+            <td style="font-size:0.8rem; color:var(--text-muted);">${l.details || '-'}</td>
+        </tr>
+    `).join('');
+    
+    return `
+        <div style="width:100%;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4><i class="fas fa-history"></i> Audit Log</h4>
+                <span class="badge-count" style="position:static; background:var(--primary);">${logs.length}</span>
+            </div>
+            <div class="table-responsive" style="max-height:200px; overflow-y:auto;">
+                <table class="admin-table compressed-table">
+                    <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="4" class="text-center">No logs found.</td></tr>'}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
 }
 
 async function addDailyTip() {

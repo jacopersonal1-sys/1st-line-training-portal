@@ -74,6 +74,62 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 - **`js/attendance.js`**: 
   - Clock In/Out system with Late Reason capture.
   - Admin Register view.
+const DEFAULT_SYSTEM_CONFIG = {
+    // --- CORE PERFORMANCE (Your Request) ---
+    sync_rates: {
+        admin: 10000,      // 10s (High visibility)
+        teamleader: 300000,// 5m (Low bandwidth)
+        trainee: 60000     // 1m (Standard)
+    },
+    heartbeat_rates: {
+        admin: 5000,       // 5s (Realtime monitoring)
+        default: 60000     // 1m (Active status check)
+    },
+    idle_thresholds: {
+        warning: 60000,    // 1m (When to show "Are you there?")
+        logout: 900000     // 15m (Auto-logout duration)
+    },
+
+    // --- ATTENDANCE RULES (New Recommendation) ---
+    attendance: {
+        work_start: "08:00",
+        late_cutoff: "08:15", // Grace period
+        work_end: "17:00",
+        reminder_start: "16:45", // When to start nagging to clock out
+        allow_weekend_login: false
+    },
+
+    // --- SECURITY & ACCESS (New Recommendation) ---
+    security: {
+        maintenance_mode: false,      // If true, only Admins can login
+        min_version: "2.1.46",        // Block login for outdated apps
+        force_kiosk_global: false,    // EMERGENCY: Force everyone into Kiosk mode
+        allowed_ips: []               // CIDR whitelist (e.g. Office IP only)
+    },
+
+    // --- FEATURE FLAGS (New Recommendation) ---
+    // Turn modules on/off instantly if they break or aren't needed
+    features: {
+        vetting_arena: true,
+        live_assessments: true,
+        nps_surveys: true,
+        daily_tips: true
+    },
+
+    // --- MONITORING TOLERANCE (New Recommendation) ---
+    monitoring: {
+        tolerance_ms: 180000,         // 3 mins (Time allowed in external apps before flagging)
+        whitelist_strict: false       // If true, ANY non-whitelisted app is immediately flagged
+    },
+
+    // --- GLOBAL MESSAGING ---
+    announcement: {
+        active: false,
+        message: "",                  // "System maintenance in 10 mins!"
+        type: "info"                  // info, warning, error
+    }
+};
+  - **Reminders**: "Clock In" prompt on login (until 4 PM) and "Clock Out" alerts (16:45 - 17:00) with a stern popup at 16:55.
 - **`js/nps_system.js`**: 
   - Net Promoter Score surveys triggered by time or completion.
 - **`js/analyticsDashboard.js`**: 
@@ -81,14 +137,15 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 
 ### Admin & System
 - **`js/admin_users.js`**: User CRUD, Roster Management, **Onboarding Email Automation**, and **Graduate/Restore** workflows.
-- **`js/admin_sys.js`**: Database Management (Cleanup Duplicates, Archive Old Data, Roster Sync, JSON/CSV Export/Import), System Health, and **Remote Commands**.
+- **`js/admin_sys.js`**: Database Management, System Health, **Super Admin Console**, **Remote Commands** (Kick/Ban), **Audit Logs**, and **System Configuration** (Hot Reload).
 - **`js/admin_updates.js`**: Auto-Updater logic and Update Logs.
 
 ## User Roles
-1.  **Admin**: Full access. Manage users, build tests, grade, configure system.
-2.  **Team Leader**: View-only access to reports, schedules, and agent progress.
-3.  **Trainee**: Restricted access. Take tests, view schedule, check results.
-4.  **Special Viewer**: Read-only Admin view (Audit mode).
+1.  **Super Admin**: Ultimate control. Can configure system internals, ban clients, override security locks, and manage global settings.
+2.  **Admin**: Full access. Manage users, build tests, grade, configure system.
+3.  **Team Leader**: View-only access to reports, schedules, and agent progress.
+4.  **Trainee**: Restricted access. Take tests, view schedule, check results.
+5.  **Special Viewer**: Read-only Admin view (Audit mode).
 
 ## Critical Logic Flows
 
@@ -142,6 +199,9 @@ The app uses a **"Smart Split Sync"** with Conflict Resolution:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.1.48**: **System Hardening**: Enhanced Backup & Restore tools to include full system configuration, metadata, and local settings. Improved Factory Reset to cover all new security schemas. Fixed SharePoint display issues in Study Monitor.
+- **v2.1.47**: **Super Admin & System Control**: Introduced `super_admin` role with a dedicated console (`Ctrl+Shift+S`). Added dynamic **System Configuration** (Sync rates, Attendance rules, Feature flags). Implemented **Client Health Monitoring** with remote commands (Kick, Reload, Message) and **Instant Ban** button. Added **Banned Clients** list, **Client Whitelist** (Strict Mode), and **Audit Logging** for critical actions.
+- **v2.1.46**: **Attendance Logic**: Enhanced reminder system. Trainees are now prompted to Clock In upon login until 16:00. Added a "Clock Out" monitor that triggers warnings from 16:45, culminating in a stern alert at 16:55 to ensure compliance before the 17:00 cutoff.
 - **v2.1.45**: **Visual Overhaul**: Comprehensive UI/UX upgrade including glassmorphism login with particle effects, animated dashboard entry, and modern assessment interface. **Feedback Systems**: Added skeleton loaders, enhanced toast notifications, and dynamic activity monitor grid. **Polish**: Implemented smooth tab transitions, tactile button responses, and interactive table rows.
 - **v2.1.44**: **Login Security**: Filtered out Graduated Agents from the Trainee Login list. **User Management**: Prevented system from regenerating accounts for archived graduates.
 - **v2.1.43**: **Daily Tip Management**: Added Admin widget to customize tips. **Sync Hardening**: Removed conflict prompts, added retry logic, and improved nested merge. **Stability**: Fixed Trainee Dashboard crash.

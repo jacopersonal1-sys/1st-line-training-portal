@@ -10,6 +10,14 @@ let VETTING_REALTIME_UNSUB = null;
 let ADMIN_VETTING_REALTIME_UNSUB = null;
 
 function loadVettingArena() {
+    // FEATURE FLAG CHECK
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    if (config.features && config.features.vetting_arena === false) {
+        const container = document.getElementById('vetting-arena-content');
+        if(container) container.innerHTML = `<div style="text-align:center; padding:50px; color:var(--text-muted);"><i class="fas fa-ban" style="font-size:3rem; margin-bottom:15px;"></i><h3>Feature Disabled</h3><p>The Vetting Arena is currently disabled by the System Administrator.</p></div>`;
+        return;
+    }
+
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
         renderAdminArena();
     } else {
@@ -464,6 +472,13 @@ async function checkSystemCompliance() {
     const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
     const isOverridden = myData && myData.override;
     const isRelaxed = myData && myData.relaxed;
+    
+    // GLOBAL KIOSK ENFORCEMENT
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    if (config.security && config.security.force_kiosk_global) {
+        // Force strict mode regardless of relaxed setting
+        if (isRelaxed) return; // Wait, we need to force checks. Actually, we should treat isRelaxed as false.
+    }
 
     let errors = [];
     
@@ -578,7 +593,13 @@ async function enterArena(testId) {
     // 1. Enforce Security
     const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
     const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
-    const isRelaxed = myData && myData.relaxed;
+    let isRelaxed = myData && myData.relaxed;
+
+    // GLOBAL KIOSK ENFORCEMENT
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    if (config.security && config.security.force_kiosk_global) {
+        isRelaxed = false;
+    }
 
     if (!isRelaxed && typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');

@@ -18,6 +18,10 @@ const NPSSystem = {
     checkForSurveys: function() {
         if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
 
+        // FEATURE FLAG CHECK
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        if (config.features && config.features.nps_surveys === false) return;
+
         const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
         const responses = JSON.parse(localStorage.getItem('nps_responses') || '[]');
         
@@ -47,6 +51,10 @@ const NPSSystem = {
 
     triggerCompletionSurvey: function(contextType, contextId) {
         if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
+
+        // FEATURE FLAG CHECK
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        if (config.features && config.features.nps_surveys === false) return;
 
         const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
         const responses = JSON.parse(localStorage.getItem('nps_responses') || '[]');

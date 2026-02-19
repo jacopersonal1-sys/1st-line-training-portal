@@ -106,6 +106,38 @@ async function attemptLogin() {
       return;
   }
 
+  // --- SECURITY CHECK 1.5: MAINTENANCE MODE & VERSION ---
+  const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+  if (config.security) {
+      // Maintenance Mode
+      if (config.security.maintenance_mode && validUser.role !== 'admin' && validUser.role !== 'super_admin') {
+          document.getElementById('loginError').innerText = "System is in Maintenance Mode. Admin access only.";
+          return;
+      }
+      // Version Check (Simple String Compare)
+      if (config.security.min_version && window.APP_VERSION) {
+          if (window.APP_VERSION < config.security.min_version) {
+             document.getElementById('loginError').innerText = `Update Required. Min Version: ${config.security.min_version}`;
+             return;
+          }
+      }
+      
+      // Client ID Security Checks
+      const myClientId = localStorage.getItem('client_id');
+      
+      // 1. Ban List Check
+      if (config.security.banned_clients && config.security.banned_clients.includes(myClientId)) {
+          document.getElementById('loginError').innerText = "Access Denied: This terminal has been banned.";
+          return;
+      }
+
+      // 2. Whitelist Check (Only if whitelist is active/not empty)
+      if (config.security.client_whitelist && config.security.client_whitelist.length > 0 && !config.security.client_whitelist.includes(myClientId)) {
+          document.getElementById('loginError').innerText = "Access Denied: This terminal is not authorized.";
+          return;
+      }
+  }
+
   // --- SECURITY CHECK 2: PASSWORD VALIDATION ---
   const users = JSON.parse(localStorage.getItem('users') || '[]');
   
@@ -135,7 +167,7 @@ async function attemptLogin() {
     if(!accessGranted) return; // Overlay will show, stop login
     // -------------------------------
 
-    if(LOGIN_MODE === 'admin' && (validUser.role === 'trainee')) {
+    if(LOGIN_MODE === 'admin' && (validUser.role === 'trainee' && validUser.role !== 'super_admin')) {
       document.getElementById('loginError').innerText = "Trainees must use Trainee tab."; return;
     }
     
@@ -224,6 +256,17 @@ async function autoLogin() {
   // Apply Theme Immediately
   if (typeof applyUserTheme === 'function') applyUserTheme();
   
+  // --- WEEKEND LOGIN CHECK ---
+  const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+  if (config.attendance && config.attendance.allow_weekend_login === false) {
+      const day = new Date().getDay();
+      if ((day === 0 || day === 6) && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
+          alert("Weekend login is currently disabled by System Administrator.");
+          if(typeof logout === 'function') logout();
+          return;
+      }
+  }
+
   applyRolePermissions();
   checkFirstTimeLogin();
   
@@ -284,7 +327,7 @@ function applyRolePermissions() {
   const subBtnStatus = document.getElementById('btn-sub-status');
   const subBtnUpdates = document.getElementById('btn-sub-updates');
 
-  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
     adminElems.forEach(e => e.classList.remove('hidden'));
     tlElems.forEach(e => e.classList.remove('hidden'));
     filterContainer.classList.remove('hidden');
@@ -302,6 +345,13 @@ function applyRolePermissions() {
     if(subBtnAccess) subBtnAccess.classList.remove('hidden');
     if(subBtnStatus) subBtnStatus.classList.remove('hidden');
     if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');
+
+    // SUPER ADMIN EXCLUSIVE
+    const superBtn = document.getElementById('btn-super-admin');
+    if (superBtn) {
+        if (CURRENT_USER.role === 'super_admin') superBtn.classList.remove('hidden');
+        else superBtn.classList.add('hidden');
+    }
 
     if (CURRENT_USER.role === 'special_viewer') {
         document.getElementById('admin-create-user-card')?.classList.add('hidden');
@@ -332,7 +382,7 @@ function applyRolePermissions() {
     
     if (arenaBtn) {
         let show = false;
-        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') show = true;
+        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') show = true;
         else if (session.active) {
             if (!session.targetGroup || session.targetGroup === 'all') show = true;
             else {
@@ -420,7 +470,12 @@ function isIpInCidr(ip, cidr) {
 
 async function checkAccessControl() {
     const ac = JSON.parse(localStorage.getItem('accessControl') || '{"enabled":false, "whitelist":[]}');
-    if(!ac.enabled) return true;
+    
+    // MERGE SUPER ADMIN IPS
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const superIps = (config.security && config.security.allowed_ips) ? config.security.allowed_ips : [];
+    
+    if(!ac.enabled && superIps.length === 0) return true;
     
     try {
         const response = await fetch('https://api.ipify.org?format=json');
@@ -429,11 +484,29 @@ async function checkAccessControl() {
         const data = await response.json();
         const userIp = data.ip;
         
-        const isAllowed = ac.whitelist.some(allowedIp => {
-            if (allowedIp === userIp) return true; 
-            if (allowedIp.includes('/') && isIpInCidr(userIp, allowedIp)) return true;
-            return false;
-        });
+        let isAllowed = false;
+        
+        // Check Local Whitelist (if enabled)
+        if (ac.enabled) {
+             isAllowed = ac.whitelist.some(allowedIp => {
+                if (allowedIp === userIp) return true; 
+                if (allowedIp.includes('/') && isIpInCidr(userIp, allowedIp)) return true;
+                return false;
+            });
+        } else {
+            isAllowed = true; // Default allow if local AC disabled
+        }
+
+        // Check Super Admin Whitelist (Always enforced if present)
+        if (superIps.length > 0) {
+            const isSuperAllowed = superIps.some(allowedIp => {
+                if (allowedIp === userIp) return true; 
+                if (allowedIp.includes('/') && isIpInCidr(userIp, allowedIp)) return true;
+                return false;
+            });
+            // If Super Admin list exists, you MUST be in it
+            if (!isSuperAllowed) isAllowed = false;
+        }
 
         if(isAllowed) {
             return true; 
@@ -478,6 +551,7 @@ function showAccessDeniedOverlay(ip) {
 /* ================= PERMISSION CHECKER ================= */
 function hasPermission(permission) {
     if (!CURRENT_USER) return false;
+    if (CURRENT_USER.role === 'super_admin') return true;
     if (CURRENT_USER.role === 'admin') return true;
     if (CURRENT_USER.role === 'special_viewer') return false; // Read-only
     if (CURRENT_USER.role === 'teamleader') {

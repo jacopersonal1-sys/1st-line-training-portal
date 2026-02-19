@@ -161,6 +161,8 @@ async function saveRoster() {
     if (emails.length > 0 && typeof generateOnboardingEmail === 'function') {
         generateOnboardingEmail(emails);
     }
+
+    if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Roster Update', `${mode === 'new' ? 'Created' : 'Updated'} group ${targetGroupId}`);
     
     alert(`Successfully ${mode === 'new' ? 'created' : 'updated'} group: ${getGroupLabel(targetGroupId, rosters[targetGroupId].length)}`);
 }
@@ -234,6 +236,7 @@ async function deleteGroup(groupId) {
     
     await secureUserSave();
     
+    if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Group', `Deleted group ${groupId}`);
     refreshAllDropdowns();
 }
 
@@ -299,6 +302,7 @@ async function deleteAgentFromSystem(agentName, groupId) {
         ], true);
     }
     
+    if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Agent', `Obliterated agent ${agentName}`);
     refreshAllDropdowns();
     if(typeof showToast === 'function') showToast(`Agent ${agentName} obliterated.`, "success");
 }
@@ -427,7 +431,7 @@ function loadAdminUsers() {
 
     let displayUsers = [];
     
-    if (CURRENT_USER.role === 'admin') {
+    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
         if(createContainer) createContainer.classList.remove('hidden');
         if(scanBtn) scanBtn.classList.remove('hidden');
         displayUsers = users.filter(u => u.user.toLowerCase().includes(search));
@@ -464,7 +468,7 @@ function loadAdminUsers() {
             const color = "#" + "00000".substring(0, 6 - c.length) + c;
             const avatarHtml = `<div style="width:28px; height:28px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; margin-right:10px; vertical-align:middle; box-shadow:0 2px 4px rgba(0,0,0,0.2);">${initials}</div>`;
 
-            if (CURRENT_USER.role === 'admin' && u.user !== 'admin') {
+            if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && u.user !== 'admin') {
                 const hasReport = savedReports.some(r => r.trainee.toLowerCase() === u.user.toLowerCase());
                 const moveBtn = hasReport 
                     ? `<button class="btn-warning btn-sm" onclick="openMoveUserModal('${safeUser}')" title="Move to another group"><i class="fas fa-exchange-alt"></i></button>`
@@ -681,6 +685,7 @@ async function remUser(username) {
         // 4. SECURE SAVE (Safe Merge - relies on revokedUsers blacklist to enforce deletion)
         await secureUserSave();
 
+        if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete User', `Deleted user ${username}`);
         loadAdminUsers(); 
         populateTraineeDropdown(); 
     } 
@@ -705,11 +710,12 @@ function openUserEdit(username) {
             <option value="trainee">Trainee</option>
             <option value="teamleader">Team Leader</option>
             <option value="admin">Admin</option>
+            <option value="super_admin">Super Admin</option>
         </select>
         <label>Idle Timeout (Minutes)</label>
         <input type="number" id="editUserTimeout" value="${u.idleTimeout || 15}" min="1" placeholder="Default: 15">`;
     
-    if (CURRENT_USER.role !== 'admin') {
+    if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
         const roleSelect = document.getElementById('editUserRole');
         if(roleSelect) roleSelect.disabled = true;
     } else {
@@ -734,7 +740,7 @@ async function saveUserEdit() {
         }
     }
     
-    if(CURRENT_USER.role === 'admin') {
+    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
         users[editTargetIndex].role = document.getElementById('editUserRole').value;
     }
 
@@ -859,6 +865,7 @@ async function restoreAgent(username) {
         ], true);
     }
 
+    if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Restore Agent', `Restored ${username} from archive`);
     loadGraduatedAgents();
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
     if(typeof showToast === 'function') showToast("Agent restored successfully.", "success");
@@ -945,6 +952,7 @@ async function graduateTrainee(username) {
             ], true);
         }
 
+        if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Graduate Agent', `Graduated ${username}`);
         alert(`${username} has been graduated and archived.`);
         
         // Refresh UI if on Insight page

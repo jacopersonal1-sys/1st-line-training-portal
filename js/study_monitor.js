@@ -97,7 +97,9 @@ const StudyMonitor = {
                     // NEW: Check Idle State from Global Tracker
                     // We use the global LAST_INTERACTION timestamp updated by data.js
                     const lastInteract = window.LAST_INTERACTION || Date.now();
-                    const idleThreshold = 60000; // 1 minute (matches config)
+                    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+                    const idleThreshold = config.idle_thresholds ? config.idle_thresholds.warning : 60000;
+                    
                     const isPhysicallyIdle = (Date.now() - lastInteract) > idleThreshold;
 
                     // Only track if it's different from current to avoid spamming history
@@ -232,6 +234,13 @@ const StudyMonitor = {
         if (this.cachedWhitelist.some(w => raw.includes(w.toLowerCase()))) {
             return 'study';
         }
+
+        // STRICT MODE CHECK
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        if (config.monitoring && config.monitoring.whitelist_strict) {
+            // If strict, and not whitelisted (passed above), and not explicitly 'idle', assume external
+            if (!act.startsWith('idle:')) return 'external';
+        }
         
         if (act.startsWith('studying:') || (act.includes('studying') && !act.startsWith('external:')) || act.includes('system:') || act.includes('navigating:')) return 'study';
         if (act.startsWith('external:') || act.includes('external') || act.includes('background')) return 'external';
@@ -327,6 +336,8 @@ const StudyMonitor = {
         webview.style.width = '100%';
         webview.style.height = '100%';
         webview.setAttribute('allowpopups', 'true');
+        // Fix for SharePoint/Microsoft 365 blank pages (Spoof standard Chrome UA)
+        webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         this.activeWebview = webview;
         
@@ -398,9 +409,10 @@ const StudyMonitor = {
             // 1. SharePoint: Remove ?web=1 to force raw view (Extract PDF)
             if (url.includes('sharepoint.com') || url.includes('onedrive.com')) {
                 const u = new URL(url);
-                if (u.searchParams.get('web') === '1') {
-                    u.searchParams.delete('web');
-                    url = u.toString();
+                // Only strip web=1 if it is a PDF. For Pages/Lists, we need web=1 or default behavior.
+                if (url.toLowerCase().includes('.pdf') && u.searchParams.get('web') === '1') {
+                     u.searchParams.delete('web');
+                     url = u.toString();
                 }
             }
             // 2. PDF Tools: Hide sidebar/toolbar
@@ -783,7 +795,8 @@ function renderActivitySummary(container) {
             
             // TOLERANCE: Activities < 3 mins are considered "Quick Checks" or "Thinking" (Productive)
             // Only > 3 mins counts as Distraction/Idle (Concern)
-            const TOLERANCE = 180000; 
+            const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+            const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
             
             if (category === 'study') {
                 studyMs += effectiveDuration;
@@ -880,7 +893,8 @@ function renderActivitySummary(container) {
                 if (pct < 0.5) return; // Skip tiny slivers
                 
                 const cat = StudyMonitor.getCategory(seg.activity);
-                const TOLERANCE = 180000; // 3 mins
+                const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+                const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
                 
                 let typeClass = 'seg-idle'; // Default
                 let style = `width:${pct}%;`;
@@ -1244,7 +1258,8 @@ StudyMonitor.expandTimeline = function(agentName) {
          totalMs += effectiveDuration;
 
          const category = StudyMonitor.getCategory(seg.activity);
-         const TOLERANCE = 180000;
+         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+         const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
          let typeClass = 'seg-idle';
          let catLabel = 'Idle';
          let style = '';

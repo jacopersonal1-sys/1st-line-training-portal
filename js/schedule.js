@@ -91,7 +91,7 @@ function renderSchedule() {
         }
     }
 
-    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader');
+    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader');
     const isTL = (CURRENT_USER.role === 'teamleader');
     
     if (!isAdmin && !isTL) {
@@ -373,7 +373,7 @@ function renderLiveTable() {
     const activeSlots = settings.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
     
     // 2. Admin Controls Visibility
-    if(CURRENT_USER.role === 'admin') {
+    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
         const adminPanel = document.querySelector('#live-assessment .admin-only');
         adminPanel.classList.remove('hidden');
 
@@ -473,7 +473,7 @@ function renderLiveTable() {
 
                     // Actions
                     let actions = '';
-                    if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'special_viewer') {
+                    if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && CURRENT_USER.role !== 'special_viewer') {
                         // Admin: Cancel OR Mark Complete
                         if(!isCompleted) {
                             actions += `<button class="btn-primary btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="initiateLiveSession('${booking.id}', '${booking.assessment}', '${booking.trainee}')" title="Start Live Session"><i class="fas fa-play"></i> Start</button>`;

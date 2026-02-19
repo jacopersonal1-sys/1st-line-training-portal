@@ -107,7 +107,7 @@ function renderMonthly() {
   // FOCUS PROTECTION for the Trainee Search Input in the Monthly View
   // We allow updates while typing to filter results, but ensure we don't clear the input.
   
-  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
+  if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
       // Fix Alignment: Add Checkbox Header
       if (!theadRow.querySelector('.check-col')) {
           const th = document.createElement('th');
@@ -154,13 +154,13 @@ function renderMonthly() {
     if(r.score >= PASS_SCORE) { s = 'pass'; t = 'Pass'; }
     else if(r.score >= IMPROVE_SCORE) { s = 'improve'; t = 'Improve'; }
     
-    let checkHtml = (CURRENT_USER.role === 'admin') 
+    let checkHtml = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') 
       ? `<td class="admin-only" style="text-align:center;"><input type="checkbox" class="del-check" value="${originalIndex}" aria-label="Select Record for Deletion"></td>` 
       : '';
     
     // --- ACTION COLUMN LOGIC ---
     let actionHtml = '';
-    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
+    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
         actionHtml = '<td class="action-cell">';
         
         if(r.link === 'Digital-Assessment' || r.link === 'Live-Session') {
@@ -186,12 +186,12 @@ function renderMonthly() {
             let btnText = r.link && r.link.startsWith('http') ? 'Open' : 'Link';
             
             // If Admin, show "Add Link" style if missing
-            if (CURRENT_USER.role === 'admin' && !r.link) { btnClass = 'btn-primary'; btnIcon = 'fa-plus'; btnText = 'Add Link'; }
+            if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && !r.link) { btnClass = 'btn-primary'; btnIcon = 'fa-plus'; btnText = 'Add Link'; }
 
             actionHtml += `<button class="${btnClass} btn-sm" onclick="handleRecordLinkClick('${r.id}', '${safeLink}', '${safeTrainee}', '${safeAssess}')"><i class="fas ${btnIcon}"></i> ${btnText}</button>`;
             
             // Admin Edit Button (Only if link exists)
-            if (CURRENT_USER.role === 'admin' && r.link) {
+            if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && r.link) {
                 actionHtml += ` <button class="btn-secondary btn-sm" onclick="updateRecordLink(${originalIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
             }
         }
@@ -219,7 +219,7 @@ function renderMonthly() {
   if (html === '') tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="color:var(--text-muted);">No records found matching filters.</td></tr>';
   else tbody.innerHTML = html;
 
-  if(CURRENT_USER.role === 'admin') document.querySelectorAll('.admin-only').forEach(e => e.classList.remove('hidden')); 
+  if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') document.querySelectorAll('.admin-only').forEach(e => e.classList.remove('hidden')); 
   else document.querySelectorAll('.admin-only').forEach(e => e.classList.add('hidden'));
 }
 

@@ -167,7 +167,7 @@ function openAdminMarking(subId) {
     const container = document.getElementById('markingContainer');
     modal.classList.remove('hidden');
     
-    const isLocked = sub.status === 'completed' && CURRENT_USER.role !== 'admin';
+    const isLocked = sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin';
 
     container.innerHTML = `
         <div style="margin-bottom:20px; border-bottom:2px solid var(--border-color); padding-bottom:10px; display:flex; justify-content:space-between; align-items:center;">

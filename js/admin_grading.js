@@ -354,7 +354,7 @@ function loadTestRecords() {
                 }
                 
                 // ADMIN ONLY ACTIONS
-                if (CURRENT_USER.role === 'admin' && CURRENT_USER.role !== 'teamleader') {
+                if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && CURRENT_USER.role !== 'teamleader') {
                     if (s.source === 'digital') {
                         actionBtn += ` <button class="btn-primary btn-sm" onclick="viewCompletedTest('${s.id}', null, 'edit')" title="Edit Score"><i class="fas fa-pen"></i></button>`;
                         actionBtn += ` <button class="btn-danger btn-sm" onclick="deleteSubmission('${s.id}')"><i class="fas fa-trash"></i></button>`;

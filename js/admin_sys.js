@@ -459,6 +459,39 @@ function toggleAutoBackup() {
     localStorage.setItem('autoBackup', cb.checked);
 }
 
+// OVERRIDE: SAFE IMPORT (Handles Metadata & Force Sync)
+window.importDatabase = function(input) {
+    const file = input.files[0];
+    if(!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            
+            Object.keys(data).forEach(key => {
+                if (key === 'meta') return; // Skip metadata
+                
+                if (typeof data[key] === 'object') {
+                    localStorage.setItem(key, JSON.stringify(data[key]));
+                } else {
+                    localStorage.setItem(key, data[key]);
+                }
+            });
+
+            console.log("Restoring backup to cloud...");
+            if (typeof saveToServer === 'function') await saveToServer(null, true); // Force save ALL keys
+
+            alert("Database restored successfully.");
+            location.reload();
+        } catch (err) {
+            console.error(err);
+            alert("Error restoring database: " + err.message);
+        }
+    };
+    reader.readAsText(file);
+};
+
 // OVERRIDE: SAFE EXPORT (Ensures cloud data is fresh before backup)
 // We redefine the global exportDatabase function here to add the 'await loadFromServer' step
 window.exportDatabase = async function() {
@@ -476,15 +509,24 @@ window.exportDatabase = async function() {
 
         // 2. GENERATE EXPORT BLOB
         const d = {};
+        
+        // Metadata for version tracking
+        d.meta = {
+            version: window.APP_VERSION || '2.0',
+            date: new Date().toISOString(),
+            exportedBy: CURRENT_USER.user
+        };
+
         // Use DB_SCHEMA from data.js or fallback
         const schemaKeys = (typeof DB_SCHEMA !== 'undefined') ? Object.keys(DB_SCHEMA) : ['records','users','assessments','rosters','schedules','liveBookings'];
         
         schemaKeys.forEach(k => {
-            d[k] = JSON.parse(localStorage.getItem(k)) || [];
+            d[k] = JSON.parse(localStorage.getItem(k)) || (typeof DB_SCHEMA !== 'undefined' ? DB_SCHEMA[k] : []);
         });
         
         d.theme = localStorage.getItem('theme') || 'dark';
         d.autoBackup = localStorage.getItem('autoBackup') || 'false';
+        d.local_theme_config = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
        
         const b = new Blob([JSON.stringify(d,null,2)],{type:'application/json'}); 
         const a = document.createElement('a'); 
@@ -656,7 +698,10 @@ async function sendRemoteCommand(username, action) {
             .eq('user', username);
             
         if(error) alert("Command failed: " + error.message);
-        else alert(`Command '${action}' sent to ${username}. It will execute on their next heartbeat.`);
+        else {
+            if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Remote Command', `Sent '${action}' to ${username}`);
+            alert(`Command '${action}' sent to ${username}. It will execute on their next heartbeat.`);
+        }
     }
 }
 
@@ -690,6 +735,7 @@ async function confirmFactoryReset() {
             .neq('user', 'placeholder'); // Delete all rows
 
         if (!resetErr) {
+            if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Factory Reset', 'System reset to defaults');
             alert("System has been reset successfully. You will now be redirected.");
             localStorage.clear(); 
             location.reload();
@@ -713,4 +759,335 @@ async function resetLiveSessionsKey() {
     
     alert("Live Sessions cleared. Reloading...");
     location.reload();
+}
+
+// --- SECTION 7: SUPER ADMIN CONFIGURATION ---
+
+function openSuperAdminConfig() {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    
+    // Defaults if missing
+    const rates = config.sync_rates || { admin: 10000, teamleader: 300000, trainee: 60000 }; // ms
+    const att = config.attendance || { work_start: "08:00", work_end: "17:00", reminder_start: "16:45", late_cutoff: "08:15" };
+    const sec = config.security || { maintenance_mode: false, min_version: "0.0.0", banned_clients: [] };
+    const feat = config.features || { vetting_arena: true, live_assessments: true, disable_animations: false };
+    const ann = config.announcement || { active: false, message: "", type: "info" };
+    const banned = sec.banned_clients || [];
+    const whitelist = sec.client_whitelist || [];
+
+    const modalHtml = `
+        <div id="superAdminModal" class="modal-overlay">
+            <div class="modal-box" style="width:800px; max-height:90vh; overflow-y:auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <h2 style="margin:0; color:#8e44ad;"><i class="fas fa-user-astronaut"></i> Super Admin Console</h2>
+                    <button class="btn-secondary" onclick="document.getElementById('superAdminModal').remove()">&times;</button>
+                </div>
+
+                <div class="grid-2">
+                    <div class="card">
+                        <h4><i class="fas fa-sync"></i> Sync Performance</h4>
+                        <label>Admin Polling (Seconds)</label><input type="number" id="sa_sync_admin" value="${rates.admin / 1000}">
+                        <label>Trainee Polling (Seconds)</label><input type="number" id="sa_sync_trainee" value="${rates.trainee / 1000}">
+                        <label>TL Polling (Minutes)</label><input type="number" id="sa_sync_tl" value="${rates.teamleader / 60000}">
+                    </div>
+                    <div class="card">
+                        <h4><i class="fas fa-clock"></i> Attendance Rules</h4>
+                        <label>Work Start</label><input type="time" id="sa_att_start" value="${att.work_start}">
+                        <label>Late Cutoff (Grace Period)</label><input type="time" id="sa_att_late" value="${att.late_cutoff}">
+                        <label>Work End</label><input type="time" id="sa_att_end" value="${att.work_end}">
+                        <label>Clock-Out Reminder</label><input type="time" id="sa_att_remind" value="${att.reminder_start}">
+                    </div>
+                </div>
+
+                <div class="grid-2" style="margin-top:15px;">
+                    <div class="card">
+                        <h4><i class="fas fa-shield-alt"></i> Security</h4>
+                        <label style="display:flex; align-items:center; gap:10px;">
+                            <input type="checkbox" id="sa_sec_maint" ${sec.maintenance_mode ? 'checked' : ''}> Maintenance Mode (Block Login)
+                        </label>
+                        <label style="display:flex; align-items:center; gap:10px;">
+                            <input type="checkbox" id="sa_sec_kiosk" ${sec.force_kiosk_global ? 'checked' : ''}> Force Global Kiosk (Emergency)
+                        </label>
+                        <label>Min App Version</label><input type="text" id="sa_sec_ver" value="${sec.min_version}">
+                        <label>Banned Client IDs</label>
+                        <div style="display:flex; gap:5px;">
+                            <input type="text" id="sa_sec_banned" value="${banned.join(', ')}" placeholder="CL-XXXX, CL-YYYY" style="flex:1;">
+                            <button class="btn-secondary btn-sm" onclick="viewBannedClientsReport()"><i class="fas fa-list"></i> Report</button>
+                        </div>
+                        <label>Client Whitelist (Empty = Allow All)</label><input type="text" id="sa_sec_whitelist" value="${whitelist.join(', ')}" placeholder="CL-XXXX, CL-YYYY">
+                    </div>
+                    <div class="card">
+                        <h4><i class="fas fa-toggle-on"></i> Feature Flags</h4>
+                        <label style="display:flex; align-items:center; gap:10px;" title="Enable secure testing environment"><input type="checkbox" id="sa_feat_vet" ${feat.vetting_arena ? 'checked' : ''}> Vetting Arena</label>
+                        <label style="display:flex; align-items:center; gap:10px;" title="Enable live trainer interaction"><input type="checkbox" id="sa_feat_live" ${feat.live_assessments ? 'checked' : ''}> Live Assessments</label>
+                        <label style="display:flex; align-items:center; gap:10px;" title="Enable feedback surveys"><input type="checkbox" id="sa_feat_nps" ${feat.nps_surveys ? 'checked' : ''}> NPS Surveys</label>
+                        <label style="display:flex; align-items:center; gap:10px;" title="Show daily tips on dashboard"><input type="checkbox" id="sa_feat_tips" ${feat.daily_tips !== false ? 'checked' : ''}> Daily Tips</label>
+                        <label style="display:flex; align-items:center; gap:10px;" title="Reduce visual effects for performance"><input type="checkbox" id="sa_feat_anim" ${feat.disable_animations ? 'checked' : ''}> Disable Animations</label>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:15px;">
+                    <h4><i class="fas fa-bullhorn"></i> Global Announcement</h4>
+                    <label style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                        <input type="checkbox" id="sa_ann_active" ${ann.active ? 'checked' : ''}> Show Banner
+                    </label>
+                    <input type="text" id="sa_ann_msg" placeholder="Message to all users..." value="${ann.message}">
+                    <select id="sa_ann_type" style="margin-top:5px;">
+                        <option value="info" ${ann.type === 'info' ? 'selected' : ''}>Info (Blue)</option>
+                        <option value="warning" ${ann.type === 'warning' ? 'selected' : ''}>Warning (Yellow)</option>
+                        <option value="error" ${ann.type === 'error' ? 'selected' : ''}>Critical (Red)</option>
+                        <option value="success" ${ann.type === 'success' ? 'selected' : ''}>Success (Green)</option>
+                    </select>
+                </div>
+                
+                <div class="card" style="margin-top:15px;">
+                    <h4><i class="fas fa-bullhorn"></i> Instant Broadcast</h4>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" id="sa_broadcast_msg" placeholder="Popup message to all users..." style="flex:1;">
+                        <button class="btn-warning btn-sm" onclick="sendSystemBroadcast()">Send</button>
+                        <label style="display:flex; align-items:center; gap:5px; margin:0;"><input type="checkbox" id="sa_broadcast_sound" checked> Sound</label>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:15px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h4><i class="fas fa-heartbeat"></i> Connected Clients Health</h4>
+                        <div style="display:flex; gap:5px;">
+                            <button id="btnForceRefreshAll" class="btn-danger btn-sm" onclick="forceRefreshAllClients()" title="Force Reload All Clients"><i class="fas fa-power-off"></i> Refresh All</button>
+                            <button class="btn-secondary btn-sm" onclick="refreshClientHealthTable()"><i class="fas fa-sync"></i></button>
+                        </div>
+                    </div>
+                    <div id="sa_client_health_table" style="max-height:200px; overflow-y:auto; margin-top:10px;">Loading...</div>
+                </div>
+
+                <button class="btn-primary" style="width:100%; margin-top:20px; background:#8e44ad;" onclick="saveSuperAdminConfig()">
+                    <i class="fas fa-save"></i> Push Configuration to All Clients
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    // Initial Load
+    refreshClientHealthTable();
+}
+
+async function saveSuperAdminConfig() {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    
+    config.sync_rates = {
+        admin: parseInt(document.getElementById('sa_sync_admin').value) * 1000,
+        teamleader: parseInt(document.getElementById('sa_sync_tl').value) * 60000,
+        trainee: parseInt(document.getElementById('sa_sync_trainee').value) * 1000
+    };
+    
+    config.attendance = { ...config.attendance,
+        work_start: document.getElementById('sa_att_start').value,
+        late_cutoff: document.getElementById('sa_att_late').value,
+        work_end: document.getElementById('sa_att_end').value,
+        reminder_start: document.getElementById('sa_att_remind').value
+    };
+
+    config.security = { ...config.security,
+        maintenance_mode: document.getElementById('sa_sec_maint').checked,
+        force_kiosk_global: document.getElementById('sa_sec_kiosk').checked,
+        min_version: document.getElementById('sa_sec_ver').value,
+        banned_clients: document.getElementById('sa_sec_banned').value.split(',').map(s => s.trim()).filter(s => s),
+        client_whitelist: document.getElementById('sa_sec_whitelist').value.split(',').map(s => s.trim()).filter(s => s)
+    };
+
+    config.features = { ...config.features, vetting_arena: document.getElementById('sa_feat_vet').checked, live_assessments: document.getElementById('sa_feat_live').checked, nps_surveys: document.getElementById('sa_feat_nps').checked, daily_tips: document.getElementById('sa_feat_tips').checked, disable_animations: document.getElementById('sa_feat_anim').checked };
+    
+    config.announcement = { active: document.getElementById('sa_ann_active').checked, message: document.getElementById('sa_ann_msg').value, type: document.getElementById('sa_ann_type').value };
+
+    localStorage.setItem('system_config', JSON.stringify(config));
+    if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
+    
+    if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'System Config', 'Updated Super Admin Settings');
+
+    alert("Configuration Pushed. Clients will update on next sync.");
+    document.getElementById('superAdminModal').remove();
+    if(typeof applySystemConfig === 'function') applySystemConfig();
+}
+
+async function sendSystemBroadcast() {
+    const msg = document.getElementById('sa_broadcast_msg').value;
+    if(!msg) return alert("Enter a message.");
+    
+    if(!confirm("Send this popup message to ALL active users immediately?")) return;
+    
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const sound = document.getElementById('sa_broadcast_sound').checked;
+    config.broadcast = { id: Date.now(), message: msg, sound: sound };
+    
+    localStorage.setItem('system_config', JSON.stringify(config));
+    if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
+    alert("Broadcast sent.");
+}
+
+async function refreshClientHealthTable() {
+    const container = document.getElementById('sa_client_health_table');
+    if (!container || !window.supabaseClient) return;
+
+    const { data: sessions, error } = await supabaseClient
+        .from('sessions')
+        .select('*')
+        .order('lastSeen', { ascending: false });
+
+    if (error) {
+        container.innerHTML = `<div style="color:#ff5252;">Error fetching health data.</div>`;
+        return;
+    }
+
+    if (!sessions || sessions.length === 0) {
+        container.innerHTML = `<div style="color:var(--text-muted);">No active sessions.</div>`;
+        return;
+    }
+
+    let html = `<table class="admin-table compressed-table"><thead><tr><th>User</th><th>Client ID</th><th>Activity</th><th>Latency</th><th>Action</th></tr></thead><tbody>`;
+    
+    sessions.forEach(s => {
+        const latency = s.latency || 0;
+        let latColor = '#2ecc71';
+        if (latency > 500) latColor = '#f1c40f';
+        if (latency > 1500) latColor = '#ff5252';
+        
+        const seenTime = new Date(s.lastSeen).toLocaleTimeString();
+        const isOnline = (Date.now() - new Date(s.lastSeen).getTime()) < 90000; // 90s threshold
+        const statusDot = isOnline ? `<span style="color:#2ecc71;">●</span>` : `<span style="color:#95a5a6;">○</span>`;
+        const clientId = s.clientId || 'Unknown';
+        const activity = s.activity || '-';
+        
+        const banBtn = (clientId !== 'Unknown' && s.role !== 'super_admin') ? `<button class="btn-danger btn-sm" style="padding:0 4px; font-size:0.7rem; margin-left:5px;" onclick="banClient('${clientId}', '${s.user}')" title="Ban Terminal"><i class="fas fa-ban"></i></button>` : '';
+
+        html += `<tr>
+            <td>${statusDot} <strong>${s.user}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">(${s.role})</span></td>
+            <td style="font-family:monospace; font-size:0.8rem;">${clientId}${banBtn}</td>
+            <td style="font-size:0.8rem; max-width:150px; overflow:hidden; text-overflow:ellipsis;" title="${activity}">${activity}</td>
+            <td style="color:${latColor}; font-weight:bold;">${latency}ms</td>
+            <td>
+                <button class="btn-danger btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.user}', 'logout')" title="Kick"><i class="fas fa-sign-out-alt"></i></button>
+                <button class="btn-warning btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.user}', 'restart')" title="Reload"><i class="fas fa-sync"></i></button>
+                <button class="btn-primary btn-sm" style="padding:0 5px;" onclick="promptRemoteMessage('${s.user}')" title="Message"><i class="fas fa-comment"></i></button>
+            </td>
+        </tr>`;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
+async function promptRemoteMessage(username) {
+    const msg = prompt(`Send private message to ${username}:`);
+    if(msg) {
+        sendRemoteCommand(username, 'msg:' + msg);
+    }
+}
+
+async function forceRefreshAllClients() {
+    if (!confirm("⚠️ FORCE REFRESH ALL CLIENTS?\n\nThis will command EVERY connected user (including you) to reload the application immediately.\nUnsaved work might be lost if not cached.\n\nAre you sure?")) return;
+
+    const btn = document.getElementById('btnForceRefreshAll');
+    if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...'; }
+
+    try {
+        if (!window.supabaseClient) throw new Error("Not connected to cloud.");
+
+        // Update all sessions to trigger a restart on next heartbeat
+        const { error } = await supabaseClient
+            .from('sessions')
+            .update({ pending_action: 'restart' })
+            .neq('user', 'placeholder'); // Safety filter to match all rows
+
+        if (error) throw error;
+
+        if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Force Refresh', 'Triggered global client refresh');
+        alert("Command sent! Clients will refresh on their next heartbeat (within 60s).");
+    } catch (e) {
+        console.error(e);
+        alert("Failed to send command: " + e.message);
+    } finally {
+        if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-power-off"></i> Refresh All'; }
+    }
+}
+
+// --- KEYBOARD SHORTCUT ---
+// Failsafe access to Super Admin Console (Ctrl + Shift + S)
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+        if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'super_admin') {
+            openSuperAdminConfig();
+        }
+    }
+});
+
+async function banClient(clientId, username) {
+    if(!confirm(`Ban terminal ${clientId} (User: ${username})?\n\nThey will be logged out and blocked from signing in.`)) return;
+    
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    if (!config.security) config.security = {};
+    if (!config.security.banned_clients) config.security.banned_clients = [];
+    
+    if (!config.security.banned_clients.includes(clientId)) {
+        config.security.banned_clients.push(clientId);
+        localStorage.setItem('system_config', JSON.stringify(config));
+        if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
+        
+        // Kick the user immediately
+        sendRemoteCommand(username, 'logout');
+        alert(`Terminal banned and kick command sent to ${username}.`);
+    }
+}
+
+// --- BANNED CLIENTS REPORT ---
+function viewBannedClientsReport() {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const banned = (config.security && config.security.banned_clients) ? config.security.banned_clients : [];
+
+    let html = `<div class="modal-overlay" id="bannedReportModal" style="z-index:10001;">
+        <div class="modal-box" style="width:500px;">
+            <h3><i class="fas fa-ban" style="color:#ff5252;"></i> Banned Clients Report</h3>
+            <div class="table-responsive" style="max-height:300px; overflow-y:auto; margin-top:15px;">
+                <table class="admin-table">
+                    <thead><tr><th>Client ID</th><th>Action</th></tr></thead>
+                    <tbody>`;
+    
+    if (banned.length === 0) {
+        html += `<tr><td colspan="2" class="text-center" style="color:var(--text-muted);">No banned clients found.</td></tr>`;
+    } else {
+        banned.forEach(id => {
+            html += `<tr>
+                <td style="font-family:monospace;">${id}</td>
+                <td style="text-align:right;"><button class="btn-success btn-sm" onclick="unbanClient('${id}')"><i class="fas fa-unlock"></i> Unban</button></td>
+            </tr>`;
+        });
+    }
+
+    html += `</tbody></table></div>
+            <div style="text-align:right; margin-top:15px;">
+                <button class="btn-secondary" onclick="document.getElementById('bannedReportModal').remove()">Close</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function unbanClient(id) {
+    if(!confirm(`Unban Client ID: ${id}?`)) return;
+    
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    if (config.security && config.security.banned_clients) {
+        config.security.banned_clients = config.security.banned_clients.filter(c => c !== id);
+        localStorage.setItem('system_config', JSON.stringify(config));
+        if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
+        
+        // Refresh report and main modal input
+        document.getElementById('bannedReportModal').remove();
+        viewBannedClientsReport();
+        
+        // Update the input in the main modal if it's open
+        const input = document.getElementById('sa_sec_banned');
+        if(input) input.value = config.security.banned_clients.join(', ');
+        
+        if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Security', `Unbanned Client ID: ${id}`);
+    }
 }
