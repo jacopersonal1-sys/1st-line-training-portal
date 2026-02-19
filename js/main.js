@@ -1,5 +1,43 @@
 /* ================= MAIN ENTRY ================= */
 
+// --- GLOBAL CONSOLE RECORDER (For AI Analysis) ---
+// Captures logs, warns, and errors so the AI can analyze app history.
+window.CONSOLE_HISTORY = [];
+const MAX_LOG_SIZE = 200; // Keep last 200 entries to manage memory
+
+function captureLog(type, args) {
+    try {
+        const msg = args.map(a => {
+            if (a instanceof Error) return a.toString() + (a.stack ? '\n' + a.stack : '');
+            if (typeof a === 'object') return JSON.stringify(a);
+            return String(a);
+        }).join(' ');
+        
+        window.CONSOLE_HISTORY.push({ type, msg, time: new Date().toISOString() });
+        if (window.CONSOLE_HISTORY.length > MAX_LOG_SIZE) window.CONSOLE_HISTORY.shift();
+
+        // --- SILENT CLOUD REPORTING ---
+        // Send error to Super Admin instead of showing local popup
+        if ((type === 'error' || type === 'fatal') && typeof reportSystemError === 'function') {
+            reportSystemError(msg, type);
+        }
+    } catch(e) { /* Prevent infinite loops if logging fails */ }
+}
+
+const originalConsoleLog = console.log;
+console.log = function(...args) { captureLog('log', args); originalConsoleLog.apply(console, args); };
+
+const originalConsoleWarn = console.warn;
+console.warn = function(...args) { captureLog('warn', args); originalConsoleWarn.apply(console, args); };
+
+const originalConsoleError = console.error;
+console.error = function(...args) { captureLog('error', args); originalConsoleError.apply(console, args); };
+
+window.onerror = function(msg, url, line, col, error) {
+    captureLog('fatal', [`${msg} (at ${url}:${line}:${col})`, error]);
+    return false; // Let default handler run
+};
+
 // --- HELPER: ASYNC SAVE ---
 // Ensures initialization data (like default admin) is saved to Supabase before app usage.
 async function secureInitSave() {
@@ -611,17 +649,24 @@ function updateSidebarVisibility() {
     const existingSaBtn = document.getElementById('btn-super-admin');
     if (role === 'super_admin') {
         if (!existingSaBtn) {
-            // Target the main menu container directly
-            const menuContainer = document.querySelector('.sidebar-menu');
-            if (menuContainer) {
+            // Target the header control bubble
+            const bubbleContent = document.querySelector('.control-bubble .bubble-content');
+            const adminToolsBtn = document.getElementById('btn-admin-tools');
+            
+            if (bubbleContent) {
                 const btn = document.createElement('button');
                 btn.id = 'btn-super-admin';
-                btn.className = 'nav-item';
-                btn.innerHTML = '<i class="fas fa-user-astronaut"></i> <span class="nav-text">Super Admin</span>';
+                btn.className = 'icon-btn';
+                btn.title = 'Super Admin Console';
+                btn.innerHTML = '<i class="fas fa-user-astronaut"></i>';
                 btn.onclick = function() { if(typeof openSuperAdminConfig === 'function') openSuperAdminConfig(); };
                 
-                // Append to the end of the menu
-                menuContainer.appendChild(btn);
+                // Insert after Admin Tools if present, otherwise prepend
+                if (adminToolsBtn && adminToolsBtn.parentNode === bubbleContent) {
+                    bubbleContent.insertBefore(btn, adminToolsBtn.nextSibling);
+                } else {
+                    bubbleContent.prepend(btn);
+                }
             }
         }
     } else if (existingSaBtn) {

@@ -139,6 +139,7 @@ const DEFAULT_SYSTEM_CONFIG = {
 - **`js/admin_users.js`**: User CRUD, Roster Management, **Onboarding Email Automation**, and **Graduate/Restore** workflows.
 - **`js/admin_sys.js`**: Database Management, System Health, **Super Admin Console**, **Remote Commands** (Kick/Ban), **Audit Logs**, and **System Configuration** (Hot Reload).
 - **`js/admin_updates.js`**: Auto-Updater logic and Update Logs.
+- **`js/ai_core.js`**: **AI System Analyst** (Gemini Integration). Handles natural language commands, system diagnostics, error analysis, and self-repair logic.
 
 ## User Roles
 1.  **Super Admin**: Ultimate control. Can configure system internals, ban clients, override security locks, and manage global settings.
@@ -199,6 +200,7 @@ The app uses a **"Smart Split Sync"** with Conflict Resolution:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.1.49**: **AI Co-Pilot Integration**: Added **Gemini System Analyst** for Super Admins. Features include natural language system queries ("Run diagnostics"), automated error analysis, self-repair tools, and a centralized error reporting dashboard. Enhanced Super Admin console with quick actions and deep system visibility.
 - **v2.1.48**: **System Hardening**: Enhanced Backup & Restore tools to include full system configuration, metadata, and local settings. Improved Factory Reset to cover all new security schemas. Fixed SharePoint display issues in Study Monitor.
 - **v2.1.47**: **Super Admin & System Control**: Introduced `super_admin` role with a dedicated console (`Ctrl+Shift+S`). Added dynamic **System Configuration** (Sync rates, Attendance rules, Feature flags). Implemented **Client Health Monitoring** with remote commands (Kick, Reload, Message) and **Instant Ban** button. Added **Banned Clients** list, **Client Whitelist** (Strict Mode), and **Audit Logging** for critical actions.
 - **v2.1.46**: **Attendance Logic**: Enhanced reminder system. Trainees are now prompted to Clock In upon login until 16:00. Added a "Clock Out" monitor that triggers warnings from 16:45, culminating in a stern alert at 16:55 to ensure compliance before the 17:00 cutoff.

@@ -280,3 +280,40 @@ window.triggerConfetti = function() {
     // Safety cleanup
     setTimeout(() => { if(document.body.contains(canvas)) canvas.remove(); }, 8000);
 };
+
+/* ================= AI INTEGRATION HELPERS ================= */
+
+async function generateAIResponse(systemPrompt, userPrompt) {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    
+    if (!config.ai || !config.ai.enabled) {
+        console.warn("AI is disabled in System Config.");
+        return null;
+    }
+
+    try {
+        // Works for OpenAI and Local Ollama (if endpoint is http://localhost:11434/v1/chat/completions)
+        const response = await fetch(config.ai.endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.ai.apiKey || 'dummy-key'}` // Ollama ignores key
+            },
+            body: JSON.stringify({
+                model: config.ai.model,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ],
+                temperature: 0.7
+            })
+        });
+
+        const data = await response.json();
+        return data.choices[0].message.content;
+    } catch (e) {
+        console.error("AI Request Failed:", e);
+        if(typeof showToast === 'function') showToast("AI Request Failed. Check Console.", "error");
+        return null;
+    }
+}

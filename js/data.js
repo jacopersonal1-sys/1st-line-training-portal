@@ -34,7 +34,8 @@ const DB_SCHEMA = {
         features: { vetting_arena: true, live_assessments: true, nps_surveys: true, daily_tips: true, disable_animations: false },
         monitoring: { tolerance_ms: 180000, whitelist_strict: false },
         announcement: { active: false, message: "", type: "info" },
-        broadcast: { id: 0, message: "" }
+        broadcast: { id: 0, message: "" },
+        ai: { enabled: false, provider: "gemini", apiKey: "", model: "gemini-pro", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" }
     },
     revokedUsers: [], // Added to ensure blacklist syncs
     auditLogs: [], // Critical Action History
@@ -51,7 +52,8 @@ const DB_SCHEMA = {
     graduated_agents: [], // Archived data for graduated trainees
     monitor_whitelist: [], // Custom whitelist for work-related apps
     monitor_reviewed: [], // Apps confirmed as External/Idle (Dismissed from queue)
-    dailyTips: [] // Admin controlled daily tips
+    dailyTips: [], // Admin controlled daily tips
+    error_reports: [] // Centralized error logging for Super Admin
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -150,6 +152,9 @@ async function loadFromServer(silent = false) {
             // HOT RELOAD: Apply system config changes immediately
             if (keysToFetch.includes('system_config')) applySystemConfig();
             
+            // NEW: Super Admin Alert for Errors
+            if (keysToFetch.includes('error_reports')) checkErrorAlerts();
+            
             // Refresh UI if needed
             if(silent && typeof refreshAllDropdowns === 'function') {
                 const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
@@ -227,6 +232,44 @@ function applySystemConfig() {
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
         // We simply restart the engine, it will read the new config values
         if (typeof startRealtimeSync === 'function') startRealtimeSync();
+    }
+}
+
+// --- ERROR REPORTING SYSTEM ---
+async function reportSystemError(msg, type) {
+    const report = {
+        id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+        user: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.user : 'Guest',
+        role: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.role : 'Unknown',
+        error: msg,
+        type: type,
+        timestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent
+    };
+
+    // Optimistic Load & Save
+    const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    reports.push(report);
+    
+    // Keep size manageable (Last 100 errors)
+    if (reports.length > 100) reports.shift();
+    
+    localStorage.setItem('error_reports', JSON.stringify(reports));
+    
+    // Silent Sync to Cloud
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['error_reports'], false, true);
+    }
+}
+
+function checkErrorAlerts() {
+    if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || CURRENT_USER.role !== 'super_admin') return;
+    
+    const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    const lastCount = parseInt(localStorage.getItem('last_seen_error_count') || '0');
+    
+    if (reports.length > lastCount) {
+        if (typeof showToast === 'function') showToast(`⚠️ ${reports.length - lastCount} New System Errors Reported!`, 'error');
     }
 }
 
@@ -582,7 +625,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
 async function fetchSystemStatus() {
     const start = Date.now();
     try {
-        if (!window.supabaseClient) return;
+        if (!window.supabaseClient) return { error: "No Cloud Connection" };
 
         // Estimate storage size from LocalStorage
         let storageSize = 0;
@@ -671,8 +714,19 @@ async function fetchSystemStatus() {
                 activeTable.innerHTML = html;
             }
         }
+
+        // RETURN DATA FOR AI / CALLER
+        return {
+            storage: typeof formatBytes === 'function' ? formatBytes(storageSize) : storageSize,
+            latency: latency + " ms",
+            activeUsers: activeUsers ? activeUsers.length : 0,
+            memory: (performance && performance.memory) ? formatBytes(performance.memory.usedJSHeapSize) : "N/A",
+            connection: navigator.connection ? navigator.connection.effectiveType.toUpperCase() : (navigator.onLine ? "ONLINE" : "OFFLINE")
+        };
+
     } catch (e) {
         console.error("Supabase Status fetch error", e);
+        return { error: e.message };
     }
 }
 
@@ -1192,6 +1246,7 @@ if (typeof module !== 'undefined' && module.exports) {
         saveToServer,
         performSmartMerge,
         notifyUnsavedChanges,
-        logAuditAction
+        logAuditAction,
+        reportSystemError
     };
 }

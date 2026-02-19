@@ -774,6 +774,7 @@ function openSuperAdminConfig() {
     const ann = config.announcement || { active: false, message: "", type: "info" };
     const banned = sec.banned_clients || [];
     const whitelist = sec.client_whitelist || [];
+    const ai = config.ai || { enabled: false, apiKey: "" };
 
     const modalHtml = `
         <div id="superAdminModal" class="modal-overlay">
@@ -824,6 +825,15 @@ function openSuperAdminConfig() {
                         <label style="display:flex; align-items:center; gap:10px;" title="Show daily tips on dashboard"><input type="checkbox" id="sa_feat_tips" ${feat.daily_tips !== false ? 'checked' : ''}> Daily Tips</label>
                         <label style="display:flex; align-items:center; gap:10px;" title="Reduce visual effects for performance"><input type="checkbox" id="sa_feat_anim" ${feat.disable_animations ? 'checked' : ''}> Disable Animations</label>
                     </div>
+                </div>
+
+                <div class="card" style="margin-top:15px; border-left: 4px solid #4285f4;">
+                    <h4><i class="fas fa-robot"></i> AI System Analyst (Gemini)</h4>
+                    <label style="display:flex; align-items:center; gap:10px;"><input type="checkbox" id="sa_ai_enabled" ${ai.enabled ? 'checked' : ''}> Enable AI Co-Pilot</label>
+                    <label>Google Gemini API Key</label>
+                    <input type="password" id="sa_ai_key" value="${ai.apiKey || ''}" placeholder="AIzaSy...">
+                    <button class="btn-secondary btn-sm" onclick="AICore.openConsole()" style="margin-top:10px;"><i class="fas fa-terminal"></i> Launch AI Console</button>
+                    <button class="btn-danger btn-sm" onclick="viewSystemErrors()" style="margin-top:10px; margin-left:5px;"><i class="fas fa-bug"></i> View Error Reports</button>
                 </div>
 
                 <div class="card" style="margin-top:15px;">
@@ -898,6 +908,11 @@ async function saveSuperAdminConfig() {
     config.features = { ...config.features, vetting_arena: document.getElementById('sa_feat_vet').checked, live_assessments: document.getElementById('sa_feat_live').checked, nps_surveys: document.getElementById('sa_feat_nps').checked, daily_tips: document.getElementById('sa_feat_tips').checked, disable_animations: document.getElementById('sa_feat_anim').checked };
     
     config.announcement = { active: document.getElementById('sa_ann_active').checked, message: document.getElementById('sa_ann_msg').value, type: document.getElementById('sa_ann_type').value };
+
+    config.ai = { ...config.ai,
+        enabled: document.getElementById('sa_ai_enabled').checked,
+        apiKey: document.getElementById('sa_ai_key').value
+    };
 
     localStorage.setItem('system_config', JSON.stringify(config));
     if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
@@ -1090,4 +1105,54 @@ async function unbanClient(id) {
         
         if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Security', `Unbanned Client ID: ${id}`);
     }
+}
+
+// --- SYSTEM ERROR REPORTS ---
+function viewSystemErrors() {
+    const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    
+    // Update "Last Seen" count to stop notifications
+    localStorage.setItem('last_seen_error_count', reports.length.toString());
+
+    let html = `<div class="modal-overlay" id="errorReportModal" style="z-index:10002;">
+        <div class="modal-box" style="width:900px; max-height:90vh; display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3 style="margin:0; color:#ff5252;"><i class="fas fa-bug"></i> System Error Reports</h3>
+                <div>
+                    <button class="btn-warning btn-sm" onclick="clearSystemErrors()">Clear All</button>
+                    <button class="btn-secondary btn-sm" onclick="document.getElementById('errorReportModal').remove()">&times;</button>
+                </div>
+            </div>
+            <div class="table-responsive" style="flex:1; overflow-y:auto;">
+                <table class="admin-table">
+                    <thead><tr><th>Time</th><th>User</th><th>Error Message</th><th>Action</th></tr></thead>
+                    <tbody>`;
+    
+    if (reports.length === 0) {
+        html += `<tr><td colspan="4" class="text-center" style="color:var(--text-muted);">No errors reported.</td></tr>`;
+    } else {
+        // Show newest first
+        reports.slice().reverse().forEach(r => {
+            const time = new Date(r.timestamp).toLocaleString();
+            const safeMsg = r.error.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            
+            html += `<tr>
+                <td style="font-size:0.8rem; white-space:nowrap;">${time}</td>
+                <td><strong>${r.user}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${r.role}</span></td>
+                <td style="font-family:monospace; font-size:0.8rem; color:#ff5252;">${r.error}</td>
+                <td><button class="btn-primary btn-sm" onclick="AICore.analyzeError('${safeMsg}')" title="Ask AI to Diagnose"><i class="fas fa-robot"></i> Analyze</button></td>
+            </tr>`;
+        });
+    }
+
+    html += `</tbody></table></div></div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function clearSystemErrors() {
+    if(!confirm("Clear all error reports?")) return;
+    localStorage.setItem('error_reports', '[]');
+    if(typeof saveToServer === 'function') await saveToServer(['error_reports'], true);
+    document.getElementById('errorReportModal').remove();
+    viewSystemErrors();
 }
