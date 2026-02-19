@@ -63,6 +63,16 @@ function renderLoadingDashboard() {
     container.innerHTML += gridHtml;
 }
 
+const DEFAULT_TIPS = [
+    "Consistency is key. A little study every day adds up!",
+    "Don't forget to take breaks. Your brain needs rest to absorb info.",
+    "Review your past assessments to see where you can improve.",
+    "Ask questions! Your Team Leader is there to help.",
+    "Stay hydrated while studying.",
+    "Focus on understanding, not just memorizing.",
+    "Check the schedule daily for updates."
+];
+
 // --- DASHBOARD LAYOUT STATE ---
 let DASH_EDIT_MODE = false;
 const DEFAULT_LAYOUT_ADMIN = [
@@ -75,7 +85,8 @@ const DEFAULT_LAYOUT_ADMIN = [
     { id: 'monitor', col: 1, row: 1 },
     { id: 'leaderboard', col: 1, row: 1 },
     { id: 'sys_health', col: 2, row: 1 },
-    { id: 'active_users', col: 2, row: 1 }
+    { id: 'active_users', col: 2, row: 1 },
+    { id: 'tip_manager', col: 2, row: 1 }
 ];
 
 const DEFAULT_LAYOUT_TRAINEE = [
@@ -744,7 +755,8 @@ function buildAdminWidgets(container) {
                         </tbody>
                     </table>
                 </div>
-            </div>`)
+            </div>`),
+        'tip_manager': wrapWidget('tip_manager', buildTipManagerHtml())
     };
 
     // LOAD LAYOUT
@@ -1400,15 +1412,9 @@ function buildTraineeWidgets(container) {
         </div>`;
 
     // 6. Daily Tip
-    const tips = [
-        "Consistency is key. A little study every day adds up!",
-        "Don't forget to take breaks. Your brain needs rest to absorb info.",
-        "Review your past assessments to see where you can improve.",
-        "Ask questions! Your Team Leader is there to help.",
-        "Stay hydrated while studying.",
-        "Focus on understanding, not just memorizing.",
-        "Check the schedule daily for updates."
-    ];
+    let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    if (tips.length === 0) tips = DEFAULT_TIPS;
+
     // Pick a random tip every time the dashboard loads
     const tipOfTheDay = tips[Math.floor(Math.random() * tips.length)];
 
@@ -1473,8 +1479,7 @@ function buildTraineeWidgets(container) {
         'notepad': wrapWidget('notepad', notepadHtml),
         'daily_tip': wrapWidget('daily_tip', tipHtml),
         'help': wrapWidget('help', helpHtml),
-        'badges': wrapWidget('badges', badgesHtml),
-        'my_stats': wrapWidget('my_stats', statsHtml)
+        'badges': wrapWidget('badges', badgesHtml)
     };
 
     // LOAD LAYOUT
@@ -1510,4 +1515,72 @@ function buildTraineeWidgets(container) {
     container.innerHTML = liveBanner + gridHtml;
     
     if(DASH_EDIT_MODE) enableDashEdit();
+}
+
+// --- DAILY TIP MANAGEMENT (ADMIN) ---
+
+function buildTipManagerHtml() {
+    const tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    
+    let contentHtml = '';
+    
+    if (tips.length === 0) {
+        contentHtml = `
+            <div style="text-align:center; padding:15px; color:var(--text-muted);">
+                <p style="margin-bottom:10px;">Using System Defaults.</p>
+                <button class="btn-secondary btn-sm" onclick="enableTipEditing()">Customize Tips</button>
+            </div>`;
+    } else {
+        let listHtml = '<div style="max-height:150px; overflow-y:auto; margin-bottom:10px; border:1px solid var(--border-color); border-radius:4px;">';
+        tips.forEach((tip, idx) => {
+            listHtml += `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid var(--border-color); font-size:0.85rem; background:var(--bg-input);">
+                    <span style="flex:1; margin-right:10px;">${tip}</span>
+                    <button class="btn-danger btn-sm" onclick="deleteDailyTip(${idx})" style="padding:2px 6px;"><i class="fas fa-trash"></i></button>
+                </div>`;
+        });
+        listHtml += '</div>';
+        
+        contentHtml = `
+            ${listHtml}
+            <div style="display:flex; gap:5px;">
+                <input type="text" id="newTipInput" placeholder="Enter new tip..." style="margin:0; flex:1; font-size:0.85rem;">
+                <button class="btn-primary btn-sm" onclick="addDailyTip()">Add</button>
+            </div>`;
+    }
+
+    return `
+        <div style="width:100%;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <div class="dash-icon"><i class="fas fa-lightbulb"></i></div>
+                <h3 style="margin:0;">Daily Tips</h3>
+            </div>
+            ${contentHtml}
+        </div>`;
+}
+
+async function enableTipEditing() {
+    localStorage.setItem('dailyTips', JSON.stringify(DEFAULT_TIPS));
+    if(typeof saveToServer === 'function') await saveToServer(['dailyTips'], false);
+    renderDashboard();
+}
+
+async function addDailyTip() {
+    const input = document.getElementById('newTipInput');
+    const val = input.value.trim();
+    if(!val) return;
+    let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    tips.push(val);
+    localStorage.setItem('dailyTips', JSON.stringify(tips));
+    if(typeof saveToServer === 'function') await saveToServer(['dailyTips'], false);
+    renderDashboard();
+}
+
+async function deleteDailyTip(idx) {
+    if(!confirm("Delete this tip?")) return;
+    let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    tips.splice(idx, 1);
+    localStorage.setItem('dailyTips', JSON.stringify(tips));
+    if(typeof saveToServer === 'function') await saveToServer(['dailyTips'], false);
+    renderDashboard();
 }

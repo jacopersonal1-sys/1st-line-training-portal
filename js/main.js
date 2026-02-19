@@ -861,6 +861,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.43": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Daily Tip Management' widget for Admins to customize trainee tips.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Hardened Sync Engine. Removed conflict prompts (Server Wins), added auto-retry for saves, and improved nested object merging.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Trainee Dashboard rendering crash.</li>
+            </ul>`,
         "2.1.42": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Date Graduated' field to the Agent Search profile for archived users.</li>

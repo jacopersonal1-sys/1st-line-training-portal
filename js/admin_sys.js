@@ -310,11 +310,16 @@ async function saveRecordEdit() {
 
 async function delRec(i) { 
     if(confirm("Permanently delete?")) { 
+        // 1. Force Pull Latest (Prevent overwriting new submissions)
+        if(typeof loadFromServer === 'function') await loadFromServer(true);
+
+        // 2. Re-read and Delete
         const r = JSON.parse(localStorage.getItem('records')); 
         r.splice(i,1); 
         localStorage.setItem('records', JSON.stringify(r)); 
         
-        await secureSysSave();
+        // 3. Force Save (Now safe because we just pulled)
+        if(typeof saveToServer === 'function') await saveToServer(['records'], true);
 
         loadAdminDatabase(); 
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();

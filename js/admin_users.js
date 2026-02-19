@@ -662,8 +662,8 @@ async function remUser(username) {
         users.splice(i,1); 
         localStorage.setItem('users',JSON.stringify(users)); 
         
-        // 4. FORCE SAVE
-        if(typeof saveToServer === 'function') await saveToServer(['users', 'revokedUsers'], true);
+        // 4. SECURE SAVE (Safe Merge - relies on revokedUsers blacklist to enforce deletion)
+        await secureUserSave();
 
         loadAdminUsers(); 
         populateTraineeDropdown(); 
