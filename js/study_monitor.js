@@ -932,7 +932,7 @@ function renderActivitySummary(container) {
                     <div style="font-size:0.75rem; font-weight:bold; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase;">Top Activities</div>
                     <div id="sum_topics_${safeId}" class="topic-breakdown"></div>
                 </div>
-                <div id="sum_timeline_${safeId}" class="timeline-visual"></div>
+                <div id="sum_timeline_${safeId}" class="timeline-visual" onclick="StudyMonitor.expandTimeline('${agent.replace(/'/g, "\\'")}')" style="cursor:pointer;" title="Click to expand details"></div>
                 <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:5px;">
                     <span>Start</span>
                     <span>Current</span>
@@ -1139,6 +1139,164 @@ StudyMonitor.toggleReviewQueue = function() {
         this.forceRefresh = true; // Force initial render of queue
     }
     renderActivityMonitorContent();
+};
+
+StudyMonitor.expandTimeline = function(agentName) {
+    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const activity = data[agentName];
+    if (!activity) return alert("No data for this agent.");
+
+    let modal = document.getElementById('timelineDetailModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'timelineDetailModal';
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '9999'; // Ensure it appears above the Activity Monitor
+        modal.innerHTML = `
+            <div class="modal-box" style="width:95%; max-width:1200px; height:85vh; display:flex; flex-direction:column;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                    <h3 style="margin:0;">Activity Detail: <span id="tlDetailName" style="color:var(--primary);"></span></h3>
+                    <button class="btn-secondary" onclick="document.getElementById('timelineDetailModal').classList.add('hidden')"><i class="fas fa-times"></i> Close</button>
+                </div>
+                <div style="margin-bottom:20px;">
+                    <div id="tlDetailVisual" class="timeline-visual" style="height:40px; border-radius:4px; overflow:hidden; display:flex;"></div>
+                    <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:var(--text-muted); margin-top:5px;">
+                        <span>Start of Day</span>
+                        <span>Current Time</span>
+                    </div>
+                </div>
+                <div style="flex:1; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px;">
+                    <table class="admin-table">
+                        <thead style="position:sticky; top:0; background:var(--bg-card); z-index:1;">
+                            <tr>
+                                <th>Time</th>
+                                <th>Duration</th>
+                                <th>Activity</th>
+                                <th>Category</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tlDetailTable"></tbody>
+                    </table>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+
+    document.getElementById('tlDetailName').innerText = agentName;
+    const visualContainer = document.getElementById('tlDetailVisual');
+    const tableContainer = document.getElementById('tlDetailTable');
+    
+    visualContainer.innerHTML = '';
+    tableContainer.innerHTML = '';
+
+    // --- RECALCULATE SEGMENTS ---
+    const allSegments = [...(activity.history || [])];
+    const currentDuration = Date.now() - activity.since;
+    if (currentDuration > 1000) {
+        allSegments.push({
+            activity: activity.current,
+            start: activity.since,
+            end: Date.now(),
+            duration: currentDuration
+        });
+    }
+
+    allSegments.sort((a, b) => (a.start || 0) - (b.start || 0));
+
+    let totalMs = 0;
+    const processedSegs = [];
+    
+    allSegments.forEach(seg => {
+         const segStart = seg.start || (seg.end - seg.duration);
+         const segEnd = seg.end || (segStart + seg.duration);
+         
+         const dateStr = new Date(segStart).toISOString().split('T')[0];
+         const workStart = new Date(`${dateStr}T08:00:00`).getTime();
+         const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
+         const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
+         const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
+
+         const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
+         const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
+         const effectiveDuration = morningOverlap + afternoonOverlap;
+         
+         if (effectiveDuration <= 0) return;
+
+         totalMs += effectiveDuration;
+
+         const category = StudyMonitor.getCategory(seg.activity);
+         const TOLERANCE = 180000;
+         let typeClass = 'seg-idle';
+         let catLabel = 'Idle';
+         let style = '';
+         let rowColor = '';
+
+         if (category === 'study') {
+             typeClass = 'seg-study';
+             catLabel = 'Study';
+         } else if (category === 'external') {
+             if (effectiveDuration > TOLERANCE) {
+                 typeClass = 'seg-ext';
+                 catLabel = 'External';
+                 rowColor = 'color:#e74c3c; font-weight:bold;';
+             } else {
+                 style = `background: repeating-linear-gradient(45deg, #2ecc71, #2ecc71 5px, #f1c40f 5px, #f1c40f 10px);`;
+                 typeClass = 'seg-study'; 
+                 catLabel = 'External (Tolerated)';
+                 rowColor = 'color:#f39c12;';
+             }
+         } else {
+             if (effectiveDuration > TOLERANCE) {
+                 typeClass = 'seg-idle';
+                 catLabel = 'Idle';
+             } else {
+                 style = `background: repeating-linear-gradient(45deg, #2ecc71, #2ecc71 5px, #95a5a6 5px, #95a5a6 10px);`;
+                 typeClass = 'seg-study';
+                 catLabel = 'Idle (Thinking)';
+                 rowColor = 'color:#95a5a6;';
+             }
+         }
+         
+         processedSegs.push({
+             duration: effectiveDuration,
+             activity: seg.activity,
+             start: segStart,
+             typeClass,
+             style,
+             catLabel,
+             rowColor
+         });
+    });
+
+    let visualHtml = '';
+    let tableHtml = '';
+
+    if (totalMs > 0) {
+        processedSegs.forEach(p => {
+            const pct = (p.duration / totalMs) * 100;
+            visualHtml += `<div class="timeline-seg ${p.typeClass}" style="width:${pct}%; ${p.style}" title="${p.activity} (${Math.round(p.duration/1000)}s)"></div>`;
+            
+            const timeStr = new Date(p.start).toLocaleTimeString();
+            const mins = (p.duration / 60000).toFixed(1) + 'm';
+            
+            tableHtml += `
+                <tr style="${p.rowColor}">
+                    <td>${timeStr}</td>
+                    <td>${mins}</td>
+                    <td>${p.activity}</td>
+                    <td>${p.catLabel}</td>
+                </tr>
+            `;
+        });
+    } else {
+        visualHtml = '<div style="text-align:center; width:100%; color:var(--text-muted); padding-top:10px;">No data in working hours.</div>';
+        tableHtml = '<tr><td colspan="4" style="text-align:center;">No activity recorded during working hours (08:00 - 17:00).</td></tr>';
+    }
+
+    visualContainer.innerHTML = visualHtml;
+    tableContainer.innerHTML = tableHtml;
+    
+    modal.classList.remove('hidden');
 };
 
 // Hook for dashboard.js to trigger updates if modal is open

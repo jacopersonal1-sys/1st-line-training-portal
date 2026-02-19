@@ -821,8 +821,16 @@ async function confirmAndSaveLiveSession() {
 
     // 1. Create Full Submission Record (For "View Completed Test" & Marking Queue)
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    
+    // DEDUPLICATION: Check if this booking/session already has a submission
+    const existingSubIdx = submissions.findIndex(s => 
+        (session.bookingId && s.bookingId === session.bookingId) || 
+        (s.testId == test.id && s.trainee === session.trainee && s.date === new Date().toISOString().split('T')[0] && s.type === 'live')
+    );
+
     const newSub = {
-        id: Date.now().toString(),
+        id: (existingSubIdx > -1) ? submissions[existingSubIdx].id : Date.now().toString(),
+        bookingId: session.bookingId, // Link to booking
         testId: test.id,
         testTitle: test.title,
         // SNAPSHOT: store full test definition at time of assessment
@@ -837,7 +845,12 @@ async function confirmAndSaveLiveSession() {
         comments: session.comments, // Save comments
         scores: session.scores      // Save individual scores
     };
-    submissions.push(newSub);
+
+    if (existingSubIdx > -1) {
+        submissions[existingSubIdx] = newSub;
+    } else {
+        submissions.push(newSub);
+    }
     localStorage.setItem('submissions', JSON.stringify(submissions));
 
     // 2. Update Booking Status
@@ -865,7 +878,13 @@ async function confirmAndSaveLiveSession() {
     // Determine Phase (Vetting vs Assessment)
     const phaseVal = test.title.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
     
-    records.push({
+    // DEDUPLICATION: Check if record exists
+    const existingRecIdx = records.findIndex(r => 
+        r.trainee === session.trainee && 
+        r.assessment === test.title
+    );
+
+    const newRecord = {
         id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
         groupID: groupId,
         trainee: session.trainee,
@@ -875,8 +894,15 @@ async function confirmAndSaveLiveSession() {
         phase: phaseVal,
         cycle: 'Live',
         link: 'Live-Session',
-        docSaved: true
-    });
+        docSaved: true,
+        submissionId: newSub.id // Link to specific submission
+    };
+
+    if (existingRecIdx > -1) {
+        records[existingRecIdx] = { ...records[existingRecIdx], ...newRecord, id: records[existingRecIdx].id };
+    } else {
+        records.push(newRecord);
+    }
     localStorage.setItem('records', JSON.stringify(records));
 
     // 4. Clear Session

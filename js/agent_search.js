@@ -194,6 +194,10 @@ function renderAgentDashboard(agentName) {
     // --- ONBOARD REPORT ---
     let reportHtml = '';
     if(agentReport) {
+        // FIX: Handle both new flat structure (behaviorYes) and legacy nested structure (data.repBehavior)
+        const behavior = agentReport.behaviorYes ? 'Yes' : (agentReport.data && agentReport.data.repBehavior ? agentReport.data.repBehavior : 'No');
+        const observe = agentReport.observeYes ? 'Yes' : (agentReport.data && agentReport.data.repObserve ? agentReport.data.repObserve : 'No');
+
         reportHtml = `
             <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
@@ -207,11 +211,11 @@ function renderAgentDashboard(agentName) {
                     </div>
                     <div style="background:var(--bg-input); padding:10px; border-radius:6px;">
                         <div style="font-size:0.8rem; color:var(--text-muted);">Behavioral Issues</div>
-                        <div>${agentReport.data.repBehavior || 'No'}</div>
+                        <div>${behavior}</div>
                     </div>
                     <div style="background:var(--bg-input); padding:10px; border-radius:6px;">
                         <div style="font-size:0.8rem; color:var(--text-muted);">Observations</div>
-                        <div>${agentReport.data.repObserve || 'No'}</div>
+                        <div>${observe}</div>
                     </div>
                 </div>
             </div>

@@ -122,7 +122,8 @@ async function approveSubmission(subId) {
         groupID: targetGroup,
         docSaved: true,
         videoSaved: false,
-        link: 'Digital-Assessment'
+        link: 'Digital-Assessment',
+        submissionId: sub.id
     };
 
     if (existingIdx > -1) {
@@ -130,6 +131,7 @@ async function approveSubmission(subId) {
         recs[existingIdx].date = sub.date;
         recs[existingIdx].cycle = cycleVal;
         recs[existingIdx].docSaved = true;
+        recs[existingIdx].submissionId = sub.id;
         if(!recs[existingIdx].id) recs[existingIdx].id = newRecord.id;
     } else {
         recs.push(newRecord);
@@ -381,9 +383,25 @@ function openAdminMarking(subId) {
     }
 }
 
-function viewCompletedTest(trainee, assessment, mode = 'view') {
+function viewCompletedTest(arg1, arg2, arg3) {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const sub = subs.find(s => s.trainee === trainee && s.testTitle === assessment);
+    let sub = null;
+    let mode = 'view';
+
+    // Overload: (id, null, mode) OR (trainee, assessment, mode)
+    if (arg2 === null || arg2 === undefined || arg2 === 'view' || arg2 === 'edit') {
+        // ID Lookup (Robust)
+        sub = subs.find(s => s.id === arg1);
+        if (arg3) mode = arg3;
+        else if (arg2 === 'view' || arg2 === 'edit') mode = arg2;
+    } else {
+        // Legacy Lookup (Trainee + Title) - Fallback
+        // Find LATEST to avoid opening old duplicates
+        const matches = subs.filter(s => s.trainee === arg1 && s.testTitle === arg2);
+        matches.sort((a,b) => new Date(b.date) - new Date(a.date) || b.score - a.score);
+        sub = matches[0];
+        if (arg3) mode = arg3;
+    }
     
     if(!sub) {
         alert("Digital submission file not found.");
@@ -481,13 +499,15 @@ async function finalizeAdminMarking(subId) {
         phase: phaseVal,
         cycle: cycleVal,
         link: 'Digital-Assessment',
-        docSaved: true
+        docSaved: true,
+        submissionId: sub.id // Link to submission
     };
 
     if (existingIdx > -1) {
         records[existingIdx].score = percentage;
         records[existingIdx].cycle = cycleVal;
         records[existingIdx].docSaved = true;
+        records[existingIdx].submissionId = sub.id; // Ensure link is updated
         if(!records[existingIdx].id) records[existingIdx].id = newRecord.id;
     } else {
         records.push(newRecord);

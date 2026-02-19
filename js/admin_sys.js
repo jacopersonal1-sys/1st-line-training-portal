@@ -185,6 +185,22 @@ async function remVetting(i) {
 
 function loadAdminDatabase() { 
     const term = document.getElementById('dbSearch') ? document.getElementById('dbSearch').value.toLowerCase() : '';
+    
+    // --- INJECT CLEANUP BUTTON ---
+    const searchInput = document.getElementById('dbSearch');
+    if (searchInput && !document.getElementById('btnCleanupDupes') && CURRENT_USER.role === 'admin') {
+        const btn = document.createElement('button');
+        btn.id = 'btnCleanupDupes';
+        btn.className = 'btn-warning btn-sm';
+        btn.style.marginLeft = '10px';
+        btn.innerHTML = '<i class="fas fa-broom"></i> Cleanup Duplicates';
+        btn.onclick = cleanupDuplicateRecords;
+        if (searchInput.parentNode) {
+            searchInput.parentNode.insertBefore(btn, searchInput.nextSibling);
+        }
+    }
+    // -----------------------------
+
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const users = JSON.parse(localStorage.getItem('users') || '[]');
     
@@ -203,7 +219,9 @@ function loadAdminDatabase() {
         let viewBtn = '';
         if(d.link === 'Digital-Assessment' || d.link === 'Live-Session') {
              // viewCompletedTest is in assessment.js
-             viewBtn = `<button class="btn-secondary" style="padding:2px 6px;" onclick="viewCompletedTest('${d.trainee}', '${d.assessment}')" title="View Submission"><i class="fas fa-eye"></i></button>`;
+             // Use submissionId if available, else fallback
+             const clickAction = d.submissionId ? `viewCompletedTest('${d.submissionId}', null, 'view')` : `viewCompletedTest('${d.trainee}', '${d.assessment}')`;
+             viewBtn = `<button class="btn-secondary" style="padding:2px 6px;" onclick="${clickAction}" title="View Submission"><i class="fas fa-eye"></i></button>`;
         }
 
         let actions = viewBtn;
@@ -363,6 +381,70 @@ async function archiveOldSubmissions() {
     
     if(typeof showToast === 'function') showToast(`Archived ${move.length} submissions successfully.`, "success");
     loadAdminDatabase();
+}
+
+async function cleanupDuplicateRecords() {
+    if(!confirm("Run duplicate cleanup? This will remove duplicate records for the same Trainee + Assessment, keeping the highest score.")) return;
+
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const uniqueMap = new Map();
+    let duplicatesCount = 0;
+
+    records.forEach(r => {
+        if (!r.trainee || !r.assessment) return;
+        
+        // Create unique key based on Trainee + Assessment
+        const key = `${r.trainee.trim().toLowerCase()}|${r.assessment.trim().toLowerCase()}`;
+        
+        if (uniqueMap.has(key)) {
+            const existing = uniqueMap.get(key);
+            
+            // Logic: Keep Highest Score
+            const scoreA = parseFloat(r.score) || 0;
+            const scoreB = parseFloat(existing.score) || 0;
+            
+            let keepNew = false;
+            
+            if (scoreA > scoreB) {
+                keepNew = true;
+            } else if (scoreA === scoreB) {
+                // If scores equal, keep newest date
+                const dateA = new Date(r.date || 0).getTime();
+                const dateB = new Date(existing.date || 0).getTime();
+                if (dateA > dateB) keepNew = true;
+            }
+            
+            if (keepNew) {
+                uniqueMap.set(key, r);
+            }
+            duplicatesCount++;
+        } else {
+            uniqueMap.set(key, r);
+        }
+    });
+
+    if (duplicatesCount === 0) {
+        alert("No duplicates found.");
+        return;
+    }
+
+    const cleanRecords = Array.from(uniqueMap.values());
+    
+    localStorage.setItem('records', JSON.stringify(cleanRecords));
+    
+    // Force Sync
+    if (typeof saveToServer === 'function') {
+        const btn = document.getElementById('btnCleanupDupes');
+        if(btn) { btn.innerText = "Syncing..."; btn.disabled = true; }
+        await saveToServer(['records'], true);
+        if(btn) { btn.innerHTML = '<i class="fas fa-broom"></i> Cleanup Duplicates'; btn.disabled = false; }
+    }
+    
+    loadAdminDatabase();
+    if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+    
+    if(typeof showToast === 'function') showToast(`Cleanup complete. Removed ${duplicatesCount} duplicates.`, "success");
+    else alert(`Cleanup complete. Removed ${duplicatesCount} duplicates.`);
 }
 
 // --- SECTION 3: IMPORT / EXPORT & BACKUP (OVERRIDES) ---

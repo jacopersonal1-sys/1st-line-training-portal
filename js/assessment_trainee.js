@@ -409,7 +409,8 @@ async function submitTest(forceSubmit = false) {
             phase: phaseVal,
             cycle: cycleVal,
             link: 'Digital-Assessment',
-            docSaved: true
+            docSaved: true,
+            submissionId: submission.id // Link to submission
         };
 
         if (existingIdx > -1) {

@@ -852,6 +852,16 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.38": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Cleanup Duplicates' tool to Admin Database to remove redundant records.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where viewing assessments opened the wrong submission due to duplicate data.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Enhanced duplicate prevention in Live Assessment saving logic.</li>
+            </ul>`,
+        "2.1.37": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Agent Search crash when viewing agents with recent Onboard Reports.</li>
+            </ul>`,
         "2.1.36": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Agent Search loading error.</li>
