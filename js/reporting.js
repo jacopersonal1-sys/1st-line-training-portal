@@ -529,7 +529,23 @@ async function deleteSavedReport(id) {
 
 function viewSavedReport(id) {
     const saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
-    const report = saved.find(r => r.id === id);
+    // FIX: Use loose equality (==) to match string ID from HTML with number ID in data
+    let report = saved.find(r => r.id == id);
+
+    // NEW: Check Archives if not found in active reports
+    if (!report) {
+        const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        for (const g of graduates) {
+            if (g.reports && Array.isArray(g.reports)) {
+                const found = g.reports.find(r => r.id == id);
+                if (found) {
+                    report = found;
+                    break;
+                }
+            }
+        }
+    }
+
     if(!report) return;
     const container = document.getElementById('savedReportContent');
     container.innerHTML = report.html;

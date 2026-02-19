@@ -518,6 +518,12 @@ function showTab(id, btn) {
       if(statusView && statusView.classList.contains('active')) {
           if(typeof refreshSystemStatus === 'function') refreshSystemStatus();
       }
+      
+      // NEW: Refresh Graduated Agents if that specific view is open
+      const gradView = document.getElementById('admin-view-graduated');
+      if(gradView && gradView.classList.contains('active')) {
+          if(typeof loadGraduatedAgents === 'function') loadGraduatedAgents();
+      }
   }
   
   if(id === 'test-manage') {
@@ -554,6 +560,9 @@ function showAdminSub(viewName, btn) {
   }
   if(viewName === 'attendance' && typeof loadAttendanceDashboard === 'function') {
       loadAttendanceDashboard();
+  }
+  if(viewName === 'graduated' && typeof loadGraduatedAgents === 'function') {
+      loadGraduatedAgents();
   }
 }
 
@@ -852,6 +861,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.41": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Onboard Reports for Graduated/Archived agents could not be viewed.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Improved 'Graduate Trainee' workflow stability.</li>
+            </ul>`,
         "2.1.40": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Conflict Resolution' modal. You can now choose between Server or Local versions when a data conflict is detected during sync.</li>

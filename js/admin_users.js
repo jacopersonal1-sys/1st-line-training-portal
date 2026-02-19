@@ -764,9 +764,6 @@ function loadGraduatedAgents() {
         let group = "Unknown";
         if (g.records && g.records.length > 0) group = g.records[0].groupID || "Unknown";
         
-        // Show Reason if available (e.g. Moved vs Graduated)
-        if (g.reason) group += ` <br><span style="font-size:0.75rem; color:var(--text-muted); font-style:italic;">${g.reason}</span>`;
-        
         const safeUser = g.user.replace(/'/g, "\\'");
 
         return `
@@ -851,113 +848,99 @@ async function restoreAgent(username) {
     if(typeof showToast === 'function') showToast("Agent restored successfully.", "success");
 }
 
-// --- GRADUATED AGENTS MANAGEMENT ---
+// --- NEW: GRADUATE TRAINEE FUNCTION ---
+async function graduateTrainee(username) {
+    if(!confirm(`Graduate ${username}?\n\nThis will ARCHIVE all their data and remove their login access.\n\nThey will be moved to the 'Graduated Agents' archive.`)) return;
 
-function loadGraduatedAgents() {
-    const container = document.getElementById('graduateList');
-    if (!container) return;
-
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-    const search = document.getElementById('graduateSearch') ? document.getElementById('graduateSearch').value.toLowerCase() : '';
-
-    const filtered = graduates.filter(g => g.user.toLowerCase().includes(search));
-    
-    // Sort by graduation date desc
-    filtered.sort((a,b) => new Date(b.graduatedDate) - new Date(a.graduatedDate));
-
-    if (filtered.length === 0) {
-        container.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No archived agents found.</td></tr>';
-        return;
+    const btn = document.activeElement;
+    if(btn && btn.tagName === 'BUTTON') {
+        btn.innerText = "Graduating...";
+        btn.disabled = true;
     }
 
-    container.innerHTML = filtered.map(g => {
-        const dateStr = new Date(g.graduatedDate).toLocaleDateString();
-        // Try to find group from archived records
-        let group = "Unknown";
-        if (g.records && g.records.length > 0) group = g.records[0].groupID || "Unknown";
+    try {
+        // 1. ARCHIVE DATA (Snapshot)
+        const archiveData = {
+            user: username,
+            graduatedDate: new Date().toISOString(),
+            reason: 'Graduated',
+            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => r.trainee === username),
+            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => s.trainee === username),
+            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => r.user === username),
+            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => r.trainee === username),
+            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => r.trainee === username),
+            notes: (JSON.parse(localStorage.getItem('agentNotes') || '{}'))[username] || null
+        };
+
+        let archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        archives.push(archiveData);
+        localStorage.setItem('graduated_agents', JSON.stringify(archives));
+
+        // 2. WIPE ACTIVE DATA
+        const wipe = (key, field) => {
+            let data = JSON.parse(localStorage.getItem(key) || '[]');
+            const newData = data.filter(item => item[field] !== username);
+            if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
+        };
         
-        const safeUser = g.user.replace(/'/g, "\\'");
+        wipe('records', 'trainee');
+        wipe('submissions', 'trainee');
+        wipe('attendance_records', 'user');
+        wipe('savedReports', 'trainee');
+        wipe('insightReviews', 'trainee');
+        wipe('liveBookings', 'trainee');
+        wipe('linkRequests', 'trainee');
+        wipe('exemptions', 'trainee');
+        
+        let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+        if(notes[username]) { delete notes[username]; localStorage.setItem('agentNotes', JSON.stringify(notes)); }
 
-        return `
-            <tr>
-                <td><strong>${g.user}</strong></td>
-                <td>${dateStr}</td>
-                <td>${group}</td>
-                <td>
-                    <button class="btn-warning btn-sm" onclick="restoreAgent('${safeUser}')"><i class="fas fa-undo"></i> Restore</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
-}
+        let monitor = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        if(monitor[username]) { delete monitor[username]; localStorage.setItem('monitor_data', JSON.stringify(monitor)); }
 
-async function restoreAgent(username) {
-    if(!confirm(`Restore ${username} to active duty?\n\nThis will move their data back to the active database and re-enable login access.`)) return;
-
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-    const idx = graduates.findIndex(g => g.user === username);
-    
-    if (idx === -1) return alert("Agent not found in archive.");
-    
-    const agentData = graduates[idx];
-    
-    // 1. Restore Data
-    const restore = (key, data) => {
-        if (!data || data.length === 0) return;
-        const current = JSON.parse(localStorage.getItem(key) || '[]');
-        // Merge avoiding duplicates (simple ID check if available, else push)
-        data.forEach(item => {
-            if (item.id) {
-                if (!current.some(c => c.id === item.id)) current.push(item);
-            } else {
-                current.push(item);
-            }
-        });
-        localStorage.setItem(key, JSON.stringify(current));
-    };
-
-    restore('records', agentData.records);
-    restore('submissions', agentData.submissions);
-    restore('attendance_records', agentData.attendance);
-    restore('savedReports', agentData.reports);
-    restore('insightReviews', agentData.reviews);
-    
-    if (agentData.notes) {
-        const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
-        notes[username] = agentData.notes;
-        localStorage.setItem('agentNotes', JSON.stringify(notes));
-    }
-
-    // 2. Restore User Account (Re-create)
-    let users = JSON.parse(localStorage.getItem('users') || '[]');
-    if (!users.some(u => u.user === username)) {
-        // Generate temp pin
-        const pin = Math.floor(1000 + Math.random() * 9000).toString();
-        users.push({ user: username, pass: pin, role: 'trainee' });
+        // 3. REMOVE USER & ROSTER
+        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        users = users.filter(u => u.user !== username);
         localStorage.setItem('users', JSON.stringify(users));
-        alert(`User restored. Temporary PIN: ${pin}`);
+
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        for (const gid in rosters) {
+            const idx = rosters[gid].indexOf(username);
+            if (idx > -1) rosters[gid].splice(idx, 1);
+        }
+        localStorage.setItem('rosters', JSON.stringify(rosters));
+
+        // 4. BLACKLIST (Prevent regeneration)
+        let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        if(!revoked.includes(username)) {
+            revoked.push(username);
+            localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+        }
+
+        // 5. SYNC
+        if(typeof saveToServer === 'function') {
+            await saveToServer([
+                'rosters', 'graduated_agents', 'records', 'submissions', 
+                'attendance_records', 'savedReports', 'insightReviews', 
+                'agentNotes', 'users', 'revokedUsers', 'liveBookings', 
+                'linkRequests', 'exemptions', 'monitor_data'
+            ], true);
+        }
+
+        alert(`${username} has been graduated and archived.`);
+        
+        // Refresh UI if on Insight page
+        if(typeof renderInsightDashboard === 'function') renderInsightDashboard();
+
+    } catch(e) {
+        console.error("Graduation Error:", e);
+        alert("Error graduating user: " + e.message);
+    } finally {
+        if(btn && btn.tagName === 'BUTTON') {
+            btn.innerText = "Graduate Trainee"; 
+            btn.disabled = false;
+        }
     }
-
-    // 3. Remove from Blacklist
-    let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-    revoked = revoked.filter(u => u !== username);
-    localStorage.setItem('revokedUsers', JSON.stringify(revoked));
-
-    // 4. Remove from Archive
-    graduates.splice(idx, 1);
-    localStorage.setItem('graduated_agents', JSON.stringify(graduates));
-
-    // 5. Sync
-    if(typeof saveToServer === 'function') {
-        await saveToServer([
-            'records', 'submissions', 'attendance_records', 'savedReports', 
-            'insightReviews', 'agentNotes', 'users', 'revokedUsers', 'graduated_agents'
-        ], true);
-    }
-
-    loadGraduatedAgents();
-    if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
-    if(typeof showToast === 'function') showToast("Agent restored successfully.", "success");
 }
 
 // --- EMAIL AUTOMATION ---

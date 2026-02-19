@@ -142,6 +142,7 @@ The app uses a **"Smart Split Sync"** with Conflict Resolution:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.1.41**: **Archived Reports Fix**: Resolved issue where 'View Full Report' failed for graduated agents. Added archive lookup logic to the report viewer.
 - **v2.1.40**: **Conflict Resolution System**: Added interactive modal for resolving data conflicts (Server vs Local) on critical keys.
 - **v2.1.39**: **Sync Engine Overhaul**: Implemented 'Server-Wins' vs 'Local-Wins' merge strategies to fix data reversion bugs. Added **Auto-Recovery**, **Latency Testing**, and **Visual Sync Indicators** (Unsaved/Offline).
 - **v2.1.38**: Added **Duplicate Cleanup Tool** in Admin Database. Fixed Assessment Viewer linking issues (ID-based lookup).
