@@ -92,10 +92,16 @@ function renderAgentDashboard(agentName) {
     
     // Find Group
     let group = "Unknown Group";
+    let gradDateHtml = "";
+
     if (isArchived) {
         // Try to recover group from records, otherwise generic
         if (agentRecords.length > 0) group = agentRecords[0].groupID || "Graduated";
         else group = "Graduated / Archived";
+        
+        if (archivedData.graduatedDate) {
+            gradDateHtml = `<div style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;"><i class="fas fa-calendar-check"></i> Graduated: ${new Date(archivedData.graduatedDate).toLocaleDateString()}</div>`;
+        }
     } else {
         for (const [gid, members] of Object.entries(rosters)) {
             if (members.some(m => m.toLowerCase() === agentName.toLowerCase())) {
@@ -126,9 +132,9 @@ function renderAgentDashboard(agentName) {
         <div class="card" style="border-left: 5px solid var(--primary);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                    <h2 style="margin:0; border:none;">${agentName}</h2>
                     <h2 style="margin:0; border:none;">${agentName} ${headerBadge}</h2>
                     <div style="color:var(--text-muted); margin-top:5px;">${group}</div>
+                    ${gradDateHtml}
                 </div>
                 <div style="text-align:right;">
                     <div style="font-size:2rem; font-weight:bold; color:${progress===100 ? '#2ecc71' : 'var(--primary)'};">${progress}%</div>

@@ -861,6 +861,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.42": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Date Graduated' field to the Agent Search profile for archived users.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Onboard Report auto-fill to correctly match assessment scores even if casing differs (Fuzzy Match).</li>
+            </ul>`,
         "2.1.41": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Onboard Reports for Graduated/Archived agents could not be viewed.</li>

@@ -331,7 +331,12 @@ function generateReport() {
               return false;
           });
 
-          const sub = mySubs.find(s => s.testTitle === a.name);
+          // UPDATED: Fuzzy match for submissions to ensure scores populate even if casing differs
+          const sub = mySubs.find(s => {
+              if (s.testTitle === a.name) return true;
+              return (s.testTitle && s.testTitle.trim().toLowerCase() === a.name.trim().toLowerCase());
+          });
+
           const score = Math.max(rec ? rec.score : -1, sub ? sub.score : -1);
 
           let g1='', g2='', g3='', s1='', s2='', s3='';
