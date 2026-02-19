@@ -59,6 +59,16 @@ function isUserTyping() {
     return (tag === 'input' || tag === 'textarea' || tag === 'select');
 }
 
+// --- NETWORK STATE LISTENERS (Auto-Recovery) ---
+window.addEventListener('online', () => {
+    console.log("Network Online. Resuming sync...");
+    updateSyncUI('syncing');
+    setTimeout(() => loadFromServer(true), 1500); // Delay to allow connection to stabilize
+});
+window.addEventListener('offline', () => {
+    updateSyncUI('error');
+});
+
 // 2. Load Data (UPDATED: SMART SPLIT SYNC)
 // Only downloads keys that have changed on the server.
 async function loadFromServer(silent = false) {
@@ -101,22 +111,19 @@ async function loadFromServer(silent = false) {
             if (fetchErr) throw fetchErr;
 
             docs.forEach(doc => {
-                // SMART PULL: Merge specific keys instead of overwriting
-                // This prevents the "Fresh List" issue where background sync wipes local pending data
-                const mergeKeys = ['monitor_data', 'monitor_history', 'monitor_whitelist', 'monitor_reviewed'];
+                // SMART PULL: Always try to merge JSON data to prevent overwriting local unsaved drafts
+                // We use 'server_wins' strategy here: If an item exists in both, Server version is the truth.
+                const localVal = JSON.parse(localStorage.getItem(doc.key));
                 
-                if (mergeKeys.includes(doc.key)) {
-                    const localVal = JSON.parse(localStorage.getItem(doc.key));
-                    if (localVal) {
-                        const serverObj = { [doc.key]: doc.content };
-                        const localObj = { [doc.key]: localVal };
-                        // Merge Server into Local (Preserving Local edits)
-                        const merged = performSmartMerge(serverObj, localObj);
-                        localStorage.setItem(doc.key, JSON.stringify(merged[doc.key]));
-                    } else {
-                        localStorage.setItem(doc.key, JSON.stringify(doc.content));
-                    }
+                if (localVal && (Array.isArray(localVal) || typeof localVal === 'object')) {
+                    const serverObj = { [doc.key]: doc.content };
+                    const localObj = { [doc.key]: localVal };
+                    
+                    // STRATEGY: 'server_wins' ensures we accept updates from others
+                    const merged = performSmartMerge(serverObj, localObj, 'server_wins');
+                    localStorage.setItem(doc.key, JSON.stringify(merged[doc.key]));
                 } else {
+                    // Fallback for primitives or empty local data
                     localStorage.setItem(doc.key, JSON.stringify(doc.content));
                 }
                 localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
@@ -171,6 +178,52 @@ async function migrateToSplitSchema() {
     console.log("Migration Complete.");
 }
 
+// Helper to manually trigger "Unsaved" state (e.g. during debounce)
+function notifyUnsavedChanges() {
+    updateSyncUI('pending');
+}
+
+// Helper to retry sync manually from the UI
+window.retrySync = async function() {
+    const el = document.getElementById('sync-indicator');
+    
+    // 1. Visual Feedback
+    if(el) {
+        el.style.opacity = '1';
+        el.innerHTML = '<i class="fas fa-satellite-dish fa-pulse"></i> Testing...';
+    }
+
+    // 2. Latency Test
+    const start = Date.now();
+    let success = false;
+    
+    try {
+        if (window.supabaseClient) {
+            // Ping DB (Lightweight query)
+            await window.supabaseClient.from('app_documents').select('key').limit(1);
+            success = true;
+        }
+    } catch(e) { console.error("Ping failed", e); }
+    
+    const latency = Date.now() - start;
+
+    // 3. Display & Proceed
+    if (success) {
+        let color = '#2ecc71';
+        if (latency > 500) color = '#f1c40f';
+        if (latency > 1500) color = '#ff5252';
+        
+        if(el) el.innerHTML = `<i class="fas fa-wifi" style="color:${color}"></i> ${latency}ms`;
+        await new Promise(r => setTimeout(r, 1000)); // Pause to show result
+        
+        console.log(`Retry Latency: ${latency}ms`);
+        await saveToServer(null, false);
+    } else {
+        if(el) el.innerHTML = '<i class="fas fa-times" style="color:#ff5252"></i> Offline';
+        setTimeout(() => updateSyncUI('error'), 2000);
+    }
+};
+
 // --- SYNC STATUS UI ---
 function updateSyncUI(status) {
     const el = document.getElementById('sync-indicator');
@@ -194,7 +247,13 @@ function updateSyncUI(status) {
             }
         }, 2000);
     } else if (status === 'error') {
-        el.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#ff5252;"></i> Sync Failed';
+        // Smart Error Message
+        const isOffline = !navigator.onLine;
+        const msg = isOffline ? 'Offline' : 'Sync Failed';
+        const icon = isOffline ? 'fa-wifi' : 'fa-exclamation-circle';
+        el.innerHTML = `<i class="fas ${icon}" style="color:#ff5252;"></i> ${msg} <button onclick="retrySync()" style="background:transparent; border:1px solid #ff5252; color:#ff5252; border-radius:4px; cursor:pointer; font-size:0.7rem; padding:1px 5px; margin-left:5px;">Retry</button>`;
+    } else if (status === 'pending') {
+        el.innerHTML = '<i class="fas fa-pen" style="color:#f1c40f;"></i> Unsaved...';
     }
 }
 
@@ -237,25 +296,33 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
                     // We wrap in objects to reuse existing merge logic
                     const serverObj = { [key]: remoteRow.content };
                     const localObj = { [key]: localContent };
-                    const mergedObj = performSmartMerge(serverObj, localObj);
+                    const mergedObj = performSmartMerge(serverObj, localObj, 'local_wins');
                     finalContent = mergedObj[key];
                 }
             }
 
             // C. Push to Supabase
-            const { error: saveErr } = await supabaseClient
+            // UPDATED: Use .select() to get the REAL server timestamp
+            const { data: savedData, error: saveErr } = await supabaseClient
                 .from('app_documents')
                 .upsert({ 
                     key: key, 
                     content: finalContent,
                     updated_at: new Date().toISOString()
-                });
+                })
+                .select();
 
             if (saveErr) throw saveErr;
             
             // Update Local Cache Timestamp
             localStorage.setItem(key, JSON.stringify(finalContent));
-            localStorage.setItem('sync_ts_' + key, new Date().toISOString());
+            
+            // ACCURACY FIX: Use Server Time, not Client Time
+            if(savedData && savedData[0]) {
+                localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
+            } else {
+                localStorage.setItem('sync_ts_' + key, new Date().toISOString());
+            }
         }
 
         console.log(`Synced keys: ${keysToSave.join(', ')}`);
@@ -279,7 +346,8 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
 
 // --- HELPER: MERGE LOGIC (Crucial for Data Integrity) ---
 // UPDATED: Improved deduplication logic to prevent "10 copies" bug
-function performSmartMerge(server, local) {
+// ADDED: 'strategy' param. 'local_wins' (Pushing) or 'server_wins' (Pulling)
+function performSmartMerge(server, local, strategy = 'local_wins') {
     const merged = { ...server }; 
     
     // Safety check for revoked users (Blacklist)
@@ -321,8 +389,8 @@ function performSmartMerge(server, local) {
                     // Fallback for legacy records that might not have IDs yet
                     if (key === 'records' && localItem.trainee && serverItem.trainee) {
                         return (
-                            localItem.trainee === serverItem.trainee &&
-                            localItem.assessment === serverItem.assessment &&
+                            localItem.trainee.toLowerCase() === serverItem.trainee.toLowerCase() &&
+                            (localItem.assessment||'').toLowerCase() === (serverItem.assessment||'').toLowerCase() &&
                             localItem.groupID === serverItem.groupID &&
                             localItem.phase === serverItem.phase
                         );
@@ -340,7 +408,11 @@ function performSmartMerge(server, local) {
                 if (!exists) {
                     combined.push(localItem); // Keep local item if missing on server
                 } else {
-                    // Update: Prefer local version (it might be an edit/status change)
+                    // CONFLICT RESOLUTION:
+                    // If strategy is 'server_wins' (Pulling), we do NOTHING here.
+                    // We keep the item currently in 'combined' (which is the Server version).
+                    
+                    if (strategy === 'local_wins') {
                     const index = combined.findIndex(i => {
                         if (localItem.id && i.id) return localItem.id.toString() === i.id.toString();
                         if (key === 'users' && localItem.user && i.user) return localItem.user.toLowerCase() === i.user.toLowerCase();
@@ -357,7 +429,8 @@ function performSmartMerge(server, local) {
                         if (key === 'liveSessions' && localItem.sessionId && i.sessionId) return localItem.sessionId === i.sessionId;
                         return JSON.stringify(i) === JSON.stringify(localItem);
                     });
-                    if(index > -1) combined[index] = localItem;
+                        if(index > -1) combined[index] = localItem;
+                    }
                 }
             });
 
@@ -945,6 +1018,7 @@ if (typeof module !== 'undefined' && module.exports) {
         DB_SCHEMA,
         loadFromServer,
         saveToServer,
-        performSmartMerge
+        performSmartMerge,
+        notifyUnsavedChanges
     };
 }

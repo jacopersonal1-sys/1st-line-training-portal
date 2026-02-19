@@ -585,6 +585,9 @@ function handleRealtimeInput(qIdx) {
             session.answers[qIdx] = ans;
             localStorage.setItem('liveSession', JSON.stringify(session));
             
+            // Notify UI of unsaved changes pending upload
+            if (typeof notifyUnsavedChanges === 'function') notifyUnsavedChanges();
+
             // Debounced Cloud Sync (1 second delay to prevent flooding)
             if (REALTIME_SAVE_TIMEOUT) clearTimeout(REALTIME_SAVE_TIMEOUT);
             REALTIME_SAVE_TIMEOUT = setTimeout(() => {

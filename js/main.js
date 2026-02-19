@@ -852,6 +852,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.39": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Major Sync Engine upgrade. Fixed data reversion issues by implementing 'Server-Wins' (Pull) vs 'Local-Wins' (Push) merge strategies.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added visual 'Unsaved Changes' indicator and 'Offline' detection with Auto-Recovery.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Retry' button with Connection Speed Test for failed syncs.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Improved timestamp accuracy using Server Time to prevent sync loops.</li>
+            </ul>`,
         "2.1.38": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Cleanup Duplicates' tool to Admin Database to remove redundant records.</li>
