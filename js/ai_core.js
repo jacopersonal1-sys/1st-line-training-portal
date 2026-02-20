@@ -6,6 +6,15 @@ const AICore = {
     isOpen: false,
     isAnalyzing: false,
     lastErrorTime: 0,
+    analysisInterval: null,
+
+    init: function() {
+        // Start background analysis loop (every 10 minutes)
+        if (this.analysisInterval) clearInterval(this.analysisInterval);
+        this.analysisInterval = setInterval(() => {
+            this.analyzeForImprovements();
+        }, 600000); 
+    },
     
     // --- TOOL REGISTRY (Safe Functions) ---
     tools: {
@@ -175,6 +184,12 @@ const AICore = {
                 return `Password for '${username}' reset to: ${newPin}`;
             }
         },
+        "generate_improvements": {
+            description: "Force run the background improvement analyzer.",
+            execute: async () => {
+                return await AICore.analyzeForImprovements(true);
+            }
+        },
         "clear_old_logs": {
             description: "Delete audit logs older than 30 days to free up space.",
             execute: async () => {
@@ -191,6 +206,30 @@ const AICore = {
                     return `Cleanup complete. Removed ${removed} old log entries.`;
                 }
                 return "No logs older than 30 days found.";
+        },
+        "export_logs": {
+            description: "Download all system logs (Errors, Feedback, Audit, Monitor) as a JSON file.",
+            execute: () => {
+                const exportData = {
+                    date: new Date().toISOString(),
+                    error_reports: JSON.parse(localStorage.getItem('error_reports') || '[]'),
+                    nps_responses: JSON.parse(localStorage.getItem('nps_responses') || '[]'),
+                    auditLogs: JSON.parse(localStorage.getItem('auditLogs') || '[]'),
+                    monitor_data: JSON.parse(localStorage.getItem('monitor_data') || '{}'),
+                    system_config: JSON.parse(localStorage.getItem('system_config') || '{}')
+                };
+                
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `System_Logs_${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                return "Logs exported successfully.";
+            }
             }
         }
     },
@@ -228,18 +267,30 @@ const AICore = {
             { label: "🔄 Force Sync", cmd: "Run force_sync" },
             { label: "🚧 Toggle Maint.", cmd: "Run toggle_maintenance" },
             { label: "📅 Daily Briefing", cmd: "Run summarize_today" },
-            { label: "🛡️ Security Audit", cmd: "Run check_security_posture" }
+            { label: "🛡️ Security Audit", cmd: "Run check_security_posture" },
+            { label: "💡 Suggest Improvements", cmd: "Run generate_improvements" },
+            { label: "📂 Export Logs", cmd: "Run export_logs" }
         ];
 
         div.innerHTML = `
-            <div class="modal-box" style="width: 800px; max-width: 95%; height: 80vh; display: flex; flex-direction: column; background: #1e1e1e; color: #e0e0e0; border: 1px solid #333; box-shadow: 0 0 50px rgba(0,0,0,0.5);">
+            <div class="modal-box" style="width: 900px; max-width: 95%; height: 85vh; display: flex; flex-direction: column; background: #1e1e1e; color: #e0e0e0; border: 1px solid #333; box-shadow: 0 0 50px rgba(0,0,0,0.5);">
                 <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:15px; border-bottom:1px solid #333;">
                     <h3 style="margin:0; color: #4285f4; display:flex; align-items:center; gap:10px;"><i class="fas fa-robot"></i> Gemini System Analyst</h3>
                     <button class="btn-secondary btn-sm" onclick="document.getElementById('aiConsoleModal').classList.add('hidden')">&times;</button>
                 </div>
                 
-                <div id="aiChatHistory" style="flex:1; overflow-y:auto; padding:15px; font-family: monospace; font-size: 0.9rem; background: #121212;">
-                    <div style="color: #888;">System: AI Core Initialized. Connected to Tool Registry.</div>
+                <div style="display:flex; flex:1; overflow:hidden;">
+                    <div id="aiChatHistory" style="flex:2; overflow-y:auto; padding:15px; font-family: monospace; font-size: 0.9rem; background: #121212; border-right:1px solid #333;">
+                        <div style="color: #888;">System: AI Core Initialized. Connected to Tool Registry.</div>
+                    </div>
+                    <div style="flex:1; background:#252526; display:flex; flex-direction:column; border-left:1px solid #000;">
+                        <div style="padding:10px; background:#333; font-weight:bold; font-size:0.8rem; text-transform:uppercase; letter-spacing:1px;">
+                            <i class="fas fa-lightbulb" style="color:#f1c40f;"></i> AI Suggestions
+                        </div>
+                        <div id="aiSuggestionsList" style="flex:1; overflow-y:auto; padding:10px;">
+                            <div style="color:#888; font-style:italic; font-size:0.8rem; text-align:center; margin-top:20px;">Analyzing system usage...</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div style="padding-top:15px; border-top:1px solid #333;">
@@ -257,6 +308,7 @@ const AICore = {
             </div>
         `;
         document.body.appendChild(div);
+        this.renderSuggestions();
     },
 
     setInput: function(text) {
@@ -439,6 +491,75 @@ const AICore = {
         this.isAnalyzing = false;
 
         this.showErrorPopup(explanation);
+    },
+
+    // --- BACKGROUND IMPROVEMENT ANALYZER ---
+    analyzeForImprovements: async function(force = false) {
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        if (!config.ai || !config.ai.enabled || !config.ai.apiKey) return "AI Disabled.";
+
+        // Gather Context
+        const logs = window.CONSOLE_HISTORY || [];
+        const audit = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        const recentErrors = logs.filter(l => l.type === 'error').slice(-10);
+        const recentAudit = audit.slice(-10);
+
+        // Skip if no data to analyze (unless forced)
+        if (!force && recentErrors.length === 0 && recentAudit.length === 0) return;
+
+        const context = `
+            Analyze the following system logs and suggest 1 concrete improvement for the application.
+            Focus on Stability, Performance, or User Experience.
+            
+            Recent Errors: ${JSON.stringify(recentErrors)}
+            Recent Actions: ${JSON.stringify(recentAudit)}
+            
+            Output format: "Title|Description" (Single line)
+        `;
+
+        // DEBUG: Log the context so Admin can verify what the AI sees
+        console.log("🔍 AI Analysis Context:", context);
+
+        try {
+            const response = await this.processRequest(context);
+            if (response && response.includes('|')) {
+                const [title, desc] = response.split('|');
+                const suggestion = {
+                    id: Date.now(),
+                    date: new Date().toISOString(),
+                    title: title.trim(),
+                    desc: desc.trim()
+                };
+
+                const list = JSON.parse(localStorage.getItem('ai_suggestions') || '[]');
+                // Add to top, keep max 20
+                list.unshift(suggestion);
+                if (list.length > 20) list.pop();
+                
+                localStorage.setItem('ai_suggestions', JSON.stringify(list));
+                if(typeof saveToServer === 'function') saveToServer(['ai_suggestions'], false);
+                
+                this.renderSuggestions();
+                return `Suggestion Added: ${title}`;
+            }
+            return "Analysis complete (No new suggestions).";
+        } catch (e) { return "Analysis failed."; }
+    },
+
+    renderSuggestions: function() {
+        const container = document.getElementById('aiSuggestionsList');
+        if (!container) return;
+        
+        const list = JSON.parse(localStorage.getItem('ai_suggestions') || '[]');
+        if (list.length === 0) return;
+
+        container.innerHTML = list.map(s => `
+            <div style="background:#333; padding:10px; border-radius:4px; margin-bottom:10px; border-left:3px solid #f1c40f;">
+                <div style="font-weight:bold; font-size:0.85rem; color:#fff; margin-bottom:4px;">${s.title}</div>
+                <div style="font-size:0.8rem; color:#ccc; line-height:1.4;">${s.desc}</div>
+                <div style="font-size:0.7rem; color:#666; margin-top:5px;">${new Date(s.date).toLocaleDateString()}</div>
+            </div>
+        `).join('');
     },
 
     showErrorPopup: function(msg) {

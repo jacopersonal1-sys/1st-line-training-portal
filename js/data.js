@@ -35,8 +35,9 @@ const DB_SCHEMA = {
         monitoring: { tolerance_ms: 180000, whitelist_strict: false },
         announcement: { active: false, message: "", type: "info" },
         broadcast: { id: 0, message: "" },
-        ai: { enabled: false, provider: "gemini", apiKey: "", model: "gemini-pro", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" }
+        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-pro", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" }
     },
+    ai_suggestions: [], // Stores background improvement suggestions
     revokedUsers: [], // Added to ensure blacklist syncs
     auditLogs: [], // Critical Action History
     accessLogs: [], // Login/Logout/Timeout History
