@@ -517,9 +517,6 @@ const AICore = {
             Output format: "Title|Description" (Single line)
         `;
 
-        // DEBUG: Log the context so Admin can verify what the AI sees
-        console.log("🔍 AI Analysis Context:", context);
-
         try {
             const response = await this.processRequest(context);
             if (response && response.includes('|')) {

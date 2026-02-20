@@ -324,14 +324,11 @@ function loadRostersToSelect(elementId = 'selectedGroup') {
 
 function populateTraineeDropdown() { 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-    const gradNames = new Set(graduates.map(g => g.user.toLowerCase()));
     const list = document.getElementById('traineeOptions'); 
     
     if(list) {
         list.innerHTML = ''; 
-        users.filter(u => u.role === 'trainee')
-             .filter(u => !gradNames.has(u.user.toLowerCase()))
+        users.filter(u => u.user && u.role && u.role.trim().toLowerCase() === 'trainee')
              .sort((a,b) => a.user.localeCompare(b.user))
              .forEach(u => { 
                 let opt = document.createElement('option'); 
@@ -348,8 +345,6 @@ async function scanAndGenerateUsers(silent = false) {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
     const records = JSON.parse(localStorage.getItem('records') || '[]'); 
     const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-    const gradNames = new Set(graduates.map(g => g.user.toLowerCase()));
 
     let allNames = new Set(); 
     
@@ -367,9 +362,6 @@ async function scanAndGenerateUsers(silent = false) {
     let resurrectedCount = 0;
     
     allNames.forEach(name => { 
-        // Skip if user is graduated (Archived)
-        if (gradNames.has(name.toLowerCase())) return;
-
         // Case-insensitive check
         const exists = users.find(u => u.user.toLowerCase() === name.toLowerCase());
         const revokedIdx = revoked.findIndex(r => r.toLowerCase() === name.toLowerCase());

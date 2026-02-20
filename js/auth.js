@@ -167,7 +167,8 @@ async function attemptLogin() {
     if(!accessGranted) return; // Overlay will show, stop login
     // -------------------------------
 
-    if(LOGIN_MODE === 'admin' && (validUser.role === 'trainee' && validUser.role !== 'super_admin')) {
+    const userRole = validUser.role ? validUser.role.toLowerCase().trim() : '';
+    if(LOGIN_MODE === 'admin' && (userRole === 'trainee' && userRole !== 'super_admin')) {
       document.getElementById('loginError').innerText = "Trainees must use Trainee tab."; return;
     }
     
@@ -183,6 +184,9 @@ async function attemptLogin() {
 
     // Success
     CURRENT_USER = validUser;
+    // Normalize role for session consistency
+    if (CURRENT_USER.role) CURRENT_USER.role = CURRENT_USER.role.toLowerCase().trim();
+    
     sessionStorage.setItem('currentUser', JSON.stringify(validUser));
     
     // --- REMEMBER ME LOGIC ---

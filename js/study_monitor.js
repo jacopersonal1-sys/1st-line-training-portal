@@ -332,7 +332,7 @@ const StudyMonitor = {
         // Create Webview
         const webview = document.createElement('webview');
         webview.src = this.cleanUrl(url);
-        webview.partition = 'persist:study'; // ENABLE PERSISTENCE (Microsoft Login)
+        // webview.partition = 'persist:study'; // REMOVED: Use default session for better OS/SSO integration
         webview.style.width = '100%';
         webview.style.height = '100%';
         webview.setAttribute('allowpopups', 'true');
@@ -409,8 +409,8 @@ const StudyMonitor = {
             // 1. SharePoint: Remove ?web=1 to force raw view (Extract PDF)
             if (url.includes('sharepoint.com') || url.includes('onedrive.com')) {
                 const u = new URL(url);
-                // Only strip web=1 if it is a PDF. For Pages/Lists, we need web=1 or default behavior.
-                if (url.toLowerCase().includes('.pdf') && u.searchParams.get('web') === '1') {
+                // STRICTER CHECK: Only strip web=1 if it ends in .pdf. Do not touch .aspx or other pages.
+                if (u.pathname.toLowerCase().endsWith('.pdf') && u.searchParams.get('web') === '1') {
                      u.searchParams.delete('web');
                      url = u.toString();
                 }

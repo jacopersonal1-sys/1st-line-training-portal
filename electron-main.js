@@ -6,6 +6,10 @@ const { exec } = require('child_process');
 // Enable logging for the auto-updater (helps debug "nothing happening")
 autoUpdater.logger = console;
 
+// SECURITY & SSO: Enable Windows Integrated Auth (NTLM/Kerberos) for SharePoint/Microsoft
+app.commandLine.appendSwitch('enable-ntlm-v2');
+app.commandLine.appendSwitch('auth-server-whitelist', '*'); // Allow all domains to negotiate auth
+
 // DATA ISOLATION: Separate Dev vs Prod
 // This ensures your "Test Version" doesn't use the same LocalStorage/Cache as your "Installed Version".
 if (!app.isPackaged) {
