@@ -216,11 +216,22 @@ function populateAttendanceGroupSelect() {
     const sel = document.getElementById('attAdminGroupSelect');
     if(!sel) return;
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
     sel.innerHTML = '';
     Object.keys(rosters).sort().reverse().forEach(gid => {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
         sel.add(new Option(label, gid));
     });
+    
+    // Add Active Schedules Filter
+    const activeGroups = new Set();
+    Object.values(schedules).forEach(s => {
+        if(s.assigned) activeGroups.add(s.assigned);
+    });
+    if(activeGroups.size > 0) {
+        const opt = new Option("--- Active Schedules ---", "active_schedules");
+        sel.add(opt, 0); // Add to top
+    }
 }
 
 function renderAttendanceRegister() {
@@ -230,18 +241,33 @@ function renderAttendanceRegister() {
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const members = rosters[gid] || [];
+    let members = [];
+
+    if (gid === 'active_schedules') {
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        Object.values(schedules).forEach(s => {
+            if(s.assigned && rosters[s.assigned]) {
+                members = [...members, ...rosters[s.assigned]];
+            }
+        });
+        // Deduplicate
+        members = [...new Set(members)];
+    } else {
+        members = rosters[gid] || [];
+    }
+    
+    members.sort();
 
     let html = `<div class="card"><table class="admin-table"><thead><tr><th>Agent</th><th>Total Days</th><th>Lates</th><th>Unconfirmed Lates</th><th>Action</th></tr></thead><tbody>`;
 
     members.forEach(m => {
         const myRecs = records.filter(r => r.user === m);
         const total = myRecs.length;
-        const lates = myRecs.filter(r => r.isLate).length;
+        const lates = myRecs.filter(r => r.isLate && !r.isIgnored).length;
         // Unconfirmed: Late AND (lateConfirmed is undefined or false)
-        const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed);
+        const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored);
         
-        const safeUser = m.replace(/'/g, "\\'");
+        const safeUser = m.replace(/'/g, "\\\\'");
         
         const unconfDisplay = unconfirmed.length > 0 
             ? `<span class="badge-count" style="position:static; background:#ff5252; font-size:0.85rem; padding:2px 8px; border-radius:12px;">${unconfirmed.length}</span>` 
@@ -360,10 +386,11 @@ function manageAgentAttendance(username) {
         myRecs.forEach(r => {
             let status = '';
             if (r.isAbsent) status = '<span style="color:#e74c3c; font-weight:bold;">Absent</span>';
+            else if (r.isIgnored) status = '<span style="color:var(--text-muted);">Ignored</span>';
             else if (r.isLate) status = '<span style="color:#ff5252;">Late</span>';
             else status = '<span style="color:#2ecc71;">On Time</span>';
 
-            const safeUser = username.replace(/'/g, "\\'");
+            const safeUser = username.replace(/'/g, "\\\\'");
             const commentHtml = r.adminComment ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px; font-style:italic;">Admin: ${r.adminComment}</div>` : '';
             html += `
                 <tr>
@@ -372,6 +399,7 @@ function manageAgentAttendance(username) {
                     <td>${r.clockOut || '-'}</td>
                     <td>${status}${commentHtml}</td>
                     <td>
+                        <button class="btn-secondary btn-sm" onclick="editAttendanceRecord('${r.id}', '${safeUser}')" title="Edit Record"><i class="fas fa-pen"></i></button>
                         ${!r.isAbsent ? `<button class="btn-danger btn-sm" onclick="deleteAttendanceRecord('${r.id}', '${safeUser}')" title="Delete Record"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
@@ -381,6 +409,107 @@ function manageAgentAttendance(username) {
     
     html += `</tbody></table></div></div>`;
     container.innerHTML = html;
+}
+
+function editAttendanceRecord(id, username) {
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    let rec = records.find(r => r.id === id);
+
+    // Handle Generated Absent Record (Create temporary object for editing)
+    if (!rec && id.startsWith('absent_')) {
+        const dateStr = id.replace('absent_', '');
+        rec = {
+            id: id,
+            date: dateStr,
+            clockIn: '',
+            clockOut: '',
+            isAbsent: true,
+            user: username
+        };
+    }
+
+    if(!rec) return;
+
+    // Helper to convert time string (e.g. "8:00:00 AM") to input format "HH:mm"
+    const toInputTime = (str) => {
+        if(!str) return '';
+        if(str.match(/^\d{2}:\d{2}$/)) return str; // Already HH:mm
+        try {
+            const d = new Date('1970-01-01 ' + str);
+            if(isNaN(d.getTime())) return '';
+            return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+        } catch(e) { return ''; }
+    };
+
+    const safeUser = username.replace(/'/g, "\\\\'");
+
+    const modal = document.createElement('div');
+    modal.id = 'attendanceEditModal'; // Unique ID to prevent closing wrong modal
+    modal.className = 'modal-overlay';
+    modal.style.zIndex = '11000'; // Ensure it sits above the register view
+    modal.innerHTML = `
+        <div class="modal-box">
+            <h3>Edit Attendance: ${username}</h3>
+            <label>Date</label><input type="date" id="editAttDate" value="${rec.date}">
+            <label>Clock In</label><input type="time" id="editAttIn" value="${toInputTime(rec.clockIn)}">
+            <label>Clock Out</label><input type="time" id="editAttOut" value="${toInputTime(rec.clockOut)}">
+            <label>Status Override</label>
+            <select id="editAttStatus">
+                <option value="normal" ${(!rec.isLate && !rec.isIgnored) ? 'selected' : ''}>Normal (On Time)</option>
+                <option value="late" ${rec.isLate && !rec.isIgnored ? 'selected' : ''}>Late</option>
+                <option value="ignored" ${rec.isIgnored ? 'selected' : ''}>Ignored (Excused)</option>
+            </select>
+            <div style="margin-top:15px; text-align:right;">
+                <button class="btn-secondary" onclick="document.getElementById('attendanceEditModal').remove()">Cancel</button>
+                <button class="btn-primary" onclick="saveAttendanceEdit('${id}', '${safeUser}')">Save</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+window.saveAttendanceEdit = async function(id, username) {
+    let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    let rec = records.find(r => r.id === id);
+
+    const dateVal = document.getElementById('editAttDate').value;
+    const inVal = document.getElementById('editAttIn').value;
+    const outVal = document.getElementById('editAttOut').value;
+    const statusVal = document.getElementById('editAttStatus').value;
+
+    // If editing a generated absent record, create a new real record
+    if (!rec && id.startsWith('absent_')) {
+        rec = {
+            id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+            user: username,
+            date: dateVal,
+            clockIn: inVal,
+            clockOut: outVal,
+            isLate: statusVal === 'late',
+            isIgnored: statusVal === 'ignored',
+            isAbsent: false // Converted from Absent to Present/Late
+        };
+        records.push(rec);
+    } else if (rec) {
+        // Update existing
+        rec.date = dateVal;
+        rec.clockIn = inVal;
+        rec.clockOut = outVal;
+        rec.isLate = (statusVal === 'late');
+        rec.isIgnored = (statusVal === 'ignored');
+        rec.isAbsent = false; // Ensure it's no longer marked absent
+    }
+
+    localStorage.setItem('attendance_records', JSON.stringify(records));
+    
+    // Close modal FIRST to ensure UI responsiveness
+    const modal = document.getElementById('attendanceEditModal');
+    if(modal) modal.remove();
+    
+    manageAgentAttendance(username);
+
+    // Sync in background
+    if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
 }
 
 async function deleteAttendanceRecord(id, username) {

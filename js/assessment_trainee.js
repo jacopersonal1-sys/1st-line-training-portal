@@ -35,7 +35,7 @@ function loadTraineeTests() {
 
     let visibleTests = [];
     
-    if (CURRENT_USER.role === 'admin') visibleTests = tests;
+    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') visibleTests = tests;
     else visibleTests = tests.filter(t => allowedTestIds.has(t.id.toString()));
 
     if (visibleTests.length === 0) {

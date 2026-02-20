@@ -211,6 +211,17 @@ async function updateDashboardHealth() {
     const latencyEl = document.getElementById('dashLatency');
     const syncEl = document.getElementById('dashLastSync'); 
     const activeTableBody = document.getElementById('dashActiveUsersBody'); 
+    const netEl = document.getElementById('statusConnection');
+
+    // Local Network Check
+    if(netEl) {
+        const online = navigator.onLine;
+        const startPing = Date.now();
+        try { await fetch('https://www.google.com/favicon.ico', { mode: 'no-cors', cache: 'no-store' }); } catch(e){}
+        const ping = Date.now() - startPing;
+        netEl.innerText = online ? `Online (${ping}ms)` : "Offline";
+        netEl.style.color = online ? (ping < 200 ? '#2ecc71' : 'orange') : '#ff5252';
+    }
 
     const start = Date.now();
     try {
@@ -262,14 +273,17 @@ async function updateDashboardHealth() {
                     activeTableBody.innerHTML = '<tr><td colspan="4" class="text-center" style="color:var(--text-muted);">No active users.</td></tr>';
                 } else {
                     activeTableBody.innerHTML = activeUsers.map(u => {
-                        const idleStr = (typeof formatDuration === 'function') ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0)+'s';
+                        const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
+                            ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0)+'s')
+                            : '-';
+                        const roleStr = u.role || '-';
                         const statusBadge = u.isIdle 
                             ? '<span class="status-badge status-fail">Idle</span>' 
                             : '<span class="status-badge status-pass">Active</span>';
                         return `
                             <tr>
                                 <td style="max-width:100px; overflow:hidden; text-overflow:ellipsis;"><strong>${u.user}</strong></td>
-                                <td>${u.role}</td>
+                                <td>${roleStr}</td>
                                 <td>${statusBadge}</td>
                                 <td>${idleStr}</td>
                             </tr>`;
@@ -622,7 +636,7 @@ function buildAdminWidgets(container) {
         : '';
 
     // Attendance Alert (Unconfirmed Lates)
-    const unconfirmedLates = attRecords.filter(r => r.isLate && !r.lateConfirmed).length;
+    const unconfirmedLates = attRecords.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored).length;
     const badgeAtt = unconfirmedLates > 0 
         ? `<span id="badgeAtt" class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${unconfirmedLates}</span>` 
         : '';

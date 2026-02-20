@@ -234,10 +234,12 @@ async function deleteGroup(groupId) {
     delete rosters[groupId];
     localStorage.setItem('rosters', JSON.stringify(rosters));
     
-    await secureUserSave();
+    // FIX: Force overwrite rosters to ensure deletion persists (Server Wins strategy would restore it otherwise)
+    if(typeof saveToServer === 'function') await saveToServer(['rosters'], true);
     
     if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Group', `Deleted group ${groupId}`);
     refreshAllDropdowns();
+    setTimeout(loadRostersList, 50); // Force reload of the list with slight delay for stability
 }
 
 async function deleteAgentFromSystem(agentName, groupId) {
@@ -985,4 +987,11 @@ ${emails.join('\n')}`;
 
     const mailtoLink = `mailto:${toAddress}?cc=${ccAddresses}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mailtoLink;
+}
+
+function clearAppCache() {
+    if(!confirm("Clear local session cache? This can fix login loops or display issues.\n\n(Your data will not be deleted)")) return;
+    sessionStorage.clear();
+    localStorage.removeItem('rememberedUser');
+    window.location.reload();
 }

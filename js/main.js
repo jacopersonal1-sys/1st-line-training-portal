@@ -647,9 +647,15 @@ function updateSidebarVisibility() {
     // --- INJECT SUPER ADMIN BUTTON ---
     // Moved outside the loop to ensure it runs reliably
     const existingSaBtn = document.getElementById('btn-super-admin');
+    
+    // Force removal if not super admin
+    if (role !== 'super_admin' && existingSaBtn) existingSaBtn.remove();
+
     if (role === 'super_admin') {
-        if (!existingSaBtn) {
-            // Target the header control bubble
+        // Robust Retry logic for header injection
+        const injectBtn = () => {
+            if (document.getElementById('btn-super-admin')) return true;
+            
             const bubbleContent = document.querySelector('.control-bubble .bubble-content');
             const adminToolsBtn = document.getElementById('btn-admin-tools');
             
@@ -667,10 +673,19 @@ function updateSidebarVisibility() {
                 } else {
                     bubbleContent.prepend(btn);
                 }
+                return true;
             }
+            return false;
+        };
+        
+        // Try immediately, then poll briefly to ensure it catches late DOM renders
+        if (!injectBtn()) {
+            let attempts = 0;
+            const interval = setInterval(() => {
+                attempts++;
+                if (injectBtn() || attempts > 10) clearInterval(interval);
+            }, 500);
         }
-    } else if (existingSaBtn) {
-        existingSaBtn.remove();
     }
 
     const allNavItems = document.querySelectorAll('.nav-item');

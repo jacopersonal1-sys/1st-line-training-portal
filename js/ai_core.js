@@ -246,6 +246,7 @@ const AICore = {
         modal.classList.remove('hidden');
         this.isOpen = true;
         this.renderChat();
+        this.renderSuggestions(); // FIX: Ensure suggestions are rendered every time
         
         // Focus input
         setTimeout(() => document.getElementById('aiInput').focus(), 100);
@@ -368,7 +369,7 @@ const AICore = {
 
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
         if (!config.ai || !config.ai.enabled || !config.ai.apiKey) {
-            return "Error: AI is disabled or API Key is missing.\nYou can still use 'Run [tool]' commands manually.";
+            return "Error: AI is disabled or API Key is missing in Super Admin Config.\nYou can still use 'Run [tool]' commands manually.";
         }
 
         // Construct Context
@@ -496,7 +497,7 @@ const AICore = {
     // --- BACKGROUND IMPROVEMENT ANALYZER ---
     analyzeForImprovements: async function(force = false) {
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-        if (!config.ai || !config.ai.enabled || !config.ai.apiKey) return "AI Disabled.";
+        if (!config.ai || !config.ai.enabled || !config.ai.apiKey) return "AI Disabled (Check Config/API Key).";
 
         // Gather Context
         const logs = window.CONSOLE_HISTORY || [];
@@ -548,7 +549,10 @@ const AICore = {
         if (!container) return;
         
         const list = JSON.parse(localStorage.getItem('ai_suggestions') || '[]');
-        if (list.length === 0) return;
+        if (list.length === 0) {
+            container.innerHTML = '<div style="color:#888; font-style:italic; font-size:0.8rem; text-align:center; margin-top:20px;">No suggestions available.</div>';
+            return;
+        }
 
         container.innerHTML = list.map(s => `
             <div style="background:#333; padding:10px; border-radius:4px; margin-bottom:10px; border-left:3px solid #f1c40f;">

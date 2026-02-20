@@ -18,7 +18,7 @@ function loadVettingArena() {
         return;
     }
 
-    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'special_viewer') {
+    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
         renderAdminArena();
     } else {
         renderTraineeArena();

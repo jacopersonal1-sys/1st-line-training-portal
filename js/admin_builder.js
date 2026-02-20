@@ -527,7 +527,7 @@ function loadManageTests() {
         <div class="test-card-row">
             <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
             <div>
-                ${CURRENT_USER.role === 'admin' ? `
+                ${(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? `
                 <button class="btn-secondary btn-sm" onclick="copyTest('${t.id}')" title="Copy"><i class="fas fa-copy"></i></button>
                 <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
                 <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}

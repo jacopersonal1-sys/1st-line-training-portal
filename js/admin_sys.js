@@ -683,6 +683,23 @@ function refreshSystemStatus() {
         document.getElementById('statusStorage').innerText = "Active";
         document.getElementById('statusLatency').innerText = "OK";
     }
+    
+    // Local Network Ping (Admin Tool Specific)
+    const connEl = document.getElementById('statusConnection');
+    if(connEl) {
+        const startPing = Date.now();
+        fetch('https://www.google.com/favicon.ico', { mode: 'no-cors', cache: 'no-store' })
+            .then(() => {
+                const ping = Date.now() - startPing;
+                connEl.innerText = `Online (${ping}ms)`;
+                connEl.style.color = ping < 200 ? '#2ecc71' : 'orange';
+            })
+            .catch(() => {
+                connEl.innerText = "Offline";
+                connEl.style.color = '#ff5252';
+            });
+    }
+
     if(typeof refreshAccessLogs === 'function') {
         refreshAccessLogs();
     }
@@ -774,7 +791,7 @@ function openSuperAdminConfig() {
     const ann = config.announcement || { active: false, message: "", type: "info" };
     const banned = sec.banned_clients || [];
     const whitelist = sec.client_whitelist || [];
-    const ai = config.ai || { enabled: false, apiKey: "" };
+    const ai = config.ai || { enabled: true, apiKey: "" }; // FIX: Default to Enabled
 
     const modalHtml = `
         <div id="superAdminModal" class="modal-overlay">
@@ -971,18 +988,20 @@ async function refreshClientHealthTable() {
         const statusDot = isOnline ? `<span style="color:#2ecc71;">●</span>` : `<span style="color:#95a5a6;">○</span>`;
         const clientId = s.clientId || 'Unknown';
         const activity = s.activity || '-';
+        const roleStr = s.role || '?';
+        const safeUser = s.user.replace(/'/g, "\\'"); // FIX: Escape quotes for button
         
         const banBtn = (clientId !== 'Unknown' && s.role !== 'super_admin') ? `<button class="btn-danger btn-sm" style="padding:0 4px; font-size:0.7rem; margin-left:5px;" onclick="banClient('${clientId}', '${s.user}')" title="Ban Terminal"><i class="fas fa-ban"></i></button>` : '';
 
         html += `<tr>
-            <td>${statusDot} <strong>${s.user}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">(${s.role})</span></td>
+            <td>${statusDot} <strong>${s.user}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">(${roleStr})</span></td>
             <td style="font-family:monospace; font-size:0.8rem;">${clientId}${banBtn}</td>
             <td style="font-size:0.8rem; max-width:150px; overflow:hidden; text-overflow:ellipsis;" title="${activity}">${activity}</td>
             <td style="color:${latColor}; font-weight:bold;">${latency}ms</td>
             <td>
                 <button class="btn-danger btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.user}', 'logout')" title="Kick"><i class="fas fa-sign-out-alt"></i></button>
                 <button class="btn-warning btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.user}', 'restart')" title="Reload"><i class="fas fa-sync"></i></button>
-                <button class="btn-primary btn-sm" style="padding:0 5px;" onclick="promptRemoteMessage('${s.user}')" title="Message"><i class="fas fa-comment"></i></button>
+                <button class="btn-primary btn-sm" style="padding:0 5px;" onclick="promptRemoteMessage('${safeUser}')" title="Message"><i class="fas fa-comment"></i></button>
             </td>
         </tr>`;
     });
@@ -992,7 +1011,7 @@ async function refreshClientHealthTable() {
 }
 
 async function promptRemoteMessage(username) {
-    const msg = prompt(`Send private message to ${username}:`);
+    const msg = await customPrompt("Send Message", `Send private message to ${username}:`);
     if(msg) {
         sendRemoteCommand(username, 'msg:' + msg);
     }
@@ -1108,7 +1127,10 @@ async function unbanClient(id) {
 }
 
 // --- SYSTEM ERROR REPORTS ---
-function viewSystemErrors() {
+async function viewSystemErrors() {
+    // Force pull latest errors to ensure list is populated
+    if(typeof loadFromServer === 'function') await loadFromServer(true);
+
     const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
     
     // Update "Last Seen" count to stop notifications

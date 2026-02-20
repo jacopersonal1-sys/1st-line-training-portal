@@ -225,10 +225,15 @@ function renderMonthly() {
 
 function loadReportTab() {
   let users = JSON.parse(localStorage.getItem('users') || '[]');
+  let reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+  const existingTrainees = new Set(reports.map(r => r.trainee.toLowerCase()));
+
   const select = document.getElementById('reportTraineeSelect');
   if(select) {
       select.innerHTML = '<option value="">-- Select Trainee --</option>';
-      users.filter(u => u.role === 'trainee').sort((a,b) => a.user.localeCompare(b.user)).forEach(u => { select.add(new Option(u.user, u.user)); });
+      users.filter(u => u.role === 'trainee' && !existingTrainees.has(u.user.toLowerCase()))
+           .sort((a,b) => a.user.localeCompare(b.user))
+           .forEach(u => { select.add(new Option(u.user, u.user)); });
   }
   const dateEl = document.getElementById('printDate');
   if(dateEl) dateEl.innerText = new Date().toLocaleDateString();

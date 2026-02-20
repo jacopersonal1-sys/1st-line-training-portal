@@ -670,7 +670,10 @@ async function fetchSystemStatus() {
             if (connEl && navigator.connection) {
                 connEl.innerText = navigator.connection.effectiveType.toUpperCase();
             } else if (connEl) {
-                connEl.innerText = navigator.onLine ? "ONLINE" : "OFFLINE";
+                const startPing = Date.now();
+                try { await fetch('https://www.google.com/favicon.ico', { mode: 'no-cors', cache: 'no-store' }); } catch(e){}
+                const ping = Date.now() - startPing;
+                connEl.innerText = navigator.onLine ? `Online (${ping}ms)` : "Offline";
             }
             
             if (platformEl) {
@@ -684,11 +687,12 @@ async function fetchSystemStatus() {
                       html = '<tr><td colspan="6" class="text-center">No active users detected.</td></tr>';
                 } else {
                     activeUsers.forEach(u => {
-                        const idleStr = typeof formatDuration === 'function' 
-                            ? formatDuration(u.idleTime) 
-                            : (u.idleTime/1000).toFixed(0) + 's';
+                        const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
+                            ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0) + 's')
+                            : '-';
                         
                         const verStr = u.version || '-';
+                        const roleStr = u.role || '-';
                         
                         const statusBadge = u.isIdle
                             ? '<span class="status-badge status-fail">Idle</span>'
@@ -700,7 +704,7 @@ async function fetchSystemStatus() {
                             <tr class="${rowClass}">
                                 <td><strong>${u.user}</strong></td>
                                 <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
-                                <td>${u.role}</td>
+                                <td>${roleStr}</td>
                                 <td>${statusBadge}</td>
                                 <td>${idleStr}</td>
                                 <td>
@@ -807,6 +811,8 @@ async function logAuditAction(username, action, details) {
     }
 }
 
+let HEARTBEAT_SAFE_MODE = false; // false | 'safe' | 'minimal'
+
 // 5. SUPABASE: Send Heartbeat
 async function sendHeartbeat() {
     if (!CURRENT_USER || !window.supabaseClient) return;
@@ -825,19 +831,48 @@ async function sendHeartbeat() {
     }
 
     try {
-        // 1. Send Heartbeat with Version
-        await supabaseClient
-            .from('sessions')
-            .upsert({
+        // 1. Try Full Heartbeat (Default)
+        if (!HEARTBEAT_SAFE_MODE) {
+            const safeActivity = currentActivity.length > 250 ? currentActivity.substring(0, 247) + '...' : currentActivity;
+            const fullPayload = {
                 user: CURRENT_USER.user,
                 role: CURRENT_USER.role,
                 version: window.APP_VERSION || 'Unknown',
-                idleTime: diff,
+                idleTime: Math.round(diff),
                 isIdle: isIdle,
                 lastSeen: new Date().toISOString(),
                 clientId: clientId,
-                activity: currentActivity
+                activity: safeActivity
+            };
+            
+            const { error } = await supabaseClient.from('sessions').upsert(fullPayload);
+            if (!error) return; // Success
+            
+            console.warn("Heartbeat Full failed (Schema mismatch?). Downgrading to Safe Mode.");
+            HEARTBEAT_SAFE_MODE = 'safe';
+        }
+
+        // 2. Safe Mode (Common fields only)
+        if (HEARTBEAT_SAFE_MODE === 'safe') {
+            const { error } = await supabaseClient.from('sessions').upsert({
+                user: CURRENT_USER.user,
+                lastSeen: new Date().toISOString(),
+                isIdle: isIdle,
+                idleTime: Math.round(diff)
             });
+            if (!error) return;
+            
+            console.warn("Heartbeat Safe failed. Downgrading to Minimal.");
+            HEARTBEAT_SAFE_MODE = 'minimal';
+        }
+
+        // 3. Minimal Mode (Absolute basics)
+        if (HEARTBEAT_SAFE_MODE === 'minimal') {
+            await supabaseClient.from('sessions').upsert({
+                user: CURRENT_USER.user,
+                lastSeen: new Date().toISOString()
+            });
+        }
             
         // 2. Check for Remote Commands (Pending Actions)
         const { data: sessionData } = await supabaseClient

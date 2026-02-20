@@ -274,6 +274,9 @@ async function autoLogin() {
   applyRolePermissions();
   checkFirstTimeLogin();
   
+  // FIX: Ensure sidebar/header buttons (like Super Admin) are updated immediately
+  if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
+  
   // MANDATORY: Check Attendance on Login
   if (typeof checkAttendanceStatus === 'function') checkAttendanceStatus();
   
@@ -292,7 +295,7 @@ async function autoLogin() {
   }
 
   // Redirect based on role
-  if(CURRENT_USER.role === 'admin') showTab('dashboard-view'); 
+  if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') showTab('dashboard-view'); 
   else if(CURRENT_USER.role === 'trainee') showTab('dashboard-view');
   else showTab('monthly'); // Team Leader
 }
