@@ -14,6 +14,7 @@ const StudyMonitor = {
     externalPoller: null, // Track the interval for external monitoring
     queueSelection: new Set(), // Persist selections across refreshes
     cachedWhitelist: [], // Cache for performance
+    lastSyncedPayload: null, // OPTIMIZATION: Track last sync to prevent duplicate pushes
 
     init: function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
@@ -92,22 +93,28 @@ const StudyMonitor = {
             if (typeof require !== 'undefined') {
                 try {
                     const { ipcRenderer } = require('electron');
+
+                    // --- NEW: IDLE CHECK ---
+                    // If no interaction for 60s, force Idle state regardless of active window
+                    if (window.LAST_INTERACTION && (Date.now() - window.LAST_INTERACTION > 60000)) {
+                        
+                        // FIX: Allow idling if waiting in Vetting Arena after submission
+                        const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+                        if (vSession.active && vSession.trainees && CURRENT_USER && vSession.trainees[CURRENT_USER.user]?.status === 'completed') {
+                             if (this.currentActivity !== 'Vetting: Waiting') this.track('Vetting: Waiting');
+                             return;
+                        }
+
+                        if (this.currentActivity !== 'Idle') this.track('Idle');
+                        return;
+                    }
+
                     const activeWindow = await ipcRenderer.invoke('get-active-window');
                     
-                    // NEW: Check Idle State from Global Tracker
-                    // We use the global LAST_INTERACTION timestamp updated by data.js
-                    const lastInteract = window.LAST_INTERACTION || Date.now();
-                    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-                    const idleThreshold = config.idle_thresholds ? config.idle_thresholds.warning : 60000;
-                    
-                    const isPhysicallyIdle = (Date.now() - lastInteract) > idleThreshold;
-
                     // Only track if it's different from current to avoid spamming history
                     let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
 
-                    if (isPhysicallyIdle) {
-                        activityLabel = "Idle: Away (No Input)";
-                    } else {
+                    if (activeWindow) {
                         // --- WORK SITES WHITELIST ---
                         const defaultSites = [
                             'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
@@ -117,7 +124,7 @@ const StudyMonitor = {
                         const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
 
                         // Check if window title contains any of the work sites
-                        const matchedSite = workSites.find(site => activeWindow.toLowerCase().includes(site.toLowerCase()));
+                        const matchedSite = workSites.find(site => site && activeWindow.toLowerCase().includes(site.toLowerCase()));
                         
                         if (matchedSite) {
                             // Classify as "Studying" (or Work) so it counts towards Focus Score
@@ -167,7 +174,7 @@ const StudyMonitor = {
         }
 
         // Instant local save (optional)
-        // this.sync(); 
+        this.sync(); // Trigger sync check immediately on activity change
     },
 
     recordClick: function() {
@@ -187,8 +194,13 @@ const StudyMonitor = {
             current: this.currentActivity,
             since: this.startTime,
             isStudyOpen: this.isStudyOpen,
-            history: this.history
+            history: this.history,
+            date: new Date().toISOString().split('T')[0] // Ensure date is always present
         };
+
+        // OPTIMIZATION: Only sync if data changed since last successful push
+        const payloadStr = JSON.stringify(payload);
+        if (this.lastSyncedPayload === payloadStr) return;
 
         // We use a specific key in app_documents for monitoring to avoid bloating 'sessions'
         // We read-modify-write the 'monitor_data' object
@@ -210,7 +222,10 @@ const StudyMonitor = {
                 
                 // UPDATED: Force a silent background push to ensure Admin sees this.
                 // We use 'false' for safe merge and 'true' for silent mode.
-                if (typeof saveToServer === 'function') saveToServer(['monitor_data'], false, true);
+                if (typeof saveToServer === 'function') {
+                    await saveToServer(['monitor_data'], false, true);
+                    this.lastSyncedPayload = payloadStr; // Update cache on success
+                }
                 
             } catch (e) {
                 console.error("Monitor Sync Error", e);
@@ -242,7 +257,7 @@ const StudyMonitor = {
             if (!act.startsWith('idle:')) return 'external';
         }
         
-        if (act.startsWith('studying:') || (act.includes('studying') && !act.startsWith('external:')) || act.includes('system:') || act.includes('navigating:')) return 'study';
+        if (act.startsWith('studying:') || (act.includes('studying') && !act.startsWith('external:')) || act.includes('system:') || act.includes('navigating:') || act.includes('vetting:')) return 'study';
         if (act.startsWith('external:') || act.includes('external') || act.includes('background')) return 'external';
         if (act.startsWith('idle:')) return 'idle';
         return 'idle'; // Default
@@ -809,15 +824,25 @@ function renderActivitySummary(container) {
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' }; // Default to neutral
                 
                 if (effectiveDuration > TOLERANCE) {
-                    extMs += effectiveDuration;
+                    // LENIENT MODE: Forgive the first X minutes (TOLERANCE) as "Transition/Setup"
+                    studyMs += TOLERANCE;
+                    extMs += (effectiveDuration - TOLERANCE);
                     topicMap[topic].type = 'external'; // Flag as concern
                 } else {
                     studyMs += effectiveDuration; // Tolerated
                 }
                 topicMap[topic].ms += effectiveDuration;
             } else {
-                if (effectiveDuration > TOLERANCE) idleMs += effectiveDuration;
+                // Track Idle as a topic for visibility in breakdown
+                const topic = "Idle / Away";
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'idle' };
+
+                if (effectiveDuration > TOLERANCE) {
+                    studyMs += TOLERANCE; // Thinking time
+                    idleMs += (effectiveDuration - TOLERANCE);
+                }
                 else studyMs += effectiveDuration; // Thinking time
+                topicMap[topic].ms += effectiveDuration;
             }
         });
 

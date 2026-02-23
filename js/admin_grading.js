@@ -14,7 +14,7 @@ function loadGroupMembers() {
     
     t.innerHTML = members.map(n => `
         <tr data-trainee="${n}">
-            <td>${n}</td>
+            <td><div style="display:flex; align-items:center;">${getAvatarHTML(n)} ${n}</div></td>
             <td><input type="number" class="score-input" min="0" max="100"></td>
             <td align="center"><input type="checkbox" class="doc-input"></td>
             <td align="center" class="video-col hidden"><input type="checkbox" class="video-input"></td>
@@ -114,7 +114,12 @@ async function saveScores() {
             const traineeName = r.dataset.trainee;
             if(traineeName) {
                 // Check if a record already exists for this exact combination
-                const exists = recs.some(item => item.trainee === traineeName && item.assessment === finalAssessName && item.groupID === gid && item.phase === phase);
+                const exists = recs.some(item => 
+                    item.trainee.toLowerCase() === traineeName.toLowerCase() && 
+                    item.assessment.toLowerCase() === finalAssessName.toLowerCase() && 
+                    (item.groupID||'').toLowerCase() === gid.toLowerCase() && 
+                    (item.phase||'').toLowerCase() === phase.toLowerCase()
+                );
                 if(exists) conflicts.push(traineeName);
             }
         }
@@ -149,10 +154,10 @@ async function saveScores() {
 
             // DEDUPLICATION: Check if record exists
             const existingIndex = recs.findIndex(item => 
-                item.trainee === traineeName && 
-                item.assessment === finalAssessName &&
-                item.groupID === gid &&
-                item.phase === phase
+                item.trainee.toLowerCase() === traineeName.toLowerCase() && 
+                item.assessment.toLowerCase() === finalAssessName.toLowerCase() &&
+                (item.groupID||'').toLowerCase() === gid.toLowerCase() &&
+                (item.phase||'').toLowerCase() === phase.toLowerCase()
             );
 
             if (existingIndex > -1) {
@@ -340,6 +345,7 @@ function loadTestRecords() {
                 }
 
                 const scoreDisplay = s.status === 'completed' ? `<span style="font-weight:bold; color:green;">${s.score}%</span>` : '<span style="color:orange;">Pending</span>';
+                const statusBadge = s.status === 'completed' ? '<span class="status-badge status-pass">Completed</span>' : '<span class="status-badge status-semi">Pending</span>';
                 
                 const safeTrainee = s.trainee.replace(/'/g, "\\'");
                 const safeTitle = s.testTitle.replace(/'/g, "\\'");
@@ -370,7 +376,7 @@ function loadTestRecords() {
                     }
                 }
 
-                tbody.innerHTML += `<tr><td>${s.date}</td><td>${groupDisplay}</td><td>${s.trainee}</td><td>${s.testTitle}</td><td>${scoreDisplay}</td><td>${s.status}</td><td>${actionBtn}</td></tr>`;
+                tbody.innerHTML += `<tr><td>${s.date}</td><td>${groupDisplay}</td><td><div style="display:flex; align-items:center;">${getAvatarHTML(s.trainee)} ${s.trainee}</div></td><td>${s.testTitle}</td><td>${scoreDisplay}</td><td>${statusBadge}</td><td>${actionBtn}</td></tr>`;
             });
         }
     }

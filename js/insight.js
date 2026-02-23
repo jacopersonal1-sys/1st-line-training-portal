@@ -9,6 +9,17 @@
 let INSIGHT_VIEW_MODE = 'action'; // 'action', 'all', 'progress', 'dept'
 let CURRENT_REVIEW_TARGET = null;
 
+// --- HELPER: AVATAR GENERATOR ---
+function getAvatarHTML(name) {
+    if(!name) return '';
+    const initials = name.substring(0, 2).toUpperCase();
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    const color = "#" + "00000".substring(0, 6 - c.length) + c;
+    return `<div style="width:32px; height:32px; border-radius:50%; background:${color}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:bold; margin-right:10px; flex-shrink:0; box-shadow:0 2px 4px rgba(0,0,0,0.1);">${initials}</div>`;
+}
+
 // --- HELPER: ASYNC SAVE ---
 // Ensures reviews and exemptions are saved to server (Supabase) before UI updates.
 async function secureInsightSave() {
@@ -18,11 +29,46 @@ async function secureInsightSave() {
     if (typeof saveToServer === 'function') {
         try {
             // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(true); 
+            await saveToServer(['insightReviews', 'exemptions', 'users', 'revokedUsers'], true); 
         } catch(e) {
             console.error("Insight Cloud Sync Error:", e);
         }
     }
+}
+
+// --- HELPER: CENTRALIZED REQUIREMENTS ---
+function getRequiredItems() {
+    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
+    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
+    
+    let items = [];
+    
+    // 1. Standard Assessments
+    assessments.forEach(a => {
+        if(!a.name.toLowerCase().includes("vetting test")) {
+            items.push({ name: a.name, type: 'assessment' });
+        }
+    });
+
+    // 2. Vetting Sub-Tests
+    topics.forEach(t => {
+        if (!t.toLowerCase().includes('vetting')) {
+            items.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
+            items.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
+        }
+    });
+
+    // 3. Misc Items
+    items.push({ name: "Onboard Report", type: 'report' });
+    items.push({ name: "Insight Review", type: 'review' });
+
+    // SORT
+    items.sort((a, b) => {
+        const typeOrder = { 'assessment': 1, 'report': 2, 'review': 2, 'vetting': 3 };
+        return (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
+    });
+
+    return items;
 }
 
 // Main entry point
@@ -48,19 +94,25 @@ function renderInsightDashboard() {
 
     // 4. Render Sub-Navigation
     const navHTML = `
-        <div class="admin-sub-nav" style="margin-bottom:15px; border-bottom:1px solid var(--border-color); display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'action' ? 'active' : ''}" onclick="switchInsightView('action')" aria-label="View Action Required">
-                <i class="fas fa-exclamation-circle"></i> Action Required
-            </button>
-            <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'all' ? 'active' : ''}" onclick="switchInsightView('all')" aria-label="View Full Overview">
-                <i class="fas fa-list"></i> Full Overview
-            </button>
-            <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'progress' ? 'active' : ''}" onclick="switchInsightView('progress')" aria-label="View Agent Progress">
-                <i class="fas fa-tasks"></i> Agent Progress
-            </button>
-            <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'dept' ? 'active' : ''}" onclick="switchInsightView('dept')" aria-label="View Department Overview">
-                <i class="fas fa-building"></i> Dept Overview
-            </button>
+        <div class="admin-sub-nav" style="margin-bottom:15px; border-bottom:1px solid var(--border-color); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <div style="display:flex; gap:10px;">
+                <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'action' ? 'active' : ''}" onclick="switchInsightView('action')" aria-label="View Action Required">
+                    <i class="fas fa-exclamation-circle"></i> Action Required
+                </button>
+                <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'all' ? 'active' : ''}" onclick="switchInsightView('all')" aria-label="View Full Overview">
+                    <i class="fas fa-list"></i> Full Overview
+                </button>
+                <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'progress' ? 'active' : ''}" onclick="switchInsightView('progress')" aria-label="View Agent Progress">
+                    <i class="fas fa-tasks"></i> Agent Progress
+                </button>
+                <button class="sub-tab-btn ${INSIGHT_VIEW_MODE === 'dept' ? 'active' : ''}" onclick="switchInsightView('dept')" aria-label="View Department Overview">
+                    <i class="fas fa-building"></i> Dept Overview
+                </button>
+            </div>
+            <div style="margin-left:auto; position:relative;" class="${INSIGHT_VIEW_MODE === 'dept' ? 'hidden' : ''}">
+                <i class="fas fa-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.8rem;"></i>
+                <input type="text" id="insightSearchInput" placeholder="Filter Agents..." onkeyup="filterInsightCards()" style="padding:6px 10px 6px 30px; border-radius:20px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); width:200px; font-size:0.85rem;">
+            </div>
         </div>
     `;
 
@@ -139,22 +191,49 @@ function switchInsightView(mode) {
     renderInsightDashboard();
 }
 
+// --- NEW: CLIENT-SIDE FILTERING ---
+function filterInsightCards() {
+    const input = document.getElementById('insightSearchInput');
+    if(!input) return;
+    const filter = input.value.toLowerCase();
+    const cards = document.querySelectorAll('.insight-card, .completeness-card');
+    
+    cards.forEach(card => {
+        const name = card.getAttribute('data-search') || '';
+        card.style.display = name.includes(filter) ? '' : 'none';
+    });
+}
+
 // --- STANDARD VIEWS (Action & All) - COMPACT MODE ---
 
 function renderStandardView(members, filter, grid, navHTML) {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
     
+    // OPTIMIZATION: Pre-index records and reviews by trainee
+    const recordsMap = {};
+    records.forEach(r => {
+        if (!r.trainee) return;
+        const t = r.trainee;
+        if (!recordsMap[t]) recordsMap[t] = [];
+        recordsMap[t].push(r);
+    });
+
+    const reviewsMap = {};
+    reviews.forEach(r => {
+        reviewsMap[r.trainee] = r;
+    });
+
     let cardsHTML = '';
     let count = 0;
 
     members.forEach(trainee => {
-        // UPDATED: Inclusive Group Filter
-        // Includes records for this group OR system-generated records (Live/Digital) for this trainee
+        // UPDATED: Inclusive Group Filter using Map
+        const allTraineeRecords = recordsMap[trainee] || [];
         const validGroups = [filter, 'Live-Session', 'Digital-Assessment', 'Manual-Upload', 'Unknown'];
-        const traineeRecords = records.filter(r => r.trainee === trainee && (validGroups.includes(r.groupID) || !r.groupID));
+        const traineeRecords = allTraineeRecords.filter(r => validGroups.includes(r.groupID) || !r.groupID);
         
-        const review = reviews.find(r => r.trainee === trainee);
+        const review = reviewsMap[trainee];
         
         let cycleLabel = "New Onboard";
         if(typeof getTraineeCycle === 'function') {
@@ -213,11 +292,27 @@ function renderProgressView(members, filter, grid, navHTML) {
     const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
     const exemptions = JSON.parse(localStorage.getItem('exemptions') || '[]');
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
-    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]'); 
     // Load users to check login status
     const users = JSON.parse(localStorage.getItem('users') || '[]');
     
+    // OPTIMIZATION: Pre-index data
+    const recordsMap = {};
+    records.forEach(r => { if(r.trainee) { if(!recordsMap[r.trainee]) recordsMap[r.trainee] = []; recordsMap[r.trainee].push(r); } });
+
+    const submissionsMap = {};
+    submissions.forEach(s => { if(s.trainee) { if(!submissionsMap[s.trainee]) submissionsMap[s.trainee] = []; submissionsMap[s.trainee].push(s); } });
+
+    const reportsMap = {};
+    reports.forEach(r => { if(r.trainee) reportsMap[r.trainee] = r; });
+
+    const reviewsMap = {};
+    reviews.forEach(r => { if(r.trainee) reviewsMap[r.trainee] = r; });
+
+    const exemptionsMap = {};
+    exemptions.forEach(e => { if(e.trainee) { if(!exemptionsMap[e.trainee]) exemptionsMap[e.trainee] = []; exemptionsMap[e.trainee].push(e); } });
+
+    const usersMap = new Set(users.map(u => u.user));
+
     // --- FIX: Define isAdmin HERE so it is accessible in the entire function ---
     let isAdmin = false;
     try { 
@@ -232,53 +327,24 @@ function renderProgressView(members, filter, grid, navHTML) {
     }
     // -------------------------------------------------------------------------
     
-    // Build Required List dynamically
-    let requiredItems = [];
-    
-    // 1. Standard Assessments
-    assessments.forEach(a => {
-        // Include ALL assessments (Standard + Live) except explicit Vetting Tests
-        // Vetting Tests are handled via Topics to avoid duplication
-        if(!a.name.toLowerCase().includes("vetting test")) {
-             requiredItems.push({ name: a.name, type: 'assessment' });
-        }
-    });
-
-    // 2. Vetting Sub-Tests
-    topics.forEach(t => {
-        // Only generate variations if it's a raw topic name
-        if (!t.toLowerCase().includes('vetting')) {
-            requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
-            requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
-        }
-    });
-
-    // 3. Misc Items
-    requiredItems.push({ name: "Onboard Report", type: 'report' });
-    requiredItems.push({ name: "Insight Review", type: 'review' });
-
-    // SORT: Assessments -> Reports/Reviews -> Vetting
-    requiredItems.sort((a, b) => {
-        const typeOrder = { 'assessment': 1, 'report': 2, 'review': 2, 'vetting': 3 };
-        const orderA = typeOrder[a.type] || 99;
-        const orderB = typeOrder[b.type] || 99;
-        return orderA - orderB;
-    });
+    // Build Required List dynamically using Helper
+    const requiredItems = getRequiredItems();
 
     let html = '<div style="margin-top:15px; display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:20px;">';
 
     members.forEach(trainee => {
         // UPDATED: Inclusive Record Fetching
         const validGroups = [filter, 'Live-Session', 'Digital-Assessment', 'Manual-Upload', 'Unknown'];
-        const myRecords = records.filter(r => r.trainee === trainee && (validGroups.includes(r.groupID) || !r.groupID));
+        const allTraineeRecords = recordsMap[trainee] || [];
+        const myRecords = allTraineeRecords.filter(r => validGroups.includes(r.groupID) || !r.groupID);
         
-        const mySubs = submissions.filter(s => s.trainee === trainee);
-        const myReport = reports.find(r => r.trainee === trainee);
-        const myReview = reviews.find(r => r.trainee === trainee);
-        const myExempts = exemptions.filter(e => e.trainee === trainee && e.groupID === filter).map(e => e.item);
+        const mySubs = submissionsMap[trainee] || [];
+        const myReport = reportsMap[trainee];
+        const myReview = reviewsMap[trainee];
+        const myExempts = (exemptionsMap[trainee] || []).filter(e => e.groupID === filter).map(e => e.item);
 
         // Check login status
-        const hasLogin = users.some(u => u.user === trainee);
+        const hasLogin = usersMap.has(trainee);
 
         let completedCount = 0;
         let itemsHTML = '';
@@ -358,20 +424,29 @@ function renderProgressView(members, filter, grid, navHTML) {
             revokeBtnHTML = `<div style="margin-top:10px; font-size:0.8rem; color:#27ae60; text-align:center;"><i class="fas fa-check"></i> Access Revoked (Graduated)</div>`;
         }
 
+        const avatar = getAvatarHTML(trainee);
+
         html += `
-        <div class="completeness-card" style="margin-bottom:0;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3 style="margin:0; font-size:1rem;">${trainee}</h3>
-                <span style="font-weight:bold; font-size:0.9rem; color:${progress==100?'#27ae60':'var(--primary)'};">${progress}% Complete</span>
+        <div class="completeness-card" data-search="${trainee.toLowerCase()}" style="margin-bottom:0; transition: transform 0.2s;">
+            <div style="display:flex; align-items:center; margin-bottom:10px;">
+                ${avatar}
+                <div style="flex:1;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h3 style="margin:0; font-size:1rem;">${trainee}</h3>
+                        <span style="font-weight:bold; font-size:0.85rem; color:${progress==100?'#27ae60':'var(--primary)'};">${progress}%</span>
+                    </div>
+                    <div class="progress-track" style="height:6px; margin-top:5px;"><div class="progress-fill" style="width:${progress}%;"></div></div>
+                </div>
             </div>
-            <div class="progress-track"><div class="progress-fill" style="width:${progress}%;"></div></div>
             
             <div class="checklist-container" style="display:none;" id="check_${trainee.replace(/\s/g,'')}">
                 ${itemsHTML}
                 ${revokeBtnHTML}
             </div>
             
-            <button class="btn-secondary btn-sm" style="width:100%; margin-top:10px;" onclick="toggleChecklist('check_${trainee.replace(/\s/g,'')}')" aria-label="Toggle Details for ${trainee}">Toggle Details</button>
+            <button class="btn-secondary btn-sm" style="width:100%; margin-top:5px; background:transparent; border:1px dashed var(--border-color); color:var(--text-muted);" onclick="toggleChecklist('check_${trainee.replace(/\s/g,'')}')" aria-label="Toggle Details for ${trainee}">
+                <i class="fas fa-chevron-down"></i> Show Details
+            </button>
         </div>`;
     });
 
@@ -407,28 +482,13 @@ async function toggleExemption(trainee, group, item, isExempt) {
 // --- LOGIC ENGINE (Shared) ---
 
 function calculateAgentStats(traineeName, records) {
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
-    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
     const exemptions = JSON.parse(localStorage.getItem('exemptions') || '[]');
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
     const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
     
-    let requiredItems = [];
-    assessments.forEach(a => {
-        // Include ALL assessments (Standard + Live) except explicit Vetting Tests
-        if(!a.name.toLowerCase().includes("vetting test")) {
-            requiredItems.push({ name: a.name, type: 'assessment' });
-        }
-    });
-    
-    topics.forEach(t => {
-        requiredItems.push({ name: `1st Vetting - ${t}`, type: 'vetting' });
-        requiredItems.push({ name: `Final Vetting - ${t}`, type: 'vetting' });
-    });
-    
-    requiredItems.push({ name: "Onboard Report", type: 'report' });
-    requiredItems.push({ name: "Insight Review", type: 'review' });
+    // Use Helper
+    const requiredItems = getRequiredItems();
 
     let completedCount = 0;
     
@@ -484,6 +544,9 @@ function calculateAgentStatus(records) {
     let failedSemi = [];
     let failedImprove = [];
     
+    // LOGIC FIX: If no records exist, status is Pending, not Pass
+    if (!records || records.length === 0) return { status: 'Pending', failedItems: [] };
+
     const limit = (typeof IMPROVE !== 'undefined') ? IMPROVE : 80;
 
     records.forEach(r => {
@@ -514,6 +577,7 @@ function buildInsightCard(name, group, data, cycle) {
         case 'Critical': case 'Fail': borderClass = 'status-critical'; badgeClass = 'badge-critical'; break;
         case 'Semi-Critical': borderClass = 'status-semi'; badgeClass = 'badge-semi'; break;
         case 'Improvement': borderClass = 'status-improve'; badgeClass = 'badge-improve'; break;
+        case 'Pending': borderClass = 'status-pending'; badgeClass = 'badge-secondary'; break; // NEW
         default: borderClass = ''; badgeClass = 'badge-success';
     }
 
@@ -543,16 +607,35 @@ function buildInsightCard(name, group, data, cycle) {
         ? `<div class="insight-actions" style="margin-top:10px;"><button class="btn-primary btn-sm" onclick="openInsightReview('${name}')" aria-label="${btnText} for ${name}">${btnText}</button></div>`
         : ``;
 
+    const avatar = getAvatarHTML(name);
+
     return `
-    <div class="insight-card ${borderClass}">
-        <div class="insight-header" style="margin-bottom:10px;">
-            <div><h3 class="insight-name" style="font-size:1rem;">${name} ${cycleBadge} ${manualTag}</h3><div class="insight-group" style="font-size:0.75rem;">${group}</div></div>
-            <div class="${badgeClass}" style="font-size:0.7rem; padding:2px 6px;">${badgeText}</div>
+    <div class="insight-card ${borderClass}" data-search="${name.toLowerCase()}" style="transition: transform 0.2s, box-shadow 0.2s;">
+        <div class="insight-header" style="margin-bottom:10px; display:flex; align-items:center;">
+            ${avatar}
+            <div style="flex:1; min-width:0;">
+                <div style="display:flex; justify-content:space-between; align-items:start;">
+                    <h3 class="insight-name" style="font-size:1rem; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${name}</h3>
+                    <div class="${badgeClass}" style="font-size:0.7rem; padding:2px 6px; margin-left:5px; flex-shrink:0;">${badgeText}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:5px; margin-top:2px;">
+                    <div class="insight-group" style="font-size:0.75rem; color:var(--text-muted);">${group}</div>
+                    ${cycleBadge} ${manualTag}
+                </div>
+            </div>
         </div>
-        <details>
-            <summary style="cursor:pointer; font-size:0.8rem; color:var(--text-muted); margin-bottom:5px;">Details</summary>
-            ${failListHTML}${commentBlock}
-        </details>
+        
+        <div style="background:var(--bg-input); border-radius:6px; padding:8px; margin-top:10px;">
+            <details>
+                <summary style="cursor:pointer; font-size:0.8rem; color:var(--text-muted); font-weight:600; list-style:none; display:flex; justify-content:space-between; align-items:center;">
+                    <span>Issues / Notes</span>
+                    <i class="fas fa-chevron-down" style="font-size:0.7rem;"></i>
+                </summary>
+                <div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--border-color);">
+                    ${failListHTML}${commentBlock}
+                </div>
+            </details>
+        </div>
         ${actionBtn}
     </div>`;
 }

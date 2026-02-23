@@ -35,9 +35,11 @@ function loadAssessmentDashboard() {
         const pending = testSubs.filter(s => s.status === 'pending').length;
         const completed = testSubs.filter(s => s.status === 'completed').length;
 
+        const icon = t.type === 'vetting' ? '<i class="fas fa-shield-alt" style="color:#9b59b6;"></i>' : (t.type === 'live' ? '<i class="fas fa-satellite-dish" style="color:var(--primary);"></i>' : '<i class="fas fa-file-alt" style="color:var(--text-muted);"></i>');
+
         html += `
             <tr>
-                <td><strong>${t.title}</strong></td>
+                <td>${icon} <strong>${t.title}</strong></td>
                 <td align="center">${testSubs.length}</td>
                 <td align="center"><b style="${pending > 0 ? 'color:var(--primary);' : 'opacity:0.5;'}">${pending}</b></td>
                 <td align="center"><b style="color:green;">${completed}</b></td>
@@ -65,9 +67,12 @@ function loadMarkingQueue() {
 
     container.innerHTML = pending.map(s => `
         <div class="test-card-row" style="border-left: 4px solid var(--primary); margin-bottom:10px;">
-            <div>
-                <strong>${s.trainee}</strong>
-                <div style="font-size:0.8rem; color:var(--text-muted);">${s.testTitle} | Submitted: ${s.date} | Score: ${s.score || 0}%</div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                ${getAvatarHTML(s.trainee)}
+                <div>
+                    <strong>${s.trainee}</strong>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">${s.testTitle} | Submitted: ${s.date} | Score: ${s.score || 0}%</div>
+                </div>
             </div>
             <div style="display:flex; gap:5px;">
                 <button class="btn-primary btn-sm" onclick="approveSubmission('${s.id}')" title="Quick Approve"><i class="fas fa-check"></i></button>
@@ -107,8 +112,10 @@ async function approveSubmission(subId) {
     const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
 
     const existingIdx = recs.findIndex(r => 
-        r.trainee === sub.trainee && 
-        r.assessment === sub.testTitle
+        r.trainee.toLowerCase() === sub.trainee.toLowerCase() && 
+        r.assessment.toLowerCase() === sub.testTitle.toLowerCase() &&
+        (r.groupID||'').toLowerCase() === targetGroup.toLowerCase() &&
+        (r.phase||'').toLowerCase() === phaseVal.toLowerCase()
     );
 
     const newRecord = {
@@ -485,8 +492,10 @@ async function finalizeAdminMarking(subId) {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     
     const existingIdx = records.findIndex(r => 
-        r.trainee === sub.trainee && 
-        r.assessment === sub.testTitle
+        r.trainee.toLowerCase() === sub.trainee.toLowerCase() && 
+        r.assessment.toLowerCase() === sub.testTitle.toLowerCase() &&
+        (r.groupID||'').toLowerCase() === groupId.toLowerCase() &&
+        (r.phase||'').toLowerCase() === phaseVal.toLowerCase()
     );
 
     const newRecord = {

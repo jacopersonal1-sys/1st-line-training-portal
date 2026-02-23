@@ -19,6 +19,17 @@ function formatDuration(ms) {
         : `${seconds}s`;
 }
 
+// --- UI: AVATAR GENERATOR ---
+function getAvatarHTML(name, size = 32) {
+    if(!name) return '';
+    const initials = name.substring(0, 2).toUpperCase();
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    const color = "#" + "00000".substring(0, 6 - c.length) + c;
+    return `<div style="width:${size}px; height:${size}px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:${size*0.4}px; font-weight:bold; margin-right:10px; flex-shrink:0; box-shadow:0 2px 4px rgba(0,0,0,0.1); vertical-align:middle;">${initials}</div>`;
+}
+
 // --- UI: SKELETON LOADER GENERATOR ---
 function getSkeletonRows(cols = 4, rows = 3) {
     let html = '';

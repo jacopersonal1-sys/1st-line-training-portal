@@ -92,7 +92,7 @@ function loadCompletedHistory() {
         html += `
             <tr>
                 <td>${s.date}</td>
-                <td><strong>${s.trainee}</strong></td>
+                <td><div style="display:flex; align-items:center;">${getAvatarHTML(s.trainee)} <strong>${s.trainee}</strong></div></td>
                 <td>${s.testTitle}</td>
                 <td><span style="font-weight:bold; color:${scoreColor};">${s.score}%</span></td>
                 <td>${editedBy}</td>

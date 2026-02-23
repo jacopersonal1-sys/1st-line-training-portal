@@ -37,8 +37,9 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 
 ### Specialized Modules
 - **`js/schedule.js`**: 
-  - Manages Assessment Timeline and Calendar views.
-  - Handles Live Assessment Booking logic (Slots, Conflicts, Cancellations).
+  - Manages Assessment Timeline and Calendar views with **Multi-Group Support** (Schedule A, B, etc.).
+  - **Live Assessment Engine**: Implements **Multi-Group Live Schedules** (Live Schedule A, B...), allowing distinct start dates, durations, and active slot configurations per group.
+  - Handles Booking logic (Slots, Conflicts, Cancellations) and dynamic Trainee-to-Schedule mapping.
 - **`js/live_execution.js` (Live Arena)**: 
   - Real-time interaction between Trainer and Trainee.
   - Uses Polling or Supabase Realtime to sync state (`liveSession` key).
@@ -74,61 +75,6 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 - **`js/attendance.js`**: 
   - Clock In/Out system with Late Reason capture.
   - Admin Register view.
-const DEFAULT_SYSTEM_CONFIG = {
-    // --- CORE PERFORMANCE (Your Request) ---
-    sync_rates: {
-        admin: 10000,      // 10s (High visibility)
-        teamleader: 300000,// 5m (Low bandwidth)
-        trainee: 60000     // 1m (Standard)
-    },
-    heartbeat_rates: {
-        admin: 5000,       // 5s (Realtime monitoring)
-        default: 60000     // 1m (Active status check)
-    },
-    idle_thresholds: {
-        warning: 60000,    // 1m (When to show "Are you there?")
-        logout: 900000     // 15m (Auto-logout duration)
-    },
-
-    // --- ATTENDANCE RULES (New Recommendation) ---
-    attendance: {
-        work_start: "08:00",
-        late_cutoff: "08:15", // Grace period
-        work_end: "17:00",
-        reminder_start: "16:45", // When to start nagging to clock out
-        allow_weekend_login: false
-    },
-
-    // --- SECURITY & ACCESS (New Recommendation) ---
-    security: {
-        maintenance_mode: false,      // If true, only Admins can login
-        min_version: "2.1.46",        // Block login for outdated apps
-        force_kiosk_global: false,    // EMERGENCY: Force everyone into Kiosk mode
-        allowed_ips: []               // CIDR whitelist (e.g. Office IP only)
-    },
-
-    // --- FEATURE FLAGS (New Recommendation) ---
-    // Turn modules on/off instantly if they break or aren't needed
-    features: {
-        vetting_arena: true,
-        live_assessments: true,
-        nps_surveys: true,
-        daily_tips: true
-    },
-
-    // --- MONITORING TOLERANCE (New Recommendation) ---
-    monitoring: {
-        tolerance_ms: 180000,         // 3 mins (Time allowed in external apps before flagging)
-        whitelist_strict: false       // If true, ANY non-whitelisted app is immediately flagged
-    },
-
-    // --- GLOBAL MESSAGING ---
-    announcement: {
-        active: false,
-        message: "",                  // "System maintenance in 10 mins!"
-        type: "info"                  // info, warning, error
-    }
-};
   - **Reminders**: "Clock In" prompt on login (until 4 PM) and "Clock Out" alerts (16:45 - 17:00) with a stern popup at 16:55.
 - **`js/nps_system.js`**: 
   - Net Promoter Score surveys triggered by time or completion.
@@ -137,7 +83,7 @@ const DEFAULT_SYSTEM_CONFIG = {
 
 ### Admin & System
 - **`js/admin_users.js`**: User CRUD, Roster Management, **Onboarding Email Automation**, and **Graduate/Restore** workflows.
-- **`js/admin_sys.js`**: Database Management, System Health, **Super Admin Console**, **Remote Commands** (Kick/Ban), **Audit Logs**, and **System Configuration** (Hot Reload).
+- **`js/admin_sys.js`**: Database Management (**Split Schema** aware), System Health, **Super Admin Console**, **Remote Commands** (Kick/Ban), **Audit Logs**, and **System Configuration** (Hot Reload).
 - **`js/admin_updates.js`**: Auto-Updater logic and Update Logs.
 - **`js/ai_core.js`**: **AI System Analyst** (Gemini Integration). Handles natural language commands, system diagnostics, error analysis, and self-repair logic.
 
@@ -200,6 +146,14 @@ The app uses a **"Smart Split Sync"** with Conflict Resolution:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.1.59**: **Super Admin & AI Overhaul**: **Console 2.0**: Completely redesigned Super Admin Console with tabbed navigation (Overview, Config, Security, Data, AI). **Raw Data Inspector**: Added JSON editor for direct database manipulation with validation. **AI Analyst**: Dedicated chat interface for querying system data (`analyze_records`, `read_config`). **Study Monitor 2.0**: Implemented "Lenient Scoring" (tolerance for short interruptions), robust "Idle Detection" (60s timeout), and "Anti-Jiggle" logic to prevent false positives. **Vetting Arena**: Added "Waiting for Admin" pulse indicator and fixed idle detection to allow waiting in the arena without timeout. **Stability**: Added graceful error handling for cloud sync timeouts (500 errors) and optimistic UI updates for smoother admin interactions.
+- **v2.1.58**: **Vetting Arena Stability & Security**: **Flicker-Free Monitor**: Implemented smart DOM patching in the Admin Monitor to eliminate UI refreshing artifacts. **Group Isolation**: Fixed logic to strictly filter trainees by the selected target group. **Session Locking**: Trainees now remain locked in Kiosk Mode after submission until the Admin ends the session. **Auto-Retake**: Pushing a test in the Arena now automatically archives previous attempts, preventing "Already Submitted" errors. **Sync Protection**: Hardened `js/data.js` to prevent background syncs from overwriting local answers during active tests.
+- **v2.1.57**: **Live Assessment Overhaul**: Implemented **Multi-Group Live Schedules**, allowing Admins to manage separate booking calendars for different cohorts. Added dynamic slot configuration and roster assignment for Live Assessments. **System Stability**: Fixed Factory Reset logic to correctly target the new Split Schema (`app_documents`) and ensure clean state restoration.
+- **v2.1.56**: **Assessment Engine & Visuals**: **Robust Deduplication**: Overhauled Assessment Record creation logic to support "Retraining" scenarios (same user/test in different groups) and implemented case-insensitive matching to prevent duplicates. **Visual Polish**: Added auto-generated Avatars to all Assessment tables (Reporting, History, Marking Queue). Replaced plain text statuses with color-coded badges. **Data Integrity**: Enhanced `submissions` sync logic to prevent "ghost" duplicates on legacy data.
+- **v2.1.55**: **Agent Profile & Search Overhaul**: **Structured Notes**: Upgraded Agent Notes from simple text to a chronological history with timestamps and authors. **Interactive Records**: Added "View" buttons to assessment tables for direct access to digital submissions. **UX Redesign**: Complete visual overhaul of the Agent Profile with generated Avatars, Key Metrics (Risk, Attendance, Avg Score), and a modern dashboard layout. **Deep Linking**: Added URL support (`?agent=Name`) for direct profile sharing. **Fixes**: Resolved `performSmartMerge` crash on partial syncs and fixed search autocomplete binding.
+- **v2.1.54**: **Insight Dashboard Optimization**: **Performance**: Implemented Hash Map pre-indexing to reduce rendering complexity from $O(N \times M)$ to $O(N)$, drastically improving load times for large rosters. **UX**: Added Real-Time Search, Avatar generation, and a new "Pending" status for new hires (fixing false "Pass" positives). **Logic**: Centralized compliance logic and optimized cloud syncing for the Insight module.
+- **v2.1.53**: **Dashboard Visual Overhaul**: Implemented "Glassmorphism" UI for dashboard widgets. Added "Hero Widget" style for Trainee "Up Next" card. Improved hover effects and interactivity for all cards. Added "Badge Grid" styling.
+- **v2.1.52**: **Performance & Logic Optimization**: **System Health**: Optimized Supabase queries in `js/data.js` and `js/dashboard.js` to select specific columns, reducing bandwidth usage. **Network**: Replaced aggressive external pings with browser-native `navigator.connection` API for connectivity checks. **Attendance**: Updated logic to correctly respect the `allow_weekend_login` configuration setting.
 - **v2.1.51**: **Core Logic & Admin Enhancements**: Added **Attendance Editing** (Ignore/Edit Lates), **Active Schedule Filter**, and fixed "Absent" record handling. Enhanced **Super Admin Permissions** for Test Engine & Vetting. Implemented **Robust Heartbeat** (Schema Fallback) for Active Users list. Added **Local Network Ping** for system health. Fixed **AI Co-Pilot** initialization and "Analyzing..." states. **Hotfixes**: Resolved Supabase 400 errors and Attendance Modal Z-Index issues.
 - **v2.1.50**: **Stability & Access Fixes**: Resolved login visibility for retrained agents (previously graduated). Added **Clear Cache** utility for login loops. Enabled **SSO/Windows Integrated Auth** for seamless SharePoint access in Study Monitor. Fixed SharePoint link corruption issues.
 - **v2.1.49**: **AI Co-Pilot Integration**: Added **Gemini System Analyst** for Super Admins. Features include natural language system queries, automated error analysis, self-repair tools, **Background Improvement Suggestions**, and **Full Log Export**. Enhanced Super Admin console with quick actions and deep system visibility.

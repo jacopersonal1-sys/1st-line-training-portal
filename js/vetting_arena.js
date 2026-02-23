@@ -8,6 +8,7 @@ let TRAINEE_NET_POLLER = null;
 let TRAINEE_LOCAL_POLLER = null;
 let VETTING_REALTIME_UNSUB = null;
 let ADMIN_VETTING_REALTIME_UNSUB = null;
+let VETTING_SAVE_TIMEOUT = null; // OPTIMIZATION: Debounce saves
 
 function loadVettingArena() {
     // FEATURE FLAG CHECK
@@ -29,92 +30,47 @@ function renderAdminArena() {
     if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
     if (ADMIN_VETTING_REALTIME_UNSUB) { try { ADMIN_VETTING_REALTIME_UNSUB(); } catch (e) {} ADMIN_VETTING_REALTIME_UNSUB = null; }
 
-    const container = document.getElementById('vetting-arena-content');
-    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false, "testId":null, "trainees":{}}');
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const vettingTests = tests.filter(t => t.type === 'vetting');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-
-    let controlPanel = '';
-    
-    if (!session.active) {
-        // IDLE STATE
-        let options = '<option value="">-- Select Vetting Test --</option>';
-        if (vettingTests.length > 0) {
-            options += vettingTests.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
-        } else {
-            options += '<option value="" disabled>No Vetting Tests Available (Create in Test Engine)</option>';
-        }
-        
-        let groupOptions = '<option value="all">All Groups</option>';
-        Object.keys(rosters).sort().reverse().forEach(gid => {
-             const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
-             groupOptions += `<option value="${gid}">${label}</option>`;
-        });
-
-        controlPanel = `
-            <div class="card" style="text-align:center; padding:20px;">
-                <i class="fas fa-dungeon" style="font-size:3rem; color:var(--text-muted); margin-bottom:20px;"></i>
-                <h3>Start Vetting Session</h3>
-                <p style="color:var(--text-muted); margin-bottom:20px;">Select a test and target group. This will enable the Vetting Arena tab for them.</p>
-                <div style="max-width:500px; margin:0 auto; display:flex; flex-direction:column; gap:10px;">
-                    <label style="text-align:left; font-weight:bold;">1. Select Vetting Test</label>
-                    <select id="vettingTestSelect" style="margin:0;">${options}</select>
-                    <label style="text-align:left; font-weight:bold;">2. Select Target Group</label>
-                    <select id="vettingGroupSelect" style="margin:0;" ${CURRENT_USER.role === 'special_viewer' ? 'disabled' : ''}>${groupOptions}</select>
-                    <button class="btn-primary" style="margin-top:10px;" onclick="startVettingSession()">PUSH TEST</button>
-                </div>
-            </div>
+    // INJECT STYLES FOR VISUALS
+    if (!document.getElementById('vetting-visuals')) {
+        const style = document.createElement('style');
+        style.id = 'vetting-visuals';
+        style.innerHTML = `
+            .pulse-dot { display: inline-block; width: 10px; height: 10px; background-color: #e74c3c; border-radius: 50%; margin-left: 10px; animation: pulse-red 2s infinite; vertical-align: middle; }
+            @keyframes pulse-red {
+                0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
+                70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
+                100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
+            }
+            .row-blocked { background-color: rgba(255, 82, 82, 0.05) !important; }
         `;
-    } else {
-        // ACTIVE STATE
-        const activeTest = tests.find(t => t.id == session.testId);
-        const title = activeTest ? activeTest.title : "Unknown Test";
-        const targetGroup = session.targetGroup === 'all' || !session.targetGroup ? 'All Groups' : ((typeof getGroupLabel === 'function') ? getGroupLabel(session.targetGroup) : session.targetGroup);
-        
-        controlPanel = `
-            <div class="card" style="border-left:5px solid #2ecc71;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <h3 style="margin:0; color:#2ecc71;">Session Active: ${title}</h3>
-                        <p style="margin:5px 0 0 0; color:var(--text-muted);">Target: <strong>${targetGroup}</strong> | Monitoring Trainees...</p>
-                    </div>
-                    ${CURRENT_USER.role === 'special_viewer' ? '' : `<button class="btn-danger" onclick="endVettingSession()">END SESSION</button>`}
-                </div>
-            </div>
-            
-            <div class="card">
-                <h3>Live Monitor</h3>
-                <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-                    <button class="btn-secondary btn-sm" onclick="loadVettingArena()"><i class="fas fa-sync"></i> Refresh</button>
-                </div>
-                <table class="admin-table">
-                    <thead>
-                        <tr>
-                            <th>Trainee</th>
-                            <th>Status</th>
-                            <th>Time Rem.</th>
-                            <th>Screens</th>
-                            <th>Apps</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${renderTraineeRows(session.trainees)}
-                    </tbody>
-                </table>
-            </div>
-        `;
+        document.head.appendChild(style);
     }
 
-    container.innerHTML = controlPanel;
+    const container = document.getElementById('vetting-arena-content');
+    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false, "testId":null, "trainees":{}}');
+    
+    // FLICKER FIX: Check current view mode to avoid full re-render
+    const currentMode = container.getAttribute('data-view-mode');
+    const targetMode = session.active ? 'active' : 'idle';
 
-    // Prefer Realtime to get instant trainee updates (free-tier friendly: no constant reads).
-    // Keep the existing 5s UI refresh as a fallback/monitor tick.
+    if (currentMode !== targetMode) {
+        container.setAttribute('data-view-mode', targetMode);
+        if (session.active) {
+            renderActiveAdminShell(container, session);
+        } else {
+            renderIdleAdminShell(container);
+        }
+    }
+
+    // Update Data (Only if active)
+    if (session.active) {
+        updateVettingTableRows(session);
+    }
+
+    // Realtime Subscription
     if (typeof subscribeToDocKey === 'function') {
         ADMIN_VETTING_REALTIME_UNSUB = subscribeToDocKey('vettingSession', (content) => {
             localStorage.setItem('vettingSession', JSON.stringify(content || { active: false, trainees: {} }));
-            // Re-render quickly to reflect changes (only if this view is visible)
             const c = document.getElementById('vetting-arena-content');
             if (c && c.offsetParent !== null) renderAdminArena();
         });
@@ -126,41 +82,154 @@ function renderAdminArena() {
     }
 }
 
-function renderTraineeRows(trainees) {
-    if (!trainees || Object.keys(trainees).length === 0) return '<tr><td colspan="6" class="text-center">No trainees active yet.</td></tr>';
+function renderIdleAdminShell(container) {
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const vettingTests = tests.filter(t => t.type === 'vetting');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+
+    let options = '<option value="">-- Select Vetting Test --</option>';
+    if (vettingTests.length > 0) {
+        options += vettingTests.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
+    } else {
+        options += '<option value="" disabled>No Vetting Tests Available (Create in Test Engine)</option>';
+    }
     
-    return Object.entries(trainees).map(([user, data]) => {
-        let statusBadge = '<span class="status-badge status-improve">Waiting</span>';
-        if (data.status === 'started') statusBadge = '<span class="status-badge status-semi">In Progress</span>';
-        if (data.status === 'completed') statusBadge = '<span class="status-badge status-pass">Completed</span>';
+    let groupOptions = '<option value="all">All Groups</option>';
+    Object.keys(rosters).sort().reverse().forEach(gid => {
+            const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
+            groupOptions += `<option value="${gid}">${label}</option>`;
+    });
+
+    container.innerHTML = `
+        <div class="card" style="text-align:center; padding:20px;">
+            <i class="fas fa-dungeon" style="font-size:3rem; color:var(--text-muted); margin-bottom:20px;"></i>
+            <h3>Start Vetting Session</h3>
+            <p style="color:var(--text-muted); margin-bottom:20px;">Select a test and target group. This will enable the Vetting Arena tab for them.</p>
+            <div style="max-width:500px; margin:0 auto; display:flex; flex-direction:column; gap:10px;">
+                <label style="text-align:left; font-weight:bold;">1. Select Vetting Test</label>
+                <select id="vettingTestSelect" style="margin:0;">${options}</select>
+                <label style="text-align:left; font-weight:bold;">2. Select Target Group</label>
+                <select id="vettingGroupSelect" style="margin:0;" ${CURRENT_USER.role === 'special_viewer' ? 'disabled' : ''}>${groupOptions}</select>
+                <button class="btn-primary" style="margin-top:10px;" onclick="startVettingSession()">PUSH TEST</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderActiveAdminShell(container, session) {
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const activeTest = tests.find(t => t.id == session.testId);
+    const title = activeTest ? activeTest.title : "Unknown Test";
+    const targetGroup = session.targetGroup === 'all' || !session.targetGroup ? 'All Groups' : ((typeof getGroupLabel === 'function') ? getGroupLabel(session.targetGroup) : session.targetGroup);
+    
+    // Calculate Stats
+    const trainees = session.trainees || {};
+    const total = Object.keys(trainees).length;
+    const activeCount = Object.values(trainees).filter(t => t.status === 'started').length;
+    const blockedCount = Object.values(trainees).filter(t => t.status === 'blocked').length;
+    const completedCount = Object.values(trainees).filter(t => t.status === 'completed').length;
+    
+    container.innerHTML = `
+        <div class="card" style="border-left:5px solid #2ecc71; background: linear-gradient(to right, rgba(46, 204, 113, 0.05), transparent);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <div style="width:50px; height:50px; background:#2ecc71; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:1.5rem; box-shadow:0 4px 10px rgba(46, 204, 113, 0.3);">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <div>
+                        <h3 style="margin:0; color:#2ecc71; display:flex; align-items:center;">${title} <span class="pulse-dot" title="Live Session Active"></span></h3>
+                        <p style="margin:5px 0 0 0; color:var(--text-muted);">Target: <strong>${targetGroup}</strong></p>
+                    </div>
+                </div>
+                ${CURRENT_USER.role === 'special_viewer' ? '' : `<button class="btn-danger" onclick="endVettingSession()"><i class="fas fa-stop-circle"></i> END SESSION</button>`}
+            </div>
+            
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px;">
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold;">${total}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Connected</div></div>
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#2ecc71;">${activeCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">In Progress</div></div>
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#ff5252;">${blockedCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Blocked</div></div>
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#3498db;">${completedCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Completed</div></div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3 style="margin:0;"><i class="fas fa-desktop"></i> Live Monitor</h3>
+                <button class="btn-secondary btn-sm" onclick="loadVettingArena()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Trainee</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                        <th>Security Health</th>
+                        <th>Controls</th>
+                    </tr>
+                </thead>
+                <tbody id="vetting-monitor-body">
+                    <!-- Rows injected via updateVettingTableRows -->
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function updateVettingTableRows(session) {
+    const tbody = document.getElementById('vetting-monitor-body');
+    if (!tbody) return;
+
+    const trainees = session.trainees || {};
+    const targetGroup = session.targetGroup;
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+
+    // FILTER: Only show trainees in the target group
+    let filteredEntries = Object.entries(trainees);
+    
+    if (targetGroup && targetGroup !== 'all') {
+        const allowedMembers = rosters[targetGroup] || [];
+        filteredEntries = filteredEntries.filter(([user, data]) => allowedMembers.includes(user));
+    }
+
+    if (filteredEntries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center">No trainees active yet.</td></tr>';
+        return;
+    }
+
+    const html = filteredEntries.map(([user, data]) => {
+        let statusBadge = '<span class="status-badge status-improve"><i class="fas fa-hourglass-half"></i> Waiting</span>';
+        let rowClass = '';
+
+        if (data.status === 'started') { statusBadge = '<span class="status-badge status-semi"><i class="fas fa-play"></i> In Progress</span>'; }
+        if (data.status === 'completed') { statusBadge = '<span class="status-badge status-pass"><i class="fas fa-check"></i> Completed</span>'; }
         if (data.status === 'blocked') {
             statusBadge = data.override 
-                ? '<span class="status-badge status-improve">Override Sent</span>' 
-                : '<span class="status-badge status-fail">Blocked</span>';
+                ? '<span class="status-badge status-improve"><i class="fas fa-unlock"></i> Override Sent</span>' 
+                : '<span class="status-badge status-fail"><i class="fas fa-ban"></i> Blocked</span>';
+            rowClass = 'row-blocked';
         }
-        if (data.status === 'ready') statusBadge = '<span class="status-badge status-pass">Ready</span>';
+        if (data.status === 'ready') statusBadge = '<span class="status-badge status-pass"><i class="fas fa-thumbs-up"></i> Ready</span>';
         
-        let securityAlert = '';
+        // Consolidated Security Column
+        let securityHtml = '<span style="color:#2ecc71;"><i class="fas fa-shield-alt"></i> Secure</span>';
         if (data.security) {
-            if (data.security.screens > 1) securityAlert += ` <i class="fas fa-desktop" style="color:#ff5252; margin-right:5px;" title="Multiple Screens Detected"></i>`;
+            const issues = [];
+            if (data.security.screens > 1) issues.push(`${data.security.screens} Screens`);
+            if (data.security.apps && data.security.apps.length > 0) issues.push(`${data.security.apps.length} Apps`);
             
-            // Check for forbidden apps (Browsers/WhatsApp)
-            const badApps = data.security.apps || [];
-            if (badApps.length > 0) securityAlert += ` <i class="fas fa-exclamation-triangle" style="color:#ff5252;" title="Forbidden Apps Detected"></i>`;
+            if (issues.length > 0) {
+                securityHtml = `<span style="color:#ff5252; font-weight:bold;"><i class="fas fa-exclamation-triangle"></i> ${issues.join(', ')}</span>`;
+                if (data.security.apps.length > 0) {
+                    securityHtml += `<div style="font-size:0.7rem; color:#ff5252; max-width:200px; overflow:hidden; text-overflow:ellipsis;">${data.security.apps.join(', ')}</div>`;
+                }
+            }
         }
 
-        let actions = '-';
+        let mainAction = '';
         if (data.status === 'started') {
-            if (CURRENT_USER.role === 'special_viewer') actions = 'In Progress';
-            else
-            actions = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${user}')">Force Stop</button>`;
-        } else if (data.status === 'blocked') {
-            if (data.override) {
-                actions = `<span style="font-size:0.8rem; color:var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Waiting for agent...</span>`;
-            } else {
-                actions = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${user}')">Allow / Override</button>`;
-            }
-            if (CURRENT_USER.role === 'special_viewer') actions = 'Blocked';
+            if (CURRENT_USER.role !== 'special_viewer') mainAction = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${user}')" title="Force Stop"><i class="fas fa-stop"></i></button>`;
+        } else if (data.status === 'blocked' && !data.override && CURRENT_USER.role !== 'special_viewer') {
+            mainAction = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${user}')" title="Override"><i class="fas fa-key"></i></button>`;
         }
 
         // NEW: Security Switch (Replaces Lock Button)
@@ -169,33 +238,34 @@ function renderTraineeRows(trainees) {
         const disabledAttr = CURRENT_USER.role === 'special_viewer' ? 'disabled' : '';
         
         const switchHtml = `
-            <div style="display:flex; align-items:center; gap:8px; margin-top:5px;" title="Toggle Security Rules">
-                <label class="switch" style="margin-bottom:0;">
+            <label class="switch" style="margin-bottom:0;" title="Toggle Security Rules">
                     <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="toggleSecurity('${user}', !this.checked)">
                     <span class="slider round"></span>
-                </label>
-                <span style="font-size:0.75rem; color:${isSecurityOn ? '#2ecc71' : '#e67e22'}; font-weight:bold;">
-                    ${isSecurityOn ? 'SECURE' : 'OFF'}
-                </span>
-            </div>
+            </label>
         `;
 
-        if (actions === '-') actions = switchHtml;
-        else actions = `<div style="display:flex; flex-direction:column; gap:5px;">${actions}<div>${switchHtml}</div></div>`;
+        const timerDisplay = data.timer ? `<span style="font-family:monospace; font-weight:bold; font-size:1.1rem;">${data.timer}</span>` : '--:--';
 
         return `
-            <tr>
-                <td><strong>${user}</strong></td>
+            <tr class="${rowClass}">
+                <td><div style="display:flex; align-items:center;">${getAvatarHTML(user)} <strong>${user}</strong></div></td>
                 <td>${statusBadge}</td>
-                <td style="font-family:monospace; font-weight:bold;">${data.timer || '--:--'}</td>
-                <td>${data.security ? data.security.screens : '-'} ${securityAlert}</td>
-                <td><small style="color:#e74c3c;">${data.security && data.security.apps.length > 0 ? data.security.apps.join(', ') : ''}</small></td>
+                <td>${timerDisplay}</td>
+                <td>${securityHtml}</td>
                 <td>
-                    ${actions}
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        ${switchHtml}
+                        ${mainAction}
+                    </div>
                 </td>
             </tr>
         `;
     }).join('');
+
+    // Only update DOM if content changed (prevents selection loss)
+    if (tbody.innerHTML !== html) {
+        tbody.innerHTML = html;
+    }
 }
 
 async function startVettingSession() {
@@ -257,6 +327,14 @@ function renderTraineeArena() {
     const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}'); 
     
     if (!session.active) {
+        // ENSURE UNLOCK: If session is inactive, force kiosk off and restore sidebar
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            ipcRenderer.invoke('set-kiosk-mode', false).catch(()=>{});
+            ipcRenderer.invoke('set-content-protection', false).catch(()=>{});
+        }
+        toggleSidebar(true);
+
         container.innerHTML = `
             <div style="text-align:center; padding:50px;">
                 <i class="fas fa-door-closed" style="font-size:4rem; color:var(--text-muted); margin-bottom:20px;"></i>
@@ -288,11 +366,40 @@ function renderTraineeArena() {
     const myData = session.trainees[CURRENT_USER.user];
     
     if (myData && myData.status === 'completed') {
+        // Inject styles for the waiting indicator
+        if (!document.getElementById('vetting-waiting-style')) {
+            const style = document.createElement('style');
+            style.id = 'vetting-waiting-style';
+            style.innerHTML = `
+                @keyframes pulse-green {
+                    0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); }
+                    70% { box-shadow: 0 0 0 10px rgba(46, 204, 113, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+                }
+                .waiting-pulse {
+                    display: inline-flex; align-items: center; gap: 10px;
+                    padding: 12px 25px; background: rgba(46, 204, 113, 0.1);
+                    border: 1px solid #2ecc71; border-radius: 50px;
+                    color: #2ecc71; font-weight: bold;
+                    animation: pulse-green 2s infinite;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
         container.innerHTML = `
-            <div style="text-align:center; padding:50px;">
-                <i class="fas fa-check-circle" style="font-size:4rem; color:#2ecc71; margin-bottom:20px;"></i>
-                <h3>Submitted Vetting</h3>
-                <p>Please wait for the next test to be pushed.</p>
+            <div style="text-align:center; padding:50px; max-width:600px; margin:0 auto;">
+                <i class="fas fa-lock" style="font-size:4rem; color:#f1c40f; margin-bottom:20px;"></i>
+                <h3>Assessment Submitted</h3>
+                <p style="font-size:1.1rem; margin-bottom:30px;">Your test has been submitted securely.</p>
+                
+                <div class="waiting-pulse">
+                    <i class="fas fa-wifi"></i> Waiting for Admin to End Session...
+                </div>
+                
+                <div style="margin-top:30px; font-size:0.9rem; color:var(--text-muted);">
+                    Please remain seated. Your screen is still monitored.
+                </div>
             </div>`;
         return;
     }
@@ -664,7 +771,14 @@ async function updateTraineeStatus(status, timerStr = "") {
     }
 
     localStorage.setItem('vettingSession', JSON.stringify(session));
-    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], false);
+    
+    // OPTIMIZATION: Debounce Cloud Save (1.5s)
+    // Prevents database throttling if status flickers (e.g. app opened/closed quickly)
+    if (VETTING_SAVE_TIMEOUT) clearTimeout(VETTING_SAVE_TIMEOUT);
+    
+    VETTING_SAVE_TIMEOUT = setTimeout(() => {
+        if(typeof saveToServer === 'function') saveToServer(['vettingSession'], false);
+    }, 1500);
 }
 
 function startActiveTestMonitoring() {
@@ -711,20 +825,22 @@ function startActiveTestMonitoring() {
 }
 
 // Called by assessment.js when submitting
-async function exitArena() {
+async function exitArena(keepLocked = false) {
     stopTraineePollers();
     if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
     
-    if (typeof require !== 'undefined') {
-        const { ipcRenderer } = require('electron');
-        try {
-            await ipcRenderer.invoke('set-kiosk-mode', false);
-            await ipcRenderer.invoke('set-content-protection', false);
-        } catch(e) { console.error("Exit Kiosk Error", e); }
+    if (!keepLocked) {
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            try {
+                await ipcRenderer.invoke('set-kiosk-mode', false);
+                await ipcRenderer.invoke('set-content-protection', false);
+            } catch(e) { console.error("Exit Kiosk Error", e); }
+        }
+        
+        // Restore Sidebar
+        toggleSidebar(true);
     }
-    
-    // Restore Sidebar
-    toggleSidebar(true);
 
     await updateTraineeStatus('completed');
     renderTraineeArena();

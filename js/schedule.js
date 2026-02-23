@@ -2,6 +2,7 @@
 
 // State Tracker for Timeline
 let ACTIVE_SCHED_ID = 'A'; 
+let ACTIVE_LIVE_SCHED_ID = 'A'; // NEW: Track Live Schedule Tab
 let VIEW_MODE = 'list'; // 'list' or 'calendar'
 let DRAG_SRC_INDEX = null; // Track item being dragged
 let CALENDAR_MONTH = new Date();
@@ -40,7 +41,8 @@ async function secureScheduleSave() {
 
         try {
             // PARAMETER 'false' = SAFE MERGE (Prevents booking conflicts)
-            await saveToServer(['schedules', 'liveBookings', 'cancellationCounts'], false); 
+            // ADDED: liveSchedules
+            await saveToServer(['schedules', 'liveBookings', 'cancellationCounts', 'liveSchedules'], false); 
         } catch(e) {
             console.error("Schedule Cloud Sync Error:", e);
         } finally {
@@ -360,60 +362,95 @@ function renderLiveTable() {
     if(!tbody) return;
     
     // --- FOCUS PROTECTION ---
-    // If the booking modal is open, do not re-render the table underneath it,
-    // as it might cause visual glitches.
-    if (!document.getElementById('bookingModal').classList.contains('hidden')) {
-        return;
+    if (!document.getElementById('bookingModal').classList.contains('hidden')) return;
+
+    // 1. MIGRATION & INIT
+    let liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || 'null');
+    if (!liveSchedules) {
+        const oldSettings = JSON.parse(localStorage.getItem('liveScheduleSettings') || '{}');
+        liveSchedules = {
+            "A": {
+                startDate: oldSettings.startDate || new Date().toISOString().split('T')[0],
+                days: oldSettings.days || 5,
+                activeSlots: oldSettings.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+                assigned: null
+            }
+        };
+        localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+        // Save migration immediately
+        if(typeof saveToServer === 'function') saveToServer(['liveSchedules'], true);
     }
 
-    // 1. Get Settings & Data
-    const settings = JSON.parse(localStorage.getItem('liveScheduleSettings') || '{"days":5}');
-    const startDate = settings.startDate ? settings.startDate : new Date().toISOString().split('T')[0];
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const activeSlots = settings.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
+    // 2. DETERMINE ACTIVE SCHEDULE
+    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader');
     
-    // 2. Admin Controls Visibility
-    if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
-        const adminPanel = document.querySelector('#live-assessment .admin-only');
-        adminPanel.classList.remove('hidden');
-
-        // INJECT SLOTS IF MISSING
-        if (!document.getElementById('liveSlotConfig')) {
-             const slotDiv = document.createElement('div');
-             slotDiv.id = 'liveSlotConfig';
-             slotDiv.style.cssText = "margin-top:15px; padding-top:10px; border-top:1px dashed var(--border-color); display:flex; gap:15px; flex-wrap:wrap;";
-             slotDiv.innerHTML = `
-                <label style="font-size:0.9rem; font-weight:bold;">Active Hours:</label>
-                <label style="cursor:pointer;"><input type="checkbox" id="slot_100PM"> 1:00 PM</label>
-                <label style="cursor:pointer;"><input type="checkbox" id="slot_200PM"> 2:00 PM</label>
-                <label style="cursor:pointer;"><input type="checkbox" id="slot_300PM"> 3:00 PM</label>
-                <label style="cursor:pointer;"><input type="checkbox" id="slot_400PM"> 4:00 PM</label>
-             `;
-             adminPanel.appendChild(slotDiv);
+    if (!isAdmin) {
+        // Trainee: Auto-select assigned schedule
+        const mySchedId = getTraineeLiveScheduleId(CURRENT_USER.user, liveSchedules);
+        if (!mySchedId) {
+             const container = document.getElementById('live-assessment');
+             if(container) container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-calendar-times" style="font-size:3rem; margin-bottom:15px;"></i><br>No live assessment schedule assigned to your group.</div>`;
+             return;
         }
+        ACTIVE_LIVE_SCHED_ID = mySchedId;
+    } else {
+        // Admin: Ensure active ID exists
+        if (!liveSchedules[ACTIVE_LIVE_SCHED_ID]) {
+            ACTIVE_LIVE_SCHED_ID = Object.keys(liveSchedules).sort()[0] || 'A';
+        }
+    }
 
-        document.getElementById('liveStartDate').value = startDate;
-        document.getElementById('liveNumDays').value = settings.days;
-        
-        // Populate Slot Checkboxes
-        const slotContainer = document.getElementById('liveSlotConfig');
-        if (slotContainer) {
-            ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].forEach(slot => {
-                const cb = document.getElementById(`slot_${slot.replace(/[: ]/g, '')}`);
-                if(cb) cb.checked = activeSlots.includes(slot);
-            });
+    const currentSched = liveSchedules[ACTIVE_LIVE_SCHED_ID];
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    
+    // 3. RENDER ADMIN CONTROLS (TABS & TOOLBAR)
+    if(isAdmin) {
+        const adminPanel = document.querySelector('#live-assessment .admin-only');
+        if(adminPanel) {
+            adminPanel.classList.remove('hidden');
+            
+            // Inject Tabs & Toolbar
+            let controlsHtml = buildLiveTabs(liveSchedules) + buildLiveToolbar(currentSched);
+            
+            // Inject Settings Form (Existing inputs)
+            controlsHtml += `
+                <div style="margin-top:15px; padding-top:15px; border-top:1px dashed var(--border-color);">
+                    <div style="display:flex; gap:15px; align-items:end;">
+                        <div><label>Start Date</label><input type="date" id="liveStartDate" value="${currentSched.startDate}"></div>
+                        <div><label>Days</label><input type="number" id="liveNumDays" value="${currentSched.days}" min="1" max="30" style="width:80px;"></div>
+                        <button class="btn-primary" onclick="saveLiveScheduleSettings()" style="height:38px;">Update Settings</button>
+                        <button class="btn-danger" onclick="clearLiveBookings()" style="height:38px; margin-left:auto;">Clear All Bookings</button>
+                    </div>
+                    <div id="liveSlotConfig" style="margin-top:10px; display:flex; gap:15px; flex-wrap:wrap;">
+                        <label style="font-size:0.9rem; font-weight:bold;">Active Hours:</label>
+                        ${["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].map(slot => `
+                            <label style="cursor:pointer;">
+                                <input type="checkbox" id="slot_${slot.replace(/[: ]/g, '')}" ${currentSched.activeSlots && currentSched.activeSlots.includes(slot) ? 'checked' : ''}> ${slot}
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            adminPanel.innerHTML = controlsHtml;
+            
+            // Populate Dropdown if unassigned
+            if (!currentSched.assigned) {
+                populateScheduleDropdown('liveAssignSelect');
+            }
         }
     } else {
-        document.querySelector('#live-assessment .admin-only').classList.add('hidden');
+        const adminPanel = document.querySelector('#live-assessment .admin-only');
+        if(adminPanel) adminPanel.classList.add('hidden');
     }
 
-    // 3. Generate Valid Dates (Skipping Weekends/Holidays)
-    const validDays = getNextBusinessDays(startDate, parseInt(settings.days) || 5);
-
-    // 4. Define Slots
-    const timeSlots = activeSlots;
+    // 4. GENERATE TABLE
+    const startDate = currentSched.startDate;
+    const daysCount = parseInt(currentSched.days) || 5;
+    const activeSlots = currentSched.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
+    
+    const validDays = getNextBusinessDays(startDate, daysCount);
     const trainers = ["Trainer 1", "Trainer 2"];
-
     const searchTerm = document.getElementById('liveBookingSearch') ? document.getElementById('liveBookingSearch').value.toLowerCase() : '';
 
     let html = '';
@@ -426,7 +463,7 @@ function renderLiveTable() {
             <strong>${dayStr}</strong><br><span style="font-size:0.8rem; color:var(--text-muted);">${dateKey}</span>
         </td>`;
 
-        timeSlots.forEach(time => {
+        activeSlots.forEach(time => {
             html += `<td style="vertical-align:top; padding:5px;">`;
             
             // Render Both Trainer Slots per Time Cell
@@ -528,6 +565,234 @@ function renderLiveTable() {
     tbody.innerHTML = html;
 }
 
+// --- LIVE SCHEDULE HELPERS ---
+
+function buildLiveTabs(liveSchedules) {
+    const keys = Object.keys(liveSchedules).sort();
+    let html = '<div class="sched-tabs-container" style="display:flex; gap:5px; border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:15px; overflow-x:auto;">';
+    
+    html += keys.map(key => {
+        const isActive = key === ACTIVE_LIVE_SCHED_ID ? 'active' : '';
+        const data = liveSchedules[key];
+        let subLabel = "Unassigned";
+        if (data.assigned) {
+            subLabel = (typeof getGroupLabel === 'function') ? getGroupLabel(data.assigned).split('[')[0] : data.assigned;
+        }
+        return `<button class="sched-tab-btn ${isActive}" onclick="switchLiveScheduleTab('${key}')" style="padding: 8px 15px; border:1px solid var(--border-color); background:var(--bg-card); cursor:pointer; border-radius:6px; min-width:100px; text-align:left;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:bold; font-size:0.9rem;">Live Schedule ${key}</span>
+                ${CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader' ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteLiveSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
+            </div>
+            <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
+        </button>`;
+    }).join('');
+
+    if (CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader') {
+        html += `<button onclick="createNewLiveSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Live Schedule"><i class="fas fa-plus"></i></button>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function buildLiveToolbar(scheduleData) {
+    if (scheduleData.assigned) {
+        const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;">
+            <div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div>
+            <div><button class="btn-danger btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', null)">Unassign</button></div>
+        </div>`;
+    } else {
+        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;">
+            <i class="fas fa-exclamation-circle" style="color:orange;"></i>
+            <span style="margin-right:auto;">This schedule is currently unassigned.</span>
+            <select id="liveAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select>
+            <button class="btn-primary btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', document.getElementById('liveAssignSelect').value)">Assign Roster</button>
+        </div>`;
+    }
+}
+
+function switchLiveScheduleTab(id) {
+    ACTIVE_LIVE_SCHED_ID = id;
+    renderLiveTable();
+}
+
+async function createNewLiveSchedule() {
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const keys = Object.keys(liveSchedules).sort();
+    const lastKey = keys[keys.length - 1];
+    const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
+    
+    if (confirm(`Create new Live Schedule '${nextKey}'?`)) {
+        liveSchedules[nextKey] = { 
+            startDate: new Date().toISOString().split('T')[0],
+            days: 5,
+            activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+            assigned: null 
+        };
+        localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+        await secureScheduleSave();
+        ACTIVE_LIVE_SCHED_ID = nextKey;
+        renderLiveTable();
+    }
+}
+
+async function deleteLiveSchedule(id) {
+    if (!confirm(`Delete Live Schedule ${id}?`)) return;
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    delete liveSchedules[id];
+    
+    if (Object.keys(liveSchedules).length === 0) {
+        liveSchedules["A"] = { startDate: new Date().toISOString().split('T')[0], days: 5, activeSlots: [], assigned: null };
+    }
+    
+    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+    await secureScheduleSave();
+    ACTIVE_LIVE_SCHED_ID = Object.keys(liveSchedules).sort()[0];
+    renderLiveTable();
+}
+
+async function assignRosterToLiveSchedule(schedId, groupId) {
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    
+    // Check conflict
+    if (groupId) {
+        const conflict = Object.keys(liveSchedules).find(k => liveSchedules[k].assigned === groupId);
+        if (conflict) {
+            if (!confirm(`Group '${groupId}' is already assigned to Live Schedule ${conflict}. Move it here?`)) return;
+            liveSchedules[conflict].assigned = null;
+        }
+    }
+
+    liveSchedules[schedId].assigned = groupId;
+    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+    await secureScheduleSave();
+    renderLiveTable();
+}
+
+function getTraineeLiveScheduleId(username, liveSchedules) {
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    let myGroupId = null;
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (members.includes(username)) { myGroupId = gid; break; }
+    }
+    if (!myGroupId) return null;
+    return Object.keys(liveSchedules).find(key => liveSchedules[key].assigned === myGroupId) || null;
+}
+
+// --- LIVE SCHEDULE HELPERS ---
+
+function buildLiveTabs(liveSchedules) {
+    const keys = Object.keys(liveSchedules).sort();
+    let html = '<div class="sched-tabs-container" style="display:flex; gap:5px; border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:15px; overflow-x:auto;">';
+    
+    html += keys.map(key => {
+        const isActive = key === ACTIVE_LIVE_SCHED_ID ? 'active' : '';
+        const data = liveSchedules[key];
+        let subLabel = "Unassigned";
+        if (data.assigned) {
+            subLabel = (typeof getGroupLabel === 'function') ? getGroupLabel(data.assigned).split('[')[0] : data.assigned;
+        }
+        return `<button class="sched-tab-btn ${isActive}" onclick="switchLiveScheduleTab('${key}')" style="padding: 8px 15px; border:1px solid var(--border-color); background:var(--bg-card); cursor:pointer; border-radius:6px; min-width:100px; text-align:left;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:bold; font-size:0.9rem;">Live Schedule ${key}</span>
+                ${CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader' ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteLiveSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
+            </div>
+            <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
+        </button>`;
+    }).join('');
+
+    if (CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader') {
+        html += `<button onclick="createNewLiveSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Live Schedule"><i class="fas fa-plus"></i></button>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function buildLiveToolbar(scheduleData) {
+    if (scheduleData.assigned) {
+        const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;">
+            <div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div>
+            <div><button class="btn-danger btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', null)">Unassign</button></div>
+        </div>`;
+    } else {
+        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;">
+            <i class="fas fa-exclamation-circle" style="color:orange;"></i>
+            <span style="margin-right:auto;">This schedule is currently unassigned.</span>
+            <select id="liveAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select>
+            <button class="btn-primary btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', document.getElementById('liveAssignSelect').value)">Assign Roster</button>
+        </div>`;
+    }
+}
+
+function switchLiveScheduleTab(id) {
+    ACTIVE_LIVE_SCHED_ID = id;
+    renderLiveTable();
+}
+
+async function createNewLiveSchedule() {
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const keys = Object.keys(liveSchedules).sort();
+    const lastKey = keys[keys.length - 1];
+    const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
+    
+    if (confirm(`Create new Live Schedule '${nextKey}'?`)) {
+        liveSchedules[nextKey] = { 
+            startDate: new Date().toISOString().split('T')[0],
+            days: 5,
+            activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+            assigned: null 
+        };
+        localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+        await secureScheduleSave();
+        ACTIVE_LIVE_SCHED_ID = nextKey;
+        renderLiveTable();
+    }
+}
+
+async function deleteLiveSchedule(id) {
+    if (!confirm(`Delete Live Schedule ${id}?`)) return;
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    delete liveSchedules[id];
+    
+    if (Object.keys(liveSchedules).length === 0) {
+        liveSchedules["A"] = { startDate: new Date().toISOString().split('T')[0], days: 5, activeSlots: [], assigned: null };
+    }
+    
+    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+    await secureScheduleSave();
+    ACTIVE_LIVE_SCHED_ID = Object.keys(liveSchedules).sort()[0];
+    renderLiveTable();
+}
+
+async function assignRosterToLiveSchedule(schedId, groupId) {
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    
+    // Check conflict
+    if (groupId) {
+        const conflict = Object.keys(liveSchedules).find(k => liveSchedules[k].assigned === groupId);
+        if (conflict) {
+            if (!confirm(`Group '${groupId}' is already assigned to Live Schedule ${conflict}. Move it here?`)) return;
+            liveSchedules[conflict].assigned = null;
+        }
+    }
+
+    liveSchedules[schedId].assigned = groupId;
+    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+    await secureScheduleSave();
+    renderLiveTable();
+}
+
+function getTraineeLiveScheduleId(username, liveSchedules) {
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    let myGroupId = null;
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (members.includes(username)) { myGroupId = gid; break; }
+    }
+    if (!myGroupId) return null;
+    return Object.keys(liveSchedules).find(key => liveSchedules[key].assigned === myGroupId) || null;
+}
+
 // --- BOOKING LOGIC ---
 
 let PENDING_BOOKING = null;
@@ -556,14 +821,11 @@ function openBookingModal(date, time, trainer) {
     
     // FILTER FOR TRAINEES
     if (CURRENT_USER.role === 'trainee') {
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-        const schedId = getTraineeScheduleId(CURRENT_USER.user, schedules);
+        // Ensure user is assigned to a schedule (already checked in renderLiveTable, but safe to double check)
+        const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+        const schedId = getTraineeLiveScheduleId(CURRENT_USER.user, liveSchedules);
         
-        // User must be assigned to a schedule to book, but we show all available live assessments
-        // This ensures generic schedule items (e.g. "Live Assessment") don't filter out specific tests.
-        if (!schedId || !schedules[schedId]) {
-            availableList = []; // No schedule = no bookings
-        }
+        if (!schedId) availableList = [];
     }
     
     if(availableList.length === 0) {
@@ -711,7 +973,7 @@ async function markBookingComplete(id) {
 
 // --- ADMIN SETTINGS ---
 
-async function generateLiveTable() {
+async function saveLiveScheduleSettings() {
     const start = document.getElementById('liveStartDate').value;
     const days = document.getElementById('liveNumDays').value;
     
@@ -726,8 +988,12 @@ async function generateLiveTable() {
 
     if(activeSlots.length === 0) return alert("Please select at least one time slot.");
 
-    const settings = { startDate: start, days: days, activeSlots: activeSlots };
-    localStorage.setItem('liveScheduleSettings', JSON.stringify(settings));
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    liveSchedules[ACTIVE_LIVE_SCHED_ID].startDate = start;
+    liveSchedules[ACTIVE_LIVE_SCHED_ID].days = days;
+    liveSchedules[ACTIVE_LIVE_SCHED_ID].activeSlots = activeSlots;
+
+    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
     
     await secureScheduleSave();
     renderLiveTable();

@@ -206,6 +206,7 @@ const AICore = {
                     return `Cleanup complete. Removed ${removed} old log entries.`;
                 }
                 return "No logs older than 30 days found.";
+            }
         },
         "export_logs": {
             description: "Download all system logs (Errors, Feedback, Audit, Monitor) as a JSON file.",
@@ -230,6 +231,29 @@ const AICore = {
                 
                 return "Logs exported successfully.";
             }
+        },
+        "read_system_config": {
+            description: "Read the current full system configuration.",
+            execute: () => {
+                return localStorage.getItem('system_config') || "{}";
+            }
+        },
+        "analyze_records": {
+            description: "Analyze assessment records for averages and trends.",
+            execute: () => {
+                const records = JSON.parse(localStorage.getItem('records') || '[]');
+                if (records.length === 0) return "No records found.";
+                let total = 0;
+                const counts = {};
+                records.forEach(r => {
+                    total += r.score;
+                    if(!counts[r.assessment]) counts[r.assessment] = {sum:0, n:0};
+                    counts[r.assessment].sum += r.score;
+                    counts[r.assessment].n++;
+                });
+                const avg = Math.round(total/records.length);
+                const breakdown = Object.entries(counts).map(([k,v]) => `\n- ${k}: ${Math.round(v.sum/v.n)}% (n=${v.n})`).join('');
+                return `Total Records: ${records.length}\nGlobal Average: ${avg}%\nBreakdown:${breakdown}`;
             }
         }
     },
@@ -369,7 +393,7 @@ const AICore = {
 
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
         if (!config.ai || !config.ai.enabled || !config.ai.apiKey) {
-            return "Error: AI is disabled or API Key is missing in Super Admin Config.\nYou can still use 'Run [tool]' commands manually.";
+            return "Error: AI is disabled or API Key is missing.<br>1. Get a key from <a href='#' onclick=\"event.preventDefault(); if(typeof require!=='undefined') require('electron').shell.openExternal('https://aistudio.google.com/app/apikey'); else window.open('https://aistudio.google.com/app/apikey', '_blank');\" style='color:#4285f4'>Google AI Studio</a><br>2. Configure it in the <a href='#' onclick='event.preventDefault(); openSuperAdminConfig();' style='color:#4285f4'>Super Admin Console</a> (Ctrl+Shift+S).";
         }
 
         // Construct Context
@@ -497,7 +521,11 @@ const AICore = {
     // --- BACKGROUND IMPROVEMENT ANALYZER ---
     analyzeForImprovements: async function(force = false) {
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-        if (!config.ai || !config.ai.enabled || !config.ai.apiKey) return "AI Disabled (Check Config/API Key).";
+        
+        // Detailed Diagnostics
+        if (!config.ai) return "AI Error: Configuration missing. Please save settings in Super Admin Console.";
+        if (!config.ai.enabled) return "AI Error: AI is disabled. Check 'Enable AI Co-Pilot' in Super Admin Console.";
+        if (!config.ai.apiKey || !config.ai.apiKey.trim()) return "AI Error: API Key is missing or empty.";
 
         // Gather Context
         const logs = window.CONSOLE_HISTORY || [];

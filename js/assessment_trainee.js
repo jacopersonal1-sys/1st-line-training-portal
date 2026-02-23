@@ -160,8 +160,14 @@ function openTestTaker(testId, isArenaMode = false) {
     const existing = subs.find(s => s.testId == testId && s.trainee === CURRENT_USER.user);
     
     if (existing && !existing.archived) {
-        if(typeof showToast === 'function') showToast("You have already completed this assessment. Please contact your Admin if you require a retake.", "info");
-        return;
+        // FIX: Allow Vetting Arena to override/archive previous attempts automatically
+        if (isArenaMode) {
+             existing.archived = true;
+             localStorage.setItem('submissions', JSON.stringify(subs));
+        } else {
+            if(typeof showToast === 'function') showToast("You have already completed this assessment. Please contact your Admin if you require a retake.", "info");
+            return;
+        }
     }
 
     window.CURRENT_TEST = JSON.parse(JSON.stringify(test)); 
@@ -406,7 +412,7 @@ async function submitTest(forceSubmit = false) {
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         let groupId = "Unknown";
         for (const [gid, members] of Object.entries(rosters)) {
-            if (members.includes(CURRENT_USER.user)) { groupId = gid; break; }
+            if (members.some(m => m.toLowerCase() === CURRENT_USER.user.toLowerCase())) { groupId = gid; break; }
         }
         
         let cycleVal = 'Digital Onboard';
@@ -416,8 +422,10 @@ async function submitTest(forceSubmit = false) {
         const records = JSON.parse(localStorage.getItem('records') || '[]');
         
         const existingIdx = records.findIndex(r => 
-            r.trainee === CURRENT_USER.user && 
-            r.assessment === window.CURRENT_TEST.title
+            r.trainee.toLowerCase() === CURRENT_USER.user.toLowerCase() && 
+            r.assessment.toLowerCase() === window.CURRENT_TEST.title.toLowerCase() &&
+            (r.groupID||'').toLowerCase() === groupId.toLowerCase() &&
+            (r.phase||'').toLowerCase() === phaseVal.toLowerCase()
         );
 
         const newRecord = {
@@ -447,7 +455,8 @@ async function submitTest(forceSubmit = false) {
 
     if (typeof exitArena === 'function') {
         try {
-            await exitArena();
+            // If in Vetting Arena, keep locked (true) until session ends
+            await exitArena(window.IS_LIVE_ARENA);
         } catch(e) {
             console.error("Failed to exit arena cleanly:", e);
         }

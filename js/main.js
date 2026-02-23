@@ -309,6 +309,94 @@ window.onload = async function() {
             }
             .taking-radio input { width: 22px; height: 22px; margin-right: 20px; accent-color: var(--primary); cursor: pointer; }
             .taking-radio span { font-size: 1.05rem; font-weight: 500; }
+
+            /* --- 9. DASHBOARD VISUALS (v2.1.53) --- */
+            .dash-header {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: 16px;
+                padding: 25px 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+                position: relative;
+                overflow: hidden;
+                margin-bottom: 25px;
+            }
+            .dash-header::before {
+                content: ''; position: absolute; top: 0; left: 0; width: 6px; height: 100%;
+                background: var(--primary);
+            }
+            .dash-card {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: 16px;
+                padding: 20px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                display: flex; flex-direction: column;
+                position: relative;
+                height: 100%;
+            }
+            .dash-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+                border-color: var(--primary-soft);
+            }
+            .dash-icon {
+                width: 48px; height: 48px;
+                border-radius: 12px;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 1.4rem;
+                background: var(--bg-input);
+                color: var(--primary);
+                transition: 0.3s;
+            }
+            .dash-card:hover .dash-icon {
+                background: var(--primary);
+                color: white;
+                transform: scale(1.1) rotate(5deg);
+            }
+            /* Hero Widget (Up Next) */
+            .hero-widget {
+                background: linear-gradient(135deg, var(--primary), #e67e22) !important;
+                border: none !important;
+                color: white !important;
+            }
+            .hero-widget .dash-icon {
+                background: rgba(255,255,255,0.2) !important;
+                color: white !important;
+            }
+            .hero-widget h2, .hero-widget h3, .hero-widget p, .hero-widget .text-muted {
+                color: rgba(255,255,255,0.9) !important;
+            }
+            .hero-widget button {
+                background: white !important;
+                color: var(--primary) !important;
+                border: none !important;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            }
+            .hero-widget button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            }
+            /* Badge Grid */
+            .badge-grid {
+                display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 15px; padding: 10px 0;
+            }
+            .badge-reward {
+                display: flex; flex-direction: column; align-items: center; text-align: center;
+                padding: 10px; border-radius: 12px; background: var(--bg-input);
+                border: 1px solid transparent; transition: 0.3s;
+            }
+            .badge-reward:hover {
+                background: var(--bg-card); box-shadow: 0 5px 15px rgba(0,0,0,0.1); transform: scale(1.05);
+            }
+            .badge-icon { font-size: 2rem; margin-bottom: 5px; }
+            .badge-title { font-size: 0.75rem; font-weight: bold; line-height: 1.2; }
+            .badge-gold { border-color: #f1c40f; background: rgba(241, 196, 15, 0.1); }
+            .badge-silver { border-color: #bdc3c7; background: rgba(189, 195, 199, 0.1); }
+            .badge-bronze { border-color: #d35400; background: rgba(211, 84, 0, 0.1); }
+            .badge-mythic { border-color: #9b59b6; background: rgba(155, 89, 182, 0.1); box-shadow: 0 0 10px rgba(155, 89, 182, 0.3); }
+            .badge-shame { border-color: #7f8c8d; opacity: 0.7; filter: grayscale(0.5); }
         `;
         document.head.appendChild(style);
     }
@@ -1253,6 +1341,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.59": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Super Admin Console 2.0:</strong> Redesigned with Tabs, Raw Data Inspector, and AI Analyst Chat.</li>
+                <li style="margin-bottom: 8px;"><strong>Study Monitor 2.0:</strong> Improved "Lenient Scoring" for short interruptions and better Idle Detection.</li>
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added "Waiting for Admin" indicator and fixed idle timeouts during sessions.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Enhanced cloud sync reliability and error handling.</li>
+            </ul>`,
         "2.1.44": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Filtered out Graduated Agents from the Trainee Login list to prevent confusion.</li>

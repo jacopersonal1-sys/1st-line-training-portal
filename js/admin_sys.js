@@ -737,13 +737,15 @@ async function confirmFactoryReset() {
             trainingData: {}, vettingTopics: [], schedules: {}, liveBookings: [],
             cancellationCounts: {}, liveScheduleSettings: {}, tests: [], submissions: [],
             savedReports: [], insightReviews: [], exemptions: [], notices: [],
-            revokedUsers: [] // CRITICAL: Reset blacklist to ensure clean slate
+            revokedUsers: [], // CRITICAL: Reset blacklist to ensure clean slate
+            liveSchedules: {}, // Reset Live Schedules
+            system_config: DB_SCHEMA.system_config // Reset system settings to defaults
         };
 
-        // 1. Reset 'app_data' table
+        // 1. Reset 'app_documents' table (Split Schema)
         const { error: resetErr } = await supabaseClient
-            .from('app_data')
-            .upsert({ id: 1, content: cleanState });
+            .from('app_documents')
+            .delete().neq('key', 'placeholder'); // Delete all rows
 
         // 2. Clear 'sessions' table
         const { error: sessionErr } = await supabaseClient
@@ -752,6 +754,12 @@ async function confirmFactoryReset() {
             .neq('user', 'placeholder'); // Delete all rows
 
         if (!resetErr) {
+            // 3. Bootstrap Admin User & Config
+            await supabaseClient.from('app_documents').insert([
+                { key: 'users', content: cleanState.users, updated_at: new Date().toISOString() },
+                { key: 'system_config', content: cleanState.system_config, updated_at: new Date().toISOString() }
+            ]);
+            
             if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Factory Reset', 'System reset to defaults');
             alert("System has been reset successfully. You will now be redirected.");
             localStorage.clear(); 
@@ -795,108 +803,246 @@ function openSuperAdminConfig() {
 
     const modalHtml = `
         <div id="superAdminModal" class="modal-overlay">
-            <div class="modal-box" style="width:800px; max-height:90vh; overflow-y:auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div class="modal-box" style="width:900px; max-height:90vh; display:flex; flex-direction:column; padding:0;">
+                
+                <!-- HEADER -->
+                <div style="padding:20px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; background:var(--bg-card);">
                     <h2 style="margin:0; color:#8e44ad;"><i class="fas fa-user-astronaut"></i> Super Admin Console</h2>
                     <button class="btn-secondary" onclick="document.getElementById('superAdminModal').remove()">&times;</button>
                 </div>
 
-                <div class="grid-2">
-                    <div class="card">
-                        <h4><i class="fas fa-sync"></i> Sync Performance</h4>
-                        <label>Admin Polling (Seconds)</label><input type="number" id="sa_sync_admin" value="${rates.admin / 1000}">
-                        <label>Trainee Polling (Seconds)</label><input type="number" id="sa_sync_trainee" value="${rates.trainee / 1000}">
-                        <label>TL Polling (Minutes)</label><input type="number" id="sa_sync_tl" value="${rates.teamleader / 60000}">
-                    </div>
-                    <div class="card">
-                        <h4><i class="fas fa-clock"></i> Attendance Rules</h4>
-                        <label>Work Start</label><input type="time" id="sa_att_start" value="${att.work_start}">
-                        <label>Late Cutoff (Grace Period)</label><input type="time" id="sa_att_late" value="${att.late_cutoff}">
-                        <label>Work End</label><input type="time" id="sa_att_end" value="${att.work_end}">
-                        <label>Clock-Out Reminder</label><input type="time" id="sa_att_remind" value="${att.reminder_start}">
-                    </div>
+                <!-- TABS -->
+                <div style="display:flex; background:var(--bg-input); border-bottom:1px solid var(--border-color);">
+                    <button class="sa-tab-btn active" onclick="switchSaTab('overview', this)"><i class="fas fa-tachometer-alt"></i> Overview</button>
+                    <button class="sa-tab-btn" onclick="switchSaTab('config', this)"><i class="fas fa-cogs"></i> Configuration</button>
+                    <button class="sa-tab-btn" onclick="switchSaTab('security', this)"><i class="fas fa-shield-alt"></i> Security</button>
+                    <button class="sa-tab-btn" onclick="switchSaTab('data', this)"><i class="fas fa-database"></i> Data & Logs</button>
+                    <button class="sa-tab-btn" onclick="switchSaTab('ai', this)"><i class="fas fa-robot"></i> AI Analyst</button>
                 </div>
 
-                <div class="grid-2" style="margin-top:15px;">
-                    <div class="card">
-                        <h4><i class="fas fa-shield-alt"></i> Security</h4>
-                        <label style="display:flex; align-items:center; gap:10px;">
-                            <input type="checkbox" id="sa_sec_maint" ${sec.maintenance_mode ? 'checked' : ''}> Maintenance Mode (Block Login)
-                        </label>
-                        <label style="display:flex; align-items:center; gap:10px;">
-                            <input type="checkbox" id="sa_sec_kiosk" ${sec.force_kiosk_global ? 'checked' : ''}> Force Global Kiosk (Emergency)
-                        </label>
-                        <label>Min App Version</label><input type="text" id="sa_sec_ver" value="${sec.min_version}">
-                        <label>Banned Client IDs</label>
-                        <div style="display:flex; gap:5px;">
-                            <input type="text" id="sa_sec_banned" value="${banned.join(', ')}" placeholder="CL-XXXX, CL-YYYY" style="flex:1;">
-                            <button class="btn-secondary btn-sm" onclick="viewBannedClientsReport()"><i class="fas fa-list"></i> Report</button>
+                <!-- CONTENT AREA -->
+                <div style="flex:1; overflow-y:auto; padding:20px;">
+                    
+                    <!-- TAB: OVERVIEW -->
+                    <div id="sa-tab-overview" class="sa-tab-content">
+                        <div class="card" style="border-left: 4px solid #4285f4; margin-bottom:20px;">
+                            <h4><i class="fas fa-robot"></i> AI System Analyst</h4>
+                            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+                                <label style="margin:0;"><input type="checkbox" id="sa_ai_enabled" ${ai.enabled ? 'checked' : ''}> Enable AI</label>
+                                <input type="password" id="sa_ai_key" value="${ai.apiKey || ''}" placeholder="Gemini API Key" style="flex:1;">
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <button class="btn-secondary btn-sm" onclick="AICore.openConsole()"><i class="fas fa-terminal"></i> Launch Console</button>
+                                <button class="btn-danger btn-sm" onclick="viewSystemErrors()"><i class="fas fa-bug"></i> Error Reports</button>
+                            </div>
                         </div>
-                        <label>Client Whitelist (Empty = Allow All)</label><input type="text" id="sa_sec_whitelist" value="${whitelist.join(', ')}" placeholder="CL-XXXX, CL-YYYY">
-                    </div>
-                    <div class="card">
-                        <h4><i class="fas fa-toggle-on"></i> Feature Flags</h4>
-                        <label style="display:flex; align-items:center; gap:10px;" title="Enable secure testing environment"><input type="checkbox" id="sa_feat_vet" ${feat.vetting_arena ? 'checked' : ''}> Vetting Arena</label>
-                        <label style="display:flex; align-items:center; gap:10px;" title="Enable live trainer interaction"><input type="checkbox" id="sa_feat_live" ${feat.live_assessments ? 'checked' : ''}> Live Assessments</label>
-                        <label style="display:flex; align-items:center; gap:10px;" title="Enable feedback surveys"><input type="checkbox" id="sa_feat_nps" ${feat.nps_surveys ? 'checked' : ''}> NPS Surveys</label>
-                        <label style="display:flex; align-items:center; gap:10px;" title="Show daily tips on dashboard"><input type="checkbox" id="sa_feat_tips" ${feat.daily_tips !== false ? 'checked' : ''}> Daily Tips</label>
-                        <label style="display:flex; align-items:center; gap:10px;" title="Reduce visual effects for performance"><input type="checkbox" id="sa_feat_anim" ${feat.disable_animations ? 'checked' : ''}> Disable Animations</label>
-                    </div>
-                </div>
 
-                <div class="card" style="margin-top:15px; border-left: 4px solid #4285f4;">
-                    <h4><i class="fas fa-robot"></i> AI System Analyst (Gemini)</h4>
-                    <label style="display:flex; align-items:center; gap:10px;"><input type="checkbox" id="sa_ai_enabled" ${ai.enabled ? 'checked' : ''}> Enable AI Co-Pilot</label>
-                    <label>Google Gemini API Key</label>
-                    <input type="password" id="sa_ai_key" value="${ai.apiKey || ''}" placeholder="AIzaSy...">
-                    <button class="btn-secondary btn-sm" onclick="AICore.openConsole()" style="margin-top:10px;"><i class="fas fa-terminal"></i> Launch AI Console</button>
-                    <button class="btn-danger btn-sm" onclick="viewSystemErrors()" style="margin-top:10px; margin-left:5px;"><i class="fas fa-bug"></i> View Error Reports</button>
-                </div>
+                        <div class="card" style="margin-bottom:20px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <h4><i class="fas fa-heartbeat"></i> Connected Clients</h4>
+                                <div style="display:flex; gap:5px;">
+                                    <button class="btn-danger btn-sm" onclick="forceRefreshAllClients()"><i class="fas fa-power-off"></i> Refresh All</button>
+                                    <button class="btn-secondary btn-sm" onclick="refreshClientHealthTable()"><i class="fas fa-sync"></i></button>
+                                </div>
+                            </div>
+                            <div id="sa_client_health_table" style="max-height:200px; overflow-y:auto; margin-top:10px;">Loading...</div>
+                        </div>
 
-                <div class="card" style="margin-top:15px;">
-                    <h4><i class="fas fa-bullhorn"></i> Global Announcement</h4>
-                    <label style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-                        <input type="checkbox" id="sa_ann_active" ${ann.active ? 'checked' : ''}> Show Banner
-                    </label>
-                    <input type="text" id="sa_ann_msg" placeholder="Message to all users..." value="${ann.message}">
-                    <select id="sa_ann_type" style="margin-top:5px;">
-                        <option value="info" ${ann.type === 'info' ? 'selected' : ''}>Info (Blue)</option>
-                        <option value="warning" ${ann.type === 'warning' ? 'selected' : ''}>Warning (Yellow)</option>
-                        <option value="error" ${ann.type === 'error' ? 'selected' : ''}>Critical (Red)</option>
-                        <option value="success" ${ann.type === 'success' ? 'selected' : ''}>Success (Green)</option>
-                    </select>
-                </div>
-                
-                <div class="card" style="margin-top:15px;">
-                    <h4><i class="fas fa-bullhorn"></i> Instant Broadcast</h4>
-                    <div style="display:flex; gap:10px;">
-                        <input type="text" id="sa_broadcast_msg" placeholder="Popup message to all users..." style="flex:1;">
-                        <button class="btn-warning btn-sm" onclick="sendSystemBroadcast()">Send</button>
-                        <label style="display:flex; align-items:center; gap:5px; margin:0;"><input type="checkbox" id="sa_broadcast_sound" checked> Sound</label>
-                    </div>
-                </div>
-
-                <div class="card" style="margin-top:15px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <h4><i class="fas fa-heartbeat"></i> Connected Clients Health</h4>
-                        <div style="display:flex; gap:5px;">
-                            <button id="btnForceRefreshAll" class="btn-danger btn-sm" onclick="forceRefreshAllClients()" title="Force Reload All Clients"><i class="fas fa-power-off"></i> Refresh All</button>
-                            <button class="btn-secondary btn-sm" onclick="refreshClientHealthTable()"><i class="fas fa-sync"></i></button>
+                        <div class="card">
+                            <h4><i class="fas fa-bullhorn"></i> Instant Broadcast</h4>
+                            <div style="display:flex; gap:10px;">
+                                <input type="text" id="sa_broadcast_msg" placeholder="Popup message to all users..." style="flex:1;">
+                                <button class="btn-warning btn-sm" onclick="sendSystemBroadcast()">Send</button>
+                            </div>
                         </div>
                     </div>
-                    <div id="sa_client_health_table" style="max-height:200px; overflow-y:auto; margin-top:10px;">Loading...</div>
+
+                    <!-- TAB: CONFIGURATION -->
+                    <div id="sa-tab-config" class="sa-tab-content hidden">
+                        <div class="grid-2">
+                            <div class="card">
+                                <h4><i class="fas fa-sync"></i> Sync Rates</h4>
+                                <label>Admin (Sec)</label><input type="number" id="sa_sync_admin" value="${rates.admin / 1000}">
+                                <label>Trainee (Sec)</label><input type="number" id="sa_sync_trainee" value="${rates.trainee / 1000}">
+                                <label>TL (Min)</label><input type="number" id="sa_sync_tl" value="${rates.teamleader / 60000}">
+                            </div>
+                            <div class="card">
+                                <h4><i class="fas fa-clock"></i> Attendance</h4>
+                                <label>Start</label><input type="time" id="sa_att_start" value="${att.work_start}">
+                                <label>Late Cutoff</label><input type="time" id="sa_att_late" value="${att.late_cutoff}">
+                                <label>End</label><input type="time" id="sa_att_end" value="${att.work_end}">
+                            </div>
+                        </div>
+                        <div class="card" style="margin-top:15px;">
+                            <h4><i class="fas fa-toggle-on"></i> Features</h4>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                <label><input type="checkbox" id="sa_feat_vet" ${feat.vetting_arena ? 'checked' : ''}> Vetting Arena</label>
+                                <label><input type="checkbox" id="sa_feat_live" ${feat.live_assessments ? 'checked' : ''}> Live Assessments</label>
+                                <label><input type="checkbox" id="sa_feat_nps" ${feat.nps_surveys ? 'checked' : ''}> NPS Surveys</label>
+                                <label><input type="checkbox" id="sa_feat_tips" ${feat.daily_tips !== false ? 'checked' : ''}> Daily Tips</label>
+                                <label><input type="checkbox" id="sa_feat_anim" ${feat.disable_animations ? 'checked' : ''}> Disable Animations</label>
+                            </div>
+                        </div>
+                        <div class="card" style="margin-top:15px;">
+                            <h4><i class="fas fa-scroll"></i> Global Banner</h4>
+                            <label><input type="checkbox" id="sa_ann_active" ${ann.active ? 'checked' : ''}> Active</label>
+                            <input type="text" id="sa_ann_msg" value="${ann.message}" placeholder="Message...">
+                            <select id="sa_ann_type">
+                                <option value="info" ${ann.type === 'info' ? 'selected' : ''}>Info</option>
+                                <option value="warning" ${ann.type === 'warning' ? 'selected' : ''}>Warning</option>
+                                <option value="error" ${ann.type === 'error' ? 'selected' : ''}>Critical</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- TAB: SECURITY -->
+                    <div id="sa-tab-security" class="sa-tab-content hidden">
+                        <div class="card">
+                            <h4><i class="fas fa-lock"></i> Access Control</h4>
+                            <label><input type="checkbox" id="sa_sec_maint" ${sec.maintenance_mode ? 'checked' : ''}> Maintenance Mode</label>
+                            <label><input type="checkbox" id="sa_sec_kiosk" ${sec.force_kiosk_global ? 'checked' : ''}> Force Global Kiosk</label>
+                            <label>Min Version</label><input type="text" id="sa_sec_ver" value="${sec.min_version}">
+                        </div>
+                        <div class="card" style="margin-top:15px;">
+                            <h4><i class="fas fa-ban"></i> Client Management</h4>
+                            <label>Banned IDs</label>
+                            <div style="display:flex; gap:5px;">
+                                <input type="text" id="sa_sec_banned" value="${banned.join(', ')}" style="flex:1;">
+                                <button class="btn-secondary btn-sm" onclick="viewBannedClientsReport()">Manage</button>
+                            </div>
+                            <label>Whitelist</label><input type="text" id="sa_sec_whitelist" value="${whitelist.join(', ')}">
+                        </div>
+                    </div>
+
+                    <!-- TAB: DATA (NEW) -->
+                    <div id="sa-tab-data" class="sa-tab-content hidden">
+                        <div class="card">
+                            <h4><i class="fas fa-code"></i> Raw Data Inspector</h4>
+                            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                                <select id="sa_data_key" onchange="loadRawDataKey()" style="flex:1;">
+                                    <option value="">-- Select Key --</option>
+                                    <option value="users">Users</option>
+                                    <option value="records">Records</option>
+                                    <option value="rosters">Rosters</option>
+                                    <option value="system_config">System Config</option>
+                                    <option value="auditLogs">Audit Logs</option>
+                                    <option value="error_reports">Error Reports</option>
+                                </select>
+                                <button class="btn-primary btn-sm" onclick="saveRawDataKey()">Save JSON</button>
+                            </div>
+                            <textarea id="sa_data_editor" style="width:100%; height:300px; font-family:monospace; font-size:0.8rem; background:#1e1e1e; color:#0f0; border:1px solid #333; padding:10px;"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- TAB: AI (NEW) -->
+                    <div id="sa-tab-ai" class="sa-tab-content hidden">
+                        <div class="card" style="height:100%; display:flex; flex-direction:column; min-height:400px;">
+                            <div id="sa_ai_chat_history" style="flex:1; overflow-y:auto; border:1px solid var(--border-color); padding:15px; margin-bottom:15px; background:var(--bg-input); border-radius:4px; font-family:sans-serif;">
+                                <div style="color:var(--text-muted); text-align:center; margin-top:20px;">
+                                    <i class="fas fa-robot" style="font-size:2rem; margin-bottom:10px;"></i><br>
+                                    Ask me anything about the system data.<br>
+                                    <small>"How many users are active?" &bull; "Analyze recent errors" &bull; "Check system health"</small>
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <input type="text" id="sa_ai_input" placeholder="Type your question here..." style="flex:1; padding:10px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" onkeydown="if(event.key==='Enter') sendSaAiMessage()">
+                                <button class="btn-primary" onclick="sendSaAiMessage()"><i class="fas fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
 
-                <button class="btn-primary" style="width:100%; margin-top:20px; background:#8e44ad;" onclick="saveSuperAdminConfig()">
-                    <i class="fas fa-save"></i> Push Configuration to All Clients
-                </button>
+                <!-- FOOTER -->
+                <div style="padding:15px; border-top:1px solid var(--border-color); background:var(--bg-card); text-align:right;">
+                    <button class="btn-primary" onclick="saveSuperAdminConfig()" style="background:#8e44ad;"><i class="fas fa-save"></i> Push Configuration</button>
+                </div>
             </div>
         </div>
+        <style>
+            .sa-tab-btn { flex:1; padding:15px; background:transparent; border:none; border-bottom:3px solid transparent; cursor:pointer; font-weight:bold; color:var(--text-muted); transition:0.2s; }
+            .sa-tab-btn:hover { background:rgba(255,255,255,0.05); color:var(--text-main); }
+            .sa-tab-btn.active { border-bottom-color:#8e44ad; color:#8e44ad; background:rgba(142, 68, 173, 0.1); }
+            .sa-tab-content.hidden { display:none; }
+        </style>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     // Initial Load
     refreshClientHealthTable();
 }
+
+// New Helper Functions for Tabs
+window.switchSaTab = function(tabName, btn) {
+    document.querySelectorAll('.sa-tab-content').forEach(el => el.classList.add('hidden'));
+    document.getElementById(`sa-tab-${tabName}`).classList.remove('hidden');
+    
+    document.querySelectorAll('.sa-tab-btn').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+};
+
+window.loadRawDataKey = function() {
+    const key = document.getElementById('sa_data_key').value;
+    const editor = document.getElementById('sa_data_editor');
+    if (!key) {
+        editor.value = '';
+        return;
+    }
+    const data = localStorage.getItem(key);
+    try {
+        const json = JSON.parse(data);
+        editor.value = JSON.stringify(json, null, 2);
+    } catch(e) {
+        editor.value = data || '';
+    }
+};
+
+window.saveRawDataKey = async function() {
+    const key = document.getElementById('sa_data_key').value;
+    const raw = document.getElementById('sa_data_editor').value;
+    if (!key) return alert("Select a key first.");
+    
+    try {
+        const json = JSON.parse(raw); // Validate JSON
+        if (!confirm(`Overwrite '${key}' with this data? This is irreversible.`)) return;
+        
+        localStorage.setItem(key, JSON.stringify(json));
+        if (typeof saveToServer === 'function') await saveToServer([key], true); // Force push
+        
+        alert("Data saved and synced.");
+    } catch(e) {
+        alert("Invalid JSON: " + e.message);
+    }
+};
+
+window.sendSaAiMessage = async function() {
+    const input = document.getElementById('sa_ai_input');
+    const history = document.getElementById('sa_ai_chat_history');
+    const text = input.value.trim();
+    if (!text) return;
+
+    // User Msg
+    history.innerHTML += `<div style="margin-bottom:10px; text-align:right;"><span style="background:var(--primary); color:white; padding:8px 12px; border-radius:12px; display:inline-block;">${text}</span></div>`;
+    input.value = '';
+    history.scrollTop = history.scrollHeight;
+
+    // Loading
+    const loadingId = 'ai-loading-' + Date.now();
+    history.innerHTML += `<div id="${loadingId}" style="margin-bottom:10px; text-align:left;"><span style="color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin"></i> Thinking...</span></div>`;
+    history.scrollTop = history.scrollHeight;
+
+    // Call AI
+    if (typeof AICore !== 'undefined' && typeof AICore.processRequest === 'function') {
+        const response = await AICore.processRequest(text);
+        document.getElementById(loadingId).remove();
+        
+        const formatted = response.replace(/\n/g, '<br>');
+        history.innerHTML += `<div style="margin-bottom:10px; text-align:left;"><div style="background:var(--bg-card); border:1px solid var(--border-color); padding:10px; border-radius:10px; display:inline-block; max-width:90%; line-height:1.5;">${formatted}</div></div>`;
+        history.scrollTop = history.scrollHeight;
+    } else {
+        document.getElementById(loadingId).remove();
+        history.innerHTML += `<div style="color:#ff5252;">AI Core not available.</div>`;
+    }
+};
 
 async function saveSuperAdminConfig() {
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
@@ -928,7 +1074,7 @@ async function saveSuperAdminConfig() {
 
     config.ai = { ...config.ai,
         enabled: document.getElementById('sa_ai_enabled').checked,
-        apiKey: document.getElementById('sa_ai_key').value
+        apiKey: document.getElementById('sa_ai_key').value.trim()
     };
 
     localStorage.setItem('system_config', JSON.stringify(config));
@@ -948,7 +1094,7 @@ async function sendSystemBroadcast() {
     if(!confirm("Send this popup message to ALL active users immediately?")) return;
     
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-    const sound = document.getElementById('sa_broadcast_sound').checked;
+    const sound = true; // Default to sound on
     config.broadcast = { id: Date.now(), message: msg, sound: sound };
     
     localStorage.setItem('system_config', JSON.stringify(config));
@@ -1136,11 +1282,16 @@ async function viewSystemErrors() {
     // Update "Last Seen" count to stop notifications
     localStorage.setItem('last_seen_error_count', reports.length.toString());
 
+    const uniqueUsers = new Set(reports.map(r => r.user)).size;
+
     let html = `<div class="modal-overlay" id="errorReportModal" style="z-index:10002;">
         <div class="modal-box" style="width:900px; max-height:90vh; display:flex; flex-direction:column;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <h3 style="margin:0; color:#ff5252;"><i class="fas fa-bug"></i> System Error Reports</h3>
                 <div>
+                    <h3 style="margin:0; color:#ff5252;"><i class="fas fa-bug"></i> System Error Reports</h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} Errors reported by ${uniqueUsers} unique users</div>
+                </div>
+                <div style="display:flex; gap:10px;">
                     <button class="btn-warning btn-sm" onclick="clearSystemErrors()">Clear All</button>
                     <button class="btn-secondary btn-sm" onclick="document.getElementById('errorReportModal').remove()">&times;</button>
                 </div>

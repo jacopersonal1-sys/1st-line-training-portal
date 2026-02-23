@@ -295,10 +295,13 @@ function renderAdminLivePanel(container) {
             </div>
             <div style="flex:1; overflow-y:auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border-color); margin-bottom:10px;">
-                    <div>
-                        <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
-                        <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
-                            Checking connection...
+                    <div style="display:flex; align-items:center; gap:15px;">
+                        ${getAvatarHTML(session.trainee, 48)}
+                        <div>
+                            <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
+                            <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
+                                Checking connection...
+                            </div>
                         </div>
                     </div>
                     <button class="btn-danger btn-sm" onclick="endLiveSession()">Abort Session</button>
@@ -631,6 +634,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     
     // 2. Update Global Array
     await updateGlobalSessionArray(session, false); // Safe Merge to prevent wiping other admins
+    console.log(`Live Session Initiated for ${traineeName} (ID: ${session.sessionId})`);
 
     showTab('live-execution');
     loadLiveExecution();

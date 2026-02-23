@@ -150,7 +150,7 @@ function renderDashboard() {
     const header = document.createElement('div');
     header.className = 'dash-header';
     header.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
                 <h2 style="margin:0;">${timeGreeting}, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
                 <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
@@ -215,12 +215,21 @@ async function updateDashboardHealth() {
 
     // Local Network Check
     if(netEl) {
-        const online = navigator.onLine;
-        const startPing = Date.now();
-        try { await fetch('https://www.google.com/favicon.ico', { mode: 'no-cors', cache: 'no-store' }); } catch(e){}
-        const ping = Date.now() - startPing;
-        netEl.innerText = online ? `Online (${ping}ms)` : "Offline";
-        netEl.style.color = online ? (ping < 200 ? '#2ecc71' : 'orange') : '#ff5252';
+        if (navigator.connection) {
+            // Try to get specific interface type (Electron/Mobile)
+            const type = navigator.connection.type;
+            if (type && type !== 'unknown') {
+                netEl.innerText = type.toUpperCase();
+            } else {
+                // Fallback: effectiveType returns '4g' for fast connections. Display 'Online' instead.
+                const eff = navigator.connection.effectiveType;
+                netEl.innerText = (eff === '4g') ? "Online" : eff.toUpperCase();
+            }
+            netEl.style.color = navigator.onLine ? '#2ecc71' : '#ff5252';
+        } else {
+            netEl.innerText = navigator.onLine ? "Online" : "Offline";
+            netEl.style.color = navigator.onLine ? '#2ecc71' : '#ff5252';
+        }
     }
 
     const start = Date.now();
@@ -236,62 +245,67 @@ async function updateDashboardHealth() {
         // Fetch active sessions from Supabase
         const { data: activeUsers, error } = await supabaseClient
             .from('sessions')
-            .select('*')
+            .select('user, role, isIdle, idleTime')
             .gte('lastSeen', twoMinsAgo);
+
+        if (error) {
+            console.warn("Dashboard Health Check Warning:", error.message);
+            if(latencyEl) {
+                latencyEl.innerText = "Svc Err";
+                latencyEl.style.color = "orange";
+            }
+            return; // Exit gracefully without throwing
+        }
 
         const end = Date.now();
         const latency = end - start;
 
-        if (!error) {
-            // Calculate Storage Size locally (JSON string size)
-            let sizeStr = "0 B";
-            if (typeof formatBytes === 'function') {
-                const totalStr = JSON.stringify(localStorage);
-                sizeStr = formatBytes(new TextEncoder().encode(totalStr).length);
-            }
-            
-            if(storageEl) storageEl.innerText = sizeStr;
-            if(latencyEl) {
-                latencyEl.innerText = latency + " ms";
-                latencyEl.style.color = latency < 200 ? "#2ecc71" : (latency < 500 ? "orange" : "#ff5252");
-            }
+        // Calculate Storage Size locally (JSON string size)
+        let sizeStr = "0 B";
+        if (typeof formatBytes === 'function') {
+            const totalStr = JSON.stringify(localStorage);
+            sizeStr = formatBytes(new TextEncoder().encode(totalStr).length);
+        }
+        
+        if(storageEl) storageEl.innerText = sizeStr;
+        if(latencyEl) {
+            latencyEl.innerText = latency + " ms";
+            latencyEl.style.color = latency < 200 ? "#2ecc71" : (latency < 500 ? "orange" : "#ff5252");
+        }
 
-            // --- LAST SYNC TIME ---
-            if(syncEl) {
-                const lastSync = localStorage.getItem('lastSyncTimestamp');
-                if(lastSync) {
-                    const diff = Date.now() - parseInt(lastSync);
-                    syncEl.innerText = (typeof formatDuration === 'function') ? formatDuration(diff) + ' ago' : Math.round(diff/1000) + 's ago';
-                } else {
-                    syncEl.innerText = "Just now";
-                }
+        // --- LAST SYNC TIME ---
+        if(syncEl) {
+            const lastSync = localStorage.getItem('lastSyncTimestamp');
+            if(lastSync) {
+                const diff = Date.now() - parseInt(lastSync);
+                syncEl.innerText = (typeof formatDuration === 'function') ? formatDuration(diff) + ' ago' : Math.round(diff/1000) + 's ago';
+            } else {
+                syncEl.innerText = "Just now";
             }
+        }
 
-            // --- ACTIVE USERS MONITOR ---
-            if(activeTableBody && activeUsers) {
-                if(activeUsers.length === 0) {
-                    activeTableBody.innerHTML = '<tr><td colspan="4" class="text-center" style="color:var(--text-muted);">No active users.</td></tr>';
-                } else {
-                    activeTableBody.innerHTML = activeUsers.map(u => {
-                        const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
-                            ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0)+'s')
-                            : '-';
-                        const roleStr = u.role || '-';
-                        const statusBadge = u.isIdle 
-                            ? '<span class="status-badge status-fail">Idle</span>' 
-                            : '<span class="status-badge status-pass">Active</span>';
-                        return `
-                            <tr>
-                                <td style="max-width:100px; overflow:hidden; text-overflow:ellipsis;"><strong>${u.user}</strong></td>
-                                <td>${roleStr}</td>
-                                <td>${statusBadge}</td>
-                                <td>${idleStr}</td>
-                            </tr>`;
-                    }).join('');
-                }
+        // --- ACTIVE USERS MONITOR ---
+        if(activeTableBody && activeUsers) {
+            if(activeUsers.length === 0) {
+                activeTableBody.innerHTML = '<tr><td colspan="4" class="text-center" style="color:var(--text-muted);">No active users.</td></tr>';
+            } else {
+                activeTableBody.innerHTML = activeUsers.map(u => {
+                    const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
+                        ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0)+'s')
+                        : '-';
+                    const roleStr = u.role || '-';
+                    const statusBadge = u.isIdle 
+                        ? '<span class="status-badge status-fail">Idle</span>' 
+                        : '<span class="status-badge status-pass">Active</span>';
+                    return `
+                        <tr>
+                            <td style="max-width:100px; overflow:hidden; text-overflow:ellipsis;"><strong>${u.user}</strong></td>
+                            <td>${roleStr}</td>
+                            <td>${statusBadge}</td>
+                            <td>${idleStr}</td>
+                        </tr>`;
+                }).join('');
             }
-        } else {
-            throw error; // Propagate error to catch block
         }
         
         // --- NEW: Update Activity Monitor Widget (if present) ---
@@ -681,9 +695,9 @@ function buildAdminWidgets(container) {
     const leaderboardHtml = buildLeaderboardWidget(users, records, attRecords);
 
     // Helper to wrap widget content with resize controls
-    const wrapWidget = (id, content, colSpan=1, rowSpan=1) => {
+    const wrapWidget = (id, content, colSpan=1, rowSpan=1, extraClass='') => {
         return `
-            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
                 <div class="widget-controls">
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
@@ -1015,9 +1029,9 @@ function buildLinkRequestsWidget() {
 // --- TEAM LEADER DASHBOARD ---
 function buildTLWidgets(container) {
     // Helper to wrap widget content with resize controls
-    const wrapWidget = (id, content, colSpan=1, rowSpan=1) => {
+    const wrapWidget = (id, content, colSpan=1, rowSpan=1, extraClass='') => {
         return `
-            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
                 <div class="widget-controls">
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
@@ -1383,9 +1397,9 @@ function buildTraineeWidgets(container) {
     }
 
     // Helper to wrap widget content with resize controls
-    const wrapWidget = (id, content, colSpan=1, rowSpan=1) => {
+    const wrapWidget = (id, content, colSpan=1, rowSpan=1, extraClass='') => {
         return `
-            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
                 <div class="widget-controls">
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
@@ -1402,7 +1416,7 @@ function buildTraineeWidgets(container) {
         <div style="display:flex; flex-direction:column; height:100%; justify-content:center;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
                 <div class="dash-icon"><i class="fas fa-tasks"></i></div>
-                <h3 style="margin:0;">Up Next</h3>
+                <h3 style="margin:0; color:inherit;">Up Next</h3>
             </div>
             <h2 style="color:var(--primary); margin:0;">${nextTask}</h2>
             <p style="color:var(--text-muted); margin:5px 0;">${nextDate}</p>
@@ -1529,7 +1543,7 @@ function buildTraineeWidgets(container) {
 
     // WIDGET MAP
     const widgets = {
-        'up_next': wrapWidget('up_next', upNextHtml),
+        'up_next': wrapWidget('up_next', upNextHtml, 1, 1, 'hero-widget'),
         'live_upcoming': wrapWidget('live_upcoming', liveHtml),
         'recent_results': wrapWidget('recent_results', resultsHtml),
         'available_tests': wrapWidget('available_tests', availableHtml),
@@ -1588,7 +1602,12 @@ function buildTraineeWidgets(container) {
 // --- DAILY TIP MANAGEMENT (ADMIN) ---
 
 function buildTipManagerHtml() {
-    const tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    let tips = [];
+    try {
+        tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    } catch(e) {
+        tips = [];
+    }
     
     let contentHtml = '';
     
@@ -1611,9 +1630,8 @@ function buildTipManagerHtml() {
         
         contentHtml = `
             ${listHtml}
-            <div style="display:flex; gap:5px;">
-                <input type="text" id="newTipInput" placeholder="Enter new tip..." style="margin:0; flex:1; font-size:0.85rem;">
-                <button class="btn-primary btn-sm" onclick="addDailyTip()">Add</button>
+            <div style="margin-top:10px;">
+                <button class="btn-primary btn-sm" style="width:100%;" onclick="addDailyTip()"><i class="fas fa-plus"></i> Add New Tip</button>
             </div>`;
     }
 
@@ -1664,14 +1682,27 @@ function buildAuditLogWidget() {
 }
 
 async function addDailyTip() {
-    const input = document.getElementById('newTipInput');
-    const val = input.value.trim();
-    if(!val) return;
-    let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
-    tips.push(val);
-    localStorage.setItem('dailyTips', JSON.stringify(tips));
-    if(typeof saveToServer === 'function') await saveToServer(['dailyTips'], false);
-    renderDashboard();
+    try {
+        const val = await customPrompt("Add Daily Tip", "Enter the text for the new daily tip:");
+        if (!val || !val.trim()) return;
+        
+        let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+        tips.push(val.trim());
+        localStorage.setItem('dailyTips', JSON.stringify(tips));
+        
+        if(typeof showToast === 'function') showToast("Tip added successfully.", "success");
+        
+        // Render immediately (Optimistic)
+        renderDashboard();
+        
+        // Sync in background (don't await to block UI)
+        if(typeof saveToServer === 'function') {
+            saveToServer(['dailyTips'], false).catch(e => console.warn("Tip Sync Warning:", e));
+        }
+    } catch(e) {
+        console.error("Add Tip Error:", e);
+        alert("Error adding tip: " + e.message);
+    }
 }
 
 async function deleteDailyTip(idx) {
@@ -1679,6 +1710,9 @@ async function deleteDailyTip(idx) {
     let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
     tips.splice(idx, 1);
     localStorage.setItem('dailyTips', JSON.stringify(tips));
-    if(typeof saveToServer === 'function') await saveToServer(['dailyTips'], false);
+    
+    // Optimistic Render
     renderDashboard();
+    
+    if(typeof saveToServer === 'function') saveToServer(['dailyTips'], false);
 }

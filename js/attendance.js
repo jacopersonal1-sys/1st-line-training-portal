@@ -20,9 +20,10 @@ function checkAttendanceStatus() {
     // DYNAMIC CONFIG
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
     const endHour = config.attendance ? parseInt(config.attendance.work_end.split(':')[0]) : 17;
+    const allowWeekend = config.attendance && config.attendance.allow_weekend_login === true;
 
-    // RESTRICTION: Only pop up Mon-Fri (1-5)
-    if (day === 0 || day === 6) return; 
+    // RESTRICTION: Only pop up Mon-Fri (1-5) unless weekend login is explicitly allowed
+    if ((day === 0 || day === 6) && !allowWeekend) return; 
     // CHANGED: Allow prompt until 1 hour before work end
     if (hour >= (endHour - 1)) return;
 
@@ -48,11 +49,12 @@ function checkClockOutReminder() {
     const day = now.getDay();
     const hour = now.getHours();
     const min = now.getMinutes();
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const allowWeekend = config.attendance && config.attendance.allow_weekend_login === true;
 
-    if (day === 0 || day === 6) return;
+    if ((day === 0 || day === 6) && !allowWeekend) return;
 
     // DYNAMIC CONFIG
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
     const remindTime = config.attendance ? config.attendance.reminder_start : "16:45";
     const [remindH, remindM] = remindTime.split(':').map(Number);
     const endH = config.attendance ? parseInt(config.attendance.work_end.split(':')[0]) : 17;

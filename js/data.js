@@ -13,6 +13,7 @@ const DB_SCHEMA = {
     liveBookings: [], 
     cancellationCounts: {}, 
     liveScheduleSettings: {},
+    liveSchedules: {}, // NEW: Multi-group Live Assessment Schedules
     tests: [], 
     submissions: [], 
     savedReports: [],
@@ -43,7 +44,7 @@ const DB_SCHEMA = {
     accessLogs: [], // Login/Logout/Timeout History
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
-    agentNotes: {}, // Private notes on agents { "username": "note content" }
+    agentNotes: {}, // Private notes on agents { "username": [ { id, author, date, content } ] }
     liveSessions: [], // CHANGED: Array to support multiple concurrent sessions
     forbiddenApps: [], // Dynamic list of blacklisted processes
     monitor_data: {}, // Real-time activity tracking { username: { current, history: [] } }
@@ -60,7 +61,19 @@ const DB_SCHEMA = {
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
-['click', 'mousemove', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
+
+// Anti-Jiggle: Only register mouse movement if distance > 5px
+let _lastMx = 0, _lastMy = 0;
+window.addEventListener('mousemove', (e) => {
+    const dist = Math.abs(e.screenX - _lastMx) + Math.abs(e.screenY - _lastMy);
+    if (dist > 5) {
+        window.LAST_INTERACTION = Date.now();
+        _lastMx = e.screenX;
+        _lastMy = e.screenY;
+    }
+}, { passive: true });
+
+['click', 'keydown', 'scroll', 'touchstart'].forEach(evt => {
     window.addEventListener(evt, () => {
         window.LAST_INTERACTION = Date.now();
     }, { passive: true });
@@ -252,8 +265,8 @@ async function reportSystemError(msg, type) {
     const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
     reports.push(report);
     
-    // Keep size manageable (Last 100 errors)
-    if (reports.length > 100) reports.shift();
+    // Keep size manageable (Last 500 errors) - Increased to ensure multi-user history is kept
+    if (reports.length > 500) reports.shift();
     
     localStorage.setItem('error_reports', JSON.stringify(reports));
     
@@ -511,8 +524,20 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                         return (
                             localItem.trainee.toLowerCase() === serverItem.trainee.toLowerCase() &&
                             (localItem.assessment||'').toLowerCase() === (serverItem.assessment||'').toLowerCase() &&
-                            localItem.groupID === serverItem.groupID &&
-                            localItem.phase === serverItem.phase
+                            (localItem.groupID||'').trim().toLowerCase() === (serverItem.groupID||'').trim().toLowerCase() &&
+                            (localItem.phase||'').trim().toLowerCase() === (serverItem.phase||'').trim().toLowerCase()
+                        );
+                    }
+
+                    // 5.5 SUBMISSIONS (Deduplication Fallback)
+                    // Prevents duplicates if ID is missing but the submission event is identical
+                    if (key === 'submissions' && localItem.trainee && serverItem.trainee && localItem.testId && serverItem.testId) {
+                        return (
+                            localItem.trainee === serverItem.trainee &&
+                            localItem.testId === serverItem.testId &&
+                            localItem.timestamp === serverItem.timestamp &&
+                            localItem.score === serverItem.score &&
+                            localItem.date === serverItem.date
                         );
                     }
 
@@ -566,23 +591,39 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
             const safeSVal = sVal || {};
             const safeLVal = lVal || {};
             
-            if (strategy === 'server_wins') {
-                merged[key] = { ...safeLVal, ...safeSVal }; // Server overwrites Local
-                
-                if (safeSVal.trainees || safeLVal.trainees) {
-                    merged[key].trainees = {
-                        ...(safeLVal.trainees || {}),
-                        ...(safeSVal.trainees || {})
-                    };
-                }
+            // RESET CHECK: If Server has a different start time, it's a new session.
+            // We must discard local stale data (like 'completed' status from previous run).
+            if (safeSVal.startTime && safeLVal.startTime && safeSVal.startTime !== safeLVal.startTime) {
+                 merged[key] = safeSVal;
             } else {
-                merged[key] = { ...safeSVal, ...safeLVal }; // Local overwrites Server (Default)
-                
-                if (safeSVal.trainees || safeLVal.trainees) {
-                    merged[key].trainees = {
-                        ...(safeSVal.trainees || {}),
-                        ...(safeLVal.trainees || {})
-                    };
+                // Standard Merge
+                if (strategy === 'server_wins') {
+                    merged[key] = { ...safeLVal, ...safeSVal }; // Server overwrites Local
+                    
+                    if (safeSVal.trainees || safeLVal.trainees) {
+                        merged[key].trainees = {
+                            ...(safeLVal.trainees || {}),
+                            ...(safeSVal.trainees || {})
+                        };
+                    }
+                } else {
+                    merged[key] = { ...safeSVal, ...safeLVal }; // Local overwrites Server (Default)
+                    
+                    if (safeSVal.trainees || safeLVal.trainees) {
+                        merged[key].trainees = {
+                            ...(safeSVal.trainees || {}),
+                            ...(safeLVal.trainees || {})
+                        };
+                    }
+                }
+
+                // PROTECTION: If I am a Trainee, my local state is the truth for ME (unless reset above).
+                // This prevents background sync from reverting my answers while I type.
+                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) {
+                    if (safeLVal.trainees && safeLVal.trainees[CURRENT_USER.user]) {
+                        if (!merged[key].trainees) merged[key].trainees = {};
+                        merged[key].trainees[CURRENT_USER.user] = safeLVal.trainees[CURRENT_USER.user];
+                    }
                 }
             }
         }
@@ -601,6 +642,43 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                  // Fallback: Standard merge if no user logged in
                  merged[key] = { ...sVal, ...lVal };
              }
+        }
+        // Case 2c: Agent Notes (Deep Merge of Note Arrays)
+        // Allows multiple admins to add notes to the same user without overwriting history
+        else if (key === 'agentNotes' && typeof lVal === 'object' && lVal !== null) {
+            const safeSVal = sVal || {};
+            merged[key] = { ...safeSVal }; // Start with server state
+            
+            // Iterate through local users to merge their notes
+            Object.keys(lVal).forEach(user => {
+                const sNotes = safeSVal[user]; 
+                const lNotes = lVal[user]; 
+                
+                // Helper: Normalize legacy strings to Note Objects
+                const toNoteArray = (n) => {
+                    if (!n) return [];
+                    if (Array.isArray(n)) return n;
+                    return [{ id: 'legacy_'+Date.now(), content: n, date: new Date().toISOString(), author: 'Unknown' }];
+                };
+
+                const sArr = toNoteArray(sNotes);
+                const lArr = toNoteArray(lNotes);
+                
+                // Merge: Keep all server notes, add local notes if they don't exist (by ID or Content+Date)
+                const combined = [...sArr];
+                lArr.forEach(lNote => {
+                    const exists = combined.some(sNote => 
+                        (lNote.id && sNote.id && lNote.id === sNote.id) ||
+                        (lNote.content === sNote.content && lNote.date === sNote.date)
+                    );
+                    if (!exists) combined.push(lNote);
+                });
+                
+                // Sort newest first
+                combined.sort((a,b) => new Date(b.date) - new Date(a.date));
+                
+                merged[key][user] = combined;
+            });
         }
         // Case 2: Objects (Rosters, Schedules)
         else if (typeof sVal === 'object' && sVal !== null && typeof lVal === 'object' && lVal !== null) {
@@ -624,9 +702,10 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
 
 // 4. SUPABASE: Fetch System Status
 async function fetchSystemStatus() {
-    const start = Date.now();
     try {
         if (!window.supabaseClient) return { error: "No Cloud Connection" };
+
+        const start = Date.now();
 
         // Estimate storage size from LocalStorage
         let storageSize = 0;
@@ -635,90 +714,27 @@ async function fetchSystemStatus() {
         }
         
         const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
+        
+        // OPTIMIZED: Select only specific columns instead of '*' to save bandwidth
         const { data: activeUsers, error } = await supabaseClient
             .from('sessions')
-            .select('*')
+            .select('user, role, version, isIdle, idleTime, lastSeen, clientId')
             .gte('lastSeen', twoMinutesAgo);
+
+        if (error) {
+            console.warn("System Status Fetch Warning:", error.message);
+            return { error: "Server Error (500)" };
+        }
 
         const end = Date.now();
         const latency = end - start;
 
-        if (!error) {
-            const storageEl = document.getElementById('statusStorage');
-            const latencyEl = document.getElementById('statusLatency');
-            const activeTable = document.getElementById('activeUsersTable');
-
-            const memoryEl = document.getElementById('statusMemory');
-            const connEl = document.getElementById('statusConnection');
-            const platformEl = document.getElementById('statusPlatform');
-
-            if (storageEl && typeof formatBytes === 'function') {
-                storageEl.innerText = formatBytes(storageSize);
-            }
-
-            if (latencyEl) {
-                latencyEl.innerText = latency + " ms";
-                latencyEl.style.color = latency < 200 ? "#2ecc71" : (latency < 500 ? "orange" : "#ff5252");
-            }
-
-            // --- NEW DIAGNOSTICS ---
-            if (memoryEl && performance && performance.memory) {
-                const used = performance.memory.usedJSHeapSize;
-                memoryEl.innerText = formatBytes(used);
-            }
-            
-            if (connEl && navigator.connection) {
-                connEl.innerText = navigator.connection.effectiveType.toUpperCase();
-            } else if (connEl) {
-                const startPing = Date.now();
-                try { await fetch('https://www.google.com/favicon.ico', { mode: 'no-cors', cache: 'no-store' }); } catch(e){}
-                const ping = Date.now() - startPing;
-                connEl.innerText = navigator.onLine ? `Online (${ping}ms)` : "Offline";
-            }
-            
-            if (platformEl) {
-                const os = (navigator.userAgentData && navigator.userAgentData.platform) ? navigator.userAgentData.platform : navigator.platform;
-                platformEl.innerText = os;
-            }
-
-            if (activeTable) {
-                let html = '';
-                if(!activeUsers || activeUsers.length === 0) {
-                      html = '<tr><td colspan="6" class="text-center">No active users detected.</td></tr>';
-                } else {
-                    activeUsers.forEach(u => {
-                        const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
-                            ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0) + 's')
-                            : '-';
-                        
-                        const verStr = u.version || '-';
-                        const roleStr = u.role || '-';
-                        
-                        const statusBadge = u.isIdle
-                            ? '<span class="status-badge status-fail">Idle</span>'
-                            : '<span class="status-badge status-pass">Active</span>';
-                        
-                        const rowClass = u.isIdle ? 'user-idle' : '';
-
-                        html += `
-                            <tr class="${rowClass}">
-                                <td><strong>${u.user}</strong></td>
-                                <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
-                                <td>${roleStr}</td>
-                                <td>${statusBadge}</td>
-                                <td>${idleStr}</td>
-                                <td>
-                                    <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${u.user}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
-                                    <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${u.user}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
-                                    <button class="btn-primary btn-sm" onclick="sendRemoteCommand('${u.user}', 'force_update')" title="Force Update Check"><i class="fas fa-cloud-download-alt"></i></button>
-                                </td>
-                            </tr>
-                        `;
-                    });
-                }
-                activeTable.innerHTML = html;
-            }
-        }
+        renderSystemHealthUI({
+            storageSize,
+            latency,
+            activeUsers,
+            memory: (performance && performance.memory) ? performance.memory.usedJSHeapSize : null
+        });
 
         // RETURN DATA FOR AI / CALLER
         return {
@@ -732,6 +748,88 @@ async function fetchSystemStatus() {
     } catch (e) {
         console.error("Supabase Status fetch error", e);
         return { error: e.message };
+    }
+}
+
+// --- HELPER: RENDER SYSTEM HEALTH UI ---
+function renderSystemHealthUI(metrics) {
+    const storageEl = document.getElementById('statusStorage');
+    const latencyEl = document.getElementById('statusLatency');
+    const activeTable = document.getElementById('activeUsersTable');
+    const memoryEl = document.getElementById('statusMemory');
+    const connEl = document.getElementById('statusConnection');
+    const platformEl = document.getElementById('statusPlatform');
+
+    if (storageEl && typeof formatBytes === 'function') storageEl.innerText = formatBytes(metrics.storageSize);
+
+    if (latencyEl) {
+        latencyEl.innerText = metrics.latency + " ms";
+        latencyEl.style.color = metrics.latency < 200 ? "#2ecc71" : (metrics.latency < 500 ? "orange" : "#ff5252");
+    }
+
+    if (memoryEl && metrics.memory && typeof formatBytes === 'function') {
+        memoryEl.innerText = formatBytes(metrics.memory);
+    }
+    
+    if (connEl) {
+        // Use browser API instead of pinging Google (Faster/Lighter)
+        if (navigator.connection) {
+            // Try to get specific interface type (Electron/Mobile)
+            const type = navigator.connection.type;
+            if (type && type !== 'unknown') {
+                connEl.innerText = type.toUpperCase();
+            } else {
+                // Fallback: effectiveType returns '4g' for fast connections. Display 'ONLINE' instead.
+                const eff = navigator.connection.effectiveType;
+                connEl.innerText = (eff === '4g') ? "ONLINE" : eff.toUpperCase();
+            }
+        } else {
+            connEl.innerText = navigator.onLine ? "ONLINE" : "OFFLINE";
+        }
+        connEl.style.color = navigator.onLine ? "#2ecc71" : "#ff5252";
+    }
+    
+    if (platformEl) {
+        const os = (navigator.userAgentData && navigator.userAgentData.platform) ? navigator.userAgentData.platform : navigator.platform;
+        platformEl.innerText = os;
+    }
+
+    if (activeTable) {
+        let html = '';
+        if(!metrics.activeUsers || metrics.activeUsers.length === 0) {
+                html = '<tr><td colspan="6" class="text-center">No active users detected.</td></tr>';
+        } else {
+            metrics.activeUsers.forEach(u => {
+                const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
+                    ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0) + 's')
+                    : '-';
+                
+                const verStr = u.version || '-';
+                const roleStr = u.role || '-';
+                
+                const statusBadge = u.isIdle
+                    ? '<span class="status-badge status-fail">Idle</span>'
+                    : '<span class="status-badge status-pass">Active</span>';
+                
+                const rowClass = u.isIdle ? 'user-idle' : '';
+
+                html += `
+                    <tr class="${rowClass}">
+                        <td><strong>${u.user}</strong></td>
+                        <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
+                        <td>${roleStr}</td>
+                        <td>${statusBadge}</td>
+                        <td>${idleStr}</td>
+                        <td>
+                            <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${u.user}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
+                            <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${u.user}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
+                            <button class="btn-primary btn-sm" onclick="sendRemoteCommand('${u.user}', 'force_update')" title="Force Update Check"><i class="fas fa-cloud-download-alt"></i></button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+        activeTable.innerHTML = html;
     }
 }
 
@@ -1150,7 +1248,12 @@ function startRealtimeSync() {
             const last = window.LAST_INTERACTION || Date.now();
             const idleConf = config.idle_thresholds || { logout: 900000 };
             const limitMs = idleConf.logout;
-            if ((Date.now() - last) > limitMs) {
+            
+            // EXCEPTION: Vetting Arena (Prevent Logout while waiting)
+            const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+            const isVetting = vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user];
+
+            if (!isVetting && (Date.now() - last) > limitMs) {
                 if (typeof window.cacheAndLogout === 'function') window.cacheAndLogout();
             }
         }
