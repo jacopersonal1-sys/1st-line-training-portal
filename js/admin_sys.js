@@ -648,21 +648,88 @@ function loadAdminTheme() {
     const colorInput = document.getElementById('themeColor');
     const wallInput = document.getElementById('themeWallpaper');
     
+    // --- INJECT ZOOM CONTROL ---
+    if (colorInput && !document.getElementById('themeZoomContainer')) {
+        const container = document.createElement('div');
+        container.id = 'themeZoomContainer';
+        container.style.marginTop = '20px';
+        container.style.paddingTop = '15px';
+        container.style.borderTop = '1px dashed var(--border-color)';
+        
+        container.innerHTML = `
+            <label style="display:block; margin-bottom:10px; font-weight:bold;">UI Zoom Level: <span id="themeZoomDisplay" style="color:var(--primary);">100%</span></label>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <button class="btn-secondary btn-sm" onclick="adjustZoom(-0.1)"><i class="fas fa-minus"></i></button>
+                <input type="range" id="themeZoom" min="0.5" max="1.5" step="0.1" value="1" style="flex:1;" oninput="updateZoomPreview(this.value)">
+                <button class="btn-secondary btn-sm" onclick="adjustZoom(0.1)"><i class="fas fa-plus"></i></button>
+                <button class="btn-secondary btn-sm" onclick="resetZoom()" title="Reset to 100%"><i class="fas fa-undo"></i></button>
+            </div>
+            <div style="text-align:center; font-size:0.7rem; color:var(--text-muted); margin-top:5px;">50% - 150%</div>
+        `;
+        
+        // Insert after wallpaper input if possible
+        if (wallInput && wallInput.parentNode) {
+            wallInput.parentNode.insertBefore(container, wallInput.nextSibling);
+        } else if (colorInput && colorInput.parentNode) {
+            colorInput.parentNode.insertBefore(container, colorInput.nextSibling);
+        }
+    }
+
     if (colorInput) colorInput.value = localTheme.primaryColor || '#F37021';
     if (wallInput) wallInput.value = localTheme.wallpaper || '';
     
+    const zoomInput = document.getElementById('themeZoom');
+    if (zoomInput) {
+        const z = localTheme.zoomLevel || 1.0;
+        zoomInput.value = z;
+        if(document.getElementById('themeZoomDisplay')) document.getElementById('themeZoomDisplay').innerText = Math.round(z * 100) + '%';
+    }
+
     const cb = document.getElementById('autoBackupToggle');
     if(cb) cb.checked = (localStorage.getItem('autoBackup') === 'true');
 }
+
+// Helper functions for zoom
+window.updateZoomPreview = function(val) {
+    const v = parseFloat(val);
+    document.getElementById('themeZoomDisplay').innerText = Math.round(v * 100) + '%';
+    // Live preview
+    if (typeof require !== 'undefined') {
+        try { require('electron').webFrame.setZoomFactor(v); } catch(e) {}
+    } else {
+        document.body.style.zoom = v;
+    }
+};
+
+window.adjustZoom = function(delta) {
+    const input = document.getElementById('themeZoom');
+    if(input) {
+        // Fix floating point precision issues
+        let newVal = Math.round((parseFloat(input.value) + delta) * 10) / 10;
+        newVal = Math.max(0.5, Math.min(1.5, newVal));
+        input.value = newVal;
+        updateZoomPreview(newVal);
+    }
+};
+
+window.resetZoom = function() {
+    const input = document.getElementById('themeZoom');
+    if(input) {
+        input.value = 1;
+        updateZoomPreview(1);
+    }
+};
 
 async function saveThemeSettings() {
     
     const color = document.getElementById('themeColor').value;
     const wallpaper = document.getElementById('themeWallpaper').value;
+    const zoom = document.getElementById('themeZoom') ? parseFloat(document.getElementById('themeZoom').value) : 1.0;
     
     const themeConfig = {
         primaryColor: color,
-        wallpaper: wallpaper
+        wallpaper: wallpaper,
+        zoomLevel: zoom
     };
     
     // Save locally only
@@ -670,7 +737,7 @@ async function saveThemeSettings() {
     
     if (typeof applyUserTheme === 'function') applyUserTheme();
     
-    alert("Theme Saved (Local PC Only)!");
+    alert("Theme & Zoom Saved (Local PC Only)!");
 }
 
 // --- SECTION 6: SYSTEM HEALTH & RESET ---

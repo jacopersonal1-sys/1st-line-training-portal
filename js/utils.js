@@ -27,7 +27,18 @@ function getAvatarHTML(name, size = 32) {
     for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
     const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
     const color = "#" + "00000".substring(0, 6 - c.length) + c;
-    return `<div style="width:${size}px; height:${size}px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:${size*0.4}px; font-weight:bold; margin-right:10px; flex-shrink:0; box-shadow:0 2px 4px rgba(0,0,0,0.1); vertical-align:middle;">${initials}</div>`;
+    
+    // --- NEW: Ring Color for Current User ---
+    let boxShadow = '0 2px 4px rgba(0,0,0,0.1)'; // Default shadow
+
+    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && name === CURRENT_USER.user) {
+        const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+        if (localTheme && localTheme.showRing && localTheme.profileRingColor) {
+            boxShadow = `0 0 0 3px ${localTheme.profileRingColor}`;
+        }
+    }
+
+    return `<div style="width:${size}px; height:${size}px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:${size*0.4}px; font-weight:bold; margin-right:10px; flex-shrink:0; box-shadow:${boxShadow}; vertical-align:middle;">${initials}</div>`;
 }
 
 // --- UI: SKELETON LOADER GENERATOR ---
@@ -328,3 +339,152 @@ async function generateAIResponse(systemPrompt, userPrompt) {
         return null;
     }
 }
+
+// --- PROFILE SETTINGS MODAL (Global) ---
+window.openUnifiedProfileSettings = function() {
+    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    
+    const modalHtml = `
+        <div id="profileSettingsModal" class="modal-overlay" style="z-index:10005;">
+            <div class="modal-box" style="width:500px; max-width:95%;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                    <h3 style="margin:0;"><i class="fas fa-user-circle"></i> Profile & Settings</h3>
+                    <button class="btn-secondary" onclick="document.getElementById('profileSettingsModal').remove()">&times;</button>
+                </div>
+                
+                <div class="card" style="margin-bottom:15px;">
+                    <h4 style="margin-top:0;"><i class="fas fa-palette"></i> Personalization</h4>
+                    <div class="grid-2" style="margin-bottom:10px;">
+                        <div>
+                            <label style="font-size:0.8rem;">Accent Color</label>
+                            <input type="color" id="profThemeColor" value="${localTheme.primaryColor || '#F37021'}" style="width:100%; height:35px; cursor:pointer; border:none; padding:0; background:none;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="profShowRing" ${localTheme.showRing ? 'checked' : ''}> Avatar Ring</label>
+                            <input type="color" id="profRingColor" value="${localTheme.profileRingColor || localTheme.primaryColor || '#F37021'}" style="width:100%; height:35px; cursor:pointer; border:none; padding:0; background:none;">
+                        </div>
+                    </div>
+                    <label style="font-size:0.8rem;">Wallpaper URL</label>
+                    <input type="text" id="profWallpaper" value="${localTheme.wallpaper || ''}" placeholder="https://..." style="margin-bottom:10px;">
+                    
+                    <label style="font-size:0.8rem;">UI Zoom: <span id="profZoomDisplay" style="color:var(--primary); font-weight:bold;">${Math.round((localTheme.zoomLevel || 1)*100)}%</span></label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <button class="btn-secondary btn-sm" onclick="adjustProfileZoom(-0.1)"><i class="fas fa-minus"></i></button>
+                        <input type="range" id="profZoom" min="0.5" max="1.5" step="0.1" value="${localTheme.zoomLevel || 1}" style="flex:1;" oninput="updateProfileZoom(this.value)">
+                        <button class="btn-secondary btn-sm" onclick="adjustProfileZoom(0.1)"><i class="fas fa-plus"></i></button>
+                        <button class="btn-secondary btn-sm" onclick="resetProfileZoom()" title="Reset"><i class="fas fa-undo"></i></button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h4 style="margin-top:0;"><i class="fas fa-key"></i> Security</h4>
+                    <label style="font-size:0.8rem;">Change Password</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="password" id="profNewPass" placeholder="New Password" style="margin:0; flex:1;">
+                        <button class="btn-warning btn-sm" onclick="saveProfilePassword()">Update</button>
+                    </div>
+                </div>
+
+                <div style="text-align:right; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
+                    <button class="btn-secondary" onclick="document.getElementById('profileSettingsModal').remove()" style="margin-right:10px;">Close</button>
+                    <button class="btn-primary" onclick="saveProfileSettings()">Save Changes</button>
+                    <button class="btn-danger btn-sm" onclick="logout()" style="float:left;"><i class="fas fa-sign-out-alt"></i> Log Out</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.updateProfileZoom = function(val) {
+    const v = parseFloat(val);
+    const disp = document.getElementById('profZoomDisplay');
+    if(disp) disp.innerText = Math.round(v * 100) + '%';
+    if (typeof require !== 'undefined') {
+        try { require('electron').webFrame.setZoomFactor(v); } catch(e) {}
+    } else {
+        document.body.style.zoom = v;
+    }
+};
+
+window.adjustProfileZoom = function(delta) {
+    const input = document.getElementById('profZoom');
+    if(input) {
+        let newVal = Math.round((parseFloat(input.value) + delta) * 10) / 10;
+        newVal = Math.max(0.5, Math.min(1.5, newVal));
+        input.value = newVal;
+        updateProfileZoom(newVal);
+    }
+};
+
+window.resetProfileZoom = function() {
+    const input = document.getElementById('profZoom');
+    if(input) {
+        input.value = 1;
+        updateProfileZoom(1);
+    }
+};
+
+window.saveProfileSettings = function() {
+    try {
+        const getVal = (id) => { const el = document.getElementById(id); return el ? el.value : null; };
+        const getChecked = (id) => { const el = document.getElementById(id); return el ? el.checked : false; };
+
+        const themeConfig = {
+            primaryColor: getVal('profThemeColor') || '#F37021',
+            showRing: getChecked('profShowRing'),
+            profileRingColor: getVal('profRingColor') || '#F37021',
+            wallpaper: getVal('profWallpaper') || '',
+            zoomLevel: parseFloat(getVal('profZoom') || 1)
+        };
+        
+        localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));
+        
+        if (typeof applyUserTheme === 'function') applyUserTheme();
+        
+        // Force refresh footer avatar
+        if (typeof CURRENT_USER !== 'undefined' && document.getElementById('user-footer')) {
+             // Trigger a re-render of the footer content if possible, or reload page
+             // Simple reload is safest to apply all theme changes cleanly
+             if(confirm("Settings saved. Reload to apply changes fully?")) location.reload();
+        } else {
+             if(typeof showToast === 'function') showToast("Settings Saved!", "success");
+             document.getElementById('profileSettingsModal').remove();
+        }
+    } catch(e) {
+        alert("Error saving settings: " + e.message);
+    }
+};
+
+window.saveProfilePassword = async function() {
+    const newPass = document.getElementById('profNewPass').value;
+    if(!newPass) return alert("Please enter a new password.");
+    
+    if(!confirm("Are you sure you want to change your password?")) return;
+    
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const idx = users.findIndex(u => u.user === CURRENT_USER.user);
+    
+    if(idx > -1) {
+        let finalPass = newPass;
+        if (typeof hashPassword === 'function') {
+            finalPass = await hashPassword(newPass);
+        }
+        
+        users[idx].pass = finalPass;
+        localStorage.setItem('users', JSON.stringify(users));
+        
+        // Update current session
+        CURRENT_USER.pass = finalPass;
+        sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
+        
+        // Sync
+        if(typeof secureAuthSave === 'function') await secureAuthSave();
+        else if(typeof saveToServer === 'function') await saveToServer(['users'], false);
+        
+        alert("Password updated successfully.");
+        document.getElementById('profNewPass').value = '';
+    } else {
+        alert("Error: User record not found.");
+    }
+};

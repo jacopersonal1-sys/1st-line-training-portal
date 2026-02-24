@@ -252,6 +252,7 @@ async function autoLogin() {
   }, 2000);
   // -----------------------------
 
+  // Revert to Standard Footer (Profile moved to Header)
   document.getElementById('user-footer').innerHTML = `Logged in as: <strong>${CURRENT_USER.user}</strong> (${CURRENT_USER.role}) <span id="sync-indicator" style="margin-left:15px; transition: opacity 0.5s; font-size: 0.9em;"></span>`;
   
   // LOG LOGIN
@@ -320,10 +321,93 @@ function applyRolePermissions() {
   filterContainer.classList.add('hidden');
   if(myTestsNav) myTestsNav.classList.remove('hidden'); // Default visible
   
-  // Reset Admin Panel Button (Make visible for everyone now, will act as "Settings")
+  // --- ADMIN TOOLS BUTTON ---
   if(adminPanelBtn) {
-      adminPanelBtn.classList.remove('hidden');
-      adminPanelBtn.innerHTML = '<i class="fas fa-cogs"></i>'; // Reset icon
+      // Reset to standard Admin Tools appearance
+      adminPanelBtn.title = "Admin Panel";
+      adminPanelBtn.innerHTML = '<i class="fas fa-cogs"></i>';
+      adminPanelBtn.onclick = function() { showTab('admin-panel'); };
+      
+      // Clear custom avatar styles from previous version
+      adminPanelBtn.style.padding = '';
+      adminPanelBtn.style.width = '';
+      adminPanelBtn.style.height = '';
+      adminPanelBtn.style.display = '';
+      adminPanelBtn.style.alignItems = '';
+      adminPanelBtn.style.justifyContent = '';
+      adminPanelBtn.style.borderRadius = '';
+      adminPanelBtn.style.overflow = '';
+
+      // Visibility Logic: Only for Admins
+      if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
+          adminPanelBtn.classList.remove('hidden');
+      } else {
+          adminPanelBtn.classList.add('hidden');
+      }
+  }
+
+  // --- 2. PROFILE SETTINGS BUTTON (Universal - Logo) ---
+  let controlContainer = document.querySelector('.control-bubble .bubble-content');
+  if (!controlContainer && adminPanelBtn && adminPanelBtn.parentElement) {
+      controlContainer = adminPanelBtn.parentElement;
+  }
+  
+  if (controlContainer) {
+      // Remove any existing profile buttons to prevent duplicates/stale state
+      let profileBtn = document.getElementById('btn-profile-settings');
+      if (profileBtn) profileBtn.remove();
+
+      // Create Fresh Button
+      profileBtn = document.createElement('button');
+      profileBtn.id = 'btn-profile-settings';
+      profileBtn.className = 'icon-btn';
+      
+      // Force Insert at the START of the container
+      controlContainer.prepend(profileBtn);
+
+      profileBtn.title = "Profile & Settings";
+      
+      // Apply Ring to Logo if enabled
+      const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+      let imgStyle = "width:32px; height:32px; vertical-align:middle; object-fit:contain; border-radius:50%;";
+      if (localTheme && localTheme.showRing && localTheme.profileRingColor) {
+          imgStyle += ` box-shadow: 0 0 0 3px ${localTheme.profileRingColor};`;
+      }
+
+      // Use the Logo (ico.ico) as requested
+      profileBtn.innerHTML = `<img src="ico.ico" style="${imgStyle}" alt="Profile" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'#fff\\' stroke-width=\\'2\\' stroke-linecap=\\'round\\' stroke-linejoin=\\'round\\'><circle cx=\\'12\\' cy=\\'12\\' r=\\'10\\'/><path d=\\'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2\\' /><circle cx=\\'12\\' cy=\\'7\\' r=\\'4\\' /></svg>'">`;
+      
+      profileBtn.onclick = function(e) { 
+          e.preventDefault();
+          if(typeof openUnifiedProfileSettings === 'function') openUnifiedProfileSettings(); 
+          else alert("Settings module loading...");
+      };
+      
+      // Ensure visibility for all roles
+      profileBtn.classList.remove('hidden', 'admin-only');
+      
+      // Styling
+      profileBtn.style.padding = '0';
+      profileBtn.style.width = '40px';
+      profileBtn.style.height = '40px';
+      profileBtn.style.display = 'flex';
+      profileBtn.style.alignItems = 'center';
+      profileBtn.style.justifyContent = 'center';
+      profileBtn.style.borderRadius = '50%';
+      profileBtn.style.overflow = 'visible';
+      profileBtn.style.marginLeft = '5px';
+      profileBtn.style.border = 'none';
+      profileBtn.style.background = 'transparent';
+      profileBtn.style.cursor = 'pointer';
+      profileBtn.style.zIndex = '100'; // Ensure it's on top
+
+      // Fix Avatar Margin (Remove right margin meant for text labels)
+      const innerAvatar = profileBtn.querySelector('div');
+      if(innerAvatar) {
+          innerAvatar.style.marginRight = '0';
+      }
+  } else {
+      console.warn("Profile Button: Control container not found.");
   }
 
   // --- SUB-MENU CONTROL (New Logic) ---
@@ -372,9 +456,6 @@ function applyRolePermissions() {
   else {
     // === NON-ADMIN (TL & Trainee) ===
     
-    // Rename "Admin Tools" bubble button to "Profile"
-    if(adminPanelBtn) adminPanelBtn.setAttribute('title', 'Profile & Settings');
-
     // Hide Advanced Admin Sub-Tabs
     if(subBtnAssess) subBtnAssess.classList.add('hidden');
     if(subBtnVetting) subBtnVetting.classList.add('hidden');

@@ -501,7 +501,7 @@ function renderLiveTable() {
 
                     // Info Display
                     let info = '';
-                    if (isMine || CURRENT_USER.role === 'admin') {
+                    if (isMine || ['admin', 'super_admin', 'teamleader', 'special_viewer'].includes(CURRENT_USER.role)) {
                         info = `<div style="font-weight:bold; font-size:0.85rem;">${booking.trainee}</div>
                                 <div style="font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${booking.assessment}</div>`;
                     } else {

@@ -428,6 +428,20 @@ function loadAdminUsers() {
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
         if(createContainer) createContainer.classList.remove('hidden');
         if(scanBtn) scanBtn.classList.remove('hidden');
+        
+        // Inject "My Profile" button if missing
+        if (!document.getElementById('btnMyProfileAdmin')) {
+            const btnHtml = `<button id="btnMyProfileAdmin" class="btn-secondary btn-sm" onclick="openUnifiedProfileSettings()" style="margin-left:10px; vertical-align:middle;"><i class="fas fa-user-cog"></i> My Profile Settings</button>`;
+            
+            if (scanBtn && scanBtn.parentNode) {
+                scanBtn.insertAdjacentHTML('afterend', btnHtml);
+            } else if (createContainer) {
+                createContainer.insertAdjacentHTML('beforeend', btnHtml);
+            } else {
+                const searchBox = document.getElementById('userSearch');
+                if(searchBox) searchBox.insertAdjacentHTML('afterend', btnHtml);
+            }
+        }
         displayUsers = users.filter(u => u.user.toLowerCase().includes(search));
     } else if (CURRENT_USER.role === 'special_viewer') {
         if(createContainer) createContainer.classList.add('hidden');

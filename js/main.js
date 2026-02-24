@@ -397,6 +397,23 @@ window.onload = async function() {
             .badge-bronze { border-color: #d35400; background: rgba(211, 84, 0, 0.1); }
             .badge-mythic { border-color: #9b59b6; background: rgba(155, 89, 182, 0.1); box-shadow: 0 0 10px rgba(155, 89, 182, 0.3); }
             .badge-shame { border-color: #7f8c8d; opacity: 0.7; filter: grayscale(0.5); }
+
+            /* --- LIGHT MODE ACCESSIBILITY FIXES --- */
+            body.light-mode {
+                --text-main: #111111 !important;
+                --text-muted: #444444 !important; /* Slightly softer for less harshness */
+                --border-color: #bbbbbb !important; /* Softer borders (was #888) */
+                --bg-input: #f4f4f4 !important;
+                --bg-hover: #e0e0e0 !important;
+            }
+            body.light-mode .text-muted { color: #444444 !important; font-weight: 600 !important; }
+            body.light-mode small { color: #444444 !important; font-weight: 600 !important; }
+            body.light-mode ::placeholder { color: #444444 !important; opacity: 1; font-weight: 500; }
+
+            /* --- GLOBAL SMOOTHING --- */
+            body, .card, .dash-card, .modal-box, input, select, textarea, button, .nav-item, table, tr, td, th, .sidebar, .content-wrapper {
+                transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), color 0.4s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            }
         `;
         document.head.appendChild(style);
     }
@@ -679,6 +696,20 @@ function applyUserTheme() {
         document.body.style.backgroundImage = '';
         const existingOverlay = document.getElementById('bg-overlay');
         if (existingOverlay) existingOverlay.remove();
+    }
+
+    // 3. Zoom Level
+    if (localTheme.zoomLevel) {
+        if (typeof require !== 'undefined') {
+            try {
+                const { webFrame } = require('electron');
+                webFrame.setZoomFactor(parseFloat(localTheme.zoomLevel));
+            } catch(e) {
+                document.body.style.zoom = localTheme.zoomLevel;
+            }
+        } else {
+            document.body.style.zoom = localTheme.zoomLevel;
+        }
     }
 }
 
@@ -1341,6 +1372,18 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.1.61": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Header UI:</strong> Separated Profile Settings (Logo) from Admin Tools (Gear).</li>
+                <li style="margin-bottom: 8px;"><strong>Profile:</strong> Added "My Profile" shortcut in Admin User Management.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Live Assessment booking visibility for Admins/TLs.</li>
+            </ul>`,
+        "2.1.60": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Zoom Control:</strong> New UI Zoom slider in Theme Settings to scale the interface.</li>
+                <li style="margin-bottom: 8px;"><strong>Visual Polish:</strong> Added smooth transitions when switching themes.</li>
+                <li style="margin-bottom: 8px;"><strong>Light Mode:</strong> Improved readability with softer borders and text.</li>
+            </ul>`,
         "2.1.59": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Super Admin Console 2.0:</strong> Redesigned with Tabs, Raw Data Inspector, and AI Analyst Chat.</li>
