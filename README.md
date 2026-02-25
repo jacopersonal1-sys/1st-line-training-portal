@@ -10,10 +10,12 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 - **Runtime**: Electron (Main Process handles Node integration, Kiosk Mode, Auto-Updates).
 - **Database**: 
   - **Local**: `localStorage` (Primary read/write layer).
-  - **Cloud**: Supabase (`app_documents` table for JSON blobs, `sessions` for heartbeat).
-- **Sync Engine**: Custom "Smart Split Sync" (`js/data.js`).
-  - **Logic**: Merges local changes with server data field-by-field to prevent overwrites.
-  - **Conflict Resolution**: Server timestamp wins unless specific "User-Specific" merge logic applies (e.g., Activity Monitor).
+  - **Cloud**: Supabase (Hybrid Model: `app_documents` for config blobs, dedicated tables for `records`, `submissions`, `logs`, etc.).
+- **Sync Engine**: Custom "Hybrid Row-Level Sync" (`js/data.js`).
+  - **Logic**: 
+    - **Blobs**: Config/Rosters sync as JSON objects.
+    - **Rows**: High-volume data (Records, Logs) syncs as individual rows to save bandwidth.
+  - **Optimization**: Uses lightweight checksums to track changes and prevent storage bloat.
 
 ## Key File Structure & Responsibilities
 
@@ -97,13 +99,16 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 ## Critical Logic Flows
 
 ### 1. Data Synchronization (`js/data.js`)
-The app uses a **"Smart Split Sync"** with Conflict Resolution:
-- **Load (Pull)**: `loadFromServer()` fetches metadata. Uses **`server_wins`** strategy to ensure updates from other admins are accepted.
+The app uses a **"Hybrid Row-Level Sync"** engine:
+- **Load (Pull)**: 
+  - Fetches metadata for Blobs (Config, Rosters).
+  - Queries Tables for new Rows (Records, Logs) based on `updated_at`.
 - **Merge**: `performSmartMerge(server, local, strategy)` combines arrays/objects.
   - **Deduplication**: Case-insensitive matching for records to prevent duplicates.
-- **Save (Push)**: `saveToServer(keys, force)` pushes local data.
-  - Uses **`local_wins`** strategy to preserve local edits.
-  - **Timestamping**: Uses authoritative Server Time from Supabase to prevent sync loops.
+- **Save (Push)**: 
+  - **Blobs**: Pushes full JSON objects for settings.
+  - **Rows**: Pushes only changed items as individual rows to Supabase tables.
+- **Optimization**: Uses 8-char checksums in `hash_map` to track changes efficiently.
 - **Auto-Recovery**: Automatically retries sync when network comes online.
 - **Visuals**: UI indicates "Unsaved...", "Syncing...", "Offline", or "Sync Failed" with a manual Retry/Speed Test button.
 
@@ -146,6 +151,10 @@ The app uses a **"Smart Split Sync"** with Conflict Resolution:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.2.3**: **Sync Visibility & Fixes**: Added "Last Sync Time" columns to Admin Console. Fixed User Idle Timeout logic to respect custom overrides.
+- **v2.2.2**: **Hotfix**: Resolved login lockout for Admins switching terminals.
+- **v2.2.1**: **Storage Optimization**: Implemented lightweight checksums for sync, reducing local DB size by ~90%. Added automatic duplicate cleanup.
+- **v2.2.0**: **Architectural Overhaul**: Migrated from Blob Storage to **Row-Level Sync** for high-volume data (Records, Submissions, Logs). Added **Emergency Lockdown** and **Data Patcher** tools.
 - **v2.1.61**: **Header & Profile Polish**: Separated Profile Settings (Logo) and Admin Tools (Gear) in the header. Implemented robust injection logic for header buttons. Added "My Profile" shortcut in Admin User Management. Fixed Live Assessment booking visibility for admins.
 - **v2.1.60**: **Visual & Accessibility**: **Zoom Control**: Added global UI Zoom slider in Theme Settings (50% - 150%). **Smooth Transitions**: Implemented CSS transitions for theme toggling to reduce visual jar. **Light Mode Polish**: Softened borders and text colors in Light Mode for better readability.
 - **v2.1.59**: **Super Admin & AI Overhaul**: **Console 2.0**: Completely redesigned Super Admin Console with tabbed navigation (Overview, Config, Security, Data, AI). **Raw Data Inspector**: Added JSON editor for direct database manipulation with validation. **AI Analyst**: Dedicated chat interface for querying system data (`analyze_records`, `read_config`). **Study Monitor 2.0**: Implemented "Lenient Scoring" (tolerance for short interruptions), robust "Idle Detection" (60s timeout), and "Anti-Jiggle" logic to prevent false positives. **Vetting Arena**: Added "Waiting for Admin" pulse indicator and fixed idle detection to allow waiting in the arena without timeout. **Stability**: Added graceful error handling for cloud sync timeouts (500 errors) and optimistic UI updates for smoother admin interactions.

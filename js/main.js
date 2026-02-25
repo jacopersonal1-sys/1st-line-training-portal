@@ -689,6 +689,22 @@ function applyUserTheme() {
         root.style.setProperty('--primary-soft', adjustOpacity(localTheme.primaryColor, 0.15));
     }
 
+    // NEW: Background Color & Gloss Areas
+    if (localTheme.backgroundColor) {
+        const bg = localTheme.backgroundColor;
+        root.style.setProperty('--bg-app', bg);
+        
+        if (!localTheme.wallpaper) {
+            document.body.style.background = bg;
+        }
+
+        // Dynamically tint the UI components based on background
+        root.style.setProperty('--bg-card', lightenColor(bg, 10), 'important');
+        root.style.setProperty('--bg-input', lightenColor(bg, 20), 'important');
+        root.style.setProperty('--bg-hover', lightenColor(bg, 30), 'important');
+        root.style.setProperty('--border-color', lightenColor(bg, 40), 'important');
+    }
+
     // 2. Wallpaper / Background
     if (localTheme.wallpaper) {
         document.body.style.backgroundImage = `url('${localTheme.wallpaper}')`;
@@ -725,6 +741,23 @@ function applyUserTheme() {
             document.body.style.zoom = localTheme.zoomLevel;
         }
     }
+}
+
+// --- HELPER: Lighten/Darken Hex Color ---
+function lightenColor(col, amt) {
+    let usePound = false;
+    if (col[0] === "#") {
+        col = col.slice(1);
+        usePound = true;
+    }
+    let num = parseInt(col, 16);
+    let r = (num >> 16) + amt;
+    let b = ((num >> 8) & 0x00FF) + amt;
+    let g = (num & 0x0000FF) + amt;
+    if (r > 255) r = 255; else if (r < 0) r = 0;
+    if (b > 255) b = 255; else if (b < 0) b = 0;
+    if (g > 255) g = 255; else if (g < 0) g = 0;
+    return (usePound ? "#" : "") + ((g | (b << 8) | (r << 16)) >>> 0).toString(16).padStart(6, '0');
 }
 
 // Helper to create the soft color variant
@@ -1386,6 +1419,19 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.6": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Enforced Background Color theme application to ensure UI components (Cards, Inputs) update correctly.</li>
+            </ul>`,
+        "2.2.5": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Theme Engine:</strong> Background Color setting now applies to Cards, Inputs, and Sidebars (Gloss Grey areas) for a fully consistent look.</li>
+            </ul>`,
+        "2.2.4": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Super Admin Console crash (Syntax Error).</li>
+                <li style="margin-bottom: 8px;"><strong>Theme:</strong> Added "Background Color" customization for Dark Mode in Theme Settings.</li>
+            </ul>`,
         "2.2.3": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added "Last Sync Time" column to the Row-Level Sync Status table for better visibility.</li>

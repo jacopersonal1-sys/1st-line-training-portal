@@ -648,6 +648,14 @@ function loadAdminTheme() {
     const colorInput = document.getElementById('themeColor');
     const wallInput = document.getElementById('themeWallpaper');
     
+    // --- INJECT BACKGROUND COLOR INPUT ---
+    if (colorInput && !document.getElementById('themeBgColor')) {
+        const div = document.createElement('div');
+        div.style.marginBottom = '10px';
+        div.innerHTML = `<label>Background Color (Dark Mode)</label><input type="color" id="themeBgColor" value="#1A1410" style="width:100%; height:40px; cursor:pointer; border:1px solid var(--border-color); border-radius:4px;">`;
+        if (colorInput.parentNode) colorInput.parentNode.insertBefore(div, colorInput.nextSibling);
+    }
+
     // --- INJECT ZOOM CONTROL ---
     if (colorInput && !document.getElementById('themeZoomContainer')) {
         const container = document.createElement('div');
@@ -677,6 +685,10 @@ function loadAdminTheme() {
 
     if (colorInput) colorInput.value = localTheme.primaryColor || '#F37021';
     if (wallInput) wallInput.value = localTheme.wallpaper || '';
+    
+    if (document.getElementById('themeBgColor')) {
+        document.getElementById('themeBgColor').value = localTheme.backgroundColor || '#1A1410';
+    }
     
     const zoomInput = document.getElementById('themeZoom');
     if (zoomInput) {
@@ -724,10 +736,12 @@ async function saveThemeSettings() {
     
     const color = document.getElementById('themeColor').value;
     const wallpaper = document.getElementById('themeWallpaper').value;
+    const bgColor = document.getElementById('themeBgColor') ? document.getElementById('themeBgColor').value : '#1A1410';
     const zoom = document.getElementById('themeZoom') ? parseFloat(document.getElementById('themeZoom').value) : 1.0;
     
     const themeConfig = {
         primaryColor: color,
+        backgroundColor: bgColor,
         wallpaper: wallpaper,
         zoomLevel: zoom
     };
@@ -1149,7 +1163,6 @@ window.checkRowSyncStatus = async function() {
         const { count: remAtt } = await supabaseClient.from('attendance').select('*', { count: 'exact', head: true });
         const { count: remArch } = await supabaseClient.from('archived_users').select('*', { count: 'exact', head: true });
         const { count: remRep } = await supabaseClient.from('saved_reports').select('*', { count: 'exact', head: true });
-        const { count: remReq } = await supabaseClient.from('link_requests').select('*', { count: 'exact', head: true });
         const { count: remReq } = await supabaseClient.from('link_requests').select('*', { count: 'exact', head: true });
         const { count: remMon } = await supabaseClient.from('monitor_state').select('*', { count: 'exact', head: true });
         
