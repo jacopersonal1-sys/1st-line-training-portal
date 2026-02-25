@@ -68,12 +68,16 @@ function renderAdminArena() {
     }
 
     // Realtime Subscription
-    if (typeof subscribeToDocKey === 'function') {
-        ADMIN_VETTING_REALTIME_UNSUB = subscribeToDocKey('vettingSession', (content) => {
-            localStorage.setItem('vettingSession', JSON.stringify(content || { active: false, trainees: {} }));
-            const c = document.getElementById('vetting-arena-content');
-            if (c && c.offsetParent !== null) renderAdminArena();
-        });
+    if (window.supabaseClient) {
+        const channel = window.supabaseClient.channel('vetting_room')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
+                const content = payload.new ? payload.new.data : null;
+                localStorage.setItem('vettingSession', JSON.stringify(content || { active: false, trainees: {} }));
+                const c = document.getElementById('vetting-arena-content');
+                if (c && c.offsetParent !== null) renderAdminArena();
+            })
+            .subscribe();
+        ADMIN_VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
     }
 
     // Auto-Refresh Monitor every 5 seconds if active
@@ -286,7 +290,7 @@ async function startVettingSession() {
     };
     
     localStorage.setItem('vettingSession', JSON.stringify(session));
-    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true); // Force push
+    await saveVettingSessionDirectly(session);
     
     loadVettingArena();
     alert("Session Started. Trainees can now access the Vetting Arena.");
@@ -299,7 +303,7 @@ async function endVettingSession() {
     session.active = false;
     
     localStorage.setItem('vettingSession', JSON.stringify(session));
-    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true);
+    await saveVettingSessionDirectly(session);
     
     if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
     loadVettingArena();
@@ -310,8 +314,19 @@ async function toggleSecurity(username, enable) {
     if (!session.trainees[username]) session.trainees[username] = {};
     session.trainees[username].relaxed = enable;
     localStorage.setItem('vettingSession', JSON.stringify(session));
-    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], false);
+    await saveVettingSessionDirectly(session);
     loadVettingArena();
+}
+
+// --- NEW: DIRECT TABLE SAVE (Bypass Blob) ---
+async function saveVettingSessionDirectly(session) {
+    if (!window.supabaseClient) return;
+    // Upsert to 'vetting_sessions' table with fixed ID
+    await window.supabaseClient.from('vetting_sessions').upsert({
+        id: 'global_session',
+        data: session,
+        updated_at: new Date().toISOString()
+    });
 }
 
 // --- TRAINEE CONTROLS ---
@@ -465,41 +480,15 @@ function stopTraineePollers() {
 function startTraineePreFlight() {
     // Prefer Realtime for session updates. Fallback to polling if unavailable.
     let usingRealtime = false;
-    if (typeof subscribeToDocKey === 'function') {
-        VETTING_REALTIME_UNSUB = subscribeToDocKey('vettingSession', (content) => {
-            const serverSession = content || { active: false };
-            const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-
-            // Merge only the global session flags + override flag (same logic as poller)
-            localSession.active = serverSession.active;
-            localSession.testId = serverSession.testId;
-            localSession.targetGroup = serverSession.targetGroup;
-
-            if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
-                if (!localSession.trainees) localSession.trainees = {};
-                if (!localSession.trainees[CURRENT_USER.user]) localSession.trainees[CURRENT_USER.user] = {};
-                localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
-                localSession.trainees[CURRENT_USER.user].relaxed = serverSession.trainees[CURRENT_USER.user].relaxed;
-            }
-
-            const newStr = JSON.stringify(localSession);
-            const currentLocal = localStorage.getItem('vettingSession');
-            if (currentLocal !== newStr) {
-                localStorage.setItem('vettingSession', newStr);
-
-                // If session ended while taking test, force submit/exit
-                if (!serverSession.active && document.getElementById('arenaTestContainer')) {
-                    if (typeof submitTest === 'function') submitTest(true);
-                    return;
-                }
-
-                if (!document.getElementById('arenaTestContainer')) {
-                    renderTraineeArena();
-                }
-                if (typeof applyRolePermissions === 'function') applyRolePermissions();
-            }
-        });
-        usingRealtime = !!VETTING_REALTIME_UNSUB;
+    if (window.supabaseClient) {
+        const channel = window.supabaseClient.channel('vetting_room_trainee')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
+                const serverSession = payload.new ? payload.new.data : { active: false };
+                handleVettingUpdate(serverSession);
+            })
+            .subscribe();
+        VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
+        usingRealtime = true;
     }
 
     // Fallback network poll (5s)
@@ -514,56 +503,52 @@ function startTraineePreFlight() {
     checkSystemCompliance(); // Run immediately
 }
 
+function handleVettingUpdate(serverSession) {
+    const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+
+    // Merge only the global session flags + override flag
+    localSession.active = serverSession.active;
+    localSession.testId = serverSession.testId;
+    localSession.targetGroup = serverSession.targetGroup;
+
+    if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
+        if (!localSession.trainees) localSession.trainees = {};
+        if (!localSession.trainees[CURRENT_USER.user]) localSession.trainees[CURRENT_USER.user] = {};
+        localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
+        localSession.trainees[CURRENT_USER.user].relaxed = serverSession.trainees[CURRENT_USER.user].relaxed;
+    }
+
+    const newStr = JSON.stringify(localSession);
+    const currentLocal = localStorage.getItem('vettingSession');
+    if (currentLocal !== newStr) {
+        localStorage.setItem('vettingSession', newStr);
+
+        // If session ended while taking test, force submit/exit
+        if (!serverSession.active && document.getElementById('arenaTestContainer')) {
+            if (typeof submitTest === 'function') submitTest(true);
+            return;
+        }
+
+        if (!document.getElementById('arenaTestContainer')) {
+            renderTraineeArena();
+        }
+        if (typeof applyRolePermissions === 'function') applyRolePermissions();
+    }
+}
+
 // Lightweight Poller for Session State
 async function pollVettingSession() {
     if (!window.supabaseClient) return;
     
-    // Fetch ONLY the vettingSession row to save bandwidth
+    // Fetch from TABLE
     const { data, error } = await supabaseClient
-        .from('app_documents')
-        .select('content')
-        .eq('key', 'vettingSession')
+        .from('vetting_sessions')
+        .select('data')
+        .eq('id', 'global_session')
         .single();
         
-    if (data && data.content) {
-        const serverSession = data.content;
-        const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-        
-        // Merge Server State (Global) into Local
-        localSession.active = serverSession.active;
-        localSession.testId = serverSession.testId;
-        localSession.targetGroup = serverSession.targetGroup;
-        
-        // Sync Override flag specifically for current user
-        if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
-            if (!localSession.trainees) localSession.trainees = {};
-            if (!localSession.trainees[CURRENT_USER.user]) localSession.trainees[CURRENT_USER.user] = {};
-            
-            // Adopt override if present on server
-            localSession.trainees[CURRENT_USER.user].override = serverSession.trainees[CURRENT_USER.user].override;
-            localSession.trainees[CURRENT_USER.user].relaxed = serverSession.trainees[CURRENT_USER.user].relaxed;
-        }
-
-        const newStr = JSON.stringify(localSession);
-        const currentLocal = localStorage.getItem('vettingSession');
-        
-        // Only re-render if state changed
-        if (currentLocal !== newStr) {
-            localStorage.setItem('vettingSession', newStr);
-            
-            // FIX: If session ended while taking test, force submit/exit
-            if (!serverSession.active && document.getElementById('arenaTestContainer')) {
-                if (typeof submitTest === 'function') await submitTest(true); // Force submit
-                return;
-            }
-
-            // If we are NOT currently taking the test, refresh the view
-            if (!document.getElementById('arenaTestContainer')) {
-                renderTraineeArena();
-            }
-            // FIX: Update sidebar visibility immediately when session state changes
-            if (typeof applyRolePermissions === 'function') applyRolePermissions();
-        }
+    if (data && data.data) {
+        handleVettingUpdate(data.data);
     }
 }
 
@@ -777,7 +762,7 @@ async function updateTraineeStatus(status, timerStr = "") {
     if (VETTING_SAVE_TIMEOUT) clearTimeout(VETTING_SAVE_TIMEOUT);
     
     VETTING_SAVE_TIMEOUT = setTimeout(() => {
-        if(typeof saveToServer === 'function') saveToServer(['vettingSession'], false);
+        saveVettingSessionDirectly(session);
     }, 1500);
 }
 

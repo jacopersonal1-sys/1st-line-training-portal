@@ -7,6 +7,7 @@ let LIVE_REALTIME_UNSUB = null;
 let LIVE_FALLBACK_POLLER = null;
 let LIVE_CONN_INTERVAL = null;
 let LIVE_TIMER_INTERVAL = null;
+let CURRENT_SOCKET_STATUS = 'CONNECTING';
 
 function loadLiveExecution() {
     if (LIVE_POLLER) clearInterval(LIVE_POLLER);
@@ -30,6 +31,26 @@ function loadLiveExecution() {
     // Prefer Realtime (push) to reduce reads on free tier.
     // Fallback to polling if Realtime isn't available/configured.
     let usingRealtime = false;
+    if (window.supabaseClient) {
+        // NEW: Subscribe to TABLE changes (Row-Level)
+        const channel = window.supabaseClient.channel('live_sessions_room')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, () => {
+                // When any row changes, re-fetch the state immediately
+                syncLiveSessionState();
+            })
+            .subscribe((status) => {
+                CURRENT_SOCKET_STATUS = status;
+                updateSocketStatusUI();
+            });
+
+        LIVE_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
+        usingRealtime = true;
+
+        // Initial Sync
+        syncLiveSessionState();
+    }
+
+    /* REMOVED OLD BLOB SUBSCRIPTION LOGIC
     if (typeof subscribeToDocKey === 'function') {
         LIVE_REALTIME_UNSUB = subscribeToDocKey('liveSessions', (content) => {
             // Keep local cache updated
@@ -77,7 +98,7 @@ function loadLiveExecution() {
             }
         });
         usingRealtime = !!LIVE_REALTIME_UNSUB;
-    }
+    } */
 
     if (!usingRealtime) {
         // Start Polling for updates (1s) for immediate updates
@@ -93,14 +114,14 @@ async function syncLiveSessionState() {
     // Matches Vetting Arena logic to prevent full re-renders wiping user input
     if (!window.supabaseClient) return;
 
-    const { data, error } = await supabaseClient
-        .from('app_documents')
-        .select('content')
-        .eq('key', 'liveSessions') // Fetch the ARRAY
-        .single();
+    // UPDATED: Fetch from TABLE (live_sessions)
+    const { data: rows, error } = await supabaseClient
+        .from('live_sessions')
+        .select('data');
 
-    if (data && data.content) {
-        const allSessions = data.content || [];
+    if (rows) {
+        // Map rows back to array format
+        const allSessions = rows.map(r => r.data);
         localStorage.setItem('liveSessions', JSON.stringify(allSessions));
 
         // FIND MY RELEVANT SESSION
@@ -160,6 +181,28 @@ async function syncLiveSessionState() {
             }
         }
     }
+}
+
+// --- SOCKET STATUS UI HELPER ---
+function updateSocketStatusUI() {
+    const els = [document.getElementById('socket-status'), document.getElementById('socket-status-trainee')];
+    const status = CURRENT_SOCKET_STATUS;
+    
+    let color = '#95a5a6'; // Grey
+    let text = 'Connecting...';
+    let icon = 'fa-bolt';
+    
+    if (status === 'SUBSCRIBED') { color = '#2ecc71'; text = 'Realtime Active'; }
+    else if (status === 'TIMED_OUT') { color = '#f1c40f'; text = 'Reconnecting...'; }
+    else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') { color = '#ff5252'; text = 'Socket Offline'; icon = 'fa-exclamation-triangle'; }
+    
+    els.forEach(el => {
+        if (el) {
+            el.innerHTML = `<i class="fas ${icon}" style="color:${color}; margin-right:5px;"></i> ${text}`;
+            el.style.borderColor = color;
+            el.title = `Socket Status: ${status}`;
+        }
+    });
 }
 
 // --- ADMIN VIEW ---
@@ -298,7 +341,12 @@ function renderAdminLivePanel(container) {
                     <div style="display:flex; align-items:center; gap:15px;">
                         ${getAvatarHTML(session.trainee, 48)}
                         <div>
-                            <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
+                                <div id="socket-status" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
+                                    <i class="fas fa-bolt"></i> ...
+                                </div>
+                            </div>
                             <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
                                 Checking connection...
                             </div>
@@ -318,6 +366,7 @@ function renderAdminLivePanel(container) {
             updateLiveConnectionStatus(session.trainee);
         }, 10000); // every 10s while panel is open
     }
+    updateSocketStatusUI();
 }
 
 function updateAdminLiveView() {
@@ -522,7 +571,12 @@ function renderTraineeLivePanel(container) {
     container.innerHTML = `
         <div style="max-width:95%; margin:0 auto; padding:20px;">
             <div style="margin-bottom:10px;">
-                <h2 style="margin:0;">Live Assessment</h2>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h2 style="margin:0;">Live Assessment</h2>
+                    <div id="socket-status-trainee" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
+                        <i class="fas fa-bolt"></i> ...
+                    </div>
+                </div>
                 <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
                     Checking connection...
                 </div>
@@ -560,6 +614,7 @@ function renderTraineeLivePanel(container) {
             updateLiveConnectionStatus(CURRENT_USER.user, 'live-conn-status-trainee');
         }, 10000);
     }
+    updateSocketStatusUI();
 }
 
 // --- REAL-TIME SYNC ENGINE ---

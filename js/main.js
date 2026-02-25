@@ -1386,6 +1386,15 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.3": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added "Last Sync Time" column to the Row-Level Sync Status table for better visibility.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where custom User Idle Timeout settings were ignored (defaulting to 15 mins).</li>
+            </ul>`,
+        "2.2.2": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved login lockout for Admins switching between terminals or Dev/Prod environments.</li>
+            </ul>`,
         "2.2.1": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Performance:</strong> Major storage optimization. Reduced local database size by ~90% using lightweight sync checksums.</li>

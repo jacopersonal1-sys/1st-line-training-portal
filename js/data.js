@@ -27,8 +27,8 @@ const DB_SCHEMA = {
     },
     // --- SUPER ADMIN CONFIGURATION ---
     system_config: {
-        sync_rates: { admin: 10000, teamleader: 300000, trainee: 60000 },
-        heartbeat_rates: { admin: 5000, default: 60000 },
+        sync_rates: { admin: 4000, teamleader: 60000, trainee: 15000 },
+        heartbeat_rates: { admin: 5000, default: 30000 },
         idle_thresholds: { warning: 60000, logout: 900000 },
         attendance: { work_start: "08:00", late_cutoff: "08:15", work_end: "17:00", reminder_start: "16:45", allow_weekend_login: false },
         security: { maintenance_mode: false, lockdown_mode: false, min_version: "0.0.0", force_kiosk_global: false, allowed_ips: [], banned_clients: [], client_whitelist: [] },
@@ -220,7 +220,27 @@ async function loadFromServer(silent = false) {
             }
         }
 
-        // --- PHASE C: POST-SYNC ACTIONS ---
+        // --- PHASE C: MONITOR STATE SYNC (Real-time Activity) ---
+        // Fetch all active user states from the table
+        const { data: monRows, error: monErr } = await supabaseClient
+            .from('monitor_state')
+            .select('user_id, data');
+            
+        if (monRows) {
+            const monData = {};
+            monRows.forEach(r => monData[r.user_id] = r.data);
+            
+            // Preserve MY local state (Optimistic UI) - Don't let server overwrite my own live status
+            if (CURRENT_USER) {
+                const currentLocal = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                if (currentLocal[CURRENT_USER.user]) {
+                    monData[CURRENT_USER.user] = currentLocal[CURRENT_USER.user];
+                }
+            }
+            localStorage.setItem('monitor_data', JSON.stringify(monData));
+        }
+
+        // --- PHASE D: POST-SYNC ACTIONS ---
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
         if (config.security && config.security.lockdown_mode && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
             alert("⚠️ EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
@@ -563,7 +583,23 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                     localStorage.setItem(key, JSON.stringify(localContent));
                 }
             } 
-            // --- STRATEGY B: BLOB SYNC (Config, Rosters, Users) ---
+            // --- STRATEGY B: MONITOR STATE (Real-time Object -> Table) ---
+            else if (key === 'monitor_data') {
+                 // Special handling: Write MY entry to monitor_state table
+                 // We do NOT save the whole object as a blob anymore.
+                 if (CURRENT_USER) {
+                     const allMon = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                     const myMon = allMon[CURRENT_USER.user];
+                     if (myMon) {
+                         await supabaseClient.from('monitor_state').upsert({
+                             user_id: CURRENT_USER.user,
+                             data: myMon,
+                             updated_at: new Date().toISOString()
+                         });
+                     }
+                 }
+            }
+            // --- STRATEGY C: BLOB SYNC (Config, Rosters, Users) ---
             else {
                 let finalContent = localContent;
 
@@ -1408,7 +1444,12 @@ function startRealtimeSync() {
         if (CURRENT_USER) {
             const last = window.LAST_INTERACTION || Date.now();
             const idleConf = config.idle_thresholds || { logout: 900000 };
-            const limitMs = idleConf.logout;
+            let limitMs = idleConf.logout;
+            
+            // FIX: Respect User Override (Minutes to Ms)
+            if (CURRENT_USER.idleTimeout && CURRENT_USER.idleTimeout > 0) {
+                limitMs = CURRENT_USER.idleTimeout * 60 * 1000;
+            }
             
             // EXCEPTION: Vetting Arena (Prevent Logout while waiting)
             const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');

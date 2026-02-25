@@ -1139,6 +1139,7 @@ window.checkRowSyncStatus = async function() {
         const locArch = (JSON.parse(localStorage.getItem('graduated_agents') || '[]')).length;
         const locRep = (JSON.parse(localStorage.getItem('savedReports') || '[]')).length;
         const locReq = (JSON.parse(localStorage.getItem('linkRequests') || '[]')).length;
+        const locMon = Object.keys(JSON.parse(localStorage.getItem('monitor_data') || '{}')).length;
         
         // Remote Counts (Head Query)
         const { count: remRecs } = await supabaseClient.from('records').select('*', { count: 'exact', head: true });
@@ -1149,25 +1150,34 @@ window.checkRowSyncStatus = async function() {
         const { count: remArch } = await supabaseClient.from('archived_users').select('*', { count: 'exact', head: true });
         const { count: remRep } = await supabaseClient.from('saved_reports').select('*', { count: 'exact', head: true });
         const { count: remReq } = await supabaseClient.from('link_requests').select('*', { count: 'exact', head: true });
+        const { count: remReq } = await supabaseClient.from('link_requests').select('*', { count: 'exact', head: true });
+        const { count: remMon } = await supabaseClient.from('monitor_state').select('*', { count: 'exact', head: true });
         
         const getStatus = (loc, rem) => {
             if (loc === rem) return '<span style="color:#2ecc71; font-weight:bold;">Synced</span>';
             if (loc > rem) return `<span style="color:#f1c40f; font-weight:bold;">Pending Upload (${loc - rem})</span>`;
             return `<span style="color:#3498db; font-weight:bold;">Server Ahead (${rem - loc})</span>`;
         };
+        
+        const getTs = (key) => {
+            const ts = localStorage.getItem('row_sync_ts_' + key);
+            if (!ts) return '<span style="color:var(--text-muted);">-</span>';
+            return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+        };
 
         container.innerHTML = `
             <table class="admin-table compressed-table" style="margin-top:5px;">
-                <thead><tr><th>Table</th><th>Local</th><th>Cloud</th><th>Status</th></tr></thead>
+                <thead><tr><th>Table</th><th>Local</th><th>Cloud</th><th>Status</th><th>Last Sync</th></tr></thead>
                 <tbody>
-                    <tr><td>Records</td><td>${locRecs}</td><td>${remRecs||0}</td><td>${getStatus(locRecs, remRecs||0)}</td></tr>
-                    <tr><td>Submissions</td><td>${locSubs}</td><td>${remSubs||0}</td><td>${getStatus(locSubs, remSubs||0)}</td></tr>
-                    <tr><td>Audit Logs</td><td>${locLogs}</td><td>${remLogs||0}</td><td>${getStatus(locLogs, remLogs||0)}</td></tr>
-                    <tr><td>Live Bookings</td><td>${locLive}</td><td>${remLive||0}</td><td>${getStatus(locLive, remLive||0)}</td></tr>
-                    <tr><td>Attendance</td><td>${locAtt}</td><td>${remAtt||0}</td><td>${getStatus(locAtt, remAtt||0)}</td></tr>
-                    <tr><td>Archives</td><td>${locArch}</td><td>${remArch||0}</td><td>${getStatus(locArch, remArch||0)}</td></tr>
-                    <tr><td>Reports</td><td>${locRep}</td><td>${remRep||0}</td><td>${getStatus(locRep, remRep||0)}</td></tr>
-                    <tr><td>Requests</td><td>${locReq}</td><td>${remReq||0}</td><td>${getStatus(locReq, remReq||0)}</td></tr>
+                    <tr><td>Records</td><td>${locRecs}</td><td>${remRecs||0}</td><td>${getStatus(locRecs, remRecs||0)}</td><td>${getTs('records')}</td></tr>
+                    <tr><td>Submissions</td><td>${locSubs}</td><td>${remSubs||0}</td><td>${getStatus(locSubs, remSubs||0)}</td><td>${getTs('submissions')}</td></tr>
+                    <tr><td>Audit Logs</td><td>${locLogs}</td><td>${remLogs||0}</td><td>${getStatus(locLogs, remLogs||0)}</td><td>${getTs('auditLogs')}</td></tr>
+                    <tr><td>Live Bookings</td><td>${locLive}</td><td>${remLive||0}</td><td>${getStatus(locLive, remLive||0)}</td><td>${getTs('liveBookings')}</td></tr>
+                    <tr><td>Attendance</td><td>${locAtt}</td><td>${remAtt||0}</td><td>${getStatus(locAtt, remAtt||0)}</td><td>${getTs('attendance_records')}</td></tr>
+                    <tr><td>Archives</td><td>${locArch}</td><td>${remArch||0}</td><td>${getStatus(locArch, remArch||0)}</td><td>${getTs('graduated_agents')}</td></tr>
+                    <tr><td>Reports</td><td>${locRep}</td><td>${remRep||0}</td><td>${getStatus(locRep, remRep||0)}</td><td>${getTs('savedReports')}</td></tr>
+                    <tr><td>Requests</td><td>${locReq}</td><td>${remReq||0}</td><td>${getStatus(locReq, remReq||0)}</td><td>${getTs('linkRequests')}</td></tr>
+                    <tr><td>Monitor Live</td><td>${locMon}</td><td>${remMon||0}</td><td>${getStatus(locMon, remMon||0)}</td><td>-</td></tr>
                 </tbody>
             </table>
         `;
