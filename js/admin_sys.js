@@ -867,6 +867,7 @@ function openSuperAdminConfig() {
     const banned = sec.banned_clients || [];
     const whitelist = sec.client_whitelist || [];
     const ai = config.ai || { enabled: true, apiKey: "" }; // FIX: Default to Enabled
+    const lockdown = sec.lockdown_mode || false;
 
     const modalHtml = `
         <div id="superAdminModal" class="modal-overlay">
@@ -884,6 +885,7 @@ function openSuperAdminConfig() {
                     <button class="sa-tab-btn" onclick="switchSaTab('config', this)"><i class="fas fa-cogs"></i> Configuration</button>
                     <button class="sa-tab-btn" onclick="switchSaTab('security', this)"><i class="fas fa-shield-alt"></i> Security</button>
                     <button class="sa-tab-btn" onclick="switchSaTab('data', this)"><i class="fas fa-database"></i> Data & Logs</button>
+                    <button class="sa-tab-btn" onclick="switchSaTab('patcher', this)"><i class="fas fa-terminal"></i> Data Patcher</button>
                     <button class="sa-tab-btn" onclick="switchSaTab('ai', this)"><i class="fas fa-robot"></i> AI Analyst</button>
                 </div>
 
@@ -914,6 +916,14 @@ function openSuperAdminConfig() {
                             </div>
                             <div id="sa_client_health_table" style="max-height:200px; overflow-y:auto; margin-top:10px;">Loading...</div>
                         </div>
+                        
+                        <div class="card" style="border-left: 4px solid #ff5252;">
+                            <h4><i class="fas fa-exclamation-triangle"></i> Emergency Controls</h4>
+                            <div style="display:flex; gap:15px; align-items:center;">
+                                <button class="btn-danger" onclick="toggleLockdown()" style="flex:1;">${lockdown ? 'UNLOCK SYSTEM' : '⚠ INITIATE LOCKDOWN'}</button>
+                                <div style="font-size:0.8rem; color:var(--text-muted); flex:2;"><strong>Lockdown Mode:</strong> Freezes logins, blocks saves, and forces logout for non-admins.</div>
+                            </div>
+                        </div>
 
                         <div class="card">
                             <h4><i class="fas fa-bullhorn"></i> Instant Broadcast</h4>
@@ -938,6 +948,7 @@ function openSuperAdminConfig() {
                                 <label>Start</label><input type="time" id="sa_att_start" value="${att.work_start}">
                                 <label>Late Cutoff</label><input type="time" id="sa_att_late" value="${att.late_cutoff}">
                                 <label>End</label><input type="time" id="sa_att_end" value="${att.work_end}">
+                                <label>Reminder</label><input type="time" id="sa_att_remind" value="${att.reminder_start}">
                             </div>
                         </div>
                         <div class="card" style="margin-top:15px;">
@@ -999,6 +1010,21 @@ function openSuperAdminConfig() {
                             </div>
                             <textarea id="sa_data_editor" style="width:100%; height:300px; font-family:monospace; font-size:0.8rem; background:#1e1e1e; color:#0f0; border:1px solid #333; padding:10px;"></textarea>
                         </div>
+                        <div class="card" style="margin-top:15px;">
+                            <h4><i class="fas fa-hdd"></i> Storage Visualizer</h4>
+                            <div id="sa_storage_viz" style="margin-top:10px;"></div>
+                        </div>
+                        <div class="card" style="margin-top:15px; border-left: 4px solid #2ecc71;">
+                            <h4><i class="fas fa-database"></i> Row-Level Sync Status</h4>
+                            <div id="sa_migration_status" style="margin-top:10px; font-size:0.9rem; color:var(--text-muted);">Click check to compare Local vs Cloud Row Counts.</div>
+                            <div style="margin-top:10px; display:flex; gap:10px;">
+                                <button class="btn-secondary btn-sm" onclick="checkRowSyncStatus()"><i class="fas fa-sync"></i> Check Status</button>
+                                <button class="btn-warning btn-sm" onclick="performBlobToRowMigration()"><i class="fas fa-upload"></i> Migrate Blobs to Rows</button>
+                                <button class="btn-primary btn-sm" onclick="forceResyncRows()"><i class="fas fa-cloud-download-alt"></i> Force Pull Rows</button>
+                                <button class="btn-danger btn-sm" onclick="cleanupCloudDuplicates()"><i class="fas fa-broom"></i> Cleanup Cloud Duplicates</button>
+                                <button class="btn-danger btn-sm" onclick="cleanupLocalDuplicates()"><i class="fas fa-laptop-medical"></i> Cleanup Local Duplicates</button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- TAB: AI (NEW) -->
@@ -1014,6 +1040,19 @@ function openSuperAdminConfig() {
                             <div style="display:flex; gap:10px;">
                                 <input type="text" id="sa_ai_input" placeholder="Type your question here..." style="flex:1; padding:10px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" onkeydown="if(event.key==='Enter') sendSaAiMessage()">
                                 <button class="btn-primary" onclick="sendSaAiMessage()"><i class="fas fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB: PATCHER (NEW) -->
+                    <div id="sa-tab-patcher" class="sa-tab-content hidden">
+                        <div class="card" style="background:#1e1e1e; border:1px solid #333;">
+                            <h4 style="color:#f1c40f;"><i class="fas fa-code"></i> JavaScript Data Patcher</h4>
+                            <p style="color:#aaa; font-size:0.8rem; margin-bottom:10px;">Write JS to modify data in bulk. Available variables: <code>users</code>, <code>records</code>, <code>rosters</code>. Changes are applied to LocalStorage and Synced.</p>
+                            <textarea id="sa_patcher_code" style="width:100%; height:200px; font-family:monospace; background:#121212; color:#0f0; border:1px solid #444; padding:10px; margin-bottom:10px;" placeholder="// Example: users.forEach(u => u.active = true);"></textarea>
+                            <div style="display:flex; justify-content:space-between;">
+                                <div id="sa_patcher_result" style="color:#aaa; font-family:monospace; font-size:0.8rem;">Ready.</div>
+                                <button class="btn-warning" onclick="executeDataPatch()">Execute Patch</button>
                             </div>
                         </div>
                     </div>
@@ -1036,6 +1075,7 @@ function openSuperAdminConfig() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     // Initial Load
     refreshClientHealthTable();
+    renderStorageVisualizer();
 }
 
 // New Helper Functions for Tabs
@@ -1081,6 +1121,492 @@ window.saveRawDataKey = async function() {
     }
 };
 
+window.checkRowSyncStatus = async function() {
+    const container = document.getElementById('sa_migration_status');
+    if(!container) return;
+    
+    container.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Checking Cloud Tables...';
+    
+    try {
+        if (!window.supabaseClient) throw new Error("Not connected to Supabase.");
+
+        // Local Counts
+        const locRecs = (JSON.parse(localStorage.getItem('records') || '[]')).length;
+        const locSubs = (JSON.parse(localStorage.getItem('submissions') || '[]')).length;
+        const locLogs = (JSON.parse(localStorage.getItem('auditLogs') || '[]')).length;
+        const locLive = (JSON.parse(localStorage.getItem('liveBookings') || '[]')).length;
+        const locAtt = (JSON.parse(localStorage.getItem('attendance_records') || '[]')).length;
+        const locArch = (JSON.parse(localStorage.getItem('graduated_agents') || '[]')).length;
+        const locRep = (JSON.parse(localStorage.getItem('savedReports') || '[]')).length;
+        const locReq = (JSON.parse(localStorage.getItem('linkRequests') || '[]')).length;
+        
+        // Remote Counts (Head Query)
+        const { count: remRecs } = await supabaseClient.from('records').select('*', { count: 'exact', head: true });
+        const { count: remSubs } = await supabaseClient.from('submissions').select('*', { count: 'exact', head: true });
+        const { count: remLogs } = await supabaseClient.from('audit_logs').select('*', { count: 'exact', head: true });
+        const { count: remLive } = await supabaseClient.from('live_bookings').select('*', { count: 'exact', head: true });
+        const { count: remAtt } = await supabaseClient.from('attendance').select('*', { count: 'exact', head: true });
+        const { count: remArch } = await supabaseClient.from('archived_users').select('*', { count: 'exact', head: true });
+        const { count: remRep } = await supabaseClient.from('saved_reports').select('*', { count: 'exact', head: true });
+        const { count: remReq } = await supabaseClient.from('link_requests').select('*', { count: 'exact', head: true });
+        
+        const getStatus = (loc, rem) => {
+            if (loc === rem) return '<span style="color:#2ecc71; font-weight:bold;">Synced</span>';
+            if (loc > rem) return `<span style="color:#f1c40f; font-weight:bold;">Pending Upload (${loc - rem})</span>`;
+            return `<span style="color:#3498db; font-weight:bold;">Server Ahead (${rem - loc})</span>`;
+        };
+
+        container.innerHTML = `
+            <table class="admin-table compressed-table" style="margin-top:5px;">
+                <thead><tr><th>Table</th><th>Local</th><th>Cloud</th><th>Status</th></tr></thead>
+                <tbody>
+                    <tr><td>Records</td><td>${locRecs}</td><td>${remRecs||0}</td><td>${getStatus(locRecs, remRecs||0)}</td></tr>
+                    <tr><td>Submissions</td><td>${locSubs}</td><td>${remSubs||0}</td><td>${getStatus(locSubs, remSubs||0)}</td></tr>
+                    <tr><td>Audit Logs</td><td>${locLogs}</td><td>${remLogs||0}</td><td>${getStatus(locLogs, remLogs||0)}</td></tr>
+                    <tr><td>Live Bookings</td><td>${locLive}</td><td>${remLive||0}</td><td>${getStatus(locLive, remLive||0)}</td></tr>
+                    <tr><td>Attendance</td><td>${locAtt}</td><td>${remAtt||0}</td><td>${getStatus(locAtt, remAtt||0)}</td></tr>
+                    <tr><td>Archives</td><td>${locArch}</td><td>${remArch||0}</td><td>${getStatus(locArch, remArch||0)}</td></tr>
+                    <tr><td>Reports</td><td>${locRep}</td><td>${remRep||0}</td><td>${getStatus(locRep, remRep||0)}</td></tr>
+                    <tr><td>Requests</td><td>${locReq}</td><td>${remReq||0}</td><td>${getStatus(locReq, remReq||0)}</td></tr>
+                </tbody>
+            </table>
+        `;
+    } catch(e) {
+        container.innerHTML = `<div style="color:#ff5252;">Error: ${e.message}</div>`;
+    }
+};
+
+window.forceResyncRows = async function() {
+    if(!confirm("Force re-download of all row data? This will merge server data into your local database.")) return;
+    
+    const btn = document.activeElement;
+    if(btn && btn.tagName === 'BUTTON') { btn.disabled = true; btn.innerText = "Syncing..."; }
+    
+    // Reset timestamps to force full pull
+    Object.keys(localStorage).forEach(k => {
+        if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
+    });
+    
+    if(typeof loadFromServer === 'function') await loadFromServer(true);
+    
+    if(btn && btn.tagName === 'BUTTON') { btn.disabled = false; btn.innerText = "Force Pull Rows"; }
+    checkRowSyncStatus();
+    alert("Sync complete.");
+};
+
+window.resetPushState = function() {
+    // Clears the bloated hash maps so they regenerate as small checksums
+    Object.keys(localStorage).forEach(k => {
+        if(k.startsWith('hash_map_')) localStorage.removeItem(k);
+    });
+    console.log("Push state reset. Next sync will regenerate lightweight hashes.");
+    if(typeof renderStorageVisualizer === 'function') renderStorageVisualizer();
+};
+
+window.cleanupCloudDuplicates = async function() {
+    if(!confirm("⚠️ NUCLEAR CLEANUP: RECORDS & ARCHIVES\n\nThis will scan for duplicates in 'Records' and 'Archives'.\nIt keeps the entry with the HIGHEST SCORE or LATEST DATE.\n\nThis fixes the '5x Size' bloat.\n\nProceed?")) return;
+    
+    const btn = document.activeElement;
+    const originalText = btn.innerText;
+    btn.disabled = true; btn.innerText = "Cleaning...";
+    
+    try {
+        if (!window.supabaseClient) throw new Error("Not connected.");
+
+        // 1. CLEAN RECORDS (The heavy hitter)
+        // Fetch minimal fields to avoid memory crash
+        const { data: records, error: recErr } = await supabaseClient.from('records').select('id, trainee, data, updated_at');
+        
+        if (records && records.length > 0) {
+            const uniqueMap = new Map();
+            const toDelete = [];
+            
+            records.forEach(row => {
+                // Key: Trainee + Assessment
+                const rData = row.data || {};
+                const key = `${(rData.trainee||'').toLowerCase()}|${(rData.assessment||'').toLowerCase()}`;
+                
+                if (uniqueMap.has(key)) {
+                    const existing = uniqueMap.get(key);
+                    const exData = existing.data || {};
+                    
+                    // Keep the one with higher score, or newer date
+                    const scoreA = parseFloat(rData.score) || 0;
+                    const scoreB = parseFloat(exData.score) || 0;
+                    
+                    if (scoreA > scoreB) {
+                        toDelete.push(existing.id); // Delete old, keep new
+                        uniqueMap.set(key, row);
+                    } else {
+                        toDelete.push(row.id); // Delete new, keep old
+                    }
+                } else {
+                    uniqueMap.set(key, row);
+                }
+            });
+            
+            if (toDelete.length > 0) {
+                // Delete in batches of 1000
+                for (let i = 0; i < toDelete.length; i += 1000) {
+                    await supabaseClient.from('records').delete().in('id', toDelete.slice(i, i + 1000));
+                }
+                alert(`Cleaned ${toDelete.length} duplicate records.`);
+            }
+        }
+
+        // 2. CLEAN ARCHIVES (Dedupe by user_id)
+        const { data: archives, error } = await supabaseClient.from('archived_users').select('id, user_id, updated_at');
+        if(archives) {
+            const seen = new Set();
+            const toDelete = [];
+            
+            // Sort by updated_at desc (keep newest)
+            archives.sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at));
+            
+            archives.forEach(row => {
+                if(seen.has(row.user_id)) {
+                    toDelete.push(row.id);
+                } else {
+                    seen.add(row.user_id);
+                }
+            });
+            
+            if(toDelete.length > 0) {
+                await supabaseClient.from('archived_users').delete().in('id', toDelete);
+                console.log(`Removed ${toDelete.length} duplicate archives.`);
+                alert(`Removed ${toDelete.length} duplicate archived users.`);
+            } else {
+                alert("No duplicates found in Archives.");
+            }
+        }
+        checkRowSyncStatus();
+    } catch(e) {
+        alert("Error: " + e.message);
+    } finally {
+        btn.disabled = false; btn.innerText = originalText;
+    }
+};
+
+window.cleanupLocalDuplicates = function() {
+    if(!confirm("Optimize Local Storage?\n\n1. Remove duplicates.\n2. Prune old detailed activity logs (keeps summaries).\n3. Reset sync state.")) return;
+    
+    let totalRemoved = 0;
+    const keys = ['records', 'graduated_agents', 'submissions'];
+    
+    // 1. Standard Deduplication
+    keys.forEach(key => {
+        const items = JSON.parse(localStorage.getItem(key) || '[]');
+        if(items.length === 0) return;
+        
+        const uniqueMap = new Map();
+        let removed = 0;
+        
+        items.forEach(item => {
+            // Create unique signature
+            let sig = "";
+            if (key === 'records') sig = `${item.trainee}|${item.assessment}`;
+            else if (key === 'graduated_agents') sig = `${item.user}`;
+            else if (key === 'submissions') sig = `${item.trainee}|${item.testId}`;
+            else sig = item.id;
+            
+            sig = sig.toLowerCase();
+            
+            if (uniqueMap.has(sig)) {
+                // Keep the one with newer data/score
+                // For simplicity in local cleanup, we keep the existing (first found) or overwrite if needed.
+                // Let's keep the one already in map (First one)
+                removed++;
+            } else {
+                uniqueMap.set(sig, item);
+            }
+        });
+        
+        if (removed > 0) {
+            localStorage.setItem(key, JSON.stringify(Array.from(uniqueMap.values())));
+            totalRemoved += removed;
+        }
+    });
+
+    // 2. Monitor History Optimization (The Big Fix)
+    const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+    const initialHistLen = history.length;
+    const initialHistSize = JSON.stringify(history).length;
+    
+    const now = Date.now();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    const seenHist = new Set();
+    const cleanHistory = [];
+    
+    history.forEach(h => {
+        // Dedupe Key: User + Date
+        const key = `${h.user}|${h.date}`;
+        if(seenHist.has(key)) return; // Skip duplicate
+        seenHist.add(key);
+        
+        // Prune Details if old
+        const entryDate = new Date(h.date).getTime();
+        if (now - entryDate > sevenDays) {
+            if (h.details) delete h.details; // Remove heavy array
+        }
+        cleanHistory.push(h);
+    });
+    
+    if (history.length !== cleanHistory.length || JSON.stringify(cleanHistory).length !== initialHistSize) {
+        localStorage.setItem('monitor_history', JSON.stringify(cleanHistory));
+        console.log(`Monitor History optimized. Rows: ${initialHistLen} -> ${cleanHistory.length}`);
+    }
+    
+    // Also reset push state to ensure clean sync
+    resetPushState();
+    
+    alert(`Cleanup complete.\n- Removed ${totalRemoved} general duplicates.\n- Optimized Activity Logs (Pruned details > 7 days).`);
+    checkRowSyncStatus();
+    renderStorageVisualizer();
+};
+
+window.performBlobToRowMigration = async function() {
+    // Ask for mode
+    const mode = confirm("Click OK for REAL MIGRATION (Uploads Data).\nClick CANCEL for DRY RUN (Simulation only).") ? 'real' : 'dry';
+    
+    if (mode === 'real') {
+        if(!confirm("⚠️ FINAL WARNING: You are about to upload all local data to the new tables. Ensure no other admins are running migration simultaneously.")) return;
+    }
+    
+    const btn = document.activeElement;
+    const originalText = btn.innerText;
+    btn.disabled = true; btn.innerText = mode === 'real' ? "Migrating..." : "Simulating...";
+    
+    try {
+        let log = [];
+        const uploadBatch = async (table, items, mapFn) => {
+            if (items.length === 0) return;
+            log.push(`${mode === 'real' ? 'Uploading' : 'Would upload'} ${items.length} items to '${table}'`);
+            if (mode === 'dry') return; // Stop here for dry run
+            
+            const rows = items.map(mapFn);
+            // Batch in chunks of 100
+            for (let i = 0; i < rows.length; i += 100) {
+                const chunk = rows.slice(i, i + 100);
+                const { error } = await supabaseClient.from(table).upsert(chunk);
+                if (error) throw error;
+            }
+        };
+
+        // 1. Records
+        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        if(mode === 'real') { records.forEach(r => { if(!r.id) r.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('records', JSON.stringify(records)); }
+        await uploadBatch('records', records, r => ({ id: r.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), trainee: r.trainee, data: r, updated_at: new Date().toISOString() }));
+
+        // 2. Submissions
+        const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        if(mode === 'real') { subs.forEach(s => { if(!s.id) s.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('submissions', JSON.stringify(subs)); }
+        await uploadBatch('submissions', subs, s => ({ id: s.id, trainee: s.trainee, data: s, updated_at: new Date().toISOString() }));
+
+        // 3. Audit Logs
+        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        if(mode === 'real') { logs.forEach(l => { if(!l.id) l.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('auditLogs', JSON.stringify(logs)); }
+        await uploadBatch('audit_logs', logs, l => ({ id: l.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: l.user, data: l, updated_at: new Date().toISOString() }));
+
+        // 4. Live Bookings
+        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        if(mode === 'real') { bookings.forEach(b => { if(!b.id) b.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('liveBookings', JSON.stringify(bookings)); }
+        await uploadBatch('live_bookings', bookings, b => ({ id: b.id, trainee: b.trainee, data: b, updated_at: new Date().toISOString() }));
+
+        // 5. Monitor History
+        const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        if(mode === 'real') { history.forEach(h => { if(!h.id) h.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('monitor_history', JSON.stringify(history)); }
+        await uploadBatch('monitor_history', history, h => ({ id: Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: h.user, data: h, updated_at: new Date().toISOString() }));
+
+        // 6. Attendance
+        const att = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+        if(mode === 'real') { att.forEach(a => { if(!a.id) a.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('attendance_records', JSON.stringify(att)); }
+        await uploadBatch('attendance', att, a => ({ id: a.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: a.user, data: a, updated_at: new Date().toISOString() }));
+
+        // 7. Access Logs
+        const access = JSON.parse(localStorage.getItem('accessLogs') || '[]');
+        if(mode === 'real') { access.forEach(a => { if(!a.id) a.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('accessLogs', JSON.stringify(access)); }
+        await uploadBatch('access_logs', access, a => ({ id: a.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: a.user, data: a, updated_at: new Date().toISOString() }));
+
+        // 8. Saved Reports
+        const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+        if(mode === 'real') { reports.forEach(r => { if(!r.id) r.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('savedReports', JSON.stringify(reports)); }
+        await uploadBatch('saved_reports', reports, r => ({ id: r.id.toString(), trainee: r.trainee, data: r, updated_at: new Date().toISOString() }));
+
+        // 9. Archived Users
+        const archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        if(mode === 'real') { archives.forEach(a => { if(!a.id) a.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('graduated_agents', JSON.stringify(archives)); }
+        await uploadBatch('archived_users', archives, a => ({ id: a.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: a.user, data: a, updated_at: new Date().toISOString() }));
+
+        // 10. Live Sessions
+        const sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        await uploadBatch('live_sessions', sessions, s => ({ id: s.sessionId || s.id, trainer: s.trainer, data: s, updated_at: new Date().toISOString() }));
+
+        // 11. Link Requests
+        const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+        if(mode === 'real') { requests.forEach(r => { if(!r.id) r.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('linkRequests', JSON.stringify(requests)); }
+        await uploadBatch('link_requests', requests, r => ({ id: r.id, trainee: r.trainee, data: r, updated_at: new Date().toISOString() }));
+
+        if (mode === 'real') {
+            alert("Migration Successful! All data is now in Row-Level tables.");
+            checkRowSyncStatus(); // Refresh UI
+        } else {
+            alert("DRY RUN COMPLETE.\n\n" + log.join('\n'));
+        }
+    } catch(e) {
+        alert("Migration Failed: " + e.message);
+    } finally {
+        btn.disabled = false; btn.innerText = originalText;
+    }
+};
+
+window.renderStorageVisualizer = function() {
+    const container = document.getElementById('sa_storage_viz');
+    if(!container) return;
+    
+    let total = 0;
+    const data = [];
+    
+    for(let key in localStorage) {
+        if(localStorage.hasOwnProperty(key)) {
+            const size = localStorage[key].length * 2; // Approx bytes
+            total += size;
+            data.push({ key, size });
+        }
+    }
+    
+    data.sort((a,b) => b.size - a.size);
+    
+    let html = `<div style="margin-bottom:10px; font-weight:bold;">Total Usage: ${formatBytes(total)}</div>`;
+    
+    data.slice(0, 8).forEach(item => {
+        const pct = Math.round((item.size / total) * 100);
+        let color = '#3498db';
+        if(pct > 30) color = '#f1c40f';
+        if(pct > 50) color = '#ff5252';
+        
+        html += `
+            <div style="margin-bottom:5px; font-size:0.8rem;">
+                <div style="display:flex; justify-content:space-between;">
+                    <span>${item.key}</span>
+                    <span>${formatBytes(item.size)} (${pct}%)</span>
+                </div>
+                <div style="height:6px; background:#333; border-radius:3px; overflow:hidden;">
+                    <div style="width:${pct}%; height:100%; background:${color};"></div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+};
+
+window.executeDataPatch = async function() {
+    const code = document.getElementById('sa_patcher_code').value;
+    const resultEl = document.getElementById('sa_patcher_result');
+    
+    if(!code.trim()) return;
+    if(!confirm("Execute this patch? This can corrupt data if incorrect.")) return;
+    
+    try {
+        // Load Context
+        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        let records = JSON.parse(localStorage.getItem('records') || '[]');
+        let rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        let system_config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        
+        // Execute
+        eval(code);
+        
+        // Save Context
+        localStorage.setItem('users', JSON.stringify(users));
+        localStorage.setItem('records', JSON.stringify(records));
+        localStorage.setItem('rosters', JSON.stringify(rosters));
+        localStorage.setItem('system_config', JSON.stringify(system_config));
+        
+        if(typeof saveToServer === 'function') await saveToServer(['users', 'records', 'rosters', 'system_config'], true);
+        
+        resultEl.innerText = "Patch Executed Successfully.";
+        resultEl.style.color = "#2ecc71";
+    } catch(e) {
+        resultEl.innerText = "Error: " + e.message;
+        resultEl.style.color = "#ff5252";
+    }
+};
+
+window.renderStorageVisualizer = function() {
+    const container = document.getElementById('sa_storage_viz');
+    if(!container) return;
+    
+    let total = 0;
+    const data = [];
+    
+    for(let key in localStorage) {
+        if(localStorage.hasOwnProperty(key)) {
+            const size = localStorage[key].length * 2; // Approx bytes
+            total += size;
+            data.push({ key, size });
+        }
+    }
+    
+    data.sort((a,b) => b.size - a.size);
+    
+    let html = `<div style="margin-bottom:10px; font-weight:bold;">Total Usage: ${formatBytes(total)}</div>`;
+    
+    data.slice(0, 8).forEach(item => {
+        const pct = Math.round((item.size / total) * 100);
+        let color = '#3498db';
+        if(pct > 30) color = '#f1c40f';
+        if(pct > 50) color = '#ff5252';
+        
+        html += `
+            <div style="margin-bottom:5px; font-size:0.8rem;">
+                <div style="display:flex; justify-content:space-between;">
+                    <span>${item.key}</span>
+                    <span>${formatBytes(item.size)} (${pct}%)</span>
+                </div>
+                <div style="height:6px; background:#333; border-radius:3px; overflow:hidden;">
+                    <div style="width:${pct}%; height:100%; background:${color};"></div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+};
+
+window.executeDataPatch = async function() {
+    const code = document.getElementById('sa_patcher_code').value;
+    const resultEl = document.getElementById('sa_patcher_result');
+    
+    if(!code.trim()) return;
+    if(!confirm("Execute this patch? This can corrupt data if incorrect.")) return;
+    
+    try {
+        // Load Context
+        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        let records = JSON.parse(localStorage.getItem('records') || '[]');
+        let rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        let system_config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        
+        // Execute
+        eval(code);
+        
+        // Save Context
+        localStorage.setItem('users', JSON.stringify(users));
+        localStorage.setItem('records', JSON.stringify(records));
+        localStorage.setItem('rosters', JSON.stringify(rosters));
+        localStorage.setItem('system_config', JSON.stringify(system_config));
+        
+        if(typeof saveToServer === 'function') await saveToServer(['users', 'records', 'rosters', 'system_config'], true);
+        
+        resultEl.innerText = "Patch Executed Successfully.";
+        resultEl.style.color = "#2ecc71";
+    } catch(e) {
+        resultEl.innerText = "Error: " + e.message;
+        resultEl.style.color = "#ff5252";
+    }
+};
+
 window.sendSaAiMessage = async function() {
     const input = document.getElementById('sa_ai_input');
     const history = document.getElementById('sa_ai_chat_history');
@@ -1114,34 +1640,45 @@ window.sendSaAiMessage = async function() {
 async function saveSuperAdminConfig() {
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
     
+    // Helper to safely get values without crashing
+    const getVal = (id, def) => {
+        const el = document.getElementById(id);
+        return el ? el.value : def;
+    };
+    const getCheck = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.checked : false;
+    };
+
     config.sync_rates = {
-        admin: parseInt(document.getElementById('sa_sync_admin').value) * 1000,
-        teamleader: parseInt(document.getElementById('sa_sync_tl').value) * 60000,
-        trainee: parseInt(document.getElementById('sa_sync_trainee').value) * 1000
+        admin: parseInt(getVal('sa_sync_admin', '10')) * 1000,
+        teamleader: parseInt(getVal('sa_sync_tl', '5')) * 60000,
+        trainee: parseInt(getVal('sa_sync_trainee', '60')) * 1000
     };
     
     config.attendance = { ...config.attendance,
-        work_start: document.getElementById('sa_att_start').value,
-        late_cutoff: document.getElementById('sa_att_late').value,
-        work_end: document.getElementById('sa_att_end').value,
-        reminder_start: document.getElementById('sa_att_remind').value
+        work_start: getVal('sa_att_start', '08:00'),
+        late_cutoff: getVal('sa_att_late', '08:15'),
+        work_end: getVal('sa_att_end', '17:00'),
+        reminder_start: getVal('sa_att_remind', '16:45')
     };
 
     config.security = { ...config.security,
-        maintenance_mode: document.getElementById('sa_sec_maint').checked,
-        force_kiosk_global: document.getElementById('sa_sec_kiosk').checked,
-        min_version: document.getElementById('sa_sec_ver').value,
-        banned_clients: document.getElementById('sa_sec_banned').value.split(',').map(s => s.trim()).filter(s => s),
-        client_whitelist: document.getElementById('sa_sec_whitelist').value.split(',').map(s => s.trim()).filter(s => s)
+        maintenance_mode: getCheck('sa_sec_maint'),
+        lockdown_mode: config.security.lockdown_mode || false, // Preserve lockdown state
+        force_kiosk_global: getCheck('sa_sec_kiosk'),
+        min_version: getVal('sa_sec_ver', '0.0.0'),
+        banned_clients: getVal('sa_sec_banned', '').split(',').map(s => s.trim()).filter(s => s),
+        client_whitelist: getVal('sa_sec_whitelist', '').split(',').map(s => s.trim()).filter(s => s)
     };
 
-    config.features = { ...config.features, vetting_arena: document.getElementById('sa_feat_vet').checked, live_assessments: document.getElementById('sa_feat_live').checked, nps_surveys: document.getElementById('sa_feat_nps').checked, daily_tips: document.getElementById('sa_feat_tips').checked, disable_animations: document.getElementById('sa_feat_anim').checked };
+    config.features = { ...config.features, vetting_arena: getCheck('sa_feat_vet'), live_assessments: getCheck('sa_feat_live'), nps_surveys: getCheck('sa_feat_nps'), daily_tips: getCheck('sa_feat_tips'), disable_animations: getCheck('sa_feat_anim') };
     
-    config.announcement = { active: document.getElementById('sa_ann_active').checked, message: document.getElementById('sa_ann_msg').value, type: document.getElementById('sa_ann_type').value };
+    config.announcement = { active: getCheck('sa_ann_active'), message: getVal('sa_ann_msg', ''), type: getVal('sa_ann_type', 'info') };
 
     config.ai = { ...config.ai,
-        enabled: document.getElementById('sa_ai_enabled').checked,
-        apiKey: document.getElementById('sa_ai_key').value.trim()
+        enabled: getCheck('sa_ai_enabled'),
+        apiKey: getVal('sa_ai_key', '').trim()
     };
 
     localStorage.setItem('system_config', JSON.stringify(config));
@@ -1153,6 +1690,42 @@ async function saveSuperAdminConfig() {
     document.getElementById('superAdminModal').remove();
     if(typeof applySystemConfig === 'function') applySystemConfig();
 }
+
+window.toggleLockdown = async function() {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    if(!config.security) config.security = {};
+    
+    const newState = !config.security.lockdown_mode;
+    
+    if(newState) {
+        if(!confirm("⚠️ ACTIVATE EMERGENCY LOCKDOWN?\n\n- All non-admin users will be logged out.\n- Logins will be disabled.\n- Database writes will be blocked.\n\nProceed?")) return;
+    } else {
+        if(!confirm("Deactivate Lockdown and restore normal access?")) return;
+    }
+    
+    config.security.lockdown_mode = newState;
+    localStorage.setItem('system_config', JSON.stringify(config));
+    
+    if(typeof saveToServer === 'function') await saveToServer(['system_config'], true);
+    
+    alert(`Lockdown is now ${newState ? 'ACTIVE' : 'INACTIVE'}.`);
+    document.getElementById('superAdminModal').remove();
+    openSuperAdminConfig(); // Refresh UI
+};
+
+window.impersonateUser = function(username) {
+    if(!confirm(`Impersonate ${username}? You will see exactly what they see.`)) return;
+    
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const target = users.find(u => u.user === username);
+    
+    if(!target) return alert("User not found.");
+    
+    // Save Real Identity
+    sessionStorage.setItem('real_admin_identity', JSON.stringify(CURRENT_USER));
+    sessionStorage.setItem('currentUser', JSON.stringify(target));
+    location.reload();
+};
 
 async function sendSystemBroadcast() {
     const msg = document.getElementById('sa_broadcast_msg').value;

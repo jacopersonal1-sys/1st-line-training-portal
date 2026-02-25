@@ -106,14 +106,9 @@ async function attemptLogin() {
       return;
   }
 
-  // --- SECURITY CHECK 1.5: MAINTENANCE MODE & VERSION ---
+  // --- SECURITY CHECK 1.5: PRE-AUTH CHECKS (Version, Client ID) ---
   const config = JSON.parse(localStorage.getItem('system_config') || '{}');
   if (config.security) {
-      // Maintenance Mode
-      if (config.security.maintenance_mode && validUser.role !== 'admin' && validUser.role !== 'super_admin') {
-          document.getElementById('loginError').innerText = "System is in Maintenance Mode. Admin access only.";
-          return;
-      }
       // Version Check (Simple String Compare)
       if (config.security.min_version && window.APP_VERSION) {
           if (window.APP_VERSION < config.security.min_version) {
@@ -162,10 +157,45 @@ async function attemptLogin() {
   });
   
   if(validUser) {
+    // --- SECURITY CHECK 2.5: MAINTENANCE & LOCKDOWN (Requires User Role) ---
+    if (config.security) {
+        // Maintenance Mode
+        if (config.security.maintenance_mode && validUser.role !== 'admin' && validUser.role !== 'super_admin') {
+            document.getElementById('loginError').innerText = "System is in Maintenance Mode. Admin access only.";
+            return;
+        }
+        // Lockdown Check
+        if (config.security.lockdown_mode && validUser.role !== 'super_admin') {
+            document.getElementById('loginError').innerText = "SYSTEM LOCKDOWN ACTIVE. Access Denied.";
+            return;
+        }
+    }
+
     // --- IP ACCESS CONTROL CHECK ---
     const accessGranted = await checkAccessControl();
     if(!accessGranted) return; // Overlay will show, stop login
     // -------------------------------
+
+    // --- SECURITY CHECK 3: CLIENT ID BINDING (STRICT) ---
+    const currentClientId = localStorage.getItem('client_id');
+    
+    if (validUser.boundClientId) {
+        // If user is bound, ID MUST match
+        if (validUser.boundClientId !== currentClientId) {
+            console.error("Security Violation: Client ID Mismatch");
+            nukeApplication(); // TERMINATE
+            return;
+        }
+    } else {
+        // First time login? Bind this client ID to the user
+        console.log("Binding user to this Client ID...");
+        validUser.boundClientId = currentClientId;
+        const idx = users.findIndex(u => u.user === validUser.user);
+        if(idx > -1) users[idx] = validUser;
+        localStorage.setItem('users', JSON.stringify(users));
+        secureAuthSave();
+    }
+    // ----------------------------------------------------
 
     const userRole = validUser.role ? validUser.role.toLowerCase().trim() : '';
     if(LOGIN_MODE === 'admin' && (userRole === 'trainee' && userRole !== 'super_admin')) {
@@ -217,6 +247,15 @@ async function attemptLogin() {
         box.classList.add('shake-anim');
     }
   }
+}
+
+function nukeApplication() {
+    alert("SECURITY VIOLATION DETECTED\n\nThis account is bound to a different terminal.\nAccess Denied. Application will reset.");
+    localStorage.clear();
+    sessionStorage.clear();
+    if (typeof require !== 'undefined') {
+        try { require('electron').ipcRenderer.send('force-restart'); } catch(e) { location.reload(); }
+    } else { location.reload(); }
 }
 
 async function autoLogin() {

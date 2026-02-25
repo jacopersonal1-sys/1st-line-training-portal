@@ -31,7 +31,7 @@ const DB_SCHEMA = {
         heartbeat_rates: { admin: 5000, default: 60000 },
         idle_thresholds: { warning: 60000, logout: 900000 },
         attendance: { work_start: "08:00", late_cutoff: "08:15", work_end: "17:00", reminder_start: "16:45", allow_weekend_login: false },
-        security: { maintenance_mode: false, min_version: "0.0.0", force_kiosk_global: false, allowed_ips: [], banned_clients: [], client_whitelist: [] },
+        security: { maintenance_mode: false, lockdown_mode: false, min_version: "0.0.0", force_kiosk_global: false, allowed_ips: [], banned_clients: [], client_whitelist: [] },
         features: { vetting_arena: true, live_assessments: true, nps_surveys: true, daily_tips: true, disable_animations: false },
         monitoring: { tolerance_ms: 180000, whitelist_strict: false },
         announcement: { active: false, message: "", type: "info" },
@@ -56,6 +56,26 @@ const DB_SCHEMA = {
     monitor_reviewed: [], // Apps confirmed as External/Idle (Dismissed from queue)
     dailyTips: [], // Admin controlled daily tips
     error_reports: [] // Centralized error logging for Super Admin
+};
+
+// --- HYBRID SYNC CONFIGURATION ---
+// Maps local keys to Supabase Tables for Row-Level Sync
+const ROW_MAP = {
+    'records': 'records',
+    'submissions': 'submissions',
+    'auditLogs': 'audit_logs',
+    'error_reports': 'error_reports',
+    'liveBookings': 'live_bookings',
+    'monitor_history': 'monitor_history',
+    'attendance_records': 'attendance',
+    'accessLogs': 'access_logs',
+    'savedReports': 'saved_reports',
+    'insightReviews': 'insight_reviews',
+    'exemptions': 'exemptions',
+    'liveSessions': 'live_sessions',
+    'nps_responses': 'nps_responses',
+    'graduated_agents': 'archived_users',
+    'linkRequests': 'link_requests'
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
@@ -100,15 +120,16 @@ window.addEventListener('offline', () => {
     updateSyncUI('error');
 });
 
-// 2. Load Data (UPDATED: SMART SPLIT SYNC)
-// Only downloads keys that have changed on the server.
+// 2. Load Data (UPDATED: HYBRID ROW-LEVEL SYNC)
+// Fetches Blobs for config/rosters AND Delta Rows for records/logs
 async function loadFromServer(silent = false) {
     try {
         if (window.supabaseClient) updateSyncUI('syncing');
         if (!window.supabaseClient) return;
 
         const start = Date.now();
-        // A. Fetch Metadata (Timestamps) for all keys
+        
+        // --- PHASE A: BLOB SYNC (Settings, Rosters, Users) ---
         const { data: meta, error } = await supabaseClient
             .from('app_documents')
             .select('key, updated_at');
@@ -116,13 +137,7 @@ async function loadFromServer(silent = false) {
         
         if (error) throw error;
 
-        // B. Migration Check: If new table is empty, try to migrate from old table
-        if (!meta || meta.length === 0) {
-            await migrateToSplitSchema();
-            return;
-        }
-
-        // C. Identify Stale Keys
+        // Identify Stale Blobs
         const keysToFetch = [];
         meta.forEach(row => {
             const localTs = localStorage.getItem('sync_ts_' + row.key);
@@ -132,7 +147,7 @@ async function loadFromServer(silent = false) {
             }
         });
 
-        // D. Fetch Content for Stale Keys Only
+        // Fetch Stale Blobs
         if (keysToFetch.length > 0) {
             if(!silent) console.log(`Syncing updates for: ${keysToFetch.join(', ')}`);
             
@@ -143,7 +158,6 @@ async function loadFromServer(silent = false) {
             
             if (fetchErr) throw fetchErr;
 
-            // UPDATED: Use for...of to allow await (Conflict Modal)
             for (const doc of docs) {
                 // SMART PULL: Always try to merge JSON data to prevent overwriting local unsaved drafts
                 // We use 'server_wins' strategy here: If an item exists in both, Server version is the truth.
@@ -162,29 +176,64 @@ async function loadFromServer(silent = false) {
                 }
                 localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
             }
-
-            // HOT RELOAD: Apply system config changes immediately
+            
             if (keysToFetch.includes('system_config')) applySystemConfig();
-            
-            // NEW: Super Admin Alert for Errors
-            if (keysToFetch.includes('error_reports')) checkErrorAlerts();
-            
-            // Refresh UI if needed
-            if(silent && typeof refreshAllDropdowns === 'function') {
-                const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
-                if (!isUserTyping() && timeSinceInteraction > 5000) {
-                    refreshAllDropdowns();
-                }
-            }
-            // STABILITY FIX: Re-apply permissions to show/hide dynamic tabs like Vetting Arena
-            if (silent && typeof applyRolePermissions === 'function') {
-                applyRolePermissions();
-            }
-            updateSyncUI('success');
-        } else {
-            if(!silent) console.log("System up to date.");
-            updateSyncUI('success');
         }
+
+        // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
+        // Only fetch rows newer than our last sync timestamp
+        for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
+            const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
+            
+            const { data: newRows, error: rowErr } = await supabaseClient
+                .from(tableName)
+                .select('data, updated_at')
+                .gt('updated_at', lastSync)
+                .limit(1000); // Batch limit
+
+            if (rowErr) console.warn(`Row sync failed for ${tableName}`, rowErr);
+            
+            if (newRows && newRows.length > 0) {
+                if(!silent) console.log(`Downloaded ${newRows.length} new rows for ${localKey}`);
+                
+                // Extract data objects
+                const serverItems = newRows.map(r => r.data);
+                const localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
+                
+                // Merge using existing logic (Server Wins)
+                const serverObj = { [localKey]: serverItems };
+                const localObj = { [localKey]: localItems };
+                const merged = performSmartMerge(serverObj, localObj, 'server_wins');
+                
+                localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
+                
+                // Update Timestamp (Use the newest row's time)
+                const newest = newRows.reduce((max, r) => new Date(r.updated_at) > new Date(max) ? r.updated_at : max, lastSync);
+                localStorage.setItem(`row_sync_ts_${localKey}`, newest);
+                
+                // Update Hash Map for these items to prevent re-uploading what we just downloaded
+                const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
+                serverItems.forEach(item => {
+                    if(item.id) hashMap[item.id] = JSON.stringify(item);
+                });
+                localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(hashMap));
+            }
+        }
+
+        // --- PHASE C: POST-SYNC ACTIONS ---
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        if (config.security && config.security.lockdown_mode && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
+            alert("⚠️ EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
+            if(typeof logout === 'function') logout();
+        }
+
+        if(silent && typeof refreshAllDropdowns === 'function') {
+            const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
+            if (!isUserTyping() && timeSinceInteraction > 5000) {
+                refreshAllDropdowns();
+            }
+        }
+        updateSyncUI('success');
 
     } catch (err) { 
         updateSyncUI('error');
@@ -251,10 +300,41 @@ function applySystemConfig() {
 
 // --- ERROR REPORTING SYSTEM ---
 async function reportSystemError(msg, type) {
+    // Attempt to resolve user identity if global CURRENT_USER is missing
+    let user = 'Guest';
+    let role = 'Unknown';
+
+    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
+        user = CURRENT_USER.user;
+        role = CURRENT_USER.role;
+    } else {
+        // Fallback 1: Check Session Storage (Page Refresh)
+        try {
+            const session = sessionStorage.getItem('currentUser');
+            if (session) {
+                const u = JSON.parse(session);
+                if (u && u.user) {
+                    user = u.user + ' (Restoring)';
+                    role = u.role || 'Unknown';
+                }
+            } else {
+                // Fallback 2: Check Remember Me (Login Screen)
+                const remembered = localStorage.getItem('rememberedUser');
+                if (remembered) {
+                    const u = JSON.parse(remembered);
+                    if (u && u.user) {
+                        user = u.user + ' (Remembered)';
+                        role = 'Pending';
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+
     const report = {
         id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
-        user: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.user : 'Guest',
-        role: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.role : 'Unknown',
+        user: user,
+        role: role,
         error: msg,
         type: type,
         timestamp: new Date().toISOString(),
@@ -384,8 +464,16 @@ function updateSyncUI(status) {
     }
 }
 
-// 3. SMART SAVE (Using supabaseClient)
-// UPDATED: Accepts 'targetKeys' array to save only specific parts (e.g. ['users'])
+// --- HELPER: LIGHTWEIGHT CHECKSUM ---
+// Reduces hash_map size by 99% (Stores 8-char string instead of full JSON)
+function generateChecksum(str) {
+    let hash = 5381, i = str.length;
+    while(i) hash = (hash * 33) ^ str.charCodeAt(--i);
+    return (hash >>> 0).toString(16);
+}
+
+// 3. SMART SAVE (UPDATED: HYBRID ROW-LEVEL PUSH)
+// Splits data into Blobs (app_documents) and Rows (tables) based on ROW_MAP
 async function saveToServer(targetKeys = null, force = false, silent = false, retryCount = 0) {
     try {
         // Legacy support: if first arg is boolean, treat as force for ALL keys
@@ -394,65 +482,123 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
             targetKeys = null; // Save all
         }
 
+        // LOCKDOWN CHECK
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        if (config.security && config.security.lockdown_mode && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
+            console.warn("Save blocked by Lockdown Mode.");
+            return;
+        }
+
         if (!window.supabaseClient) {
             console.warn("Supabase client not ready. Offline?");
             if(!silent) updateSyncUI('error');
             return;
         }
 
-        // A. Get Local Data
-        // If targetKeys is null, we save EVERYTHING (Heavy, use sparingly)
         const keysToSave = targetKeys || Object.keys(DB_SCHEMA);
-
         if(!silent) updateSyncUI('busy');
 
         for (const key of keysToSave) {
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
-            let finalContent = localContent;
-
-            // B. Optimistic Lock / Merge (Per Key)
-            if (!force) {
-                const { data: remoteRow } = await supabaseClient
-                    .from('app_documents')
-                    .select('content')
-                    .eq('key', key)
-                    .single();
+            
+            // --- STRATEGY A: ROW-LEVEL SYNC (Records, Submissions, Logs) ---
+            if (ROW_MAP[key]) {
+                const tableName = ROW_MAP[key];
+                const hashMapKey = `hash_map_${key}`;
+                const hashMap = JSON.parse(localStorage.getItem(hashMapKey) || '{}');
+                const itemsToUpload = [];
                 
-                if (remoteRow && remoteRow.content) {
-                    // Merge just this key's data
-                    // We wrap in objects to reuse existing merge logic
-                    const serverObj = { [key]: remoteRow.content };
-                    const localObj = { [key]: localContent };
-                    const mergedObj = performSmartMerge(serverObj, localObj, 'local_wins');
-                    finalContent = mergedObj[key];
+                // 1. Identify Changed Items (Delta)
+                if (Array.isArray(localContent)) {
+                    localContent.forEach(item => {
+                        // Ensure ID exists
+                        if (!item.id) item.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+                        
+                        const currentHash = generateChecksum(JSON.stringify(item));
+                        const lastHash = hashMap[item.id];
+                        
+                        if (currentHash !== lastHash) {
+                            itemsToUpload.push(item);
+                            hashMap[item.id] = currentHash; // Update hash immediately (Optimistic)
+                        }
+                    });
                 }
-            }
+                
+                // 2. Upload Deltas
+                if (itemsToUpload.length > 0) {
+                    if(!silent) console.log(`Uploading ${itemsToUpload.length} changed rows to ${tableName}`);
+                    
+                    // Map to Table Schema
+                    const rows = itemsToUpload.map(item => {
+                        // Base Object
+                        const row = {
+                            id: item.id,
+                            data: item,
+                            updated_at: new Date().toISOString()
+                        };
+                        
+                        // Add specific columns ONLY if the table expects them
+                        if (['records', 'submissions', 'live_bookings', 'saved_reports', 'insight_reviews', 'exemptions', 'link_requests'].includes(tableName)) {
+                            row.trainee = item.trainee || item.user || null;
+                        } 
+                        else if (['audit_logs', 'monitor_history', 'attendance', 'access_logs', 'nps_responses', 'archived_users'].includes(tableName)) {
+                            row.user_id = item.user || null;
+                        }
+                        else if (tableName === 'live_sessions') {
+                            // Live sessions use 'trainer' as the owner usually, or sessionId as key
+                            row.id = item.sessionId || item.id; // Ensure sessionId is used as PK
+                            row.trainer = item.trainer || null;
+                        }
+                        // error_reports only needs id, data, updated_at
+                        
+                        return row;
+                    });
 
-            // C. Push to Supabase
-            // UPDATED: Use .select() to get the REAL server timestamp
-            const { data: savedData, error: saveErr } = await supabaseClient
-                .from('app_documents')
-                .upsert({ 
-                    key: key, 
-                    content: finalContent,
-                    updated_at: new Date().toISOString()
-                })
-                .select();
+                    const { error } = await supabaseClient.from(tableName).upsert(rows);
+                    if (error) throw error;
+                    
+                    // Save Hash Map only on success
+                    localStorage.setItem(hashMapKey, JSON.stringify(hashMap));
+                    // Save content back to ensure IDs are persisted locally
+                    localStorage.setItem(key, JSON.stringify(localContent));
+                }
+            } 
+            // --- STRATEGY B: BLOB SYNC (Config, Rosters, Users) ---
+            else {
+                let finalContent = localContent;
 
-            if (saveErr) throw saveErr;
-            
-            // Update Local Cache Timestamp
-            localStorage.setItem(key, JSON.stringify(finalContent));
-            
-            // ACCURACY FIX: Use Server Time, not Client Time
-            if(savedData && savedData[0]) {
-                localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
-            } else {
-                localStorage.setItem('sync_ts_' + key, new Date().toISOString());
+                // Optimistic Merge (Fetch -> Merge -> Push)
+                if (!force) {
+                    const { data: remoteRow } = await supabaseClient
+                        .from('app_documents')
+                        .select('content')
+                        .eq('key', key)
+                        .single();
+                    
+                    if (remoteRow && remoteRow.content) {
+                        const serverObj = { [key]: remoteRow.content };
+                        const localObj = { [key]: localContent };
+                        const mergedObj = performSmartMerge(serverObj, localObj, 'local_wins');
+                        finalContent = mergedObj[key];
+                    }
+                }
+
+                const { data: savedData, error: saveErr } = await supabaseClient
+                    .from('app_documents')
+                    .upsert({ 
+                        key: key, 
+                        content: finalContent,
+                        updated_at: new Date().toISOString()
+                    })
+                    .select();
+
+                if (saveErr) throw saveErr;
+                
+                localStorage.setItem(key, JSON.stringify(finalContent));
+                if(savedData && savedData[0]) localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
             }
         }
 
-        console.log(`Synced keys: ${keysToSave.join(', ')}`);
         if(!silent) updateSyncUI('success');
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
 
@@ -521,11 +667,11 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                     // 5. RECORDS (Composite Key) - FIXES SCORE DUPLICATION
                     // Fallback for legacy records that might not have IDs yet
                     if (key === 'records' && localItem.trainee && serverItem.trainee) {
+                        // AGGRESSIVE DEDUPE: Match only on Trainee + Assessment
+                        // This prevents duplicates if Group or Phase changes slightly
                         return (
                             localItem.trainee.toLowerCase() === serverItem.trainee.toLowerCase() &&
-                            (localItem.assessment||'').toLowerCase() === (serverItem.assessment||'').toLowerCase() &&
-                            (localItem.groupID||'').trim().toLowerCase() === (serverItem.groupID||'').trim().toLowerCase() &&
-                            (localItem.phase||'').trim().toLowerCase() === (serverItem.phase||'').trim().toLowerCase()
+                            (localItem.assessment||'').toLowerCase() === (serverItem.assessment||'').toLowerCase()
                         );
                     }
 
@@ -544,6 +690,21 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                     // 6. Live Sessions (Unique by sessionId) - FIXES LIVE ARENA CRASH
                     if (key === 'liveSessions' && localItem.sessionId && serverItem.sessionId) {
                         return localItem.sessionId === serverItem.sessionId;
+                    }
+
+                    // 7. Archived Agents (Unique by user) - FIXES ARCHIVE DUPLICATION
+                    if (key === 'graduated_agents' && localItem.user && serverItem.user) {
+                        return localItem.user.toLowerCase() === serverItem.user.toLowerCase();
+                    }
+
+                    // 8. Link Requests (Unique by recordId)
+                    if (key === 'linkRequests' && localItem.recordId && serverItem.recordId) {
+                        return localItem.recordId === serverItem.recordId;
+                    }
+
+                    // 9. Monitor History (Unique by User + Date) - FIXES BLOAT
+                    if (key === 'monitor_history' && localItem.user && serverItem.user && localItem.date && serverItem.date) {
+                        return localItem.user === serverItem.user && localItem.date === serverItem.date;
                     }
 
                     // 7. Fallback: Deep Compare
@@ -629,7 +790,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
         // Case 2b: Monitor Data (User-Specific Merge)
         // Prevents "War for Data" where local stale data overwrites other users' fresh server data
-        else if (key === 'monitor_data' && typeof sVal === 'object' && typeof lVal === 'object') {
+        else if (key === 'monitor_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
              // 1. Start with Server data (Source of truth for everyone else)
              merged[key] = { ...sVal };
              
@@ -645,7 +806,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
         // Case 2c: Agent Notes (Deep Merge of Note Arrays)
         // Allows multiple admins to add notes to the same user without overwriting history
-        else if (key === 'agentNotes' && typeof lVal === 'object' && lVal !== null) {
+        else if (key === 'agentNotes' && lVal && typeof lVal === 'object') {
             const safeSVal = sVal || {};
             merged[key] = { ...safeSVal }; // Start with server state
             

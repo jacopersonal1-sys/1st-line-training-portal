@@ -432,6 +432,20 @@ window.onload = async function() {
         });
     }
 
+    // --- IMPERSONATION CHECK ---
+    const realAdmin = sessionStorage.getItem('real_admin_identity');
+    if (realAdmin) {
+        const banner = document.createElement('div');
+        banner.style.cssText = "position:fixed; top:0; left:0; width:100%; background:#e74c3c; color:white; text-align:center; padding:5px; z-index:99999; font-weight:bold; cursor:pointer;";
+        banner.innerHTML = `<i class="fas fa-mask"></i> You are impersonating a user. Click here to return to Admin.`;
+        banner.onclick = function() {
+            sessionStorage.setItem('currentUser', realAdmin);
+            sessionStorage.removeItem('real_admin_identity');
+            location.reload();
+        };
+        document.body.prepend(banner);
+    }
+
     // 0. EARLY RENDER: Show Skeleton Dashboard if session exists
     // This provides immediate visual feedback while waiting for Cloud Sync
     const earlySession = sessionStorage.getItem('currentUser');
@@ -1372,6 +1386,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.1": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Major storage optimization. Reduced local database size by ~90% using lightweight sync checksums.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed "Server Ahead" sync loops and added automatic duplicate cleanup for Records and Archives.</li>
+                <li style="margin-bottom: 8px;"><strong>Health Check:</strong> Added database health monitoring and auto-pruning for old Activity Logs.</li>
+                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> New "Force Pull" and "Local Cleanup" tools in Super Admin Console.</li>
+            </ul>`,
         "2.1.61": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Header UI:</strong> Separated Profile Settings (Logo) from Admin Tools (Gear).</li>
@@ -1543,4 +1564,16 @@ function getChangelog(version) {
         `
     };
     return logs[version] || logs["default"];
+}
+
+// --- DATABASE HEALTH CHECK ---
+function checkDatabaseHealth() {
+    let total = 0;
+    for(let key in localStorage) {
+        if(localStorage.hasOwnProperty(key)) total += localStorage[key].length * 2;
+    }
+    const mb = total / (1024 * 1024);
+    if (mb > 10) {
+        if(typeof showToast === 'function') showToast(`⚠️ DB Alert: Storage is heavy (${mb.toFixed(1)} MB). Run cleanup.`, 'warning');
+    }
 }

@@ -481,9 +481,11 @@ function loadAdminUsers() {
                 const moveBtn = hasReport 
                     ? `<button class="btn-warning btn-sm" onclick="openMoveUserModal('${safeUser}')" title="Move to another group"><i class="fas fa-exchange-alt"></i></button>`
                     : `<button class="btn-secondary btn-sm" disabled title="Onboard Report Required to Move"><i class="fas fa-exchange-alt" style="opacity:0.5;"></i></button>`;
+                
+                const impBtn = (CURRENT_USER.role === 'super_admin') ? `<button class="btn-primary btn-sm" onclick="impersonateUser('${safeUser}')" title="Impersonate"><i class="fas fa-mask"></i></button>` : '';
 
                 // FIX: Pass username instead of index to prevent deleting wrong user when sorted
-                actions = `${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')"><i class="fas fa-trash"></i></button>`;
+                actions = `${impBtn} ${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')"><i class="fas fa-trash"></i></button>`;
             } 
             else if (CURRENT_USER.role === 'special_viewer') {
                 actions = `<span style="color:var(--text-muted); font-style:italic;">View Only</span>`;
@@ -708,6 +710,10 @@ function openUserEdit(username) {
     editTargetIndex = index;
     const u = users[index];
     
+    const bindingInfo = u.boundClientId 
+        ? `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">Bound to Client: <code>${u.boundClientId}</code> <button class="btn-danger btn-sm" onclick="unbindUserClient(${index})" style="padding:0 5px; margin-left:5px;">Unbind</button></div>` 
+        : `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">No Client Binding (Will bind on next login)</div>`;
+
     document.getElementById('adminEditTitle').innerText = `Edit User: ${u.user}`;
     
     document.getElementById('adminEditContent').innerHTML = `
@@ -721,7 +727,8 @@ function openUserEdit(username) {
             <option value="super_admin">Super Admin</option>
         </select>
         <label>Idle Timeout (Minutes)</label>
-        <input type="number" id="editUserTimeout" value="${u.idleTimeout || 15}" min="1" placeholder="Default: 15">`;
+        <input type="number" id="editUserTimeout" value="${u.idleTimeout || 15}" min="1" placeholder="Default: 15">
+        ${bindingInfo}`;
     
     if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
         const roleSelect = document.getElementById('editUserRole');
@@ -735,6 +742,18 @@ function openUserEdit(username) {
     document.getElementById('adminEditModal').classList.remove('hidden');
     document.getElementById('adminEditSaveBtn').onclick = saveUserEdit;
 }
+
+window.unbindUserClient = async function(index) {
+    if(!confirm("Remove Client ID binding? This allows the user to login from a new machine.")) return;
+    const users = JSON.parse(localStorage.getItem('users'));
+    delete users[index].boundClientId;
+    localStorage.setItem('users', JSON.stringify(users));
+    await secureUserSave();
+    
+    // Refresh Modal
+    document.getElementById('adminEditModal').classList.add('hidden');
+    openUserEdit(users[index].user);
+};
 
 async function saveUserEdit() {
     const users = JSON.parse(localStorage.getItem('users'));
