@@ -178,22 +178,25 @@ async function attemptLogin() {
 
     // --- SECURITY CHECK 3: CLIENT ID BINDING (STRICT) ---
     const currentClientId = localStorage.getItem('client_id');
+    const isRoamingUser = (validUser.role === 'admin' || validUser.role === 'super_admin');
     
-    if (validUser.boundClientId) {
-        // If user is bound, ID MUST match
-        if (validUser.boundClientId !== currentClientId) {
-            console.error("Security Violation: Client ID Mismatch");
-            nukeApplication(); // TERMINATE
-            return;
+    if (!isRoamingUser) {
+        if (validUser.boundClientId) {
+            // If user is bound, ID MUST match
+            if (validUser.boundClientId !== currentClientId) {
+                console.error("Security Violation: Client ID Mismatch");
+                nukeApplication(); // TERMINATE
+                return;
+            }
+        } else {
+            // First time login? Bind this client ID to the user
+            console.log("Binding user to this Client ID...");
+            validUser.boundClientId = currentClientId;
+            const idx = users.findIndex(u => u.user === validUser.user);
+            if(idx > -1) users[idx] = validUser;
+            localStorage.setItem('users', JSON.stringify(users));
+            secureAuthSave();
         }
-    } else {
-        // First time login? Bind this client ID to the user
-        console.log("Binding user to this Client ID...");
-        validUser.boundClientId = currentClientId;
-        const idx = users.findIndex(u => u.user === validUser.user);
-        if(idx > -1) users[idx] = validUser;
-        localStorage.setItem('users', JSON.stringify(users));
-        secureAuthSave();
     }
     // ----------------------------------------------------
 
