@@ -36,7 +36,9 @@ const DB_SCHEMA = {
         monitoring: { tolerance_ms: 180000, whitelist_strict: false },
         announcement: { active: false, message: "", type: "info" },
         broadcast: { id: 0, message: "" },
-        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-pro", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" }
+        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-pro", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" },
+        // NEW: Server Failover Settings
+        server_settings: { active: 'cloud', local_url: '', local_key: '' }
     },
     ai_suggestions: [], // Stores background improvement suggestions
     revokedUsers: [], // Added to ensure blacklist syncs
@@ -271,6 +273,66 @@ async function loadFromServer(silent = false) {
     }
 }
 
+let SERVER_LOOKOUT_INTERVAL = null;
+
+// --- SERVER LOOKOUT (Dual-Aware Monitoring) ---
+// Checks both Cloud and Local servers for a "Switch" command in system_config.
+async function startServerLookout() {
+    if (SERVER_LOOKOUT_INTERVAL) clearInterval(SERVER_LOOKOUT_INTERVAL);
+    // Run every 30 seconds
+    SERVER_LOOKOUT_INTERVAL = setInterval(async () => {
+        const localConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const currentTarget = localStorage.getItem('active_server_target') || 'cloud';
+        const settings = localConfig.server_settings || { active: 'cloud' };
+
+        // Define potential servers
+        const servers = [
+            { name: 'cloud', url: window.CLOUD_CREDENTIALS.url, key: window.CLOUD_CREDENTIALS.key },
+            { name: 'local', url: settings.local_url, key: settings.local_key }
+        ];
+
+        for (const srv of servers) {
+            // Skip if local server is not configured
+            if (srv.name === 'local' && (!srv.url || !srv.key)) continue;
+
+            try {
+                // Create temporary lightweight client
+                const tempClient = window.supabase.createClient(srv.url, srv.key, {
+                    auth: { 
+                        persistSession: false, 
+                        autoRefreshToken: false,
+                        storageKey: 'lookout-' + srv.name // Unique key to prevent console warning
+                    }
+                });
+
+                // Fetch config
+                const { data, error } = await tempClient
+                    .from('app_documents')
+                    .select('content, updated_at')
+                    .eq('key', 'system_config')
+                    .single();
+
+                if (data && data.content && data.content.server_settings) {
+                    const remoteActive = data.content.server_settings.active;
+                    
+                    // If a server tells us to switch, and we aren't already there
+                    if (remoteActive && remoteActive !== currentTarget) {
+                        console.warn(`Server Switch Detected on ${srv.name}! Switching to ${remoteActive}...`);
+                        
+                        // Update Local Config to match
+                        localStorage.setItem('system_config', JSON.stringify(data.content));
+                        localStorage.setItem('active_server_target', remoteActive);
+                        
+                        // Reload to apply new connection
+                        alert(`System Update: Switching to ${remoteActive.toUpperCase()} Server.`);
+                        location.reload();
+                    }
+                }
+            } catch (e) { /* Ignore connection errors during lookout */ }
+        }
+    }, 30000);
+}
+
 // --- HOT RELOAD: APPLY SYSTEM CONFIG ---
 function applySystemConfig() {
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
@@ -318,6 +380,9 @@ function applySystemConfig() {
         // We simply restart the engine, it will read the new config values
         if (typeof startRealtimeSync === 'function') startRealtimeSync();
     }
+
+    // 3. Start Server Lookout
+    startServerLookout();
 }
 
 // --- ERROR REPORTING SYSTEM ---

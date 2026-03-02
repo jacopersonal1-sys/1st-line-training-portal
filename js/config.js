@@ -2,15 +2,35 @@
 
 // --- SUPABASE CONFIGURATION ---
 // Critical: These keys connect the Electron app to the Cloud Database.
-const SUPABASE_URL = 'https://ukhgyvhqoijgetxzlzpy.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVraGd5dmhxb2lqZ2V0eHpsenB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njg4MDQsImV4cCI6MjA4NTM0NDgwNH0.FONPTHcaicp7IAI47gwmic4frYM1ruitTSfNQT8vEf4';
+
+// 1. Define Available Servers
+window.CLOUD_CREDENTIALS = {
+    url: 'https://ukhgyvhqoijgetxzlzpy.supabase.co',
+    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVraGd5dmhxb2lqZ2V0eHpsenB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njg4MDQsImV4cCI6MjA4NTM0NDgwNH0.FONPTHcaicp7IAI47gwmic4frYM1ruitTSfNQT8vEf4'
+};
+
+// 2. Determine Active Server
+const activeTarget = localStorage.getItem('active_server_target') || 'cloud';
+const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
+const localSettings = systemConfig.server_settings || {};
+
+let SUPABASE_URL = window.CLOUD_CREDENTIALS.url;
+let SUPABASE_ANON_KEY = window.CLOUD_CREDENTIALS.key;
+
+if (activeTarget === 'local' && localSettings.local_url && localSettings.local_key) {
+    console.log("Using LOCAL Server Credentials");
+    SUPABASE_URL = localSettings.local_url;
+    SUPABASE_ANON_KEY = localSettings.local_key;
+} else {
+    console.log("Using CLOUD Server Credentials");
+}
 
 // Initialize the Supabase Client
 // We use 'window.supabaseClient' to avoid conflict with the library's global 'supabase' variable.
 if (typeof window !== 'undefined' && window.supabase) {
     try {
         window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        console.log("Supabase Client Initialized.");
+        console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}).`);
     } catch (e) {
         console.error("Supabase Initialization Failed:", e);
     }

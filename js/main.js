@@ -459,6 +459,40 @@ window.onload = async function() {
         } catch(e) { console.error("Early render failed", e); }
     }
 
+    // --- SERVER MIGRATION PROTOCOL ---
+    // Detects if we've switched servers and forces a full re-sync/push to ensure data consistency.
+    const currentTarget = localStorage.getItem('active_server_target') || 'cloud';
+    const lastTarget = localStorage.getItem('last_connected_server');
+    
+    if (lastTarget && lastTarget !== currentTarget) {
+        console.warn(`Server Switch Detected: ${lastTarget} -> ${currentTarget}. Initiating Data Migration...`);
+        
+        // 1. Reset Row Sync State (Forces re-evaluation of all local rows)
+        // Clear hash maps so the system thinks all local data is new and must be uploaded.
+        Object.keys(localStorage).forEach(k => {
+            if(k.startsWith('hash_map_')) localStorage.removeItem(k);
+        });
+        
+        // 2. Reset Blob Sync Timestamps (Forces fresh fetch of config/rosters)
+        Object.keys(localStorage).forEach(k => {
+            if(k.startsWith('sync_ts_')) localStorage.removeItem(k);
+        });
+
+        // 3. Force Push Local Data to New Server
+        if (typeof saveToServer === 'function') {
+            try {
+                // Show visual indicator if loader is present
+                const txt = document.getElementById('loader-text');
+                if(txt) txt.innerText = "Migrating Data to New Server...";
+
+                // Use 'false' for force to enable Smart Merge for Blobs (safer), but cleared hash_maps force Rows.
+                await saveToServer(null, false); 
+                console.log("Migration: Local data pushed to new server.");
+            } catch(e) { console.error("Migration Push Failed:", e); }
+        }
+    }
+    localStorage.setItem('last_connected_server', currentTarget);
+
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
@@ -470,6 +504,9 @@ window.onload = async function() {
             if(typeof AUTO_BACKUP !== 'undefined') AUTO_BACKUP = false; 
         }
     }
+
+    // --- APPLY CONFIG & START FAILOVER LOOKOUT ---
+    if (typeof applySystemConfig === 'function') applySystemConfig();
 
     // --- NEW: Start Real-Time Polling (Heartbeat & Sync) ---
     // This activates the Supabase polling defined in data.js
@@ -1430,6 +1467,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.0": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Dual-Server Architecture:</strong> Added support for Local/Cloud server failover.</li>
+                <li style="margin-bottom: 8px;"><strong>High Availability:</strong> System now actively monitors for server switch commands to ensure uptime.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Safety:</strong> Implemented auto-migration protocol to preserve data when switching servers.</li>
+            </ul>`,
         "2.2.15": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>System:</strong> Documentation updated to reflect recent architecture changes (Universal Search, Working Hours Logic).</li>

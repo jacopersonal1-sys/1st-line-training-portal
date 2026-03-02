@@ -915,6 +915,7 @@ function openSuperAdminConfig() {
     const whitelist = sec.client_whitelist || [];
     const ai = config.ai || { enabled: true, apiKey: "" }; // FIX: Default to Enabled
     const lockdown = sec.lockdown_mode || false;
+    const srv = config.server_settings || { active: 'cloud', local_url: '', local_key: '' };
 
     const modalHtml = `
         <div id="superAdminModal" class="modal-overlay">
@@ -998,6 +999,38 @@ function openSuperAdminConfig() {
                                 <label>Reminder</label><input type="time" id="sa_att_remind" value="${att.reminder_start}">
                             </div>
                         </div>
+                        
+                        <div class="card" style="margin-top:15px; border-left: 4px solid #9b59b6;">
+                            <h4><i class="fas fa-server"></i> Server Failover Control</h4>
+                            
+                            <div style="display:flex; gap:10px; align-items:center; margin-bottom:15px; padding:10px; background:var(--bg-input); border-radius:6px;">
+                                <label style="margin:0; font-weight:bold;">Active Target:</label>
+                                <select id="sa_srv_active" style="flex:1;">
+                                    <option value="cloud" ${srv.active === 'cloud' ? 'selected' : ''}>Cloud (Main)</option>
+                                    <option value="local" ${srv.active === 'local' ? 'selected' : ''}>Local (VM)</option>
+                                </select>
+                                <button class="btn-secondary btn-sm" onclick="testServerConnections()"><i class="fas fa-network-wired"></i> Test Connectivity</button>
+                            </div>
+
+                            <div class="grid-2" style="gap:15px;">
+                                <div style="border:1px solid var(--border-color); padding:10px; border-radius:6px; position:relative;">
+                                    <div style="font-weight:bold; margin-bottom:5px; color:#3498db;">Cloud Server (Main)</div>
+                                    <div id="status_cloud" style="position:absolute; top:10px; right:10px; font-size:0.75rem; font-weight:bold; color:var(--text-muted);">Unknown</div>
+                                    <label style="font-size:0.8rem;">URL</label><input type="text" value="${window.CLOUD_CREDENTIALS ? window.CLOUD_CREDENTIALS.url : ''}" disabled style="opacity:0.7; cursor:not-allowed;">
+                                    <label style="font-size:0.8rem;">Anon Key</label><input type="text" value="${window.CLOUD_CREDENTIALS ? window.CLOUD_CREDENTIALS.key : ''}" disabled style="opacity:0.7; cursor:not-allowed; font-family:monospace; font-size:0.7rem;">
+                                </div>
+                                <div style="border:1px solid var(--border-color); padding:10px; border-radius:6px; position:relative;">
+                                    <div style="font-weight:bold; margin-bottom:5px; color:#9b59b6;">Local Server (VM)</div>
+                                    <div id="status_local" style="position:absolute; top:10px; right:10px; font-size:0.75rem; font-weight:bold; color:var(--text-muted);">Unknown</div>
+                                    <label style="font-size:0.8rem;">URL</label><input type="text" id="sa_srv_url" value="${srv.local_url || ''}" placeholder="http://192.168.x.x:8000">
+                                    <label style="font-size:0.8rem;">Anon Key</label><input type="text" id="sa_srv_key" value="${srv.local_key || ''}" placeholder="eyJh..." style="font-family:monospace; font-size:0.7rem;">
+                                </div>
+                            </div>
+                            <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-color); text-align:right;">
+                                <button class="btn-warning btn-sm" onclick="forceMigrationPush()"><i class="fas fa-upload"></i> Force Data Migration</button>
+                            </div>
+                        </div>
+
                         <div class="card" style="margin-top:15px;">
                             <h4><i class="fas fa-toggle-on"></i> Features</h4>
                             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
@@ -1123,6 +1156,7 @@ function openSuperAdminConfig() {
     // Initial Load
     refreshClientHealthTable();
     renderStorageVisualizer();
+    setTimeout(testServerConnections, 500);
 }
 
 // New Helper Functions for Tabs
@@ -1744,6 +1778,12 @@ async function saveSuperAdminConfig() {
         apiKey: getVal('sa_ai_key', '').trim()
     };
 
+    config.server_settings = {
+        active: getVal('sa_srv_active', 'cloud'),
+        local_url: getVal('sa_srv_url', '').trim(),
+        local_key: getVal('sa_srv_key', '').trim()
+    };
+
     localStorage.setItem('system_config', JSON.stringify(config));
     if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
     
@@ -2032,3 +2072,59 @@ async function clearSystemErrors() {
     document.getElementById('errorReportModal').remove();
     viewSystemErrors();
 }
+
+window.testServerConnections = async function() {
+    const updateStatus = (id, status, latency) => {
+        const el = document.getElementById(id);
+        if(!el) return;
+        if(status === 'checking') {
+            el.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Checking...';
+            el.style.color = 'var(--text-muted)';
+        } else if (status === 'online') {
+            el.innerHTML = `<i class="fas fa-check-circle"></i> Online (${latency}ms)`;
+            el.style.color = '#2ecc71';
+        } else {
+            el.innerHTML = `<i class="fas fa-times-circle"></i> Offline`;
+            el.style.color = '#ff5252';
+        }
+    };
+
+    // 1. Test Cloud
+    updateStatus('status_cloud', 'checking');
+    const cloudUrl = window.CLOUD_CREDENTIALS ? window.CLOUD_CREDENTIALS.url : '';
+    const cloudKey = window.CLOUD_CREDENTIALS ? window.CLOUD_CREDENTIALS.key : '';
+    if(cloudUrl && cloudKey) {
+        const start = Date.now();
+        try { const client = window.supabase.createClient(cloudUrl, cloudKey, { auth: { persistSession: false, storageKey: 'test-cloud' } }); await client.from('app_documents').select('key').limit(1); updateStatus('status_cloud', 'online', Date.now() - start); } catch(e) { updateStatus('status_cloud', 'offline'); }
+    } else { document.getElementById('status_cloud').innerText = "No Config"; }
+
+    // 2. Test Local
+    updateStatus('status_local', 'checking');
+    const localUrl = document.getElementById('sa_srv_url').value.trim();
+    const localKey = document.getElementById('sa_srv_key').value.trim();
+    if(localUrl && localKey) {
+        const start = Date.now();
+        try { const client = window.supabase.createClient(localUrl, localKey, { auth: { persistSession: false, storageKey: 'test-local' } }); await client.from('app_documents').select('key').limit(1); updateStatus('status_local', 'online', Date.now() - start); } catch(e) { updateStatus('status_local', 'offline'); }
+    } else { document.getElementById('status_local').innerText = "Not Configured"; }
+};
+
+window.forceMigrationPush = async function() {
+    if(!confirm("Force push ALL local data to the current server?\n\nUse this if you just switched servers and data is missing on the other side.")) return;
+    
+    const btn = document.activeElement;
+    btn.disabled = true; btn.innerText = "Migrating...";
+    
+    // Reset Hash Maps to force row upload
+    Object.keys(localStorage).forEach(k => {
+        if(k.startsWith('hash_map_')) localStorage.removeItem(k);
+    });
+    
+    try {
+        await saveToServer(null, false);
+        alert("Migration Push Complete.");
+    } catch(e) {
+        alert("Migration Failed: " + e.message);
+    } finally {
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-upload"></i> Force Data Migration';
+    }
+};

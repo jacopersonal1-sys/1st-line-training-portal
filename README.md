@@ -12,6 +12,7 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
   - **Local**: `localStorage` (Primary read/write layer).
   - **Cloud**: Supabase (Hybrid Model: `app_documents` for config blobs, dedicated tables for `records`, `submissions`, `logs`, etc.).
 - **Sync Engine**: Custom "Hybrid Row-Level Sync" (`js/data.js`).
+  - **Failover**: "Dual-Aware" client capable of hot-swapping between Cloud and Local servers via `startServerLookout`.
   - **Logic**: 
     - **Blobs**: Config/Rosters sync as JSON objects.
     - **Rows**: High-volume data (Records, Logs) syncs as individual rows to save bandwidth.
@@ -154,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.3.0**: **Dual-Server Failover System**: Implemented "Dual-Aware" client architecture. The app now supports hot-swapping between Cloud and Local Supabase instances. Added **Server Lookout** service to poll both servers for switch commands. Implemented **Migration Protocol** to auto-push local data when switching servers, preventing data loss. Added **Connectivity Tester** and **Failover Controls** to Super Admin Console.
 - **v2.2.15**: **Documentation & Polish**: Updated README to reflect Universal Search, Working Hours logic, and Stale Review detection.
 - **v2.2.14**: **Data Integrity Fixes**: Fixed "Zombie Data" issues where deleted records/submissions would reappear. Updated Factory Reset to correctly wipe all cloud tables. Hardened deletion logic in Admin Database tools.
 - **v2.2.13**: **Insight & Live Fixes**: Fixed Insight Dashboard to correctly reflect retaken assessments (Highest Score logic). Resolved "Zombie" Live Sessions by filtering stale data and fixing the Admin Clear tool.
