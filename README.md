@@ -153,6 +153,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.2.13**: **Insight & Live Fixes**: Fixed Insight Dashboard to correctly reflect retaken assessments (Highest Score logic). Resolved "Zombie" Live Sessions by filtering stale data and fixing the Admin Clear tool.
 - **v2.2.12**: **Timer Fixes**: Fixed Vetting Test timer display for trainees (formatting & visibility). Increased Admin Monitor refresh rate for timer synchronization.
 - **v2.2.11**: **Login Fix**: Fixed semantic version comparison logic in Auth module to correctly handle double-digit version numbers (e.g., 2.2.10 > 2.2.6).
 - **v2.2.10**: **Vetting & Submission Fixes**: Fixed Vetting Arena counters not updating in real-time. Prevented "Already Submitted" errors by disabling the submit button immediately on click.

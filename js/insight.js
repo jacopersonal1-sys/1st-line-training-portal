@@ -549,7 +549,18 @@ function calculateAgentStatus(records) {
 
     const limit = (typeof IMPROVE !== 'undefined') ? IMPROVE : 80;
 
+    // NEW: Deduplicate by Assessment Name (Keep Highest Score)
+    // This ensures that if a trainee retakes a test and passes, the old failure is ignored.
+    const bestScores = {};
     records.forEach(r => {
+        if (!r.assessment) return;
+        const key = r.assessment.trim().toLowerCase();
+        if (!bestScores[key] || r.score > bestScores[key].score) {
+            bestScores[key] = r;
+        }
+    });
+
+    Object.values(bestScores).forEach(r => {
         if (r.score < limit) {
             const name = r.assessment;
             if (typeof INSIGHT_CONFIG !== 'undefined') {

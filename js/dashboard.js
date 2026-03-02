@@ -1399,7 +1399,13 @@ function buildTraineeWidgets(container) {
 
     // NEW: Check for Active Live Session (Redirect Prompt)
     const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    const myLive = liveSessions.find(s => s.trainee === CURRENT_USER.user && s.active);
+    const now = Date.now();
+    const myLive = liveSessions.find(s => {
+        if (s.trainee !== CURRENT_USER.user || !s.active) return false;
+        const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
+        // Ignore if older than 12 hours
+        return (now - start < 43200000);
+    });
     
     let liveBanner = '';
     if (myLive) {

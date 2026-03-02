@@ -778,13 +778,22 @@ async function deleteLiveSchedule(id) {
     const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
     delete liveSchedules[id];
     
-    if (Object.keys(liveSchedules).length === 0) {
-        liveSchedules["A"] = { startDate: new Date().toISOString().split('T')[0], days: 5, activeSlots: [], assigned: null };
+    // Re-index keys to ensure continuity (A, B, C...)
+    const oldKeys = Object.keys(liveSchedules).sort();
+    const newSchedules = {};
+
+    if (oldKeys.length === 0) {
+        newSchedules["A"] = { startDate: new Date().toISOString().split('T')[0], days: 5, activeSlots: [], assigned: null };
+    } else {
+        oldKeys.forEach((oldKey, index) => {
+            const newKey = String.fromCharCode(65 + index); // 65 = 'A'
+            newSchedules[newKey] = liveSchedules[oldKey];
+        });
     }
     
-    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+    localStorage.setItem('liveSchedules', JSON.stringify(newSchedules));
     await secureScheduleSave();
-    ACTIVE_LIVE_SCHED_ID = Object.keys(liveSchedules).sort()[0];
+    ACTIVE_LIVE_SCHED_ID = Object.keys(newSchedules).sort()[0];
     renderLiveTable();
 }
 
@@ -1045,7 +1054,7 @@ function switchScheduleTab(id) {
 
 async function createNewSchedule() {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
-    const keys = Object.keys(schedules);
+    const keys = Object.keys(schedules).sort();
     const lastKey = keys[keys.length - 1];
     const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
     
@@ -1329,16 +1338,24 @@ async function deleteSchedule(id) {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     delete schedules[id];
     
-    // If no schedules left, create default A
-    if (Object.keys(schedules).length === 0) {
-        schedules["A"] = { items: [], assigned: null };
+    // Re-index keys to ensure continuity (A, B, C...)
+    const oldKeys = Object.keys(schedules).sort();
+    const newSchedules = {};
+    
+    if (oldKeys.length === 0) {
+        newSchedules["A"] = { items: [], assigned: null };
+    } else {
+        oldKeys.forEach((oldKey, index) => {
+            const newKey = String.fromCharCode(65 + index); // 65 = 'A'
+            newSchedules[newKey] = schedules[oldKey];
+        });
     }
     
-    localStorage.setItem('schedules', JSON.stringify(schedules));
+    localStorage.setItem('schedules', JSON.stringify(newSchedules));
     if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
     
     // Switch to first available
-    ACTIVE_SCHED_ID = Object.keys(schedules).sort()[0];
+    ACTIVE_SCHED_ID = Object.keys(newSchedules).sort()[0];
     renderSchedule();
 }
 

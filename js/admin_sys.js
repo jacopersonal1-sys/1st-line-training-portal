@@ -861,7 +861,14 @@ async function resetLiveSessionsKey() {
     if(btn) { btn.innerText = "Clearing..."; btn.disabled = true; }
 
     localStorage.setItem('liveSessions', '[]');
-    if (typeof saveToServer === 'function') await saveToServer(['liveSessions'], true);
+    
+    // FIX: Explicitly wipe the table for Row-Level Sync
+    if (window.supabaseClient) {
+        const { error } = await window.supabaseClient
+            .from('live_sessions')
+            .delete()
+            .neq('id', 'placeholder'); // Delete all rows
+    }
     
     alert("Live Sessions cleared. Reloading...");
     location.reload();

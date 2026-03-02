@@ -1430,6 +1430,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.13": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Insight Dashboard:</strong> Fixed "Action Required" to correctly update when a trainee retakes and passes a test (Highest Score wins).</li>
+                <li style="margin-bottom: 8px;"><strong>Live Assessment:</strong> Fixed issue where old/stale sessions remained visible to trainees.</li>
+            </ul>`,
         "2.2.12": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed missing timer display for trainees. Improved timer synchronization for Admins.</li>

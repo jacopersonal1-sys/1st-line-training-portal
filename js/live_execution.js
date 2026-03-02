@@ -141,7 +141,20 @@ async function syncLiveSessionState() {
             }
         } else {
             // Trainee: Find the session assigned to me
-            myServerSession = allSessions.find(s => s.trainee === CURRENT_USER.user && s.active) || { active: false };
+            // FIX: Filter out stale sessions (>12h) and sort by start time to get the latest
+            const now = Date.now();
+            const validSessions = allSessions.filter(s => {
+                if (s.trainee !== CURRENT_USER.user || !s.active) return false;
+                // Determine start time (Fallback to ID timestamp if missing)
+                const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
+                // Check staleness (12 hours = 43200000 ms)
+                if (now - start > 43200000) return false;
+                return true;
+            });
+            
+            // Sort newest first
+            validSessions.sort((a, b) => (b.startTime || 0) - (a.startTime || 0));
+            myServerSession = validSessions.length > 0 ? validSessions[0] : { active: false };
         }
 
         // PRESERVE LOCAL ANSWERS (Trainee Only)
@@ -518,11 +531,22 @@ function renderTraineeLivePanel(container) {
     
     if (session.currentQ === -1) {
         container.innerHTML = `
-            <div style="text-align:center; padding:100px;">
+            <div style="text-align:center; padding:50px; max-width: 800px; margin: 0 auto;">
                 <h1>${test ? test.title : 'Live Assessment'}</h1>
                 <h3>Get Ready!</h3>
                 <p>The trainer is about to begin the assessment.</p>
+                
+                <div style="background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:20px; margin:30px 0; text-align:left;">
+                    <h4 style="margin-top:0; color:var(--primary);"><i class="fas fa-info-circle"></i> Assessment Rules</h4>
+                    <ul style="margin-bottom:0; line-height:1.6;">
+                        <li>This assessment takes approximately <strong>1 hour</strong> to complete.</li>
+                        <li>You are allowed to reference the training material. However, if the material is referenced constantly and it is clear the material was not studied, the live session will be ended.</li>
+                        <li>If you are unable to answer a question within <strong>5 minutes</strong> of it being provided, the marks obtained for that question are final & the next question will be provided.</li>
+                    </ul>
+                </div>
+
                 <div class="loader" style="margin:20px auto;"></div>
+                <div style="color:var(--text-muted); font-size:0.9rem;">Waiting for trainer to push the first question...</div>
             </div>`;
         return;
     }
@@ -675,6 +699,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
         active: true,
         bookingId: bookingId,
         testId: test.id,
+        startTime: Date.now(), // NEW: Track start time for staleness checks
         trainee: traineeName,
         trainer: CURRENT_USER.user,
         currentQ: -1,
@@ -734,7 +759,21 @@ async function saveLiveComment(idx, val) {
 
 async function submitLiveAnswer(qIdx) {
     // Get answer from window.USER_ANSWERS (populated by renderQuestionInput helpers)
-    const ans = window.USER_ANSWERS[qIdx];
+    let ans = window.USER_ANSWERS[qIdx];
+    
+    // FALLBACK: Scrape DOM if empty (Safety for fast clicks or missed events)
+    if (ans === undefined || ans === null || ans === "") {
+        const container = document.querySelector('.live-input-area');
+        if (container) {
+            const textInput = container.querySelector('textarea, input[type="text"]');
+            if (textInput) ans = textInput.value;
+            
+            // Radio/Checkbox (Simple check)
+            const checked = container.querySelector('input:checked');
+            if (checked && !textInput) ans = checked.value; 
+        }
+    }
+
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const session = JSON.parse(localStorage.getItem('liveSession'));
     const test = tests.find(t => t.id == session.testId);
@@ -746,7 +785,12 @@ async function submitLiveAnswer(qIdx) {
     }
 
     // For practical, if empty, mark as "Completed"
-    session.answers[qIdx] = (q.type === 'live_practical' && !ans) ? "Completed" : ans;
+    const finalAns = (q.type === 'live_practical' && !ans) ? "Completed" : ans;
+    
+    session.answers[qIdx] = finalAns;
+    
+    // Update Global State to match (so render doesn't revert it)
+    window.USER_ANSWERS[qIdx] = finalAns;
     
     localStorage.setItem('liveSession', JSON.stringify(session));
     
@@ -754,12 +798,16 @@ async function submitLiveAnswer(qIdx) {
     const btn = document.querySelector('.btn-primary.btn-lg');
     if(btn) { btn.innerText = "Sending..."; btn.disabled = true; }
     
-    await updateGlobalSessionArray(session, false); // Safe Merge (prevents overwriting other sessions)
+    try {
+        await updateGlobalSessionArray(session, true); // Force push to ensure admin sees it
+    } catch(e) { console.error("Sync Error:", e); }
     
     if(btn) { 
         // Check type to determine text
         const isPractical = q.type === 'live_practical';
         btn.innerText = isPractical ? "Done" : "Update Answer"; 
+        btn.disabled = false;
+        
         const statusSpan = document.getElementById('submit-status');
         if(statusSpan) {
             statusSpan.innerHTML = '<i class="fas fa-check-circle"></i> Answer Submitted';

@@ -133,13 +133,18 @@ const CalendarModule = {
     renderWidget: function() {
         const container = document.getElementById('calendar-widget-content');
         if (!container) return;
+        
+        // FIX: Ensure container fills height and uses flex to expand list
+        container.style.height = '100%';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
 
         const tasks = this.getTasks();
 
         if (tasks.length === 0) {
-            container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted);">No tasks for today.</div>`;
+            container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); flex:1;">No tasks for today.</div>`;
         } else {
-            let html = `<div class="task-list" style="max-height:200px; overflow-y:auto;">`;
+            let html = `<div class="task-list" style="flex:1; overflow-y:auto; min-height:0;">`;
             tasks.forEach(t => {
                 let icon = 'fa-circle';
                 if (t.type === 'vetting') icon = 'fa-shield-alt';

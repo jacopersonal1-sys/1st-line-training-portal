@@ -5,7 +5,7 @@
 let BUILDER_QUESTIONS = [];
 let EDITING_TEST_ID = null; 
 
-function loadTestBuilder(existingId = null) {
+function loadTestBuilder(existingId = null, targetQIdx = null) {
     BUILDER_QUESTIONS = [];
     document.getElementById('questionContainer').innerHTML = '';
     document.getElementById('builderTotalScore').innerText = '0';
@@ -97,6 +97,18 @@ function loadTestBuilder(existingId = null) {
             // Load Questions
             BUILDER_QUESTIONS = test.questions || [];
             renderBuilder();
+
+            // Deep Link Scroll
+            if (targetQIdx !== null) {
+                setTimeout(() => {
+                    const cards = document.querySelectorAll('.question-card');
+                    if (cards[targetQIdx]) {
+                        cards[targetQIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        cards[targetQIdx].classList.add('active-edit'); // Uses existing highlight style
+                        setTimeout(() => cards[targetQIdx].classList.remove('active-edit'), 3000);
+                    }
+                }, 500);
+            }
         } else {
             console.warn("Editing test ID not found:", existingId);
         }
@@ -502,8 +514,8 @@ async function saveTest() {
     loadManageTests();
 }
 
-function editTest(id) {
-    loadTestBuilder(id);
+function editTest(id, targetQIdx = null) {
+    loadTestBuilder(id, targetQIdx);
     showTab('test-builder');
 }
 
@@ -539,6 +551,9 @@ function loadManageTests() {
         renderGroup("Standard Assessments", standard, "var(--text-main)") +
         renderGroup("Live Assessments", live, "var(--primary)") +
         renderGroup("Vetting Tests", vetting, "#9b59b6");
+        
+    // Initialize Search UI if available
+    if (typeof initUniversalSearch === 'function') initUniversalSearch();
 }
 
 async function deleteTest(id) {

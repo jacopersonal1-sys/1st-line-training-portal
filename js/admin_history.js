@@ -6,6 +6,7 @@ function showTestEngineSub(viewName, btn) {
     document.getElementById('engine-view-overview').classList.add('hidden');
     document.getElementById('engine-view-history').classList.add('hidden');
     if(document.getElementById('engine-view-nps')) document.getElementById('engine-view-nps').classList.add('hidden');
+    if(document.getElementById('engine-view-search')) document.getElementById('engine-view-search').classList.add('hidden');
     
     document.getElementById('engine-view-' + viewName).classList.remove('hidden');
     
@@ -203,4 +204,119 @@ async function processHistoryRetake(subId) {
         alert("Retake granted.");
         loadCompletedHistory(); // Refresh THIS view
     }
+}
+
+// --- UNIVERSAL SEARCH ENGINE ---
+
+function initUniversalSearch() {
+    // 1. Inject Tab Button
+    const parent = document.getElementById('test-manage');
+    if (!parent) return;
+
+    let nav = parent.querySelector('.admin-sub-nav');
+    // Fallback: Find via existing buttons if class is missing
+    if (!nav) {
+        const existingBtn = parent.querySelector('button[onclick*="showTestEngineSub"]');
+        if (existingBtn) nav = existingBtn.parentElement;
+    }
+
+    if (nav) {
+        // Try to append to the button group div if it exists
+        const btnContainer = nav.querySelector('div') || nav;
+        if (!document.getElementById('btn-engine-search')) {
+            const btn = document.createElement('button');
+            btn.id = 'btn-engine-search';
+            btn.className = 'sub-tab-btn';
+            btn.innerHTML = '<i class="fas fa-search"></i> Universal Search';
+            btn.onclick = function() { showTestEngineSub('search', this); };
+            btnContainer.appendChild(btn);
+        }
+    }
+
+    // 2. Inject View Container
+    if (!document.getElementById('engine-view-search')) {
+        const div = document.createElement('div');
+        div.id = 'engine-view-search';
+        div.className = 'hidden';
+        div.style.width = '100%';
+        div.innerHTML = `
+            <div class="card" style="width: 100%; box-sizing: border-box;">
+                <div style="display:flex; flex-direction: row; gap:10px; margin-bottom:20px; align-items:center; width: 100%;">
+                    <div style="flex: 1; position:relative;">
+                        <i class="fas fa-search" style="position:absolute; left:15px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:1.2rem; z-index: 1;"></i>
+                        <input type="text" id="univSearchInput" placeholder="Search questions, options, titles across ALL assessments..." style="width:100%; padding:15px 15px 15px 50px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); font-size:1.2rem; box-sizing: border-box;" onkeydown="if(event.key==='Enter') runUniversalSearch()">
+                    </div>
+                    <button class="btn-primary" onclick="runUniversalSearch()" style="width: 10%; min-width: 120px; height: 56px; font-size: 1.1rem; white-space: nowrap; padding: 0;">Search</button>
+                </div>
+                <div id="univSearchResults" style="min-height:60vh;">
+                    <div style="text-align:center; color:var(--text-muted); padding:20px;">Enter text to search across Vetting, Live, and Standard assessments.</div>
+                </div>
+            </div>
+        `;
+        parent.appendChild(div);
+    }
+}
+
+function runUniversalSearch() {
+    const query = document.getElementById('univSearchInput').value.trim().toLowerCase();
+    const container = document.getElementById('univSearchResults');
+    
+    if (!query) return;
+    
+    container.innerHTML = '<div style="text-align:center; padding:20px;"><i class="fas fa-circle-notch fa-spin"></i> Searching...</div>';
+    
+    setTimeout(() => {
+        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const results = [];
+
+        tests.forEach(test => {
+            // 1. Check Title
+            if (test.title.toLowerCase().includes(query)) {
+                results.push({ type: 'Title Match', test: test, match: test.title, qIdx: null });
+            }
+
+            // 2. Check Questions
+            if (test.questions) {
+                test.questions.forEach((q, idx) => {
+                    let matchFound = false;
+                    let matchText = '';
+
+                    // Check Text
+                    if (q.text && q.text.toLowerCase().includes(query)) {
+                        matchFound = true; matchText = q.text;
+                    }
+                    // Check Options
+                    else if (q.options && q.options.some(o => o.toLowerCase().includes(query))) {
+                        matchFound = true; matchText = `Option match in: "${q.text.substring(0, 50)}..."`;
+                    }
+                    // Check Admin Notes
+                    else if (q.adminNotes && q.adminNotes.toLowerCase().includes(query)) {
+                        matchFound = true; matchText = `Note match: ${q.adminNotes}`;
+                    }
+
+                    if (matchFound) {
+                        results.push({ type: 'Question', test: test, match: matchText, qIdx: idx });
+                    }
+                });
+            }
+        });
+
+        if (results.length === 0) {
+            container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No results found.</div>';
+        } else {
+            container.innerHTML = results.map(r => {
+                const icon = r.test.type === 'vetting' ? '<i class="fas fa-shield-alt" style="color:#9b59b6;"></i>' : (r.test.type === 'live' ? '<i class="fas fa-satellite-dish" style="color:var(--primary);"></i>' : '<i class="fas fa-file-alt"></i>');
+                const context = r.qIdx !== null ? `Question ${r.qIdx + 1}` : 'Test Settings';
+                
+                return `
+                <div style="background:var(--bg-input); padding:15px; border-radius:6px; margin-bottom:10px; border-left:4px solid var(--primary); display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-weight:bold; font-size:1rem;">${icon} ${r.test.title} <span style="font-weight:normal; color:var(--text-muted); font-size:0.8rem;">(${context})</span></div>
+                        <div style="margin-top:5px; color:var(--text-main); font-size:0.9rem;">${r.match}</div>
+                    </div>
+                    <button class="btn-secondary btn-sm" onclick="editTest('${r.test.id}', ${r.qIdx})"><i class="fas fa-edit"></i> Edit</button>
+                </div>`;
+            }).join('');
+        }
+    }, 100);
 }
