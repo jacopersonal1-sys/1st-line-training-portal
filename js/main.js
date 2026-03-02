@@ -1425,6 +1425,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.8": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed real-time visibility of trainees for Admins. Added tolerance for Microsoft Teams running in the background.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Improved submission reliability and error messaging for assessments.</li>
+            </ul>`,
         "2.2.6": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Fix:</strong> Enforced Background Color theme application to ensure UI components (Cards, Inputs) update correctly.</li>

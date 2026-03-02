@@ -217,7 +217,7 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
                 const lower = proc.toLowerCase();
                 
                 // EXCEPTION: Allow WebView2 (Teams) and Updaters
-                if (lower.includes('webview') || lower.includes('update')) return;
+                if (lower.includes('webview') || lower.includes('update') || lower.includes('teams') || lower.includes('msteams')) return;
 
                 targets.forEach(t => {
                     if (lower.includes(t)) {

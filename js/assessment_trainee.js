@@ -463,7 +463,7 @@ async function submitTest(forceSubmit = false) {
     }
 
     if (finalStatus === 'completed') {
-        if(typeof showToast === 'function') showToast(`Assessment Complete! You scored: %`, "success");
+        if(typeof showToast === 'function') showToast(`Assessment Complete! You scored: ${finalPercent}%`, "success");
         
         // --- TRIGGER NPS SURVEY ---
         if (typeof NPSSystem !== 'undefined') {

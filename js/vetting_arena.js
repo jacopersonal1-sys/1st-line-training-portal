@@ -331,6 +331,29 @@ async function saveVettingSessionDirectly(session) {
     });
 }
 
+// --- NEW: SAFE PATCH FOR TRAINEES (Prevents Data Loss) ---
+async function patchTraineeStatus(username, statusData) {
+    if (!window.supabaseClient) return;
+    
+    // 1. Fetch latest server state
+    const { data, error } = await window.supabaseClient
+        .from('vetting_sessions')
+        .select('data')
+        .eq('id', 'global_session')
+        .single();
+        
+    if (error || !data) return;
+    
+    const serverSession = data.data;
+    if (!serverSession.trainees) serverSession.trainees = {};
+    
+    // 2. Merge ONLY this user's data
+    serverSession.trainees[username] = { ...(serverSession.trainees[username] || {}), ...statusData };
+    
+    // 3. Save back
+    await window.supabaseClient.from('vetting_sessions').update({ data: serverSession, updated_at: new Date().toISOString() }).eq('id', 'global_session');
+}
+
 // --- TRAINEE CONTROLS ---
 
 let SECURITY_MONITOR_INTERVAL = null; // Runs DURING test
@@ -764,8 +787,35 @@ async function updateTraineeStatus(status, timerStr = "") {
     if (VETTING_SAVE_TIMEOUT) clearTimeout(VETTING_SAVE_TIMEOUT);
     
     VETTING_SAVE_TIMEOUT = setTimeout(() => {
-        saveVettingSessionDirectly(session);
+        // FIX: Use Patch instead of Overwrite to prevent wiping other trainees
+        const currentLocal = JSON.parse(localStorage.getItem('vettingSession'));
+        if (currentLocal && currentLocal.trainees && currentLocal.trainees[CURRENT_USER.user]) {
+             patchTraineeStatus(CURRENT_USER.user, currentLocal.trainees[CURRENT_USER.user]);
+        }
     }, 1500);
+}
+
+// --- NEW: SAFE PATCH FOR TRAINEES (Prevents Data Loss) ---
+async function patchTraineeStatus(username, statusData) {
+    if (!window.supabaseClient) return;
+    
+    // 1. Fetch latest server state
+    const { data, error } = await window.supabaseClient
+        .from('vetting_sessions')
+        .select('data')
+        .eq('id', 'global_session')
+        .single();
+        
+    if (error || !data) return;
+    
+    const serverSession = data.data;
+    if (!serverSession.trainees) serverSession.trainees = {};
+    
+    // 2. Merge ONLY this user's data
+    serverSession.trainees[username] = { ...(serverSession.trainees[username] || {}), ...statusData };
+    
+    // 3. Save back
+    await window.supabaseClient.from('vetting_sessions').update({ data: serverSession, updated_at: new Date().toISOString() }).eq('id', 'global_session');
 }
 
 function startActiveTestMonitoring() {
