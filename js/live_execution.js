@@ -590,7 +590,7 @@ function renderTraineeLivePanel(container) {
             
             <div class="card" style="padding:40px;">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start;">
-                    <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">${session.currentQ + 1}. ${q.text} ${refBtn}</div>
+                    <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">${session.currentQ + 1}. ${q.text} ${refBtn} <span style="font-size:1rem; color:var(--text-muted); font-weight:normal; margin-left:10px;">(${q.points || 1} pts)</span></div>
                     <div class="live-input-area" style="font-size:1.2rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
                         ${inputHtml}
                     </div>

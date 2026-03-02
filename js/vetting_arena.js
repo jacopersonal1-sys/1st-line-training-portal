@@ -858,12 +858,12 @@ async function patchTraineeStatus(username, statusData) {
 function startActiveTestMonitoring() {
     if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
     
-    // Update status every 30 seconds
+    // Update status every 10 seconds (Faster updates for Admin Timer)
     SECURITY_MONITOR_INTERVAL = setInterval(() => {
         const timerEl = document.getElementById('test-timer-bar');
         const timeStr = timerEl ? timerEl.innerText.replace('TIME: ', '') : '';
         updateTraineeStatus('started', timeStr);
-    }, 30000);
+    }, 10000);
 
     // FAST SECURITY POLL (3s) - Detect violations quickly
     // We don't send full status to server every 3s to save bandwidth, 

@@ -969,6 +969,11 @@ function showTab(id, btn) {
       // NEW: Render Dashboard if Home Tab is clicked
       if(id === 'dashboard-view') {
           if(typeof renderDashboard === 'function') setTimeout(renderDashboard, 0); // Async render to ensure container is ready
+          
+          // FIX: Force Calendar Widget render (Today's Tasks)
+          if(typeof CalendarModule !== 'undefined' && typeof CalendarModule.renderWidget === 'function') {
+              setTimeout(() => CalendarModule.renderWidget(), 200);
+          }
       }
 
       // === CORRECTED: Training Insight Tab ===
@@ -1425,6 +1430,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.12": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed missing timer display for trainees. Improved timer synchronization for Admins.</li>
+            </ul>`,
         "2.2.11": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved version comparison bug preventing login (e.g., 2.2.10 being treated as older than 2.2.6).</li>

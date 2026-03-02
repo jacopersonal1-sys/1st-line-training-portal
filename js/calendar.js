@@ -6,6 +6,7 @@ const CalendarModule = {
     // --- CORE: GET UNIFIED EVENTS ---
     getEvents: function() {
         const events = [];
+        if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER) return events;
         const role = CURRENT_USER.role;
         const user = CURRENT_USER.user;
         

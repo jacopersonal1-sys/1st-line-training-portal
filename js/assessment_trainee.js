@@ -504,10 +504,13 @@ function startTestTimer(mins) {
         document.body.appendChild(timerBar);
     }
 
+    // FIX: Ensure visibility with inline styles (High Z-Index)
+    timerBar.style.cssText = "position:fixed; top:15px; right:20px; background:#e74c3c; color:white; padding:10px 25px; border-radius:30px; font-weight:bold; font-family:monospace; font-size:1.2rem; z-index:10000; box-shadow:0 4px 15px rgba(0,0,0,0.3); border:2px solid white;";
+
     window.TEST_TIMER = setInterval(() => {
         const m = Math.floor(secs / 60);
         const s = secs % 60;
-        timerBar.innerText = `TIME: :${s < 10 ? '0' + s : s}`;
+        timerBar.innerText = `TIME: ${m}:${s < 10 ? '0' + s : s}`;
         if (secs <= 0) {
             clearInterval(window.TEST_TIMER);
             if(typeof showToast === 'function') showToast("Time's up! Submitting automatically.", "warning");
