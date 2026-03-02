@@ -149,6 +149,12 @@
         <label style="cursor:pointer; display:flex; align-items:center;"><input type="checkbox" id="editIgnoreTime" style="width:auto; margin-right:10px;"> Disable Time Restrictions (Open/Close)</label>
     </div>
 
+    <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-color);">
+        <strong>Special Flags:</strong><br>
+        <label style="margin-right:15px;"><input type="checkbox" id="editIsVetting"> Is Vetting Test</label>
+        <label><input type="checkbox" id="editIsLive"> Is Live Assessment</label>
+    </div>
+
     <label for="editDueDate">Due Date (YYYY/MM/DD)</label>
     <input type="text" id="editDueDate" placeholder="e.g. 2026/01/07">
     
@@ -157,6 +163,33 @@
       <button class="btn-primary" onclick="saveScheduleItem()">Save Changes</button>
     </div>
   </div>
+</div>
+
+<div id="calendarModal" class="modal-overlay hidden" style="z-index:10005;">
+    <div class="modal-box">
+        <h3>Add Calendar Event</h3>
+        <label>Title</label>
+        <input type="text" id="calEventTitle" placeholder="e.g. System Maintenance">
+        <label>Date</label>
+        <input type="date" id="calEventDate">
+        
+        <label>Visibility</label>
+        <select id="calEventVis" onchange="CalendarModule.toggleVisInputs()">
+            <option value="all">Everyone</option>
+            <option value="admin">Admins Only</option>
+            <option value="trainee">All Trainees</option>
+            <option value="group">Specific Group</option>
+            <option value="user">Specific User</option>
+        </select>
+        
+        <div id="calGroupDiv" class="hidden"><label>Target Group</label><select id="calEventGroup"></select></div>
+        <div id="calUserDiv" class="hidden"><label>Target Username</label><input type="text" id="calEventUser"></div>
+        
+        <div style="margin-top:20px; text-align:right;">
+            <button class="btn-secondary" onclick="document.getElementById('calendarModal').classList.add('hidden')">Cancel</button>
+            <button class="btn-primary" onclick="CalendarModule.saveEvent()">Add Event</button>
+        </div>
+    </div>
 </div>
 
 <div id="attendanceAdminModal" class="modal-overlay hidden" style="z-index: 3500;">
@@ -1084,6 +1117,7 @@
 <script src="js/config.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/data.js"></script>
+<script src="js/calendar.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/dashboard.js"></script> 
 <script src="js/admin_updates.js"></script>

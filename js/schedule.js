@@ -25,6 +25,12 @@ const SA_HOLIDAYS = [
     "2026-12-26"  // Day of Goodwill
 ];
 
+// --- GLOBAL NAV HELPER ---
+window.openFullCalendar = function() {
+    showTab('assessment-schedule');
+    switchViewMode('calendar');
+};
+
 // --- HELPER: ASYNC SAVE & SYNC ---
 async function secureScheduleSave() {
     // MODIFIED: Removed 'autoBackup' check. 
@@ -269,6 +275,12 @@ function changeCalendarMonth(delta) {
 }
 
 function buildCalendar(items, isAdmin) {
+    // NEW: Use aggregated events if available
+    let allEvents = items; // Fallback
+    if (typeof CalendarModule !== 'undefined' && typeof CalendarModule.getEvents === 'function') {
+        allEvents = CalendarModule.getEvents();
+    }
+
     const year = CALENDAR_MONTH.getFullYear();
     const month = CALENDAR_MONTH.getMonth();
     
@@ -307,11 +319,22 @@ function buildCalendar(items, isAdmin) {
         const isToday = dateStr === todayStr;
         
         // Find items for this day
-        const dayItems = items.filter(item => isDateInRange(item.dateRange, item.dueDate, dateStr));
+        // Note: CalendarModule events use 'start' and 'end' (YYYY/MM/DD)
+        let dayItems = [];
+        if (typeof CalendarModule !== 'undefined') {
+            dayItems = allEvents.filter(e => {
+                 const s = e.start.replace(/-/g, '/');
+                 const end = e.end.replace(/-/g, '/');
+                 return dateStr >= s && dateStr <= end;
+            });
+        } else {
+            // Fallback for raw schedule items
+            dayItems = items.filter(item => isDateInRange(item.dateRange, item.dueDate, dateStr));
+        }
         
-        let itemsHtml = dayItems.map(item => `
-            <div style="font-size:0.7rem; background:var(--primary-soft); color:var(--primary); padding:2px 4px; border-radius:3px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.courseName}">
-                ${item.courseName}
+        let itemsHtml = dayItems.map(e => `
+            <div style="font-size:0.7rem; background:${e.color || 'var(--primary)'}20; color:${e.color || 'var(--primary)'}; padding:2px 4px; border-radius:3px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid ${e.color || 'var(--primary)'};" title="${e.title || e.courseName}">
+                ${e.title || e.courseName}
             </div>
         `).join('');
 
@@ -1119,6 +1142,12 @@ function editTimelineItem(index) {
     document.getElementById('editStartTime').value = item.openTime || "";
     document.getElementById('editEndTime').value = item.closeTime || "";
     document.getElementById('editIgnoreTime').checked = item.ignoreTime || false;
+    
+    // NEW: Vetting/Live Flags
+    const chkVetting = document.getElementById('editIsVetting');
+    const chkLive = document.getElementById('editIsLive');
+    if(chkVetting) chkVetting.checked = item.isVetting || false;
+    if(chkLive) chkLive.checked = item.isLive || false;
 
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const select = document.getElementById('editLinkedTest');
@@ -1144,6 +1173,10 @@ async function saveScheduleItem() {
     item.openTime = document.getElementById('editStartTime').value;
     item.closeTime = document.getElementById('editEndTime').value;
     item.ignoreTime = document.getElementById('editIgnoreTime').checked;
+    
+    // NEW: Save Flags
+    item.isVetting = document.getElementById('editIsVetting').checked;
+    item.isLive = document.getElementById('editIsLive').checked;
     
     const linked = document.getElementById('editLinkedTest').value;
     if (linked) item.linkedTestId = linked; else delete item.linkedTestId;

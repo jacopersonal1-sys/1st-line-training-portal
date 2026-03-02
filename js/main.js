@@ -550,6 +550,9 @@ window.onload = async function() {
                         StudyMonitor.init();
                     }
                     
+                    // --- START VETTING ENFORCER ---
+                    if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
+                    
                     if (typeof autoLogin === 'function') autoLogin();
                 } else {
                     sessionStorage.removeItem('currentUser'); // Clear invalid session
@@ -570,6 +573,9 @@ window.onload = async function() {
              if (typeof StudyMonitor !== 'undefined') {
                  StudyMonitor.init();
              }
+             
+             // --- START VETTING ENFORCER ---
+             if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
 
              if (typeof autoLogin === 'function') autoLogin();
         }

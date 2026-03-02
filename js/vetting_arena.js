@@ -291,6 +291,7 @@ async function startVettingSession() {
     
     localStorage.setItem('vettingSession', JSON.stringify(session));
     await saveVettingSessionDirectly(session);
+    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true); // Sync to app_documents for consistency
     
     loadVettingArena();
     alert("Session Started. Trainees can now access the Vetting Arena.");
@@ -304,6 +305,7 @@ async function endVettingSession() {
     
     localStorage.setItem('vettingSession', JSON.stringify(session));
     await saveVettingSessionDirectly(session);
+    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true); // Sync to app_documents for consistency
     
     if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
     loadVettingArena();
@@ -541,7 +543,7 @@ async function pollVettingSession() {
     if (!window.supabaseClient) return;
     
     // Fetch from TABLE
-    const { data, error } = await supabaseClient
+    const { data, error } = await window.supabaseClient
         .from('vetting_sessions')
         .select('data')
         .eq('id', 'global_session')
@@ -829,4 +831,62 @@ async function exitArena(keepLocked = false) {
 
     await updateTraineeStatus('completed');
     renderTraineeArena();
+}
+
+// --- GLOBAL ENFORCER (TRAINEE) ---
+let VETTING_ENFORCER_INTERVAL = null;
+
+window.initVettingEnforcer = function() {
+    if (VETTING_ENFORCER_INTERVAL) clearInterval(VETTING_ENFORCER_INTERVAL);
+    if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
+
+    // Check every 5 seconds
+    VETTING_ENFORCER_INTERVAL = setInterval(checkAndEnforceVetting, 5000);
+    checkAndEnforceVetting();
+};
+
+async function checkAndEnforceVetting() {
+    if (!window.supabaseClient) return;
+    
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('vetting_sessions')
+            .select('data')
+            .eq('id', 'global_session')
+            .single();
+            
+        if (data && data.data) {
+            const serverSession = data.data;
+            
+            // Use existing handler to update state and UI
+            if (typeof handleVettingUpdate === 'function') handleVettingUpdate(serverSession);
+            
+            // Update Sidebar Visibility (Show/Hide tab based on active status)
+            if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
+
+            if (serverSession.active) {
+                // Check if I am target
+                let isTarget = false;
+                if (!serverSession.targetGroup || serverSession.targetGroup === 'all') isTarget = true;
+                else {
+                    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+                    const members = rosters[serverSession.targetGroup] || [];
+                    // Case-insensitive check
+                    if (members.some(m => m.toLowerCase() === CURRENT_USER.user.toLowerCase())) isTarget = true;
+                }
+                
+                if (isTarget) {
+                    // Check if already completed
+                    const myData = serverSession.trainees ? serverSession.trainees[CURRENT_USER.user] : null;
+                    if (!myData || myData.status !== 'completed') {
+                        // Check if already on the tab
+                        const activeTab = document.querySelector('section.active');
+                        if (!activeTab || activeTab.id !== 'vetting-arena') {
+                            if (typeof showTab === 'function') showTab('vetting-arena');
+                        }
+                    }
+                }
+            }
+        }
+    } catch(e) { console.error("Vetting Enforcer Error:", e); }
 }

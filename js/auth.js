@@ -336,6 +336,9 @@ async function autoLogin() {
   if (typeof StudyMonitor !== 'undefined') {
       StudyMonitor.init();
   }
+  
+  // --- START VETTING ENFORCER ---
+  if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
 
   // Redirect based on role
   if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') showTab('dashboard-view'); 

@@ -1164,7 +1164,7 @@ window.checkRowSyncStatus = async function() {
         const { count: remArch } = await supabaseClient.from('archived_users').select('*', { count: 'exact', head: true });
         const { count: remRep } = await supabaseClient.from('saved_reports').select('*', { count: 'exact', head: true });
         const { count: remReq } = await supabaseClient.from('link_requests').select('*', { count: 'exact', head: true });
-        const { count: remMon } = await supabaseClient.from('monitor_state').select('*', { count: 'exact', head: true });
+        const { count: remCal } = await supabaseClient.from('calendar_events').select('*', { count: 'exact', head: true });
         
         const getStatus = (loc, rem) => {
             if (loc === rem) return '<span style="color:#2ecc71; font-weight:bold;">Synced</span>';
@@ -1177,6 +1177,8 @@ window.checkRowSyncStatus = async function() {
             if (!ts) return '<span style="color:var(--text-muted);">-</span>';
             return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
         };
+        
+        const locCal = (JSON.parse(localStorage.getItem('calendarEvents') || '[]')).length;
 
         container.innerHTML = `
             <table class="admin-table compressed-table" style="margin-top:5px;">
@@ -1191,6 +1193,7 @@ window.checkRowSyncStatus = async function() {
                     <tr><td>Reports</td><td>${locRep}</td><td>${remRep||0}</td><td>${getStatus(locRep, remRep||0)}</td><td>${getTs('savedReports')}</td></tr>
                     <tr><td>Requests</td><td>${locReq}</td><td>${remReq||0}</td><td>${getStatus(locReq, remReq||0)}</td><td>${getTs('linkRequests')}</td></tr>
                     <tr><td>Monitor Live</td><td>${locMon}</td><td>${remMon||0}</td><td>${getStatus(locMon, remMon||0)}</td><td>-</td></tr>
+                    <tr><td>Calendar</td><td>${locCal}</td><td>${remCal||0}</td><td>${getStatus(locCal, remCal||0)}</td><td>${getTs('calendarEvents')}</td></tr>
                 </tbody>
             </table>
         `;
@@ -1468,6 +1471,10 @@ window.performBlobToRowMigration = async function() {
         const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
         if(mode === 'real') { requests.forEach(r => { if(!r.id) r.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('linkRequests', JSON.stringify(requests)); }
         await uploadBatch('link_requests', requests, r => ({ id: r.id, trainee: r.trainee, data: r, updated_at: new Date().toISOString() }));
+
+        // 12. Calendar Events
+        const events = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
+        await uploadBatch('calendar_events', events, e => ({ id: e.id, created_by: e.createdBy, data: e, updated_at: new Date().toISOString() }));
 
         if (mode === 'real') {
             alert("Migration Successful! All data is now in Row-Level tables.");

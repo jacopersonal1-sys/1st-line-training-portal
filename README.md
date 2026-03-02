@@ -34,6 +34,7 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 - **`js/assessment_admin.js`**: Admin Dashboard, Marking Queue, Grading Logic, and Record Creation.
 - **`js/assessment_trainee.js`**: Trainee Test Taker, Timer Logic, Draft Saving, and Submission.
 - **`js/admin_builder.js`**: Test Creator UI with **Draft Saving**. Supports Rich Text, Matrix, Matching, Drag & Drop, and Live Practical types.
+- **`js/calendar.js`**: **Unified Event Engine**. Aggregates Schedules, Live Bookings, and Custom Events into a single timeline. Powers the "Today's Tasks" widget.
 - **`js/admin_history.js`**: Historical view of completed assessments with Retake/Delete capabilities.
 - **`js/admin_grading.js`**: Manual Score Capture interface and "Test Records" history view (aggregates digital & manual).
 
@@ -138,6 +139,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
   - `ipcRenderer.invoke('set-kiosk-mode', true)`
   - `ipcRenderer.invoke('set-content-protection', true)`
 - **Monitoring**: Admin sees a live table of all trainees in the arena, their status, and any security violations.
+- **Enforcer**: Background process automatically redirects Trainees to the Arena when a session is active for their group.
 
 ### 5. Assessment Lifecycle
 1. **Creation**: Admin builds test in `js/admin_builder.js`. Saved to `tests`.
@@ -151,6 +153,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.2.7**: **Vetting Arena Hardening**: Fixed Enforcer logic to ensure trainees are locked into the arena immediately upon login or refresh. Updated sync logic to write session data to both Table and Blob storage for immediate consistency. Fixed `window.supabaseClient` references in Live/Vetting modules.
+- **v2.2.4**: **Mission Control & Vetting Enforcer**: Added `js/calendar.js` for unified event tracking (Schedules, Live Bookings, Admin Tasks). Implemented **Vetting Enforcer** to auto-redirect trainees to active exams. Added "Today's Tasks" dashboard widget.
 - **v2.2.3**: **Sync Visibility & Fixes**: Added "Last Sync Time" columns to Admin Console. Fixed User Idle Timeout logic to respect custom overrides.
 - **v2.2.2**: **Hotfix**: Resolved login lockout for Admins switching terminals.
 - **v2.2.1**: **Storage Optimization**: Implemented lightweight checksums for sync, reducing local DB size by ~90%. Added automatic duplicate cleanup.

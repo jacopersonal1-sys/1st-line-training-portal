@@ -115,7 +115,7 @@ async function syncLiveSessionState() {
     if (!window.supabaseClient) return;
 
     // UPDATED: Fetch from TABLE (live_sessions)
-    const { data: rows, error } = await supabaseClient
+    const { data: rows, error } = await window.supabaseClient
         .from('live_sessions')
         .select('data');
 
@@ -422,7 +422,7 @@ async function updateLiveConnectionStatus(traineeUser, elementId = 'live-conn-st
     if (!el || !window.supabaseClient || !traineeUser) return;
 
     try {
-        const { data, error } = await supabaseClient
+        const { data, error } = await window.supabaseClient
             .from('sessions')
             .select('lastSeen, idleTime, isIdle')
             .eq('user', traineeUser)

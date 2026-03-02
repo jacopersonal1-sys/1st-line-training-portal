@@ -87,7 +87,8 @@ const DEFAULT_LAYOUT_ADMIN = [
     { id: 'sys_health', col: 2, row: 1 },
     { id: 'active_users', col: 2, row: 1 },
     { id: 'tip_manager', col: 2, row: 1 },
-    { id: 'audit_log', col: 2, row: 1 }
+    { id: 'audit_log', col: 2, row: 1 },
+    { id: 'calendar', col: 2, row: 1 } // NEW
 ];
 
 const DEFAULT_LAYOUT_TRAINEE = [
@@ -98,7 +99,8 @@ const DEFAULT_LAYOUT_TRAINEE = [
     { id: 'notepad', col: 1, row: 1 },
     { id: 'daily_tip', col: 1, row: 1 },
     { id: 'help', col: 1, row: 1 },
-    { id: 'badges', col: 2, row: 1 }
+    { id: 'badges', col: 2, row: 1 },
+    { id: 'calendar', col: 2, row: 1 } // NEW
 ];
 
 const DEFAULT_LAYOUT_TL = [
@@ -811,7 +813,15 @@ function buildAdminWidgets(container) {
                 </div>
             </div>`),
         'tip_manager': wrapWidget('tip_manager', buildTipManagerHtml()),
-        'audit_log': wrapWidget('audit_log', buildAuditLogWidget())
+        'audit_log': wrapWidget('audit_log', buildAuditLogWidget()),
+        'calendar': wrapWidget('calendar', `
+            <div style="width:100%; height:100%; display:flex; flex-direction:column; cursor:pointer;" onclick="openFullCalendar()" title="Click to view full calendar">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <div class="dash-icon"><i class="fas fa-calendar-day"></i></div>
+                    <h3 style="margin:0;">Today's Tasks</h3>
+                </div>
+                <div id="calendar-widget-content" style="flex:1;">Loading...</div>
+            </div>`)
     };
 
     // --- DYNAMIC FEATURE FLAGS ---
@@ -867,6 +877,15 @@ function buildAdminWidgets(container) {
     
     // Re-apply edit mode if active
     if(DASH_EDIT_MODE) enableDashEdit();
+    
+    // Initialize Calendar Widget
+    const initCalendar = () => {
+        if(typeof CalendarModule !== 'undefined') CalendarModule.renderWidget();
+        else console.warn("CalendarModule missing for Dashboard");
+    };
+    
+    if(typeof CalendarModule !== 'undefined') initCalendar();
+    else setTimeout(initCalendar, 500);
 }
 
 // --- DASHBOARD CUSTOMIZATION LOGIC ---
@@ -1550,7 +1569,15 @@ function buildTraineeWidgets(container) {
         'notepad': wrapWidget('notepad', notepadHtml),
         'daily_tip': wrapWidget('daily_tip', tipHtml),
         'help': wrapWidget('help', helpHtml),
-        'badges': wrapWidget('badges', badgesHtml)
+        'badges': wrapWidget('badges', badgesHtml),
+        'calendar': wrapWidget('calendar', `
+            <div style="width:100%; height:100%; display:flex; flex-direction:column; cursor:pointer;" onclick="openFullCalendar()" title="Click to view full calendar">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <div class="dash-icon"><i class="fas fa-calendar-day"></i></div>
+                    <h3 style="margin:0;">Today's Tasks</h3>
+                </div>
+                <div id="calendar-widget-content" style="flex:1;">Loading...</div>
+            </div>`)
     };
 
     // --- DYNAMIC FEATURE FLAGS ---
@@ -1597,6 +1624,15 @@ function buildTraineeWidgets(container) {
     container.innerHTML = liveBanner + gridHtml;
     
     if(DASH_EDIT_MODE) enableDashEdit();
+    
+    // Initialize Calendar Widget
+    const initCalendar = () => {
+        if(typeof CalendarModule !== 'undefined') CalendarModule.renderWidget();
+        else console.warn("CalendarModule missing for Dashboard");
+    };
+    
+    if(typeof CalendarModule !== 'undefined') initCalendar();
+    else setTimeout(initCalendar, 500);
 }
 
 // --- DAILY TIP MANAGEMENT (ADMIN) ---

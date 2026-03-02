@@ -55,6 +55,7 @@ const DB_SCHEMA = {
     monitor_whitelist: [], // Custom whitelist for work-related apps
     monitor_reviewed: [], // Apps confirmed as External/Idle (Dismissed from queue)
     dailyTips: [], // Admin controlled daily tips
+    calendarEvents: [], // Custom Admin Events
     error_reports: [] // Centralized error logging for Super Admin
 };
 
@@ -75,7 +76,8 @@ const ROW_MAP = {
     'liveSessions': 'live_sessions',
     'nps_responses': 'nps_responses',
     'graduated_agents': 'archived_users',
-    'linkRequests': 'link_requests'
+    'linkRequests': 'link_requests',
+    'calendarEvents': 'calendar_events'
 };
 
 // --- GLOBAL INTERACTION TRACKER ---
