@@ -153,6 +153,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.2.10**: **Vetting & Submission Fixes**: Fixed Vetting Arena counters not updating in real-time. Prevented "Already Submitted" errors by disabling the submit button immediately on click.
 - **v2.2.9**: **Vetting & Assessment Fixes**: Added active server polling to Vetting Arena to ensure Admins see trainees even if Realtime connection drops. Fixed "Already Submitted" error by enforcing strict ID matching for assessments.
 - **v2.2.8**: **Vetting Arena Stability**: Implemented "Safe Patch" logic for Vetting sessions to ensure real-time trainee visibility without data overwrites. Added process tolerance for Microsoft Teams/WebView2. Fixed submission success messages and hardened save logic.
 - **v2.2.7**: **Vetting Arena Hardening**: Fixed Enforcer logic to ensure trainees are locked into the arena immediately upon login or refresh. Updated sync logic to write session data to both Table and Blob storage for immediate consistency. Fixed `window.supabaseClient` references in Live/Vetting modules.

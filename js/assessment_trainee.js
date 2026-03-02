@@ -310,8 +310,17 @@ function restoreAssessmentDraft() {
 
 // UPDATED: Async Submit
 async function submitTest(forceSubmit = false) {
+    const btn = document.querySelector('button[onclick="submitTest()"]');
+    if(btn) { btn.disabled = true; btn.innerText = "Processing..."; }
+
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const existing = subs.find(s => s.testId == window.CURRENT_TEST.id && s.trainee === CURRENT_USER.user && !s.archived);
+    // FIX: Strict check to prevent false positives ("Already Submitted" error)
+    const existing = subs.find(s => 
+        s.testId && window.CURRENT_TEST.id && 
+        s.testId.toString() === window.CURRENT_TEST.id.toString() && 
+        s.trainee === CURRENT_USER.user && 
+        !s.archived
+    );
     if (existing) {
         if (!forceSubmit) alert("Error: Active submission already exists.");
         document.getElementById('test-timer-bar')?.remove();
@@ -319,7 +328,10 @@ async function submitTest(forceSubmit = false) {
         return;
     }
 
-    if (!forceSubmit && !confirm("Finalize your assessment? Answers will be locked for review.")) return;
+    if (!forceSubmit && !confirm("Finalize your assessment? Answers will be locked for review.")) {
+        if(btn) { btn.disabled = false; btn.innerText = "Finalize & Submit"; }
+        return;
+    }
 
     if (window.TEST_TIMER) clearInterval(window.TEST_TIMER);
     const bar = document.getElementById('test-timer-bar');

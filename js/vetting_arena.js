@@ -277,6 +277,24 @@ function updateVettingTableRows(session) {
     }
 }
 
+function updateVettingStats(session) {
+    const trainees = session.trainees || {};
+    const total = Object.keys(trainees).length;
+    const activeCount = Object.values(trainees).filter(t => t.status === 'started').length;
+    const blockedCount = Object.values(trainees).filter(t => t.status === 'blocked').length;
+    const completedCount = Object.values(trainees).filter(t => t.status === 'completed').length;
+
+    const elTotal = document.getElementById('v-stat-total');
+    const elActive = document.getElementById('v-stat-active');
+    const elBlocked = document.getElementById('v-stat-blocked');
+    const elCompleted = document.getElementById('v-stat-completed');
+
+    if (elTotal) elTotal.innerText = total;
+    if (elActive) elActive.innerText = activeCount;
+    if (elBlocked) elBlocked.innerText = blockedCount;
+    if (elCompleted) elCompleted.innerText = completedCount;
+}
+
 // --- NEW: ADMIN POLLER (Ensures visibility even if Realtime fails) ---
 async function adminPollVettingSession() {
     if (!window.supabaseClient) return;

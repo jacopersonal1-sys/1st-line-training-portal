@@ -1425,6 +1425,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.10": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed issue where counters (Connected, In Progress) were not updating.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Prevented double-submission errors by disabling the submit button immediately.</li>
+            </ul>`,
         "2.2.9": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added active server polling for Admins to ensure real-time visibility of trainees.</li>
