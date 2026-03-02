@@ -1425,6 +1425,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.11": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved version comparison bug preventing login (e.g., 2.2.10 being treated as older than 2.2.6).</li>
+            </ul>`,
         "2.2.10": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed issue where counters (Connected, In Progress) were not updating.</li>

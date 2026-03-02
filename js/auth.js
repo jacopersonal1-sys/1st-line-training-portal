@@ -109,9 +109,20 @@ async function attemptLogin() {
   // --- SECURITY CHECK 1.5: PRE-AUTH CHECKS (Version, Client ID) ---
   const config = JSON.parse(localStorage.getItem('system_config') || '{}');
   if (config.security) {
-      // Version Check (Simple String Compare)
+      // Version Check (Semantic Comparison)
       if (config.security.min_version && window.APP_VERSION) {
-          if (window.APP_VERSION < config.security.min_version) {
+          const currentParts = window.APP_VERSION.split('.').map(Number);
+          const minParts = config.security.min_version.split('.').map(Number);
+          
+          let isOutdated = false;
+          for (let i = 0; i < Math.max(currentParts.length, minParts.length); i++) {
+              const curr = currentParts[i] || 0;
+              const min = minParts[i] || 0;
+              if (curr < min) { isOutdated = true; break; }
+              if (curr > min) { isOutdated = false; break; }
+          }
+
+          if (isOutdated) {
              document.getElementById('loginError').innerText = `Update Required. Min Version: ${config.security.min_version}`;
              return;
           }
