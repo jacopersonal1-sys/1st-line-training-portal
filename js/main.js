@@ -1425,6 +1425,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.9": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added active server polling for Admins to ensure real-time visibility of trainees.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved "Already Submitted" error by enforcing strict ID matching.</li>
+            </ul>`,
         "2.2.8": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed real-time visibility of trainees for Admins. Added tolerance for Microsoft Teams running in the background.</li>

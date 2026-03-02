@@ -157,7 +157,12 @@ function openTestTaker(testId, isArenaMode = false) {
         }
     }
 
-    const existing = subs.find(s => s.testId == testId && s.trainee === CURRENT_USER.user);
+    // FIX: Strict check to prevent false positives ("Already Submitted" error)
+    const existing = subs.find(s => 
+        s.testId && testId && 
+        s.testId.toString() === testId.toString() && 
+        s.trainee === CURRENT_USER.user
+    );
     
     if (existing && !existing.archived) {
         // FIX: Allow Vetting Arena to override/archive previous attempts automatically

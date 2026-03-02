@@ -82,7 +82,12 @@ function renderAdminArena() {
 
     // Auto-Refresh Monitor every 5 seconds if active
     if (session.active) {
-        ADMIN_MONITOR_INTERVAL = setTimeout(loadVettingArena, 5000);
+        ADMIN_MONITOR_INTERVAL = setTimeout(async () => {
+            try {
+                await adminPollVettingSession(); // Force fetch latest data
+            } catch(e) { console.error("Vetting Poll Error:", e); }
+            loadVettingArena();
+        }, 5000);
     }
 }
 
@@ -269,6 +274,20 @@ function updateVettingTableRows(session) {
     // Only update DOM if content changed (prevents selection loss)
     if (tbody.innerHTML !== html) {
         tbody.innerHTML = html;
+    }
+}
+
+// --- NEW: ADMIN POLLER (Ensures visibility even if Realtime fails) ---
+async function adminPollVettingSession() {
+    if (!window.supabaseClient) return;
+    const { data, error } = await window.supabaseClient
+        .from('vetting_sessions')
+        .select('data')
+        .eq('id', 'global_session')
+        .single();
+    
+    if (data && data.data) {
+        localStorage.setItem('vettingSession', JSON.stringify(data.data));
     }
 }
 
