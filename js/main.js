@@ -1430,6 +1430,15 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.2.15": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Documentation updated to reflect recent architecture changes (Universal Search, Working Hours Logic).</li>
+            </ul>`,
+        "2.2.14": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved issue where deleted records would reappear after refresh.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Factory Reset now correctly wipes all cloud data tables.</li>
+            </ul>`,
         "2.2.13": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Insight Dashboard:</strong> Fixed "Action Required" to correctly update when a trainee retakes and passes a test (Highest Score wins).</li>

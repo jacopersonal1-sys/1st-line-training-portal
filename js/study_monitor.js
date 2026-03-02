@@ -195,7 +195,7 @@ const StudyMonitor = {
             since: this.startTime,
             isStudyOpen: this.isStudyOpen,
             history: this.history,
-            date: new Date().toISOString().split('T')[0] // Ensure date is always present
+            date: this.getLocalDateString() // UPDATED: Use Local Date
         };
 
         // OPTIMIZATION: Only sync if data changed since last successful push
@@ -238,6 +238,15 @@ const StudyMonitor = {
         this.cachedWhitelist = (JSON.parse(localStorage.getItem('monitor_whitelist') || '[]')).filter(w => w && w.trim().length > 0);
     },
 
+    // --- HELPER: LOCAL DATE STRING (YYYY-MM-DD) ---
+    getLocalDateString: function() {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    },
+
     // --- HELPER: CENTRALIZED CLASSIFICATION ---
     getCategory: function(activityString) {
         if (!activityString) return 'idle';
@@ -263,6 +272,59 @@ const StudyMonitor = {
         return 'idle'; // Default
     },
 
+    // --- HELPER: CALCULATE DAILY STATS (Working Hours Only) ---
+    calculateDailyStats: function(historySegments) {
+        let totalMs = 0, studyMs = 0, extMs = 0, idleMs = 0;
+        
+        historySegments.forEach(seg => {
+             const segStart = seg.start || (seg.end - seg.duration);
+             const segEnd = seg.end || (segStart + seg.duration);
+             
+             // Local Date Construction for Boundaries
+             const d = new Date(segStart);
+             const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+             
+             const workStart = new Date(`${dateStr}T08:00:00`).getTime();
+             const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
+             const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
+             const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
+
+             // 1. Morning Session (08:00 - 12:00)
+             const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
+             // 2. Afternoon Session (13:00 - 17:00)
+             const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
+             
+             const effectiveDuration = morningOverlap + afternoonOverlap;
+             
+             if (effectiveDuration <= 0) return;
+
+             totalMs += effectiveDuration;
+             const category = this.getCategory(seg.activity);
+             const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+             const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
+             
+             if (category === 'study') {
+                 studyMs += effectiveDuration;
+             } else if (category === 'external') {
+                 if (effectiveDuration > TOLERANCE) {
+                     studyMs += TOLERANCE;
+                     extMs += (effectiveDuration - TOLERANCE);
+                 } else {
+                     studyMs += effectiveDuration;
+                 }
+             } else {
+                 if (effectiveDuration > TOLERANCE) {
+                     studyMs += TOLERANCE;
+                     idleMs += (effectiveDuration - TOLERANCE);
+                 } else {
+                     studyMs += effectiveDuration;
+                 }
+             }
+        });
+        
+        return { study: studyMs, external: extMs, idle: idleMs, total: totalMs };
+    },
+
     // --- DAILY ARCHIVE LOGIC ---
     checkDailyReset: async function() {
         if (!CURRENT_USER || CURRENT_USER.role === 'admin') return;
@@ -272,29 +334,32 @@ const StudyMonitor = {
         let myData = monitorData[CURRENT_USER.user];
         
         if (myData) {
-            // Check if data is from a previous day
-            const lastDate = myData.date || new Date(myData.since).toISOString().split('T')[0];
-            const today = new Date().toISOString().split('T')[0];
+            // Determine Today (Local)
+            const today = this.getLocalDateString();
+            
+            // Determine Last Date (Local) - Handle legacy data
+            let lastDate = myData.date;
+            if (!lastDate && myData.since) {
+                const d = new Date(myData.since);
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                lastDate = `${y}-${m}-${day}`;
+            }
             
             if (lastDate !== today) {
-                console.log("New Day Detected. Archiving Activity Log...");
+                console.log(`New Day Detected (${lastDate} -> ${today}). Archiving Activity Log...`);
                 let history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
                 
-                // Calculate summary stats for the archive
-                let totalMs = 0, studyMs = 0, extMs = 0, idleMs = 0;
-                (myData.history || []).forEach(h => {
-                    totalMs += h.duration;
-                    const cat = this.getCategory(h.activity);
-                    if (cat === 'study') studyMs += h.duration;
-                    else if (cat === 'external') extMs += h.duration;
-                    else idleMs += h.duration;
-                });
+                // Use memory history if available (most recent), else fallback to storage
+                const segments = this.history.length > 0 ? this.history : (myData.history || []);
+                const stats = this.calculateDailyStats(segments);
 
                 history.push({
                     date: lastDate,
                     user: CURRENT_USER.user,
-                    summary: { study: studyMs, external: extMs, idle: idleMs, total: totalMs },
-                    details: myData.history // Archive full details
+                    summary: stats,
+                    details: segments // Archive full details
                 });
                 
                 // NEW: Retention Policy (Keep last 30 days locally to prevent bloat)
@@ -322,6 +387,7 @@ const StudyMonitor = {
                 
                 // RESET MEMORY
                 this.history = [];
+                this.startTime = Date.now(); // Reset start time for new day
                 
                 // ROBUSTNESS FIX: Use 'false' (Safe Merge) to prevent overwriting other users' history entries
                 if (typeof saveToServer === 'function') await saveToServer(['monitor_data', 'monitor_history'], false);

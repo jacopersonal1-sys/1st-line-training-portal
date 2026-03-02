@@ -420,6 +420,8 @@ async function deleteSubmission(id) {
     subs = subs.filter(s => s.id != id);
     localStorage.setItem('submissions', JSON.stringify(subs));
     
+    if (window.supabaseClient) await window.supabaseClient.from('submissions').delete().eq('id', id);
+    
     // --- CLOUD SYNC (Instant) ---
     if(typeof saveToServer === 'function') await saveToServer(['submissions'], true);
     

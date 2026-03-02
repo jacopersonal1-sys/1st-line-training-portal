@@ -533,6 +533,9 @@ async function deleteSavedReport(id) {
     let saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
     saved = saved.filter(r => r.id !== id);
     localStorage.setItem('savedReports', JSON.stringify(saved));
+    
+    if (window.supabaseClient) await window.supabaseClient.from('saved_reports').delete().eq('id', id.toString());
+    
     await secureReportSave();
     renderSavedReportsList();
 }

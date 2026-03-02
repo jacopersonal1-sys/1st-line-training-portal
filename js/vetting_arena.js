@@ -779,7 +779,7 @@ async function updateTraineeStatus(status, timerStr = "") {
     
     // CHECK: Session Ended?
     if (!session.active && status === 'started') {
-        if (typeof submitTest === 'function') await submitTest();
+        if (typeof submitTest === 'function') await submitTest(true); // Pass true to suppress "Already exists" alert
         return;
     }
     
@@ -812,7 +812,7 @@ async function updateTraineeStatus(status, timerStr = "") {
         // CHECK: Forbidden Apps during test?
         if (!isRelaxed && apps.length > 0 && status === 'started') {
             alert("Security Violation: Forbidden apps detected (" + apps.join(', ') + "). Test ending.");
-            if (typeof submitTest === 'function') await submitTest();
+            if (typeof submitTest === 'function') await submitTest(true);
             return; // Stop here, submitTest will handle the rest
         }
     }

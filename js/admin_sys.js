@@ -265,12 +265,20 @@ async function deleteBulkRecords() {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     // Sort descending to delete from end without shifting indices
     const indicesToDelete = Array.from(checks).map(c => parseInt(c.value)).sort((a,b) => b-a);
+    const idsToDelete = [];
     
-    indicesToDelete.forEach(idx => { records.splice(idx, 1); });
+    indicesToDelete.forEach(idx => { 
+        if (records[idx] && records[idx].id) idsToDelete.push(records[idx].id);
+        records.splice(idx, 1); 
+    });
     
     localStorage.setItem('records', JSON.stringify(records));
     
-    await secureSysSave();
+    if (window.supabaseClient && idsToDelete.length > 0) {
+        await window.supabaseClient.from('records').delete().in('id', idsToDelete);
+    }
+    
+    if(typeof saveToServer === 'function') await saveToServer(['records'], true);
 
     loadAdminDatabase();
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
@@ -310,15 +318,17 @@ async function saveRecordEdit() {
 
 async function delRec(i) { 
     if(confirm("Permanently delete?")) { 
-        // 1. Force Pull Latest (Prevent overwriting new submissions)
-        if(typeof loadFromServer === 'function') await loadFromServer(true);
-
-        // 2. Re-read and Delete
         const r = JSON.parse(localStorage.getItem('records')); 
+        const target = r[i];
+        
         r.splice(i,1); 
         localStorage.setItem('records', JSON.stringify(r)); 
         
-        // 3. Force Save (Now safe because we just pulled)
+        if (target && target.id && window.supabaseClient) {
+            await window.supabaseClient.from('records').delete().eq('id', target.id);
+        }
+        
+        // 3. Force Save
         if(typeof saveToServer === 'function') await saveToServer(['records'], true);
 
         loadAdminDatabase(); 
@@ -833,6 +843,22 @@ async function confirmFactoryReset() {
             .from('sessions')
             .delete()
             .neq('user', 'placeholder'); // Delete all rows
+            
+        if (sessionErr) throw sessionErr;
+        console.log("Cloud 'sessions' table wiped.");
+
+        // D. Wipe ALL Row-Level Tables (The Big Fix)
+        const tables = [
+            'records', 'submissions', 'audit_logs', 'live_bookings', 'monitor_history', 
+            'attendance', 'access_logs', 'saved_reports', 'archived_users', 'live_sessions', 
+            'link_requests', 'calendar_events', 'error_reports', 'insight_reviews', 
+            'exemptions', 'nps_responses', 'monitor_state'
+        ];
+        
+        for (const t of tables) {
+                await window.supabaseClient.from(t).delete().neq('id', 'placeholder');
+        }
+        console.log("All data tables wiped.");
 
         if (!resetErr) {
             // 3. Bootstrap Admin User & Config

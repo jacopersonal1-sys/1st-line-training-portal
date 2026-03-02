@@ -243,15 +243,34 @@ function renderStandardView(members, filter, grid, navHTML) {
         let statusObj = null;
 
         if (review) {
-            statusObj = {
-                status: review.status,
-                failedItems: [],
-                isManual: true,
-                comment: review.comment
-            };
-            // Recalculate failures to show them even if status is manual
-            const calc = calculateAgentStatus(traineeRecords);
-            statusObj.failedItems = calc.failedItems;
+            // CHECK FOR STALE REVIEW (New Data vs Review Date)
+            const reviewTime = new Date(review.date).getTime();
+            let isStale = false;
+
+            // Check if any record is NEWER than the review
+            const hasNewer = traineeRecords.some(r => {
+                // 1. Try ID Timestamp (Precision)
+                if (r.id && r.id.includes('_')) {
+                    const ts = parseInt(r.id.split('_')[0]);
+                    if (!isNaN(ts) && ts > reviewTime) return true;
+                }
+                // 2. Fallback to Date String (Day Level)
+                if (r.date && review.date) {
+                    return r.date > review.date.split('T')[0];
+                }
+                return false;
+            });
+
+            if (hasNewer) {
+                // Review is outdated -> Revert to Auto-Calc
+                statusObj = calculateAgentStatus(traineeRecords);
+                // Append note about new data
+                statusObj.comment = `[New Data Arrived] Previous: ${review.comment || ''}`;
+            } else {
+                // Review is current -> Use Manual Status but REFRESH failure list
+                statusObj = { status: review.status, failedItems: [], isManual: true, comment: review.comment };
+                statusObj.failedItems = calculateAgentStatus(traineeRecords).failedItems;
+            }
         } else {
             statusObj = calculateAgentStatus(traineeRecords);
         }

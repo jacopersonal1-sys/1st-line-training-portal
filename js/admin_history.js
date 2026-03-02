@@ -163,6 +163,13 @@ async function deleteHistorySubmission(id) {
     
     localStorage.setItem('records', JSON.stringify(records));
     
+    // 2.5. CLOUD WIPE
+    if (window.supabaseClient) {
+        await window.supabaseClient.from('submissions').delete().eq('id', id);
+        // Also delete associated record (Match by Trainee + Assessment)
+        await window.supabaseClient.from('records').delete().match({ trainee: sub.trainee, assessment: sub.testTitle });
+    }
+
     // 3. Force Sync to Cloud (Instant Overwrite)
     if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], true);
     

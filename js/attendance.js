@@ -328,6 +328,9 @@ async function deleteLateEntry(recordId) {
     if(idx > -1) {
         records.splice(idx, 1);
         localStorage.setItem('attendance_records', JSON.stringify(records));
+        
+        if (window.supabaseClient) await window.supabaseClient.from('attendance').delete().eq('id', recordId);
+        
         if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
         renderAttendanceRegister();
         if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
@@ -523,6 +526,9 @@ async function deleteAttendanceRecord(id, username) {
     if(idx > -1) {
         records.splice(idx, 1);
         localStorage.setItem('attendance_records', JSON.stringify(records));
+        
+        if (window.supabaseClient) await window.supabaseClient.from('attendance').delete().eq('id', id);
+        
         if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
         
         manageAgentAttendance(username);

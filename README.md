@@ -23,8 +23,8 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 - **`index.html`**: Main entry point. Loads all scripts dynamically based on availability.
 - **`electron-main.js`**: Main Process. Handles window management, Kiosk Mode (Vetting), Auto-Updates, and OS-level IPC (Process list, Screen count).
 - **`js/data.js`**: **The Heart of the App.** Handles `loadFromServer` (Pull) and `saveToServer` (Push). Implements `performSmartMerge` to combine arrays/objects intelligently.
-- **`js/auth.js`**: Authentication, Password Hashing (SHA-256), Role Management, and IP Access Control (CIDR checks).
-- **`js/main.js`**: Boot sequence, Version checks, Session restoration, **Release Notes Popup**, Global Event Listeners, and **Theme Application**.
+ - **`js/auth.js`**: Authentication, Password Hashing (SHA-256), Role Management, IP Access Control (CIDR checks), and **Semantic Versioning** checks.
+ - **`js/main.js`**: Boot sequence, Version checks, Session restoration, **Release Notes Popup**, Global Event Listeners, **Vetting Enforcer** initialization, and **Theme Application**.
 - **`js/utils.js`**: Shared utility functions for formatting and common helpers.
 - **`js/forms.js`**: **First-Time Questionnaire** logic, Profile updates, and Assessment **Exemption** handling.
 
@@ -73,7 +73,8 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
   - Aggregates Attendance, Activity, Records, and Notes.
 - **`js/insight.js`**: 
   - Analytics Dashboard (Effort vs Performance, Knowledge Gaps).
-  - "Action Required" logic for failing agents.
+   - "Action Required" logic for failing agents (Deduplicated by Highest Score).
+   - **Stale Review Detection**: Automatically reverts manual "Pass" statuses if new failing data arrives.
   - **Access Revocation**: Logic for blacklisting and removing users.
 - **`js/attendance.js`**: 
   - Clock In/Out system with Late Reason capture.
@@ -86,7 +87,7 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
 
 ### Admin & System
 - **`js/admin_users.js`**: User CRUD, Roster Management, **Onboarding Email Automation**, and **Graduate/Restore** workflows.
-- **`js/admin_sys.js`**: Database Management (**Split Schema** aware), System Health, **Super Admin Console**, **Remote Commands** (Kick/Ban), **Audit Logs**, and **System Configuration** (Hot Reload).
+ - **`js/admin_sys.js`**: Database Management (**Row-Level Sync** aware), System Health, **Super Admin Console**, **Remote Commands** (Kick/Ban), **Audit Logs**, and **System Configuration** (Hot Reload). Handles **Factory Reset** and **Data Deletion** across cloud tables.
 - **`js/admin_updates.js`**: Auto-Updater logic and Update Logs.
 - **`js/ai_core.js`**: **AI System Analyst** (Gemini Integration). Handles natural language commands, system diagnostics, error analysis, and self-repair logic.
 
@@ -153,6 +154,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.2.15**: **Documentation & Polish**: Updated README to reflect Universal Search, Working Hours logic, and Stale Review detection.
+- **v2.2.14**: **Data Integrity Fixes**: Fixed "Zombie Data" issues where deleted records/submissions would reappear. Updated Factory Reset to correctly wipe all cloud tables. Hardened deletion logic in Admin Database tools.
 - **v2.2.13**: **Insight & Live Fixes**: Fixed Insight Dashboard to correctly reflect retaken assessments (Highest Score logic). Resolved "Zombie" Live Sessions by filtering stale data and fixing the Admin Clear tool.
 - **v2.2.12**: **Timer Fixes**: Fixed Vetting Test timer display for trainees (formatting & visibility). Increased Admin Monitor refresh rate for timer synchronization.
 - **v2.2.11**: **Login Fix**: Fixed semantic version comparison logic in Auth module to correctly handle double-digit version numbers (e.g., 2.2.10 > 2.2.6).

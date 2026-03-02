@@ -295,6 +295,20 @@ async function deleteAgentFromSystem(agentName, groupId) {
     wipeObjectData('monitor_data');
     wipeObjectData('cancellationCounts');
     
+    // 4.5. CLOUD WIPE (Critical for Row-Level Sync)
+    if (window.supabaseClient) {
+        const { error } = await window.supabaseClient.from('records').delete().eq('trainee', agentName);
+        await window.supabaseClient.from('submissions').delete().eq('trainee', agentName);
+        await window.supabaseClient.from('attendance').delete().eq('user_id', agentName);
+        await window.supabaseClient.from('live_bookings').delete().eq('trainee', agentName);
+        await window.supabaseClient.from('saved_reports').delete().eq('trainee', agentName);
+        await window.supabaseClient.from('insight_reviews').delete().eq('trainee', agentName);
+        await window.supabaseClient.from('exemptions').delete().eq('trainee', agentName);
+        await window.supabaseClient.from('link_requests').delete().eq('trainee', agentName);
+        await window.supabaseClient.from('monitor_state').delete().eq('user_id', agentName);
+        // Note: agentNotes, rosters, users are Blobs, so saveToServer handles them automatically.
+    }
+
     // 5. Force Sync
     if(typeof saveToServer === 'function') {
         await saveToServer([
