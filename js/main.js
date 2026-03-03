@@ -1219,13 +1219,6 @@ function toggleNotifications() {
 }
 
 function updateNotifications() {
-    // Only for Trainees
-    if(!CURRENT_USER || CURRENT_USER.role !== 'trainee') {
-        const badge = document.getElementById('notifBadge');
-        if(badge) badge.classList.add('hidden');
-        return;
-    }
-
     const notifList = document.getElementById('notifList');
     const badge = document.getElementById('notifBadge');
     if(!notifList || !badge) return; // Safety check
@@ -1233,62 +1226,73 @@ function updateNotifications() {
     notifList.innerHTML = '';
     let count = 0;
 
-    // --- PROGRESS LOGIC START ---
-    // 1. CALCULATE PROGRESS (LINKED TO INSIGHT DASHBOARD)
-    // We use the centralized logic from insight.js to ensure the Trainee sees 
-    // exactly what the Admin sees on the Insight Dashboard.
-    
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
-    const myRecords = records.filter(r => r.trainee === CURRENT_USER.user);
-    
-    let progress = 0;
-    
-    if (typeof calculateAgentStats === 'function') {
-        // calculateAgentStats returns { progress, avgScore, etc... }
-        // This function resides in insight.js
-        const stats = calculateAgentStats(CURRENT_USER.user, myRecords);
-        progress = stats.progress;
-    } else {
-        // Fallback if insight.js is not loaded yet
-        progress = 0;
+    // 1. SYSTEM UPDATE NOTIFICATION (Global for all roles)
+    if (sessionStorage.getItem('update_ready') === 'true') {
+        count++;
+        notifList.innerHTML += `
+        <div class="notif-item" onclick="restartAndInstall()" style="background:rgba(46, 204, 113, 0.1); border-left:3px solid #2ecc71; cursor:pointer;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <i class="fas fa-arrow-circle-up" style="color:#2ecc71; font-size:1.2rem;"></i>
+                <div>
+                    <strong>Update Ready</strong>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Click to Restart & Install</div>
+                </div>
+            </div>
+        </div>`;
     }
 
-    // Progress Bar Notification
-    notifList.innerHTML += `
-        <div class="notif-item" style="background:var(--bg-input); border-left:3px solid var(--primary); cursor:default;" aria-label="Training Progress Notification">
-            <strong>Training Progress</strong>
-            <div style="margin-top:5px; height:6px; background:#444; border-radius:3px;">
-                <div style="width:${progress}%; background:var(--primary); height:100%; border-radius:3px; transition:width 0.5s;"></div>
-            </div>
-            <div style="font-size:0.8rem; margin-top:3px; text-align:right; color:var(--text-muted);">${progress}% Complete</div>
-        </div>`;
-    // --- PROGRESS LOGIC END ---
-
-    // 2. LIVE ASSESSMENT UPDATES
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const myBookings = bookings.filter(b => b.trainee === CURRENT_USER.user);
-    
-    myBookings.forEach(b => {
-        if(b.status === 'Completed') {
-            count++; // Only increment badge count for concrete updates like this
-            notifList.innerHTML += `
-            <div class="notif-item" onclick="showTab('live-assessment')" aria-label="Assessment Completed: ${b.assessment}">
-                <i class="fas fa-check-circle" style="color:#27ae60;"></i> 
-                Live Assessment <strong>${b.assessment}</strong> marked Complete.
-            </div>`;
+    // 2. TRAINEE SPECIFIC NOTIFICATIONS
+    if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+        // --- PROGRESS LOGIC ---
+        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const myRecords = records.filter(r => r.trainee === CURRENT_USER.user);
+        
+        let progress = 0;
+        if (typeof calculateAgentStats === 'function') {
+            const stats = calculateAgentStats(CURRENT_USER.user, myRecords);
+            progress = stats.progress;
         }
-    });
+
+        notifList.innerHTML += `
+            <div class="notif-item" style="background:var(--bg-input); border-left:3px solid var(--primary); cursor:default;" aria-label="Training Progress Notification">
+                <strong>Training Progress</strong>
+                <div style="margin-top:5px; height:6px; background:#444; border-radius:3px;">
+                    <div style="width:${progress}%; background:var(--primary); height:100%; border-radius:3px; transition:width 0.5s;"></div>
+                </div>
+                <div style="font-size:0.8rem; margin-top:3px; text-align:right; color:var(--text-muted);">${progress}% Complete</div>
+            </div>`;
+
+        // --- LIVE ASSESSMENT UPDATES ---
+        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const myBookings = bookings.filter(b => b.trainee === CURRENT_USER.user);
+        
+        myBookings.forEach(b => {
+            if(b.status === 'Completed') {
+                count++;
+                notifList.innerHTML += `
+                <div class="notif-item" onclick="showTab('live-assessment')" aria-label="Assessment Completed: ${b.assessment}">
+                    <i class="fas fa-check-circle" style="color:#2ecc71;"></i> 
+                    Live Assessment <strong>${b.assessment}</strong> marked Complete.
+                </div>`;
+            }
+        });
+
+        // Trigger Invasive Popup Check
+        if (typeof checkUrgentNoticesPopup === 'function') {
+            checkUrgentNoticesPopup();
+        }
+    }
+
+    // 3. EMPTY STATE
+    if (notifList.innerHTML === '') {
+        notifList.innerHTML = '<div style="padding:15px; text-align:center; color:#888;">No new notifications</div>';
+    }
 
     if (count > 0) {
         badge.innerText = count;
         badge.classList.remove('hidden');
     } else {
         badge.classList.add('hidden');
-    }
-    
-    // NEW: Trigger Invasive Popup Check
-    if (typeof checkUrgentNoticesPopup === 'function') {
-        checkUrgentNoticesPopup();
     }
 }
 
@@ -1364,6 +1368,10 @@ if (typeof require !== 'undefined') {
     ipcRenderer.on('update-downloaded', (event) => {
         if(typeof showToast === 'function') showToast("Update downloaded. Restart to apply.", "success");
         
+        // NEW: Set flag for notification bell
+        sessionStorage.setItem('update_ready', 'true');
+        if(typeof updateNotifications === 'function') updateNotifications();
+
         // NEW: Check if this was a Forced Update from Admin
         if (sessionStorage.getItem('force_update_active') === 'true') {
             sessionStorage.removeItem('force_update_active');
@@ -1467,6 +1475,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.2": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Update Notification:</strong> Added a notification bell alert when a new system update is ready to install.</li>
+            </ul>`,
         "2.3.1": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Trainee Portal:</strong> You can now view your Vetting Test history and submissions in the 'Test Records' tab.</li>

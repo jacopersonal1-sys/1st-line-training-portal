@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.3.2**: **Update Notifications**: Added a notification bell alert when a new system update is downloaded and ready to install.
 - **v2.3.1**: **Trainee Access**: Enabled Trainees to view their own Vetting Test submissions and history in the "Test Records" tab.
 - **v2.3.0**: **Dual-Server Failover System**: Implemented "Dual-Aware" client architecture. The app now supports hot-swapping between Cloud and Local Supabase instances. Added **Server Lookout** service to poll both servers for switch commands. Implemented **Migration Protocol** to auto-push local data when switching servers, preventing data loss. Added **Connectivity Tester** and **Failover Controls** to Super Admin Console.
 - **v2.2.15**: **Documentation & Polish**: Updated README to reflect Universal Search, Working Hours logic, and Stale Review detection.
