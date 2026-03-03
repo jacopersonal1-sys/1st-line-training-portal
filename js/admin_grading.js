@@ -230,6 +230,13 @@ function loadTestRecords() {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     
+    // Hide filters for Trainee to reduce clutter
+    const filterDiv = document.querySelector('#test-records .grid-4');
+    if (filterDiv) {
+        if (CURRENT_USER.role === 'trainee') filterDiv.classList.add('hidden');
+        else filterDiv.classList.remove('hidden');
+    }
+    
     // Filters
     const groupFilter = document.getElementById('filterTestGroup').value;
     const nameFilter = document.getElementById('filterTestName').value;
@@ -305,6 +312,9 @@ function loadTestRecords() {
             if(nameFilter && s.testTitle !== nameFilter) return false;
             if(statusFilter && s.status !== statusFilter) return false;
             if(traineeFilter && !s.trainee.toLowerCase().includes(traineeFilter)) return false;
+
+            // Trainee Restriction: Only show my own records
+            if (CURRENT_USER.role === 'trainee' && s.trainee.toLowerCase() !== CURRENT_USER.user.toLowerCase()) return false;
             
             // Group Filter
             if (groupFilter) {

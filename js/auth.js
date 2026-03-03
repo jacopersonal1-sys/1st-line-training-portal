@@ -578,9 +578,9 @@ function applyRolePermissions() {
         if(document.getElementById('filterMonthDiv')) document.getElementById('filterMonthDiv').classList.add('hidden');
         document.getElementById('overviewTitle').innerText = "My Results";
         
-        // Hide Admin Sections but KEEP admin-panel visible for settings
+        // Hide Admin Sections but KEEP admin-panel and test-records visible
         sections.forEach(s => {
-            if(s.id !== 'admin-panel') s.classList.add('hidden');
+            if(s.id !== 'admin-panel' && s.id !== 'test-records') s.classList.add('hidden');
         });
 
         // Hide Create User & Controls for Trainees

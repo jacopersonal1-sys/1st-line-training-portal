@@ -929,7 +929,7 @@ function updateSidebarVisibility() {
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
             const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly'];
+            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly', 'test-records'];
             
             // Special Check for Arena
             if (targetTab === 'vetting-arena') {
@@ -1467,6 +1467,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.1": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Trainee Portal:</strong> You can now view your Vetting Test history and submissions in the 'Test Records' tab.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved permission issues preventing trainees from accessing their own records.</li>
+            </ul>`,
         "2.3.0": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Dual-Server Architecture:</strong> Added support for Local/Cloud server failover.</li>
