@@ -191,7 +191,7 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
     return new Promise((resolve) => {
         // Windows command to list running apps
         const cmd = process.platform === 'win32' 
-            ? 'tasklist /fi "STATUS eq RUNNING" /fo csv /nh' 
+            ? 'tasklist /v /fi "STATUS eq RUNNING" /fo csv /nh' 
             : 'ps -e -o comm='; // Linux/Mac fallback
 
         exec(cmd, (err, stdout, stderr) => {
@@ -210,17 +210,33 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
             const counts = {};
             
             const lines = stdout.split('\r\n')
-                .map(l => l.split(',')[0].replace(/"/g, ''))
+                .map(l => {
+                    // CSV Parse: Handle quotes properly
+                    const parts = l.split('","');
+                    if (parts.length < 1) return null;
+                    // Clean first and last quotes if present
+                    const name = parts[0].replace(/^"/, '');
+                    // Window Title is usually the last column (Index 8 in /v)
+                    // But splitting by "," might be fragile if title has commas.
+                    // Robust approach: tasklist /v CSV usually has 9 columns.
+                    const title = parts.length >= 9 ? parts[8].replace(/"$/, '') : "N/A";
+                    return { name, title };
+                })
                 .filter(l => l);
             
             lines.forEach(proc => {
-                const lower = proc.toLowerCase();
+                const lowerName = proc.name.toLowerCase();
+                const lowerTitle = proc.title ? proc.title.toLowerCase() : "n/a";
                 
                 // EXCEPTION: Allow WebView2 (Teams) and Updaters
-                if (lower.includes('webview') || lower.includes('update') || lower.includes('teams') || lower.includes('msteams')) return;
+                if (lowerName.includes('webview') || lowerName.includes('update') || lowerName.includes('teams') || lowerName.includes('msteams')) return;
+
+                // EXCEPTION: Ignore Background Processes (No Window Title)
+                // "N/A" is the standard tasklist output for processes without a window
+                if (lowerTitle === 'n/a' || lowerTitle === '') return;
 
                 targets.forEach(t => {
-                    if (lower.includes(t)) {
+                    if (lowerName.includes(t)) {
                         counts[t] = (counts[t] || 0) + 1;
                     }
                 });

@@ -1475,6 +1475,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.3": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Stability:</strong> Fixed an issue where security alerts could freeze the test interface.</li>
+                <li style="margin-bottom: 8px;"><strong>False Positives:</strong> Improved detection to ignore background browser processes (e.g., Edge Startup Boost).</li>
+                <li style="margin-bottom: 8px;"><strong>Sync Fix:</strong> Deleted records now correctly disappear from all devices.</li>
+            </ul>`,
         "2.3.2": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Update Notification:</strong> Added a notification bell alert when a new system update is ready to install.</li>

@@ -150,24 +150,39 @@ async function deleteHistorySubmission(id) {
         return;
     }
     
-    // 1. Remove from Submissions
+    // 1. Remove from Submissions (Local)
     subs = subs.filter(s => s.id !== id);
     localStorage.setItem('submissions', JSON.stringify(subs));
     
-    // 2. Remove from Records (Database)
-    // Match by Trainee + Assessment Name to ensure the record is also wiped
+    // 2. Remove from Records (Local)
     let records = JSON.parse(localStorage.getItem('records') || '[]');
-    const initialRecLen = records.length;
+    // Find record to soft delete on server later
+    const targetRecord = records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle);
     
     records = records.filter(r => !(r.trainee === sub.trainee && r.assessment === sub.testTitle));
-    
     localStorage.setItem('records', JSON.stringify(records));
     
-    // 2.5. CLOUD WIPE
+    // 3. CLOUD SOFT DELETE (Propagate to others)
     if (window.supabaseClient) {
-        await window.supabaseClient.from('submissions').delete().eq('id', id);
-        // Also delete associated record (Match by Trainee + Assessment)
-        await window.supabaseClient.from('records').delete().match({ trainee: sub.trainee, assessment: sub.testTitle });
+        const now = new Date().toISOString();
+        
+        // Soft Delete Submission
+        const softSub = { ...sub, deleted: true };
+        await window.supabaseClient.from('submissions').upsert({ 
+            id: id, 
+            data: softSub, 
+            updated_at: now 
+        });
+
+        // Soft Delete Record (if found)
+        if (targetRecord && targetRecord.id) {
+            const softRec = { ...targetRecord, deleted: true };
+            await window.supabaseClient.from('records').upsert({
+                id: targetRecord.id,
+                data: softRec,
+                updated_at: now
+            });
+        }
     }
 
     // 3. Force Sync to Cloud (Instant Overwrite)

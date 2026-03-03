@@ -9,6 +9,8 @@ let TRAINEE_LOCAL_POLLER = null;
 let VETTING_REALTIME_UNSUB = null;
 let ADMIN_VETTING_REALTIME_UNSUB = null;
 let VETTING_SAVE_TIMEOUT = null; // OPTIMIZATION: Debounce saves
+let SECURITY_VIOLATION_INTERVAL = null; // Track the fast security poll
+let IS_SUBMITTING_VIOLATION = false; // Prevent alert loops
 
 function loadVettingArena() {
     // FEATURE FLAG CHECK
@@ -811,8 +813,11 @@ async function updateTraineeStatus(status, timerStr = "") {
 
         // CHECK: Forbidden Apps during test?
         if (!isRelaxed && apps.length > 0 && status === 'started') {
+            if (IS_SUBMITTING_VIOLATION) return; // Already handling it
+            IS_SUBMITTING_VIOLATION = true;
             alert("Security Violation: Forbidden apps detected (" + apps.join(', ') + "). Test ending.");
             if (typeof submitTest === 'function') await submitTest(true);
+            IS_SUBMITTING_VIOLATION = false;
             return; // Stop here, submitTest will handle the rest
         }
     }
@@ -857,6 +862,7 @@ async function patchTraineeStatus(username, statusData) {
 
 function startActiveTestMonitoring() {
     if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
+    if (SECURITY_VIOLATION_INTERVAL) clearInterval(SECURITY_VIOLATION_INTERVAL);
     
     // Update status every 10 seconds (Faster updates for Admin Timer)
     SECURITY_MONITOR_INTERVAL = setInterval(() => {
@@ -868,7 +874,7 @@ function startActiveTestMonitoring() {
     // FAST SECURITY POLL (3s) - Detect violations quickly
     // We don't send full status to server every 3s to save bandwidth, 
     // but we check locally and trigger updateTraineeStatus ONLY if violation found.
-    setInterval(async () => {
+    SECURITY_VIOLATION_INTERVAL = setInterval(async () => {
         const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
         const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
         const isRelaxed = myData && myData.relaxed;
@@ -902,6 +908,7 @@ function startActiveTestMonitoring() {
 async function exitArena(keepLocked = false) {
     stopTraineePollers();
     if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
+    if (SECURITY_VIOLATION_INTERVAL) clearInterval(SECURITY_VIOLATION_INTERVAL);
     
     if (!keepLocked) {
         if (typeof require !== 'undefined') {

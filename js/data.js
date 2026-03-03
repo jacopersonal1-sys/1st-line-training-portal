@@ -209,7 +209,10 @@ async function loadFromServer(silent = false) {
                 const localObj = { [localKey]: localItems };
                 const merged = performSmartMerge(serverObj, localObj, 'server_wins');
                 
-                localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
+                // NEW: Filter out soft-deleted items so they are removed from local storage
+                const cleanList = merged[localKey].filter(item => !item.deleted);
+                
+                localStorage.setItem(localKey, JSON.stringify(cleanList));
                 
                 // Update Timestamp (Use the newest row's time)
                 const newest = newRows.reduce((max, r) => new Date(r.updated_at) > new Date(max) ? r.updated_at : max, lastSync);
