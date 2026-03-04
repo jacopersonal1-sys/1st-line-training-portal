@@ -477,6 +477,9 @@ window.onload = async function() {
         Object.keys(localStorage).forEach(k => {
             if(k.startsWith('sync_ts_')) localStorage.removeItem(k);
         });
+        
+        // 3. Reset Row Sync Timestamps (Forces fresh fetch of records/logs)
+        Object.keys(localStorage).forEach(k => { if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k); });
 
         // 3. Force Push Local Data to New Server
         if (typeof saveToServer === 'function') {
@@ -863,6 +866,25 @@ function updateSidebarVisibility() {
     if (role === 'super_admin') {
         // Robust Retry logic for header injection
         const injectBtn = () => {
+            // INJECT SERVER INDICATOR
+            const header = document.querySelector('.top-header .nav-brand');
+            if (header && !document.getElementById('server-indicator')) {
+                const activeTarget = localStorage.getItem('active_server_target') || 'cloud';
+                const indicator = document.createElement('span');
+                indicator.id = 'server-indicator';
+                indicator.style.fontSize = '0.7rem';
+                indicator.style.marginLeft = '10px';
+                indicator.style.padding = '2px 6px';
+                indicator.style.borderRadius = '4px';
+                indicator.style.verticalAlign = 'middle';
+                
+                const isLocal = activeTarget === 'local';
+                indicator.style.background = isLocal ? 'rgba(155, 89, 182, 0.2)' : 'rgba(52, 152, 219, 0.2)';
+                indicator.style.color = isLocal ? '#9b59b6' : '#3498db';
+                indicator.innerHTML = isLocal ? '<i class="fas fa-server"></i> Local' : '<i class="fas fa-cloud"></i> Cloud';
+                header.appendChild(indicator);
+            }
+
             if (document.getElementById('btn-super-admin')) return true;
             
             const bubbleContent = document.querySelector('.control-bubble .bubble-content');
@@ -1475,6 +1497,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.5": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Server Indicator:</strong> Added a visual indicator in the header to show current server connection (Cloud vs Local).</li>
+            </ul>`,
         "2.3.4": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Dual-Server Stability:</strong> Resolved schema conflicts for local Supabase setup, improving reliability when switching servers.</li>
