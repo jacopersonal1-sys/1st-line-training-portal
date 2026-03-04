@@ -432,14 +432,9 @@ async function deleteSubmission(id) {
     subs = subs.filter(s => s.id != id);
     localStorage.setItem('submissions', JSON.stringify(subs));
     
-    // Soft Delete on Cloud
-    if (window.supabaseClient && sub) {
-        const softSub = { ...sub, deleted: true };
-        await window.supabaseClient.from('submissions').upsert({
-            id: id,
-            data: softSub,
-            updated_at: new Date().toISOString()
-        });
+    // Hard Delete on Cloud
+    if (window.supabaseClient) {
+        await window.supabaseClient.from('submissions').delete().eq('id', id);
     }
     
     // No need to force save 'submissions' locally since we handled the cloud update manually above

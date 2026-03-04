@@ -162,26 +162,16 @@ async function deleteHistorySubmission(id) {
     records = records.filter(r => !(r.trainee === sub.trainee && r.assessment === sub.testTitle));
     localStorage.setItem('records', JSON.stringify(records));
     
-    // 3. CLOUD SOFT DELETE (Propagate to others)
+    // 3. CLOUD HARD DELETE
     if (window.supabaseClient) {
-        const now = new Date().toISOString();
-        
-        // Soft Delete Submission
-        const softSub = { ...sub, deleted: true };
-        await window.supabaseClient.from('submissions').upsert({ 
-            id: id, 
-            data: softSub, 
-            updated_at: now 
-        });
+        await window.supabaseClient.from('submissions').delete().eq('id', id);
 
-        // Soft Delete Record (if found)
+        // Hard Delete Record (if found)
         if (targetRecord && targetRecord.id) {
-            const softRec = { ...targetRecord, deleted: true };
-            await window.supabaseClient.from('records').upsert({
-                id: targetRecord.id,
-                data: softRec,
-                updated_at: now
-            });
+            await window.supabaseClient.from('records').delete().eq('id', targetRecord.id);
+        } else {
+            // Fallback match
+            await window.supabaseClient.from('records').delete().match({ trainee: sub.trainee, assessment: sub.testTitle });
         }
     }
 

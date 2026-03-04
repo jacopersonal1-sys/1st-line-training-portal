@@ -107,6 +107,7 @@ const DEFAULT_LAYOUT_TL = [
     { id: 'tl_overview', col: 2, row: 1 },
     { id: 'schedule', col: 1, row: 1 },
     { id: 'active_users', col: 1, row: 1 },
+    { id: 'leaderboard', col: 1, row: 1 },
     { id: 'quick_links', col: 2, row: 1 }
 ];
 
@@ -247,7 +248,7 @@ async function updateDashboardHealth() {
         // Fetch active sessions from Supabase
         const { data: activeUsers, error } = await supabaseClient
             .from('sessions')
-            .select('user, role, isIdle, idleTime')
+            .select('*') // Fallback to * to avoid column errors
             .gte('lastSeen', twoMinsAgo);
 
         if (error) {
@@ -299,9 +300,10 @@ async function updateDashboardHealth() {
                     const statusBadge = u.isIdle 
                         ? '<span class="status-badge status-fail">Idle</span>' 
                         : '<span class="status-badge status-pass">Active</span>';
+                    const uName = u.username || u.user || 'Unknown';
                     return `
                         <tr>
-                            <td style="max-width:100px; overflow:hidden; text-overflow:ellipsis;"><strong>${u.user}</strong></td>
+                            <td style="max-width:100px; overflow:hidden; text-overflow:ellipsis;"><strong>${uName}</strong></td>
                             <td>${roleStr}</td>
                             <td>${statusBadge}</td>
                             <td>${idleStr}</td>
@@ -1066,6 +1068,35 @@ function buildTLWidgets(container) {
     const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     const today = new Date().toISOString().split('T')[0];
     const latesToday = attRecords.filter(r => r.date === today && r.isLate).length;
+    
+    // NEW: Fetch data for Leaderboard and Schedule widgets
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+
+    // Schedule Details (Agents on Schedule)
+    let scheduleStats = [];
+    Object.keys(schedules).sort().forEach(k => {
+        const groupName = schedules[k].assigned;
+        const count = (groupName && rosters[groupName]) ? rosters[groupName].length : 0;
+        if(groupName) scheduleStats.push(`<strong>${k}:</strong> ${count}`);
+    });
+    const rosterDisplay = scheduleStats.length > 0 ? scheduleStats.join(' | ') : "No active schedules";
+
+    let schedDetailsHtml = '';
+    Object.keys(schedules).sort().forEach(k => {
+        const groupName = schedules[k].assigned;
+        if(groupName && rosters[groupName]) {
+            schedDetailsHtml += `<div style="font-size:0.8rem; margin-bottom:8px; border-bottom:1px dashed var(--border-color); padding-bottom:4px;">
+                <strong style="color:var(--primary);">${k} (${groupName}):</strong><br>
+                <span style="color:var(--text-muted);">${rosters[groupName].join(', ')}</span>
+            </div>`;
+        }
+    });
+    if(!schedDetailsHtml) schedDetailsHtml = '<div style="color:var(--text-muted); font-style:italic;">No active schedules.</div>';
+
+    // Leaderboard
+    const leaderboardHtml = buildLeaderboardWidget(users, records, attRecords);
 
     const overviewHtml = `
         <div style="display:flex; justify-content:space-around; align-items:center; height:100%; width:100%;">
@@ -1097,10 +1128,14 @@ function buildTLWidgets(container) {
     const widgets = {
         'tl_overview': wrapWidget('tl_overview', overviewHtml),
         'schedule': wrapWidget('schedule', `
-            <div onclick="showTab('assessment-schedule')" style="cursor:pointer; width:100%; display:flex; align-items:center; gap:20px;">
-                <div class="dash-icon"><i class="fas fa-calendar-alt"></i></div>
-                <div class="dash-data"><h3>Schedule</h3><p>View Timelines</p></div>
-            </div>`),
+                <div class="dash-primary-content">
+                    <div class="dash-icon"><i class="fas fa-clipboard-list"></i></div>
+                    <div class="dash-data">
+                        <h3 style="font-size:1.1rem; line-height:1.4;">${rosterDisplay}</h3>
+                        <p>Agents on Schedule</p>
+                    </div>
+                </div>
+                <div class="dash-details">${schedDetailsHtml}</div>`),
         'active_users': wrapWidget('active_users', `
             <div style="width:100%;">
                 <h4><i class="fas fa-user-clock"></i> Active Users</h4>
@@ -1111,12 +1146,21 @@ function buildTLWidgets(container) {
                     </table>
                 </div>
             </div>`),
+        'leaderboard': wrapWidget('leaderboard', leaderboardHtml),
         'quick_links': wrapWidget('quick_links', linksHtml)
     };
 
     // LOAD LAYOUT
     let layout = JSON.parse(localStorage.getItem('dashLayout_tl') || 'null');
-    if (!layout) layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_TL));
+    if (!layout) {
+        layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_TL));
+    } else {
+        // SMART MERGE: Add new widgets if missing from saved layout
+        const existingIds = new Set(layout.map(i => (typeof i === 'string' ? i : i.id)));
+        DEFAULT_LAYOUT_TL.forEach(def => {
+            if (!existingIds.has(def.id)) layout.push(def);
+        });
+    }
 
     let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
     layout.forEach((item, index) => {

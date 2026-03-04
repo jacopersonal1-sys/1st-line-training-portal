@@ -803,7 +803,7 @@ async function sendRemoteCommand(username, action) {
         const { error } = await window.supabaseClient
             .from('sessions')
             .update({ pending_action: action })
-            .eq('user', username);
+            .eq('username', username);
             
         if(error) alert("Command failed: " + error.message);
         else {
@@ -1097,12 +1097,14 @@ function openSuperAdminConfig() {
                         <div class="card" style="margin-top:15px; border-left: 4px solid #2ecc71;">
                             <h4><i class="fas fa-database"></i> Row-Level Sync Status</h4>
                             <div id="sa_migration_status" style="margin-top:10px; font-size:0.9rem; color:var(--text-muted);">Click check to compare Local vs Cloud Row Counts.</div>
-                            <div style="margin-top:10px; display:flex; gap:10px;">
+                            <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
                                 <button class="btn-secondary btn-sm" onclick="checkRowSyncStatus()"><i class="fas fa-sync"></i> Check Status</button>
                                 <button class="btn-warning btn-sm" onclick="performBlobToRowMigration()"><i class="fas fa-upload"></i> Migrate Blobs to Rows</button>
                                 <button class="btn-primary btn-sm" onclick="forceResyncRows()"><i class="fas fa-cloud-download-alt"></i> Force Pull Rows</button>
                                 <button class="btn-danger btn-sm" onclick="cleanupCloudDuplicates()"><i class="fas fa-broom"></i> Cleanup Cloud Duplicates</button>
                                 <button class="btn-danger btn-sm" onclick="cleanupLocalDuplicates()"><i class="fas fa-laptop-medical"></i> Cleanup Local Duplicates</button>
+                                <button class="btn-warning btn-sm" onclick="performOrphanCleanup()"><i class="fas fa-link"></i> Sync Check (Orphans)</button>
+                                <button class="btn-secondary btn-sm" onclick="verifyServerSchema()"><i class="fas fa-stethoscope"></i> Verify Schema</button>
                             </div>
                         </div>
                     </div>
@@ -1878,18 +1880,18 @@ async function refreshClientHealthTable() {
         const clientId = s.clientId || 'Unknown';
         const activity = s.activity || '-';
         const roleStr = s.role || '?';
-        const safeUser = s.user.replace(/'/g, "\\'"); // FIX: Escape quotes for button
+        const safeUser = s.username.replace(/'/g, "\\'"); // FIX: Escape quotes for button
         
-        const banBtn = (clientId !== 'Unknown' && s.role !== 'super_admin') ? `<button class="btn-danger btn-sm" style="padding:0 4px; font-size:0.7rem; margin-left:5px;" onclick="banClient('${clientId}', '${s.user}')" title="Ban Terminal"><i class="fas fa-ban"></i></button>` : '';
+        const banBtn = (clientId !== 'Unknown' && s.role !== 'super_admin') ? `<button class="btn-danger btn-sm" style="padding:0 4px; font-size:0.7rem; margin-left:5px;" onclick="banClient('${clientId}', '${s.username}')" title="Ban Terminal"><i class="fas fa-ban"></i></button>` : '';
 
         html += `<tr>
-            <td>${statusDot} <strong>${s.user}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">(${roleStr})</span></td>
+            <td>${statusDot} <strong>${s.username}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">(${roleStr})</span></td>
             <td style="font-family:monospace; font-size:0.8rem;">${clientId}${banBtn}</td>
             <td style="font-size:0.8rem; max-width:150px; overflow:hidden; text-overflow:ellipsis;" title="${activity}">${activity}</td>
             <td style="color:${latColor}; font-weight:bold;">${latency}ms</td>
             <td>
-                <button class="btn-danger btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.user}', 'logout')" title="Kick"><i class="fas fa-sign-out-alt"></i></button>
-                <button class="btn-warning btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.user}', 'restart')" title="Reload"><i class="fas fa-sync"></i></button>
+                <button class="btn-danger btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.username}', 'logout')" title="Kick"><i class="fas fa-sign-out-alt"></i></button>
+                <button class="btn-warning btn-sm" style="padding:0 5px;" onclick="sendRemoteCommand('${s.username}', 'restart')" title="Reload"><i class="fas fa-sync"></i></button>
                 <button class="btn-primary btn-sm" style="padding:0 5px;" onclick="promptRemoteMessage('${safeUser}')" title="Message"><i class="fas fa-comment"></i></button>
             </td>
         </tr>`;
@@ -1919,7 +1921,7 @@ async function forceRefreshAllClients() {
         const { error } = await supabaseClient
             .from('sessions')
             .update({ pending_action: 'restart' })
-            .neq('user', 'placeholder'); // Safety filter to match all rows
+            .neq('username', 'placeholder'); // Safety filter to match all rows
 
         if (error) throw error;
 
@@ -2126,5 +2128,133 @@ window.forceMigrationPush = async function() {
         alert("Migration Failed: " + e.message);
     } finally {
         btn.disabled = false; btn.innerHTML = '<i class="fas fa-upload"></i> Force Data Migration';
+    }
+};
+
+window.performOrphanCleanup = async function(silent = false) {
+    if(!silent && !confirm("Run Sync Check (Orphan Cleanup)?\n\nThis will compare your local data against the server. Any local items that do not exist on the server (because they were hard-deleted elsewhere) will be removed from this device.\n\nProceed?")) return;
+
+    const btn = (!silent && document.activeElement && document.activeElement.tagName === 'BUTTON') ? document.activeElement : null;
+    let originalText = "";
+    if(btn) {
+        originalText = btn.innerText;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+    }
+
+    const map = [
+        { key: 'records', table: 'records' },
+        { key: 'submissions', table: 'submissions' },
+        { key: 'auditLogs', table: 'audit_logs' },
+        { key: 'liveBookings', table: 'live_bookings' },
+        { key: 'attendance_records', table: 'attendance' },
+        { key: 'graduated_agents', table: 'archived_users' },
+        { key: 'savedReports', table: 'saved_reports' },
+        { key: 'linkRequests', table: 'link_requests' },
+        { key: 'calendarEvents', table: 'calendar_events' },
+        { key: 'monitor_history', table: 'monitor_history' },
+        { key: 'error_reports', table: 'error_reports' },
+        { key: 'liveSessions', table: 'live_sessions', idField: 'sessionId' }, // Special case
+        { key: 'insightReviews', table: 'insight_reviews' },
+        { key: 'exemptions', table: 'exemptions' },
+        { key: 'nps_responses', table: 'nps_responses' }
+    ];
+
+    let totalRemoved = 0;
+    let report = [];
+
+    try {
+        if (!window.supabaseClient) throw new Error("Not connected to cloud.");
+
+        for (const item of map) {
+            // 1. Fetch ALL Server IDs for this table
+            let allIds = new Set();
+            let page = 0;
+            let pageSize = 1000;
+            let fetchMore = true;
+
+            while (fetchMore) {
+                const { data, error } = await window.supabaseClient
+                    .from(item.table)
+                    .select('id')
+                    .range(page * pageSize, (page + 1) * pageSize - 1);
+                
+                if (error) {
+                    console.error(`Error fetching IDs for ${item.table}:`, error);
+                    fetchMore = false;
+                    break;
+                }
+
+                if (data.length > 0) {
+                    data.forEach(row => allIds.add(row.id.toString()));
+                    if (data.length < pageSize) fetchMore = false;
+                    else page++;
+                } else {
+                    fetchMore = false;
+                }
+            }
+
+            // 2. Load Local
+            const localData = JSON.parse(localStorage.getItem(item.key) || '[]');
+            if (!Array.isArray(localData)) continue;
+
+            // 3. Filter Orphans
+            const idField = item.idField || 'id';
+            const cleanData = localData.filter(localItem => {
+                const localId = localItem[idField];
+                if (!localId) return true; // Keep items without IDs (unsafe to delete)
+                return allIds.has(localId.toString());
+            });
+
+            const removedCount = localData.length - cleanData.length;
+            
+            if (removedCount > 0) {
+                localStorage.setItem(item.key, JSON.stringify(cleanData));
+                totalRemoved += removedCount;
+                report.push(`${item.key}: -${removedCount}`);
+            }
+        }
+
+        // Update timestamp for automation
+        localStorage.setItem('last_orphan_cleanup_ts', Date.now().toString());
+
+        if (totalRemoved > 0) {
+            const msg = `Sync Check Complete.\n\nRemoved ${totalRemoved} orphan items:\n${report.join('\n')}`;
+            if(!silent) alert(msg);
+            else console.log(msg);
+
+            if (typeof checkRowSyncStatus === 'function') checkRowSyncStatus();
+            if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        } else {
+            if(!silent) alert("Sync Check Complete. Local data is consistent with server.");
+        }
+
+    } catch (e) {
+        if(!silent) alert("Sync Check Failed: " + e.message);
+        else console.error("Background Sync Check Failed:", e);
+    } finally {
+        if(btn) { btn.disabled = false; btn.innerText = originalText; }
+    }
+};
+
+window.verifyServerSchema = async function() {
+    const btn = document.activeElement;
+    if(btn) { btn.innerText = "Checking..."; btn.disabled = true; }
+
+    try {
+        if (!window.supabaseClient) throw new Error("Not connected.");
+
+        // Check 'sessions' table for 'username' column
+        // We do this by trying to select it. If it fails, schema is wrong.
+        const { error } = await window.supabaseClient.from('sessions').select('username').limit(1);
+        
+        if (error) {
+            alert("❌ Schema Mismatch Detected!\n\nThe connected server is missing the 'username' column in the 'sessions' table.\n\nPlease run the migration SQL script on this server.");
+        } else {
+            alert("✅ Schema Verified.\n\nThe connected server is compatible with this version of the app.");
+        }
+    } catch (e) {
+        alert("Verification Error: " + e.message);
+    } finally {
+        if(btn) { btn.innerText = "Verify Schema"; btn.disabled = false; }
     }
 };

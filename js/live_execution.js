@@ -438,7 +438,7 @@ async function updateLiveConnectionStatus(traineeUser, elementId = 'live-conn-st
         const { data, error } = await window.supabaseClient
             .from('sessions')
             .select('lastSeen, idleTime, isIdle')
-            .eq('user', traineeUser)
+            .eq('username', traineeUser)
             .single();
 
         if (error || !data) {

@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.3.4**: **Dual-Server Stability**: Resolved numerous schema and configuration issues for local Supabase setup. Added a "Schema Check" tool to the Super Admin console to verify database compatibility before switching servers. Hardened Team Leader permissions.
 - **v2.3.3**: **Vetting & Sync Hardening**: Fixed "Uneditable Text" bug in Vetting Arena by preventing alert loops. Improved security check to ignore background Edge/Chrome processes (False Positives). Implemented "Soft Deletes" to ensure deleted records are removed from all clients.
 - **v2.3.2**: **Update Notifications**: Added a notification bell alert when a new system update is downloaded and ready to install.
 - **v2.3.1**: **Trainee Access**: Enabled Trainees to view their own Vetting Test submissions and history in the "Test Records" tab.

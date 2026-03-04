@@ -942,7 +942,7 @@ function updateSidebarVisibility() {
         } 
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
-            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -958,7 +958,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment'];
+      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -1475,6 +1475,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.4": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Dual-Server Stability:</strong> Resolved schema conflicts for local Supabase setup, improving reliability when switching servers.</li>
+                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added a "Verify Schema" tool to the Super Admin console to check database compatibility.</li>
+                <li style="margin-bottom: 8px;"><strong>Permissions:</strong> Hardened Team Leader role to correctly restrict access to the Insight Dashboard.</li>
+            </ul>`,
         "2.3.3": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Stability:</strong> Fixed an issue where security alerts could freeze the test interface.</li>

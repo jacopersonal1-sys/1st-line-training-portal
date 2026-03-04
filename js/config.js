@@ -29,7 +29,12 @@ if (activeTarget === 'local' && localSettings.local_url && localSettings.local_k
 // We use 'window.supabaseClient' to avoid conflict with the library's global 'supabase' variable.
 if (typeof window !== 'undefined' && window.supabase) {
     try {
-        window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const options = {
+            global: {
+                headers: { 'ngrok-skip-browser-warning': 'true' }
+            }
+        };
+        window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
         console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}).`);
     } catch (e) {
         console.error("Supabase Initialization Failed:", e);

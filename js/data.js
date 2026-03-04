@@ -209,10 +209,7 @@ async function loadFromServer(silent = false) {
                 const localObj = { [localKey]: localItems };
                 const merged = performSmartMerge(serverObj, localObj, 'server_wins');
                 
-                // NEW: Filter out soft-deleted items so they are removed from local storage
-                const cleanList = merged[localKey].filter(item => !item.deleted);
-                
-                localStorage.setItem(localKey, JSON.stringify(cleanList));
+                localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
                 
                 // Update Timestamp (Use the newest row's time)
                 const newest = newRows.reduce((max, r) => new Date(r.updated_at) > new Date(max) ? r.updated_at : max, lastSync);
@@ -304,7 +301,7 @@ async function startServerLookout() {
                     auth: { 
                         persistSession: false, 
                         autoRefreshToken: false,
-                        storageKey: 'lookout-' + srv.name // Unique key to prevent console warning
+                        storageKey: 'lookout-' + srv.name + '-' + Date.now() // Unique key per check
                     }
                 });
 
@@ -985,7 +982,7 @@ async function fetchSystemStatus() {
         // OPTIMIZED: Select only specific columns instead of '*' to save bandwidth
         const { data: activeUsers, error } = await supabaseClient
             .from('sessions')
-            .select('user, role, version, isIdle, idleTime, lastSeen, clientId')
+            .select('*') // Fallback to * to avoid column name errors during migration
             .gte('lastSeen', twoMinutesAgo);
 
         if (error) {
@@ -1007,7 +1004,7 @@ async function fetchSystemStatus() {
         return {
             storage: typeof formatBytes === 'function' ? formatBytes(storageSize) : storageSize,
             latency: latency + " ms",
-            activeUsers: activeUsers ? activeUsers.length : 0,
+            activeUsers: activeUsers ? activeUsers.length : 0, // activeUsers is array of objects with username
             memory: (performance && performance.memory) ? formatBytes(performance.memory.usedJSHeapSize) : "N/A",
             connection: navigator.connection ? navigator.connection.effectiveType.toUpperCase() : (navigator.onLine ? "ONLINE" : "OFFLINE")
         };
@@ -1080,17 +1077,20 @@ function renderSystemHealthUI(metrics) {
                 
                 const rowClass = u.isIdle ? 'user-idle' : '';
 
+                // Handle both 'username' (New) and 'user' (Old) for compatibility
+                const uName = u.username || u.user || 'Unknown';
+
                 html += `
                     <tr class="${rowClass}">
-                        <td><strong>${u.user}</strong></td>
+                        <td><strong>${uName}</strong></td>
                         <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
                         <td>${roleStr}</td>
                         <td>${statusBadge}</td>
                         <td>${idleStr}</td>
                         <td>
-                            <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${u.user}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
-                            <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${u.user}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
-                            <button class="btn-primary btn-sm" onclick="sendRemoteCommand('${u.user}', 'force_update')" title="Force Update Check"><i class="fas fa-cloud-download-alt"></i></button>
+                            <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${uName}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
+                            <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${uName}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
+                            <button class="btn-primary btn-sm" onclick="sendRemoteCommand('${uName}', 'force_update')" title="Force Update Check"><i class="fas fa-cloud-download-alt"></i></button>
                         </td>
                     </tr>
                 `;
@@ -1200,7 +1200,7 @@ async function sendHeartbeat() {
         if (!HEARTBEAT_SAFE_MODE) {
             const safeActivity = currentActivity.length > 250 ? currentActivity.substring(0, 247) + '...' : currentActivity;
             const fullPayload = {
-                user: CURRENT_USER.user,
+                username: CURRENT_USER.user, // New Schema
                 role: CURRENT_USER.role,
                 version: window.APP_VERSION || 'Unknown',
                 idleTime: Math.round(diff),
@@ -1220,7 +1220,7 @@ async function sendHeartbeat() {
         // 2. Safe Mode (Common fields only)
         if (HEARTBEAT_SAFE_MODE === 'safe') {
             const { error } = await supabaseClient.from('sessions').upsert({
-                user: CURRENT_USER.user,
+                username: CURRENT_USER.user, // New Schema
                 lastSeen: new Date().toISOString(),
                 isIdle: isIdle,
                 idleTime: Math.round(diff)
@@ -1234,7 +1234,7 @@ async function sendHeartbeat() {
         // 3. Minimal Mode (Absolute basics)
         if (HEARTBEAT_SAFE_MODE === 'minimal') {
             await supabaseClient.from('sessions').upsert({
-                user: CURRENT_USER.user,
+                username: CURRENT_USER.user, // New Schema
                 lastSeen: new Date().toISOString()
             });
         }
@@ -1243,12 +1243,12 @@ async function sendHeartbeat() {
         const { data: sessionData } = await supabaseClient
             .from('sessions')
             .select('pending_action')
-            .eq('user', CURRENT_USER.user)
+            .eq('username', CURRENT_USER.user) // New Schema
             .single();
             
         if (sessionData && sessionData.pending_action) {
             // Clear command first to prevent loops
-            await supabaseClient.from('sessions').update({ pending_action: null }).eq('user', CURRENT_USER.user);
+            await supabaseClient.from('sessions').update({ pending_action: null }).eq('username', CURRENT_USER.user);
             
             if (sessionData.pending_action === 'logout') {
                 if (typeof logout === 'function') logout();
@@ -1503,6 +1503,14 @@ function startRealtimeSync() {
     // Uses "loadFromServer" to pull changes from others (e.g. Trainees to Admin)
     SYNC_INTERVAL = setInterval(async () => {
         await loadFromServer(true); 
+        
+        // AUTOMATED MAINTENANCE (Daily Orphan Cleanup)
+        if (typeof performOrphanCleanup === 'function') {
+            const lastRun = parseInt(localStorage.getItem('last_orphan_cleanup_ts') || '0');
+            if (Date.now() - lastRun > 86400000) { // 24 hours
+                performOrphanCleanup(true);
+            }
+        }
     }, syncRate);
 
     // 2. HEARTBEAT: Poll every 15 seconds
@@ -1626,7 +1634,7 @@ async function executeFactoryReset() {
             const { error: sessionErr } = await window.supabaseClient
                 .from('sessions')
                 .delete()
-                .neq('user', 'placeholder_to_delete_all'); // Delete all rows
+                .neq('username', 'placeholder_to_delete_all'); // Delete all rows
 
             if (sessionErr) throw sessionErr;
             console.log("Cloud 'sessions' table wiped.");
