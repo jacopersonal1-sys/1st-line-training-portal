@@ -1786,6 +1786,13 @@ async function saveSuperAdminConfig() {
         local_key: getVal('sa_srv_key', '').trim()
     };
 
+    // IMMEDIATE SWITCH: If Admin changes the target, apply it locally immediately
+    // This prevents getting stuck on a dead 'local' server.
+    const currentTarget = localStorage.getItem('active_server_target');
+    if (config.server_settings.active !== currentTarget) {
+        localStorage.setItem('active_server_target', config.server_settings.active);
+    }
+
     localStorage.setItem('system_config', JSON.stringify(config));
     if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
     

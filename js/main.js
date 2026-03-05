@@ -502,6 +502,29 @@ window.onload = async function() {
             await loadFromServer();
         } catch (e) {
             console.error("CRITICAL: Failed to load cloud data.", e);
+            
+            // --- AUTO-RECOVERY: Revert to Cloud if Local is dead ---
+            const target = localStorage.getItem('active_server_target');
+            if (target === 'local') {
+                console.warn("Local Server failed to load. Attempting recovery to Cloud...");
+                if (window.CLOUD_CREDENTIALS) {
+                    try {
+                        // Bypass standard client and try direct Cloud connection
+                        const cloudClient = window.supabase.createClient(window.CLOUD_CREDENTIALS.url, window.CLOUD_CREDENTIALS.key, {
+                            auth: { persistSession: false }
+                        });
+                        const { error } = await cloudClient.from('app_documents').select('key').limit(1);
+                        if (!error) {
+                            alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
+                            localStorage.setItem('active_server_target', 'cloud');
+                            location.reload();
+                            return;
+                        }
+                    } catch(recErr) { console.error("Recovery check failed:", recErr); }
+                }
+            }
+            // -------------------------------------------------------
+
             alert("⚠️ OFFLINE MODE\n\nCould not connect to Supabase.\nYou are viewing cached data. Changes may not be saved.");
             // Prevent auto-save to avoid overwriting cloud data with empty local data
             if(typeof AUTO_BACKUP !== 'undefined') AUTO_BACKUP = false; 
@@ -1497,6 +1520,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.7": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Failover Fix:</strong> App now correctly forces a switch back to Cloud if the Local server is unreachable during configuration save.</li>
+                <li style="margin-bottom: 8px;"><strong>Permissions:</strong> Fixed Team Leader access rights for the Insight Dashboard.</li>
+            </ul>`,
         "2.3.6": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Failover Stability:</strong> Fixed connection loops by verifying server reachability before switching.</li>
