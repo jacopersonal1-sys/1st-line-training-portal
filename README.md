@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.3.6**: **Failover Hardening**: Implemented "Ping Check" to prevent switching to unreachable servers (Loop Prevention). Added automatic fallback to Cloud if Local server fails on startup.
 - **v2.3.5**: **Server Indicator**: Added a visual indicator in the header to show whether the app is connected to Cloud or Local server.
 - **v2.3.4**: **Dual-Server Stability**: Resolved numerous schema and configuration issues for local Supabase setup. Added a "Schema Check" tool to the Super Admin console to verify database compatibility before switching servers. Hardened Team Leader permissions.
 - **v2.3.3**: **Vetting & Sync Hardening**: Fixed "Uneditable Text" bug in Vetting Arena by preventing alert loops. Improved security check to ignore background Edge/Chrome processes (False Positives). Implemented "Soft Deletes" to ensure deleted records are removed from all clients.

@@ -10,7 +10,7 @@ window.CLOUD_CREDENTIALS = {
 };
 
 // 2. Determine Active Server
-const activeTarget = localStorage.getItem('active_server_target') || 'cloud';
+let activeTarget = localStorage.getItem('active_server_target') || 'cloud';
 const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
 const localSettings = systemConfig.server_settings || {};
 
@@ -37,7 +37,14 @@ if (typeof window !== 'undefined' && window.supabase) {
         window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
         console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}).`);
     } catch (e) {
-        console.error("Supabase Initialization Failed:", e);
+        console.error("Supabase Initialization Failed:", e); 
+        // FAILSAFE: If Local fails, revert to Cloud immediately
+        if (activeTarget === 'local') {
+            console.warn("Local Server Unreachable. Reverting to Cloud...");
+            localStorage.setItem('active_server_target', 'cloud');
+            // Reload to apply
+            setTimeout(() => location.reload(), 1000);
+        }
     }
 } else {
     window.supabaseClient = null;

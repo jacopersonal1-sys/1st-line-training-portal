@@ -1497,6 +1497,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.6": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Failover Stability:</strong> Fixed connection loops by verifying server reachability before switching.</li>
+                <li style="margin-bottom: 8px;"><strong>Auto-Recovery:</strong> App now automatically reverts to Cloud if the Local server is offline.</li>
+            </ul>`,
         "2.3.5": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Server Indicator:</strong> Added a visual indicator in the header to show current server connection (Cloud vs Local).</li>
