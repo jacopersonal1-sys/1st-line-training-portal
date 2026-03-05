@@ -1566,6 +1566,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.3": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed issue where deleted records would reappear. Deletions are now permanent across all devices.</li>
+            </ul>`,
         "2.4.2": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Team Leaders:</strong> Added ability to post Broadcast Messages/Announcements to trainees.</li>
