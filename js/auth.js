@@ -550,7 +550,7 @@ function applyRolePermissions() {
         
         // ALLOWED SECTIONS FOR TL: Report Card, Admin Panel (Settings), Test Records, Insights, Agent Search, Capture (No), Manage (No)
         // Note: Monthly, Schedule are public sections so they are visible by default.
-        const allowedSections = ['report-card', 'admin-panel', 'test-records', 'insights', 'agent-search'];
+        const allowedSections = ['report-card', 'admin-panel', 'test-records', 'agent-search'];
         
         sections.forEach(s => {
             if(!allowedSections.includes(s.id)) s.classList.add('hidden'); 

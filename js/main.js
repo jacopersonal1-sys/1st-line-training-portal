@@ -499,7 +499,8 @@ window.onload = async function() {
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
-            await loadFromServer();
+            const success = await loadFromServer();
+            if (!success) throw new Error("Initial Sync Failed");
         } catch (e) {
             console.error("CRITICAL: Failed to load cloud data.", e);
             
@@ -1520,6 +1521,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.8": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Solved issue where the app would get stuck on a disconnected Local Server. It will now auto-revert to Cloud immediately.</li>
+            </ul>`,
         "2.3.7": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Failover Fix:</strong> App now correctly forces a switch back to Cloud if the Local server is unreachable during configuration save.</li>

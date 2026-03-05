@@ -258,6 +258,7 @@ async function loadFromServer(silent = false) {
             }
         }
         updateSyncUI('success');
+        return true; // Signal Success
 
     } catch (err) { 
         updateSyncUI('error');
@@ -269,6 +270,15 @@ async function loadFromServer(silent = false) {
             } else if (err.message && err.message.includes("row level security")) {
                 console.warn("DATABASE PERMISSION ERROR: Run the RLS Policy SQL in Supabase to allow access.");
             }
+            
+            // FAILSAFE: Auto-switch to Cloud if Local is dead
+            const currentTarget = localStorage.getItem('active_server_target');
+            if (currentTarget === 'local' && (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))) {
+                console.error("Local Server Dead. Switching to Cloud...");
+                localStorage.setItem('active_server_target', 'cloud');
+                setTimeout(() => location.reload(), 2000);
+            }
+            return false; // Signal Failure
         }
     }
 }
@@ -317,26 +327,6 @@ async function startServerLookout() {
                     
                     // If a server tells us to switch, and we aren't already there
                     if (remoteActive && remoteActive !== currentTarget) {
-                        
-                        // NEW: Safety Check - If switching TO local, verify it is actually reachable
-                        // This prevents infinite loops if Cloud says "Go Local" but Local is down.
-                        if (remoteActive === 'local') {
-                            const lUrl = settings.local_url;
-                            const lKey = settings.local_key;
-                            if (!lUrl || !lKey) continue;
-
-                            try {
-                                const checkClient = window.supabase.createClient(lUrl, lKey, {
-                                    auth: { persistSession: false, autoRefreshToken: false, storageKey: 'ping-check-' + Date.now() }
-                                });
-                                const { error: pingErr } = await checkClient.from('app_documents').select('key').limit(1);
-                                if (pingErr) throw pingErr;
-                            } catch (pingEx) {
-                                console.warn("Server Lookout: Command to switch to Local ignored because Local is unreachable.", pingEx);
-                                continue; // Skip the switch
-                            }
-                        }
-
                         console.warn(`Server Switch Detected on ${srv.name}! Switching to ${remoteActive}...`);
                         
                         // Update Local Config to match
