@@ -79,7 +79,8 @@ const ROW_MAP = {
     'nps_responses': 'nps_responses',
     'graduated_agents': 'archived_users',
     'linkRequests': 'link_requests',
-    'calendarEvents': 'calendar_events'
+    'calendarEvents': 'calendar_events',
+    'tests': 'tests' // NEW: Row-Level Sync for Assessments
 };
 window.ROW_MAP = ROW_MAP; // Expose globally
 
@@ -367,6 +368,25 @@ async function syncOrphans(silent = true) {
     return totalRemoved;
 }
 
+// --- GLOBAL REALTIME SYNC (Instant Updates) ---
+let GLOBAL_REALTIME_SUB = null;
+let REALTIME_DEBOUNCE = null;
+
+function initGlobalRealtime() {
+    if (!window.supabaseClient || GLOBAL_REALTIME_SUB) return;
+
+    // Listen to ALL public table changes
+    GLOBAL_REALTIME_SUB = window.supabaseClient.channel('global_db_changes')
+        .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+            // Debounce to prevent flooding if multiple rows change at once
+            if (REALTIME_DEBOUNCE) clearTimeout(REALTIME_DEBOUNCE);
+            REALTIME_DEBOUNCE = setTimeout(() => loadFromServer(true), 500);
+        })
+        .subscribe();
+    
+    console.log("Global Realtime Sync Enabled ⚡");
+}
+
 let SERVER_LOOKOUT_INTERVAL = null;
 
 // --- SERVER LOOKOUT (Dual-Aware Monitoring) ---
@@ -555,7 +575,8 @@ if (typeof module !== 'undefined' && module.exports) {
         loadFromServer,
         saveToServer,
         performSmartMerge,
-        syncOrphans
+        syncOrphans,
+        initGlobalRealtime
     };
 }
 
@@ -730,6 +751,10 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                             // Live sessions use 'trainer' as the owner usually, or sessionId as key
                             row.id = item.sessionId || item.id; // Ensure sessionId is used as PK
                             row.trainer = item.trainer || null;
+                        }
+                        else if (tableName === 'tests') {
+                            row.title = item.title;
+                            row.type = item.type;
                         }
                         // error_reports only needs id, data, updated_at
                         

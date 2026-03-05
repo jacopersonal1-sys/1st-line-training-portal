@@ -297,7 +297,11 @@ function renderBuilder() {
                 </div>
             </div>
             <div style="margin-bottom:10px;">
-                <input type="text" placeholder="Reference Image/Page URL (Optional)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary);">
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="text" placeholder="Reference Image/Page URL (Optional)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary); flex:1;">
+                    <label class="btn-secondary btn-sm" style="cursor:pointer; margin:0; display:flex; align-items:center; gap:5px;" title="Upload Image"><i class="fas fa-upload"></i><input type="file" accept="image/*" style="display:none;" onchange="uploadImage(${idx}, this)"></label>
+                    ${q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" title="Preview"><i class="fas fa-eye"></i></button>` : ''}
+                </div>
             </div>
             ${linkControl}
             <div style="margin-top:10px;">
@@ -317,6 +321,26 @@ function renderBuilder() {
 // --- RICH TEXT HELPER ---
 function formatDoc(cmd, value=null) {
     document.execCommand(cmd, false, value);
+}
+
+// --- IMAGE UPLOAD HELPER ---
+function uploadImage(idx, input) {
+    const file = input.files[0];
+    if(!file) return;
+    
+    // Limit to 1.5MB to prevent LocalStorage quotas from filling up too fast
+    if(file.size > 1.5 * 1024 * 1024) {
+        alert("Image too large. Please use an image under 1.5MB.");
+        input.value = "";
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        updateImageLink(idx, e.target.result);
+        renderBuilder();
+    };
+    reader.readAsDataURL(file);
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---

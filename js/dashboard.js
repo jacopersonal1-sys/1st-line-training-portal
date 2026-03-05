@@ -107,6 +107,7 @@ const DEFAULT_LAYOUT_TL = [
     { id: 'tl_overview', col: 2, row: 1 },
     { id: 'schedule', col: 1, row: 1 },
     { id: 'active_users', col: 1, row: 1 },
+    { id: 'my_team', col: 2, row: 1 },
     { id: 'leaderboard', col: 1, row: 1 },
     { id: 'quick_links', col: 2, row: 1 }
 ];
@@ -1098,6 +1099,34 @@ function buildTLWidgets(container) {
     // Leaderboard
     const leaderboardHtml = buildLeaderboardWidget(users, records, attRecords);
 
+    // My Team Widget Logic
+    const allTrainees = users.filter(u => u.role === 'trainee').sort((a,b) => a.user.localeCompare(b.user));
+    let teamHtml = '';
+    if (allTrainees.length === 0) {
+        teamHtml = '<div style="text-align:center; color:var(--text-muted); padding:10px;">No trainees found.</div>';
+    } else {
+        teamHtml = '<div class="table-responsive" style="max-height:200px; overflow-y:auto;"><table class="admin-table compressed-table"><thead><tr><th>Agent</th><th>Attendance</th><th>Last Score</th></tr></thead><tbody>';
+        allTrainees.forEach(t => {
+            // Attendance
+            const att = attRecords.find(r => r.user === t.user && r.date === today);
+            let attStatus = '<span style="color:var(--text-muted);">-</span>';
+            if (att) {
+                if (att.isLate) attStatus = '<span style="color:#ff5252;">Late</span>';
+                else attStatus = '<span style="color:#2ecc71;">Present</span>';
+            }
+            // Last Score
+            const myRecs = records.filter(r => r.trainee === t.user);
+            const lastRec = myRecs[myRecs.length - 1];
+            let score = '-';
+            if (lastRec) {
+                let color = lastRec.score >= 90 ? '#2ecc71' : (lastRec.score >= 60 ? '#f1c40f' : '#ff5252');
+                score = `<span style="color:${color}; font-weight:bold;">${lastRec.score}%</span>`;
+            }
+            teamHtml += `<tr><td>${t.user}</td><td>${attStatus}</td><td>${score}</td></tr>`;
+        });
+        teamHtml += '</tbody></table></div>';
+    }
+
     const overviewHtml = `
         <div style="display:flex; justify-content:space-around; align-items:center; height:100%; width:100%;">
             <div style="text-align:center;">
@@ -1145,6 +1174,14 @@ function buildTLWidgets(container) {
                         <tbody id="dashActiveUsersBody"><tr><td colspan="3"><div class="skeleton skeleton-text"></div></td></tr></tbody>
                     </table>
                 </div>
+            </div>`),
+        'my_team': wrapWidget('my_team', `
+            <div style="width:100%;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <h4><i class="fas fa-users"></i> My Team</h4>
+                    <span class="badge-count" style="position:static; background:var(--primary);">${allTrainees.length}</span>
+                </div>
+                ${teamHtml}
             </div>`),
         'leaderboard': wrapWidget('leaderboard', leaderboardHtml),
         'quick_links': wrapWidget('quick_links', linksHtml)

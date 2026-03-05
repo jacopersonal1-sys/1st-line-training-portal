@@ -34,9 +34,9 @@ function loadLiveExecution() {
     if (window.supabaseClient) {
         // NEW: Subscribe to TABLE changes (Row-Level)
         const channel = window.supabaseClient.channel('live_sessions_room')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, () => {
-                // When any row changes, re-fetch the state immediately
-                syncLiveSessionState();
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, (payload) => {
+                // Use payload directly (Push) instead of re-fetching (Pull)
+                handleRealtimeLiveUpdate(payload);
             })
             .subscribe((status) => {
                 CURRENT_SOCKET_STATUS = status;
@@ -109,12 +109,33 @@ function loadLiveExecution() {
     }
 }
 
+// --- NEW: REALTIME PAYLOAD HANDLER (PUSH) ---
+function handleRealtimeLiveUpdate(payload) {
+    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    
+    if (payload.eventType === 'DELETE') {
+        allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
+    } else {
+        const newData = payload.new.data;
+        // Ensure ID matches row ID
+        if (newData) {
+            if (!newData.sessionId) newData.sessionId = payload.new.id;
+            allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
+            allSessions.push(newData);
+        }
+    }
+    localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+    
+    // Update UI from local cache
+    processLiveSessionState(allSessions);
+}
+
 async function syncLiveSessionState() {
     // TARGETED POLLING (Efficient & Stable)
     // Matches Vetting Arena logic to prevent full re-renders wiping user input
     if (!window.supabaseClient) return;
 
-    // UPDATED: Fetch from TABLE (live_sessions)
+    // Fetch from TABLE (live_sessions)
     const { data: rows, error } = await window.supabaseClient
         .from('live_sessions')
         .select('data');
@@ -124,72 +145,74 @@ async function syncLiveSessionState() {
         const allSessions = rows.map(r => r.data);
         localStorage.setItem('liveSessions', JSON.stringify(allSessions));
 
-        // FIND MY RELEVANT SESSION
-        let myServerSession = null;
-        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
-            // Admin: Prefer the session we are explicitly viewing
-            const viewingId = localStorage.getItem('currentLiveSessionId');
-            if (viewingId) {
-                myServerSession = allSessions.find(s => s.sessionId === viewingId) || null;
-            }
-            // REJOIN LOGIC: If not found, attach to first active session where this admin is trainer
-            if (!myServerSession) {
-                myServerSession = allSessions.find(s => s.trainer === CURRENT_USER.user && s.active) || { active: false };
-                if (myServerSession && myServerSession.sessionId) {
-                    localStorage.setItem('currentLiveSessionId', myServerSession.sessionId);
-                }
-            }
-        } else {
-            // Trainee: Find the session assigned to me
-            // FIX: Filter out stale sessions (>12h) and sort by start time to get the latest
-            const now = Date.now();
-            const validSessions = allSessions.filter(s => {
-                if (s.trainee !== CURRENT_USER.user || !s.active) return false;
-                // Determine start time (Fallback to ID timestamp if missing)
-                const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
-                // Check staleness (12 hours = 43200000 ms)
-                if (now - start > 43200000) return false;
-                return true;
-            });
-            
-            // Sort newest first
-            validSessions.sort((a, b) => (b.startTime || 0) - (a.startTime || 0));
-            myServerSession = validSessions.length > 0 ? validSessions[0] : { active: false };
-        }
+        processLiveSessionState(allSessions);
+    }
+}
 
-        // PRESERVE LOCAL ANSWERS (Trainee Only)
-        // The Trainee is the source of truth for their own answers. 
-        // We must not overwrite local answers with stale server data.
-        if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
-            const currentLocal = JSON.parse(localStorage.getItem('liveSession') || '{}');
-            if (currentLocal.answers) {
-                myServerSession.answers = { ...myServerSession.answers, ...currentLocal.answers };
+// --- HELPER: PROCESS STATE (Shared by Poller & Realtime) ---
+function processLiveSessionState(allSessions) {
+    // FIND MY RELEVANT SESSION
+    let myServerSession = null;
+    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
+        // Admin: Prefer the session we are explicitly viewing
+        const viewingId = localStorage.getItem('currentLiveSessionId');
+        if (viewingId) {
+            myServerSession = allSessions.find(s => s.sessionId === viewingId) || null;
+        }
+        // REJOIN LOGIC: If not found, attach to first active session where this admin is trainer
+        if (!myServerSession) {
+            myServerSession = allSessions.find(s => s.trainer === CURRENT_USER.user && s.active) || { active: false };
+            if (myServerSession && myServerSession.sessionId) {
+                localStorage.setItem('currentLiveSessionId', myServerSession.sessionId);
             }
         }
-
-        // Update the local "Active Session" proxy for UI rendering
-        const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+    } else {
+        // Trainee: Find the session assigned to me
+        // FIX: Filter out stale sessions (>12h) and sort by start time to get the latest
+        const now = Date.now();
+        const validSessions = allSessions.filter(s => {
+            if (s.trainee !== CURRENT_USER.user || !s.active) return false;
+            // Determine start time (Fallback to ID timestamp if missing)
+            const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
+            // Check staleness (12 hours = 43200000 ms)
+            if (now - start > 43200000) return false;
+            return true;
+        });
         
-        // Only update if state actually changed
-        if (JSON.stringify(myServerSession) !== JSON.stringify(localSession)) {
-            localStorage.setItem('liveSession', JSON.stringify(myServerSession));
-            
-            const container = document.getElementById('live-execution-content');
-            if (container) {
-                if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
-                    // Admin: Update view but try to preserve focus if typing
-                    if (!document.querySelector('.admin-interaction-active') || myServerSession.currentQ !== localSession.currentQ) {
-                        renderAdminLivePanel(container);
-                    } else {
-                        updateAdminLiveView(); 
-                    }
+        // Sort newest first
+        validSessions.sort((a, b) => (b.startTime || 0) - (a.startTime || 0));
+        myServerSession = validSessions.length > 0 ? validSessions[0] : { active: false };
+    }
+
+    // PRESERVE LOCAL ANSWERS (Trainee Only)
+    if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
+        const currentLocal = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        if (currentLocal.answers) {
+            myServerSession.answers = { ...myServerSession.answers, ...currentLocal.answers };
+        }
+    }
+
+    // Update the local "Active Session" proxy for UI rendering
+    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+    
+    // Only update if state actually changed
+    if (JSON.stringify(myServerSession) !== JSON.stringify(localSession)) {
+        localStorage.setItem('liveSession', JSON.stringify(myServerSession));
+        
+        const container = document.getElementById('live-execution-content');
+        if (container) {
+            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
+                // Admin: Update view but try to preserve focus if typing
+                if (!document.querySelector('.admin-interaction-active') || myServerSession.currentQ !== localSession.currentQ) {
+                    renderAdminLivePanel(container);
                 } else {
-                    // Trainee: ONLY re-render if the question changed or session status changed
-                    // This fixes the "Selection Disappears" bug
-                    if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
-                        renderTraineeLivePanel(container);
-                        LAST_RENDERED_Q = myServerSession.currentQ;
-                    }
+                    updateAdminLiveView(); 
+                }
+            } else {
+                // Trainee: ONLY re-render if the question changed or session status changed
+                if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
+                    renderTraineeLivePanel(container);
+                    LAST_RENDERED_Q = myServerSession.currentQ;
                 }
             }
         }

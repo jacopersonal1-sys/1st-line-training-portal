@@ -73,10 +73,24 @@ function renderAdminArena() {
     if (window.supabaseClient) {
         const channel = window.supabaseClient.channel('vetting_room')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
-                const content = payload.new ? payload.new.data : null;
-                localStorage.setItem('vettingSession', JSON.stringify(content || { active: false, trainees: {} }));
-                const c = document.getElementById('vetting-arena-content');
-                if (c && c.offsetParent !== null) renderAdminArena();
+                const currentSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+                
+                if (payload.eventType === 'DELETE') {
+                    if (payload.old.id === currentSession.sessionId) {
+                        // Session ended remotely
+                        currentSession.active = false;
+                        localStorage.setItem('vettingSession', JSON.stringify(currentSession));
+                        renderAdminArena();
+                    }
+                } else {
+                    const content = payload.new ? payload.new.data : null;
+                    // Filter: Only update if it matches our current session ID (Multi-session support)
+                    if (content && content.sessionId === currentSession.sessionId) {
+                        localStorage.setItem('vettingSession', JSON.stringify(content));
+                        const c = document.getElementById('vetting-arena-content');
+                        if (c && c.offsetParent !== null) renderAdminArena();
+                    }
+                }
             })
             .subscribe();
         ADMIN_VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };

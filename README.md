@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.3.10**: **Stability Release**: Finalized robust failover logic, fixed "Zombie Data" recurrence during server switches, and hardened real-time assessment engines against race conditions.
 - **v2.3.9**: **Data Integrity & Real-time Hardening**: Implemented "Smart Orphan Cleanup" to prevent deleted data from reappearing ("Zombie Data"). Upgraded Vetting Arena to support multiple concurrent sessions. Hardened Live Assessment answer syncing to prevent race conditions.
 - **v2.3.8**: **Critical Failover Fix**: Resolved issue where Auto-Recovery wouldn't trigger because sync errors were being suppressed. App now correctly detects dead Local connections and reverts to Cloud.
 - **v2.3.7**: **Failover & Permissions**: Fixed issue where app wouldn't revert to Cloud if Local server died. Hardened Team Leader permissions to strictly block Insight Dashboard access.

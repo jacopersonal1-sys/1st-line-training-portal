@@ -549,6 +549,9 @@ window.onload = async function() {
     // --- NEW: Start Real-Time Polling (Heartbeat & Sync) ---
     // This activates the Supabase polling defined in data.js
     if (typeof startRealtimeSync === 'function') {
+        // Enable Instant Updates (Push)
+        if (typeof initGlobalRealtime === 'function') initGlobalRealtime();
+        // Start Polling (Fallback/Heartbeat)
         startRealtimeSync();
     }
     // ------------------------------------
@@ -728,7 +731,7 @@ window.openReferenceViewer = function(url) {
     
     let content = '';
     // Simple check for images vs webpages
-    if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
+    if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith('data:image')) {
         content = `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`;
     } else {
         content = `<webview src="${url}" style="width:100%; height:100%; border:none;" allowpopups></webview>`;
@@ -917,6 +920,28 @@ function updateSidebarVisibility() {
                 indicator.style.background = isLocal ? 'rgba(155, 89, 182, 0.2)' : 'rgba(52, 152, 219, 0.2)';
                 indicator.style.color = isLocal ? '#9b59b6' : '#3498db';
                 indicator.innerHTML = isLocal ? '<i class="fas fa-server"></i> Local' : '<i class="fas fa-cloud"></i> Cloud';
+                
+                // Add Ping Button
+                const pingBtn = document.createElement('i');
+                pingBtn.className = 'fas fa-network-wired';
+                pingBtn.style.marginLeft = '8px';
+                pingBtn.style.cursor = 'pointer';
+                pingBtn.style.fontSize = '0.8rem';
+                pingBtn.style.opacity = '0.7';
+                pingBtn.title = "Test Latency";
+                pingBtn.onclick = async function() {
+                    this.className = 'fas fa-circle-notch fa-spin';
+                    const start = Date.now();
+                    try {
+                        if (window.supabaseClient) {
+                            await window.supabaseClient.from('app_documents').select('key').limit(1);
+                            const ms = Date.now() - start;
+                            this.className = 'fas fa-network-wired';
+                            alert(`Latency: ${ms}ms`);
+                        } else { alert("Offline"); this.className = 'fas fa-ban'; }
+                    } catch(e) { this.className = 'fas fa-exclamation-triangle'; alert("Ping Failed"); }
+                };
+                indicator.appendChild(pingBtn);
                 header.appendChild(indicator);
             }
 
@@ -1532,6 +1557,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.10": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Finalized robust failover logic and data integrity checks for dual-server environments.</li>
+            </ul>`,
         "2.3.9": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed "Zombie Data" issue where deleted items would reappear after a server switch or sync.</li>

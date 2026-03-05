@@ -1545,6 +1545,11 @@ window.performBlobToRowMigration = async function() {
         const events = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
         await uploadBatch('calendar_events', events, e => ({ id: e.id, created_by: e.createdBy, data: e, updated_at: new Date().toISOString() }));
 
+        // 13. Tests (Assessments)
+        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        if(mode === 'real') { tests.forEach(t => { if(!t.id) t.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('tests', JSON.stringify(tests)); }
+        await uploadBatch('tests', tests, t => ({ id: t.id, title: t.title, type: t.type, data: t, updated_at: new Date().toISOString() }));
+
         if (mode === 'real') {
             alert("Migration Successful! All data is now in Row-Level tables.");
             checkRowSyncStatus(); // Refresh UI
@@ -2191,12 +2196,17 @@ window.forceMigrationPush = async function() {
 window.performOrphanCleanup = async function(silent = false) {
     // Use the robust function from data.js if available
     if (typeof syncOrphans === 'function') {
-        const btn = document.activeElement;
-        if(btn && btn.tagName === 'BUTTON') { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...'; }
+        // FIX: Only hijack UI if NOT silent (User triggered)
+        const btn = (!silent && document.activeElement && document.activeElement.tagName === 'BUTTON') ? document.activeElement : null;
+        
+        if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...'; }
         
         const count = await syncOrphans(silent);
         
-        if(btn && btn.tagName === 'BUTTON') { btn.disabled = false; btn.innerText = "Sync Check (Orphans)"; }
+        // FIX: Update timestamp to prevent infinite loop in background sync
+        localStorage.setItem('last_orphan_cleanup_ts', Date.now().toString());
+        
+        if(btn) { btn.disabled = false; btn.innerText = "Sync Check (Orphans)"; }
         if(!silent && count === 0) alert("Sync Check Complete. Local data is consistent with server.");
         return;
     }
