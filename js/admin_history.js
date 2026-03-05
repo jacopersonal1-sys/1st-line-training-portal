@@ -156,7 +156,7 @@ async function deleteHistorySubmission(id) {
     
     // 2. Remove from Records (Local)
     let records = JSON.parse(localStorage.getItem('records') || '[]');
-    // Find record to soft delete on server later
+    // Find record to delete on server
     const targetRecord = records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle);
     
     records = records.filter(r => !(r.trainee === sub.trainee && r.assessment === sub.testTitle));

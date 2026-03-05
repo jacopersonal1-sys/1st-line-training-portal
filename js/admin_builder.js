@@ -548,33 +548,72 @@ function editTest(id, targetQIdx = null) {
 function loadManageTests() {
     const container = document.getElementById('testListAdmin');
     if (!container) return;
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     
-    // Group by Type
-    const standard = tests.filter(t => !t.type || t.type === 'standard');
-    const live = tests.filter(t => t.type === 'live');
-    const vetting = tests.filter(t => t.type === 'vetting');
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const search = document.getElementById('testManagerSearch') ? document.getElementById('testManagerSearch').value.toLowerCase() : '';
+    
+    // Filter
+    const filtered = tests.filter(t => t.title.toLowerCase().includes(search));
 
-    const renderGroup = (title, list, color) => {
-        if (list.length === 0) return '';
-        return `
-            <h4 style="border-bottom:2px solid ${color}; padding-bottom:5px; margin-top:15px; color:${color};">${title}</h4>
-            ${list.map(t => `
-        <div class="test-card-row">
-            <div><strong>${t.title}</strong><br><small>${t.questions.length} Questions</small></div>
-            <div>
-                ${(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? `
-                <button class="btn-secondary btn-sm" onclick="copyTest('${t.id}')" title="Copy"><i class="fas fa-copy"></i></button>
-                <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')"><i class="fas fa-edit"></i></button>
-                <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
-            </div>
-        </div>`).join('')}`;
-    };
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);">No assessments found.</div>';
+        return;
+    }
 
-    container.innerHTML = 
-        renderGroup("Standard Assessments", standard, "var(--text-main)") +
-        renderGroup("Live Assessments", live, "var(--primary)") +
-        renderGroup("Vetting Tests", vetting, "#9b59b6");
+    let html = `
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>Assessment Name</th>
+                    <th>Type</th>
+                    <th>Stats</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    filtered.forEach(t => {
+        const testSubs = subs.filter(s => s.testId == t.id);
+        const pending = testSubs.filter(s => s.status === 'pending').length;
+        const completed = testSubs.filter(s => s.status === 'completed').length;
+
+        let icon = '<i class="fas fa-file-alt" style="color:var(--text-muted);"></i>';
+        let typeLabel = 'Standard';
+        if (t.type === 'vetting') { icon = '<i class="fas fa-shield-alt" style="color:#9b59b6;"></i>'; typeLabel = 'Vetting'; }
+        if (t.type === 'live') { icon = '<i class="fas fa-satellite-dish" style="color:var(--primary);"></i>'; typeLabel = 'Live'; }
+
+        html += `
+            <tr>
+                <td>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="font-size:1.2rem; width:30px; text-align:center;">${icon}</div>
+                        <div>
+                            <div style="font-weight:bold;">${t.title}</div>
+                            <div style="font-size:0.8rem; color:var(--text-muted);">${t.questions ? t.questions.length : 0} Questions</div>
+                        </div>
+                    </div>
+                </td>
+                <td><span style="font-size:0.8rem; background:var(--bg-input); padding:2px 8px; border-radius:4px;">${typeLabel}</span></td>
+                <td>
+                    <div style="font-size:0.8rem;">
+                        <span style="color:var(--text-muted);">Attempts:</span> <strong>${testSubs.length}</strong>
+                        ${pending > 0 ? `<span style="color:#e74c3c; margin-left:5px; font-weight:bold;">(${pending} Pending)</span>` : ''}
+                    </div>
+                </td>
+                <td style="text-align:right;">
+                    ${(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? `
+                    <button class="btn-secondary btn-sm" onclick="copyTest('${t.id}')" title="Duplicate"><i class="fas fa-copy"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')" title="Edit"><i class="fas fa-edit"></i></button>
+                    <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')" title="Delete"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
         
     // Initialize Search UI if available
     if (typeof initUniversalSearch === 'function') initUniversalSearch();
@@ -586,7 +625,10 @@ async function deleteTest(id) {
     tests = tests.filter(t => t.id != id);
     localStorage.setItem('tests', JSON.stringify(tests));
     
-    // UPDATED: Ensure deletion syncs immediately via Supabase (Force)
+    // HARD DELETE: Remove from server table immediately
+    if (window.supabaseClient) {
+        await window.supabaseClient.from('tests').delete().eq('id', id);
+    }
     if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
     
     loadManageTests();

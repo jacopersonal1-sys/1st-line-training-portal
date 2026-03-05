@@ -18,35 +18,36 @@ function loadAssessmentDashboard() {
         return;
     }
 
+    // Calculate Global Stats
+    const totalTests = tests.length;
+    const totalPending = subs.filter(s => s.status === 'pending').length;
+    const totalCompleted = subs.filter(s => s.status === 'completed').length;
+
     let html = `
-    <table class="admin-table">
-        <thead>
-            <tr>
-                <th>Assessment Title</th>
-                <th style="text-align:center;">Attempts</th>
-                <th style="text-align:center; color:var(--primary);">Pending Review</th>
-                <th style="text-align:center; color:green;">Completed</th>
-            </tr>
-        </thead>
-        <tbody>`;
-
-    tests.forEach(t => {
-        const testSubs = subs.filter(s => s.testId == t.id);
-        const pending = testSubs.filter(s => s.status === 'pending').length;
-        const completed = testSubs.filter(s => s.status === 'completed').length;
-
-        const icon = t.type === 'vetting' ? '<i class="fas fa-shield-alt" style="color:#9b59b6;"></i>' : (t.type === 'live' ? '<i class="fas fa-satellite-dish" style="color:var(--primary);"></i>' : '<i class="fas fa-file-alt" style="color:var(--text-muted);"></i>');
-
-        html += `
-            <tr>
-                <td>${icon} <strong>${t.title}</strong></td>
-                <td align="center">${testSubs.length}</td>
-                <td align="center"><b style="${pending > 0 ? 'color:var(--primary);' : 'opacity:0.5;'}">${pending}</b></td>
-                <td align="center"><b style="color:green;">${completed}</b></td>
-            </tr>`;
-    });
-
-    html += `</tbody></table>`;
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:20px;">
+            <div class="card" style="text-align:center; padding:15px; display:flex; align-items:center; gap:15px;">
+                <div style="width:50px; height:50px; background:var(--bg-input); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.5rem; color:var(--primary);"><i class="fas fa-clipboard-list"></i></div>
+                <div style="text-align:left;">
+                    <div style="font-size:1.8rem; font-weight:bold; line-height:1;">${totalTests}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Active Assessments</div>
+                </div>
+            </div>
+            <div class="card" style="text-align:center; padding:15px; display:flex; align-items:center; gap:15px;">
+                <div style="width:50px; height:50px; background:rgba(231, 76, 60, 0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.5rem; color:#e74c3c;"><i class="fas fa-highlighter"></i></div>
+                <div style="text-align:left;">
+                    <div style="font-size:1.8rem; font-weight:bold; line-height:1; color:#e74c3c;">${totalPending}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Pending Review</div>
+                </div>
+            </div>
+            <div class="card" style="text-align:center; padding:15px; display:flex; align-items:center; gap:15px;">
+                <div style="width:50px; height:50px; background:rgba(46, 204, 113, 0.1); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.5rem; color:#2ecc71;"><i class="fas fa-check-circle"></i></div>
+                <div style="text-align:left;">
+                    <div style="font-size:1.8rem; font-weight:bold; line-height:1; color:#2ecc71;">${totalCompleted}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Completed Tests</div>
+                </div>
+            </div>
+        </div>
+    `;
     container.innerHTML = html;
 }
 
@@ -59,6 +60,14 @@ function loadMarkingQueue() {
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const pending = subs.filter(s => s.status === 'pending');
+
+    // Update Badge
+    const badge = document.getElementById('markingCountBadge');
+    if (badge) {
+        badge.innerText = pending.length;
+        if (pending.length > 0) badge.classList.remove('hidden');
+        else badge.classList.add('hidden');
+    }
 
     if (pending.length === 0) {
         container.innerHTML = '<div style="padding:15px; text-align:center; color:var(--text-muted); background:var(--bg-input); border-radius:8px;">No assessments awaiting review.</div>';

@@ -1039,6 +1039,12 @@ async function clearLiveBookings() {
     localStorage.setItem('liveBookings', '[]');
     localStorage.setItem('cancellationCounts', '{}'); 
     
+    // HARD DELETE: Wipe table rows for Row-Level Sync
+    if (window.supabaseClient) {
+        await window.supabaseClient.from('live_bookings').delete().neq('id', 'placeholder');
+        // cancellationCounts is a blob, handled by secureScheduleSave
+    }
+
     await secureScheduleSave();
     
     renderLiveTable();
@@ -1352,6 +1358,7 @@ async function deleteSchedule(id) {
     }
     
     localStorage.setItem('schedules', JSON.stringify(newSchedules));
+    // HARD DELETE: Force overwrite of the schedules blob
     if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
     
     // Switch to first available

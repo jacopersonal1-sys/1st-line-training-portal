@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.4.2**: **Feature Expansion**: Added Broadcast Message capability for Team Leaders. Enabled PDF uploads for Assessment Reference material. Implemented configuration write protection to prevent legacy client overwrites.
 - **v2.4.1**: **UX & Stability**: Added manual Ping button for latency testing. Fixed "Monitor Live" count error in Admin Database tools.
 - **v2.4.0**: **Unlimited Architecture**: Enabled Global Realtime Sync (Push) for instant updates. Migrated Assessments to Row-Level Sync for scalability. Added Image Upload support for Test Builder. Added "My Team" widget for Team Leaders.
 - **v2.3.10**: **Stability Release**: Finalized robust failover logic, fixed "Zombie Data" recurrence during server switches, and hardened real-time assessment engines against race conditions.

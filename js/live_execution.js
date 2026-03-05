@@ -1056,6 +1056,11 @@ async function endLiveSession() {
     session.active = false;
     localStorage.setItem('liveSession', JSON.stringify(session));
     
+    // HARD DELETE: Remove active session row from server to prevent stale data
+    if (window.supabaseClient && session.sessionId) {
+        await window.supabaseClient.from('live_sessions').delete().eq('id', session.sessionId);
+    }
+
     await updateGlobalSessionArray(session, false);
     showTab('live-assessment');
 }

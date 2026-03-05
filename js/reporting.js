@@ -534,6 +534,7 @@ async function deleteSavedReport(id) {
     saved = saved.filter(r => r.id !== id);
     localStorage.setItem('savedReports', JSON.stringify(saved));
     
+    // HARD DELETE: Remove from server table immediately
     if (window.supabaseClient) await window.supabaseClient.from('saved_reports').delete().eq('id', id.toString());
     
     await secureReportSave();

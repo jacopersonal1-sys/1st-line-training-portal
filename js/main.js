@@ -489,24 +489,24 @@ window.onload = async function() {
                 if(txt) txt.innerText = "Migrating Data to New Server...";
 
                 // Use 'false' for force to enable Smart Merge for Blobs (safer), but cleared hash_maps force Rows.
-                // EXCLUDE system_config to prevent overwriting server settings with stale local config
-                const allKeys = Object.keys(DB_SCHEMA || {}).filter(k => k !== 'system_config');
-                await saveToServer(allKeys, false); 
-                
+                await saveToServer(null, false); 
                 console.log("Migration: Local data pushed to new server.");
-            } catch(e) { 
-                console.error("Migration Push Failed (Non-Critical):", e); 
-                // Continue anyway so we don't get stuck in a loop
-            }
+            } catch(e) { console.error("Migration Push Failed:", e); }
         }
-        // CRITICAL FIX: Update this AFTER attempt, regardless of success, to stop the loop.
-        localStorage.setItem('last_connected_server', currentTarget);
     }
+    localStorage.setItem('last_connected_server', currentTarget);
 
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
-            const success = await loadFromServer();
+            // TIMEOUT WRAPPER: Don't let a slow server block boot for more than 15 seconds (Increased for Dev)
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Connection Timed Out")), 15000));
+            
+            const success = await Promise.race([
+                loadFromServer(),
+                timeoutPromise
+            ]);
+            
             if (!success) throw new Error("Initial Sync Failed");
             
             // --- SERVER AUTHORITY CHECK ---
@@ -525,7 +525,14 @@ window.onload = async function() {
                         const cloudClient = window.supabase.createClient(window.CLOUD_CREDENTIALS.url, window.CLOUD_CREDENTIALS.key, {
                             auth: { persistSession: false }
                         });
-                        const { error } = await cloudClient.from('app_documents').select('key').limit(1);
+                        
+                        // TIMEOUT for Recovery Check (5s)
+                        const recoveryTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Recovery Timeout")), 5000));
+                        const { error } = await Promise.race([
+                            cloudClient.from('app_documents').select('key').limit(1),
+                            recoveryTimeout
+                        ]);
+
                         if (!error) {
                             alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
                             localStorage.setItem('active_server_target', 'cloud');
@@ -541,11 +548,7 @@ window.onload = async function() {
             // Prevent auto-save to avoid overwriting cloud data with empty local data
             if(typeof AUTO_BACKUP !== 'undefined') AUTO_BACKUP = false; 
         }
-        // FIX: Always hide loader after load attempt, even if it failed
-        if(loader) loader.classList.add('hidden');
     }
-    // Fallback: Ensure loader is hidden if loadFromServer is missing
-    else if(loader) loader.classList.add('hidden');
 
     // --- APPLY CONFIG & START FAILOVER LOOKOUT ---
     if (typeof applySystemConfig === 'function') applySystemConfig();
@@ -553,6 +556,9 @@ window.onload = async function() {
     // --- NEW: Start Real-Time Polling (Heartbeat & Sync) ---
     // This activates the Supabase polling defined in data.js
     if (typeof startRealtimeSync === 'function') {
+        // Enable Instant Updates (Push)
+        if (typeof initGlobalRealtime === 'function') initGlobalRealtime();
+        // Start Polling (Fallback/Heartbeat)
         startRealtimeSync();
     }
     // ------------------------------------
@@ -714,6 +720,9 @@ window.onload = async function() {
     if (savedSession && typeof checkAttendanceStatus === 'function') {
         setTimeout(checkAttendanceStatus, 1500); 
     }
+
+    // HIDE LOADER
+    if(loader) loader.classList.add('hidden');
 };
 
 // --- REFERENCE VIEWER (Draggable Window) ---
@@ -729,8 +738,10 @@ window.openReferenceViewer = function(url) {
     
     let content = '';
     // Simple check for images vs webpages
-    if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
+    if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith('data:image')) {
         content = `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`;
+    } else if (url.match(/\.pdf$/i) || url.startsWith('data:application/pdf')) {
+        content = `<iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>`;
     } else {
         content = `<webview src="${url}" style="width:100%; height:100%; border:none;" allowpopups></webview>`;
     }
@@ -918,6 +929,28 @@ function updateSidebarVisibility() {
                 indicator.style.background = isLocal ? 'rgba(155, 89, 182, 0.2)' : 'rgba(52, 152, 219, 0.2)';
                 indicator.style.color = isLocal ? '#9b59b6' : '#3498db';
                 indicator.innerHTML = isLocal ? '<i class="fas fa-server"></i> Local' : '<i class="fas fa-cloud"></i> Cloud';
+                
+                // Add Ping Button
+                const pingBtn = document.createElement('i');
+                pingBtn.className = 'fas fa-network-wired';
+                pingBtn.style.marginLeft = '8px';
+                pingBtn.style.cursor = 'pointer';
+                pingBtn.style.fontSize = '0.8rem';
+                pingBtn.style.opacity = '0.7';
+                pingBtn.title = "Test Latency";
+                pingBtn.onclick = async function() {
+                    this.className = 'fas fa-circle-notch fa-spin';
+                    const start = Date.now();
+                    try {
+                        if (window.supabaseClient) {
+                            await window.supabaseClient.from('app_documents').select('key').limit(1);
+                            const ms = Date.now() - start;
+                            this.className = 'fas fa-network-wired';
+                            alert(`Latency: ${ms}ms`);
+                        } else { alert("Offline"); this.className = 'fas fa-ban'; }
+                    } catch(e) { this.className = 'fas fa-exclamation-triangle'; alert("Ping Failed"); }
+                };
+                indicator.appendChild(pingBtn);
                 header.appendChild(indicator);
             }
 
@@ -1533,6 +1566,27 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.2": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Team Leaders:</strong> Added ability to post Broadcast Messages/Announcements to trainees.</li>
+                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Added support for uploading PDF documents as reference material.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added protection to prevent older clients from overwriting global server configuration.</li>
+            </ul>`,
+        "2.4.1": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System Tools:</strong> Added manual "Ping" button to server indicator for latency testing.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fixes:</strong> Resolved display error in Admin Database status check.</li>
+            </ul>`,
+        "2.4.0": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Global Realtime:</strong> System now uses instant push updates instead of polling, improving speed and reducing bandwidth.</li>
+                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Assessments now support Image Uploads and sync more efficiently.</li>
+                <li style="margin-bottom: 8px;"><strong>Team Leaders:</strong> Added "My Team" widget for quick attendance and score visibility.</li>
+            </ul>`,
+        "2.3.10": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Finalized robust failover logic and data integrity checks for dual-server environments.</li>
+            </ul>`,
         "2.3.9": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed "Zombie Data" issue where deleted items would reappear after a server switch or sync.</li>

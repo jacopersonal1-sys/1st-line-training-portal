@@ -234,7 +234,7 @@ async function deleteGroup(groupId) {
     delete rosters[groupId];
     localStorage.setItem('rosters', JSON.stringify(rosters));
     
-    // FIX: Force overwrite rosters to ensure deletion persists (Server Wins strategy would restore it otherwise)
+    // HARD DELETE: Force overwrite rosters to ensure deletion persists
     if(typeof saveToServer === 'function') await saveToServer(['rosters'], true);
     
     if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Group', `Deleted group ${groupId}`);
@@ -429,6 +429,7 @@ function loadAdminUsers() {
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const savedReports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const search = document.getElementById('userSearch') ? document.getElementById('userSearch').value.toLowerCase() : '';
+    const roleFilter = document.getElementById('userRoleFilter') ? document.getElementById('userRoleFilter').value : '';
     
     let createContainer = document.getElementById('createUserContainer');
     if (!createContainer) {
@@ -456,12 +457,16 @@ function loadAdminUsers() {
                 if(searchBox) searchBox.insertAdjacentHTML('afterend', btnHtml);
             }
         }
-        displayUsers = users.filter(u => u.user.toLowerCase().includes(search));
+        displayUsers = users.filter(u => {
+            const matchesSearch = u.user.toLowerCase().includes(search);
+            const matchesRole = roleFilter ? u.role === roleFilter : true;
+            return matchesSearch && matchesRole;
+        });
     } else if (CURRENT_USER.role === 'special_viewer') {
         if(createContainer) createContainer.classList.add('hidden');
         if(scanBtn) scanBtn.classList.add('hidden');
         // Special viewer sees all users but cannot edit
-        displayUsers = users.filter(u => u.user.toLowerCase().includes(search));
+        displayUsers = users.filter(u => u.user.toLowerCase().includes(search) && (roleFilter ? u.role === roleFilter : true));
     } 
     else {
         if(createContainer) createContainer.classList.add('hidden');
@@ -476,6 +481,20 @@ function loadAdminUsers() {
 
     const userList = document.getElementById('userList');
     if(userList) {
+        // SECURITY: Inject Super Admin option into Create dropdown ONLY if current user is Super Admin
+        const createRoleSelect = document.getElementById('newUserRole');
+        if (createRoleSelect) {
+            const existingOpt = createRoleSelect.querySelector('option[value="super_admin"]');
+            if (existingOpt) existingOpt.remove(); // Reset
+
+            if (CURRENT_USER.role === 'super_admin') {
+                const opt = document.createElement('option');
+                opt.value = 'super_admin';
+                opt.innerText = 'Super Admin';
+                createRoleSelect.appendChild(opt);
+            }
+        }
+
         userList.innerHTML = displayUsers.map((u,i) => {
             let actions = '';
             // Escape single quotes for onclick handler safety
@@ -498,8 +517,14 @@ function loadAdminUsers() {
                 
                 const impBtn = (CURRENT_USER.role === 'super_admin') ? `<button class="btn-primary btn-sm" onclick="impersonateUser('${safeUser}')" title="Impersonate"><i class="fas fa-mask"></i></button>` : '';
 
+                // NEW: Demote Button (Super Admin Only)
+                let demoteBtn = '';
+                if (CURRENT_USER.role === 'super_admin' && u.role === 'super_admin') {
+                    demoteBtn = `<button class="btn-warning btn-sm" onclick="demoteSuperAdmin('${safeUser}')" title="Demote to Admin"><i class="fas fa-level-down-alt"></i></button>`;
+                }
+
                 // FIX: Pass username instead of index to prevent deleting wrong user when sorted
-                actions = `${impBtn} ${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')"><i class="fas fa-trash"></i></button>`;
+                actions = `${demoteBtn} ${impBtn} ${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')"><i class="fas fa-trash"></i></button>`;
             } 
             else if (CURRENT_USER.role === 'special_viewer') {
                 actions = `<span style="color:var(--text-muted); font-style:italic;">View Only</span>`;
@@ -523,7 +548,18 @@ function loadAdminUsers() {
             const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '-';
             const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '-';
 
-            return `<tr><td>${avatarHtml}${displayUser}</td><td>${u.role}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
+            let roleDisplay = u.role;
+            if (u.role === 'super_admin') {
+                roleDisplay = `<span style="color:#9b59b6; font-weight:bold; background:rgba(155, 89, 182, 0.1); padding:2px 6px; border-radius:4px;"><i class="fas fa-user-astronaut"></i> Super Admin</span>`;
+            } else if (u.role === 'admin') {
+                roleDisplay = `<span style="color:var(--primary); font-weight:bold; background:rgba(243, 112, 33, 0.1); padding:2px 6px; border-radius:4px;"><i class="fas fa-user-shield"></i> Admin</span>`;
+            } else if (u.role === 'teamleader') {
+                roleDisplay = `<span style="color:#2ecc71; font-weight:bold; background:rgba(46, 204, 113, 0.1); padding:2px 6px; border-radius:4px;"><i class="fas fa-users"></i> Team Leader</span>`;
+            } else if (u.role === 'trainee') {
+                roleDisplay = `<span style="color:var(--text-muted); font-size:0.9rem;">Trainee</span>`;
+            }
+
+            return `<tr><td>${avatarHtml}${displayUser}</td><td>${roleDisplay}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
         }).join(''); 
     }
 }
@@ -632,6 +668,21 @@ async function confirmMoveUser() {
     }
 }
 
+async function demoteSuperAdmin(username) {
+    if (!confirm(`Demote ${username} from Super Admin to Admin?`)) return;
+
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const idx = users.findIndex(u => u.user === username);
+    
+    if (idx > -1) {
+        users[idx].role = 'admin';
+        localStorage.setItem('users', JSON.stringify(users));
+        await secureUserSave();
+        loadAdminUsers();
+        if (typeof showToast === 'function') showToast(`${username} demoted to Admin.`, "success");
+    }
+}
+
 function generatePassword() { 
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$";
     let pass = "";
@@ -654,6 +705,11 @@ async function addUser() {
     const p = document.getElementById('newUserPass').value;
     const r = document.getElementById('newUserRole').value; 
     
+    // SECURITY: Prevent Privilege Escalation
+    if (r === 'super_admin' && CURRENT_USER.role !== 'super_admin') {
+        return alert("Access Denied: Only Super Admins can create Super Admins.");
+    }
+
     if(!u || !p) return; 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     if(users.find(x => x.user === u)) return alert("User exists"); 
@@ -725,6 +781,8 @@ function openUserEdit(username) {
     editTargetIndex = index;
     const u = users[index];
     
+    const isSuper = CURRENT_USER.role === 'super_admin';
+
     const bindingInfo = u.boundClientId 
         ? `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">Bound to Client: <code>${u.boundClientId}</code> <button class="btn-danger btn-sm" onclick="unbindUserClient(${index})" style="padding:0 5px; margin-left:5px;">Unbind</button></div>` 
         : `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">No Client Binding (Will bind on next login)</div>`;
@@ -739,7 +797,8 @@ function openUserEdit(username) {
             <option value="trainee">Trainee</option>
             <option value="teamleader">Team Leader</option>
             <option value="admin">Admin</option>
-            <option value="super_admin">Super Admin</option>
+            <option value="special_viewer">Special Viewer</option>
+            ${isSuper ? '<option value="super_admin">Super Admin</option>' : ''}
         </select>
         <label>Idle Timeout (Minutes)</label>
         <input type="number" id="editUserTimeout" value="${u.idleTimeout || 15}" min="1" placeholder="Default: 15">
@@ -783,7 +842,15 @@ async function saveUserEdit() {
     }
     
     if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
-        users[editTargetIndex].role = document.getElementById('editUserRole').value;
+        const newRole = document.getElementById('editUserRole').value;
+        
+        // SECURITY: Prevent Privilege Escalation
+        if (newRole === 'super_admin' && CURRENT_USER.role !== 'super_admin') {
+            alert("Security Alert: Only existing Super Admins can promote users to Super Admin.");
+            return;
+        }
+        
+        users[editTargetIndex].role = newRole;
     }
 
     const timeoutVal = parseInt(document.getElementById('editUserTimeout').value);
