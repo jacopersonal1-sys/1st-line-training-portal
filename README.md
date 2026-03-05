@@ -155,6 +155,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.4.1**: **UX & Stability**: Added manual Ping button for latency testing. Fixed "Monitor Live" count error in Admin Database tools.
+- **v2.4.0**: **Unlimited Architecture**: Enabled Global Realtime Sync (Push) for instant updates. Migrated Assessments to Row-Level Sync for scalability. Added Image Upload support for Test Builder. Added "My Team" widget for Team Leaders.
 - **v2.3.10**: **Stability Release**: Finalized robust failover logic, fixed "Zombie Data" recurrence during server switches, and hardened real-time assessment engines against race conditions.
 - **v2.3.9**: **Data Integrity & Real-time Hardening**: Implemented "Smart Orphan Cleanup" to prevent deleted data from reappearing ("Zombie Data"). Upgraded Vetting Arena to support multiple concurrent sessions. Hardened Live Assessment answer syncing to prevent race conditions.
 - **v2.3.8**: **Critical Failover Fix**: Resolved issue where Auto-Recovery wouldn't trigger because sync errors were being suppressed. App now correctly detects dead Local connections and reverts to Cloud.

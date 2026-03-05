@@ -1223,6 +1223,7 @@ window.checkRowSyncStatus = async function() {
         const locRep = (JSON.parse(localStorage.getItem('savedReports') || '[]')).length;
         const locReq = (JSON.parse(localStorage.getItem('linkRequests') || '[]')).length;
         const locMon = Object.keys(JSON.parse(localStorage.getItem('monitor_data') || '{}')).length;
+        const locTests = (JSON.parse(localStorage.getItem('tests') || '[]')).length;
         
         // Remote Counts (Head Query)
         const { count: remRecs } = await supabaseClient.from('records').select('*', { count: 'exact', head: true });
@@ -1234,6 +1235,8 @@ window.checkRowSyncStatus = async function() {
         const { count: remRep } = await supabaseClient.from('saved_reports').select('*', { count: 'exact', head: true });
         const { count: remReq } = await supabaseClient.from('link_requests').select('*', { count: 'exact', head: true });
         const { count: remCal } = await supabaseClient.from('calendar_events').select('*', { count: 'exact', head: true });
+        const { count: remMon } = await supabaseClient.from('monitor_state').select('*', { count: 'exact', head: true });
+        const { count: remTests } = await supabaseClient.from('tests').select('*', { count: 'exact', head: true });
         
         const getStatus = (loc, rem) => {
             if (loc === rem) return '<span style="color:#2ecc71; font-weight:bold;">Synced</span>';
@@ -1263,6 +1266,7 @@ window.checkRowSyncStatus = async function() {
                     <tr><td>Requests</td><td>${locReq}</td><td>${remReq||0}</td><td>${getStatus(locReq, remReq||0)}</td><td>${getTs('linkRequests')}</td></tr>
                     <tr><td>Monitor Live</td><td>${locMon}</td><td>${remMon||0}</td><td>${getStatus(locMon, remMon||0)}</td><td>-</td></tr>
                     <tr><td>Calendar</td><td>${locCal}</td><td>${remCal||0}</td><td>${getStatus(locCal, remCal||0)}</td><td>${getTs('calendarEvents')}</td></tr>
+                    <tr><td>Tests</td><td>${locTests}</td><td>${remTests||0}</td><td>${getStatus(locTests, remTests||0)}</td><td>${getTs('tests')}</td></tr>
                 </tbody>
             </table>
         `;

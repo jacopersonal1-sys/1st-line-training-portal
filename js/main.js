@@ -1557,6 +1557,17 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.1": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System Tools:</strong> Added manual "Ping" button to server indicator for latency testing.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fixes:</strong> Resolved display error in Admin Database status check.</li>
+            </ul>`,
+        "2.4.0": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Global Realtime:</strong> System now uses instant push updates instead of polling, improving speed and reducing bandwidth.</li>
+                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Assessments now support Image Uploads and sync more efficiently.</li>
+                <li style="margin-bottom: 8px;"><strong>Team Leaders:</strong> Added "My Team" widget for quick attendance and score visibility.</li>
+            </ul>`,
         "2.3.10": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Finalized robust failover logic and data integrity checks for dual-server environments.</li>
