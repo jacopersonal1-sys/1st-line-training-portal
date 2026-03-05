@@ -199,6 +199,13 @@ function renderDashboard() {
         
         buildTLWidgets(content);
         container.appendChild(content);
+        
+        // NEW: Add Notice Manager for TLs (Restricted)
+        const manager = document.createElement('div');
+        manager.className = 'dash-panel full-width';
+        manager.style.marginTop = '20px';
+        manager.innerHTML = buildNoticeManager();
+        container.appendChild(manager);
     } else {
         // Urgent Notices (Top for Trainee)
         const noticeHtml = buildNoticeBanners(role);
@@ -331,9 +338,12 @@ async function updateDashboardHealth() {
 
 function buildNoticeBanners(role) {
     const notices = JSON.parse(localStorage.getItem('notices') || '[]');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    
     // Filter: Active AND (Target Role Matches OR Target is All)
     const activeNotices = notices.filter(n => 
-        n.active && (n.targetRole === 'all' || n.targetRole === role)
+        n.active && (n.targetRole === 'all' || n.targetRole === role) &&
+        (!n.targetGroup || n.targetGroup === 'all' || (role === 'trainee' && isUserInGroup(CURRENT_USER.user, n.targetGroup, rosters)))
     );
 
     if (activeNotices.length === 0) return '';
@@ -365,12 +375,22 @@ function buildNoticeBanners(role) {
     return html;
 }
 
+// Helper for Group Check
+function isUserInGroup(user, groupId, rosters) {
+    if (!groupId || groupId === 'all') return true;
+    const members = rosters[groupId] || [];
+    return members.some(m => m.toLowerCase() === user.toLowerCase());
+}
+
 function buildNoticeManager() {
     if (CURRENT_USER.role === 'special_viewer') {
         return '<div style="color:var(--text-muted); text-align:center; padding:20px;">Notice Management Hidden (View Only)</div>';
     }
 
     const notices = JSON.parse(localStorage.getItem('notices') || '[]');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const isTL = CURRENT_USER.role === 'teamleader';
+    
     // Sort by date desc
     notices.sort((a,b) => new Date(b.date) - new Date(a.date));
 
@@ -387,7 +407,7 @@ function buildNoticeManager() {
         <tr style="background:rgba(39, 174, 96, 0.1);">
             <td>${n.date}</td>
             <td>${n.message}</td>
-            <td>${n.targetRole}</td>
+            <td>${n.targetRole} ${n.targetGroup ? `(${n.targetGroup})` : ''}</td>
             <td>
                 <div class="notice-ack-wrapper">
                     <span style="font-weight:bold;">${n.acks ? n.acks.length : 0} Reads</span>
@@ -409,7 +429,7 @@ function buildNoticeManager() {
         <tr>
             <td style="opacity:0.6;">${n.date}</td>
             <td style="opacity:0.6;">${n.message}</td>
-            <td style="opacity:0.6;">${n.targetRole}</td>
+            <td style="opacity:0.6;">${n.targetRole} ${n.targetGroup ? `(${n.targetGroup})` : ''}</td>
             <td style="opacity:0.6;">
                 <div class="notice-ack-wrapper">
                     <span style="font-weight:bold;">${n.acks ? n.acks.length : 0} Reads</span>
@@ -426,9 +446,15 @@ function buildNoticeManager() {
         </tr>
     `).join('');
 
+    // Build Group Options
+    let groupOpts = '<option value="all">All Groups</option>';
+    Object.keys(rosters).sort().reverse().forEach(gid => {
+        groupOpts += `<option value="${gid}">${gid}</option>`;
+    });
+
     return `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h4><i class="fas fa-bullhorn"></i> Urgent Notice Board</h4>
+            <h4><i class="fas fa-bullhorn"></i> ${isTL ? 'Team Announcements' : 'Urgent Notice Board'}</h4>
         </div>
         
         <div style="display:flex; gap:10px; margin-bottom:20px; padding:15px; background:var(--bg-input); border-radius:8px;">
@@ -437,9 +463,12 @@ function buildNoticeManager() {
                 <option value="critical">Critical (Red)</option>
             </select>
             <select id="newNoticeRole" style="width:150px; margin:0;">
-                <option value="all">All Users</option>
+                ${!isTL ? '<option value="all">All Users</option>' : ''}
                 <option value="trainee">Trainees Only</option>
-                <option value="teamleader">Team Leaders Only</option>
+                ${!isTL ? '<option value="teamleader">Team Leaders Only</option>' : ''}
+            </select>
+            <select id="newNoticeGroup" style="width:150px; margin:0;">
+                ${groupOpts}
             </select>
             <input type="text" id="newNoticeMsg" placeholder="Type urgent message here..." style="margin:0; flex:1;">
             <button class="btn-primary" style="width:auto;" onclick="postNotice()">Post Notice</button>
@@ -482,6 +511,7 @@ async function postNotice() {
     const msg = document.getElementById('newNoticeMsg').value;
     const role = document.getElementById('newNoticeRole').value;
     const type = document.getElementById('newNoticeType').value;
+    const group = document.getElementById('newNoticeGroup').value;
     
     if(!msg) return alert("Message cannot be empty.");
 
@@ -492,6 +522,7 @@ async function postNotice() {
         id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
         message: msg,
         targetRole: role,
+        targetGroup: group, // NEW: Group Targeting
         type: type,
         active: true,
         date: new Date().toISOString().split('T')[0],
@@ -564,10 +595,13 @@ window.checkUrgentNoticesPopup = function() {
     if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
     
     const notices = JSON.parse(localStorage.getItem('notices') || '[]');
-    // Filter: Active AND (Target Role Matches OR Target is All) AND Not Acknowledged
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    
+    // Filter: Active AND Role Match AND Group Match AND Not Acknowledged
     const unread = notices.filter(n => 
         n.active && 
         (n.targetRole === 'all' || n.targetRole === 'trainee') &&
+        (!n.targetGroup || n.targetGroup === 'all' || isUserInGroup(CURRENT_USER.user, n.targetGroup, rosters)) &&
         (!n.acks || !n.acks.includes(CURRENT_USER.user))
     );
 

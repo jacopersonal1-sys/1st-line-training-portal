@@ -298,8 +298,8 @@ function renderBuilder() {
             </div>
             <div style="margin-bottom:10px;">
                 <div style="display:flex; gap:10px; align-items:center;">
-                    <input type="text" placeholder="Reference Image/Page URL (Optional)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary); flex:1;">
-                    <label class="btn-secondary btn-sm" style="cursor:pointer; margin:0; display:flex; align-items:center; gap:5px;" title="Upload Image"><i class="fas fa-upload"></i><input type="file" accept="image/*" style="display:none;" onchange="uploadImage(${idx}, this)"></label>
+                    <input type="text" placeholder="Reference URL (Image/PDF)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary); flex:1;">
+                    <label class="btn-secondary btn-sm" style="cursor:pointer; margin:0; display:flex; align-items:center; gap:5px;" title="Upload File"><i class="fas fa-upload"></i><input type="file" accept="image/*,application/pdf" style="display:none;" onchange="uploadImage(${idx}, this)"></label>
                     ${q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" title="Preview"><i class="fas fa-eye"></i></button>` : ''}
                 </div>
             </div>
@@ -328,9 +328,9 @@ function uploadImage(idx, input) {
     const file = input.files[0];
     if(!file) return;
     
-    // Limit to 1.5MB to prevent LocalStorage quotas from filling up too fast
-    if(file.size > 1.5 * 1024 * 1024) {
-        alert("Image too large. Please use an image under 1.5MB.");
+    // Limit to 3MB (Increased for PDF support)
+    if(file.size > 3 * 1024 * 1024) {
+        alert("File too large. Please use a file under 3MB to prevent storage issues.");
         input.value = "";
         return;
     }

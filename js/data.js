@@ -702,6 +702,14 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
         if(!silent) updateSyncUI('busy');
 
         for (const key of keysToSave) {
+            // GUARD: Protect System Config from non-Super Admins
+            // This prevents old/standard clients from overwriting global server settings
+            if (key === 'system_config') {
+                if (!CURRENT_USER || CURRENT_USER.role !== 'super_admin') {
+                    continue; 
+                }
+            }
+
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
             
             // --- STRATEGY A: ROW-LEVEL SYNC (Records, Submissions, Logs) ---

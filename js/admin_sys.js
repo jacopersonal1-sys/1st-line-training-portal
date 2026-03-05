@@ -2126,13 +2126,21 @@ window.testServerConnections = async function() {
         }
     };
 
+    // Helper: Timeout Wrapper (5s limit)
+    const checkWithTimeout = (client, ms = 5000) => {
+        return Promise.race([
+            client.from('app_documents').select('key').limit(1),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), ms))
+        ]);
+    };
+
     // 1. Test Cloud
     updateStatus('status_cloud', 'checking');
     const cloudUrl = window.CLOUD_CREDENTIALS ? window.CLOUD_CREDENTIALS.url : '';
     const cloudKey = window.CLOUD_CREDENTIALS ? window.CLOUD_CREDENTIALS.key : '';
     if(cloudUrl && cloudKey) {
         const start = Date.now();
-        try { const client = window.supabase.createClient(cloudUrl, cloudKey, { auth: { persistSession: false, storageKey: 'test-cloud' } }); await client.from('app_documents').select('key').limit(1); updateStatus('status_cloud', 'online', Date.now() - start); } catch(e) { updateStatus('status_cloud', 'offline'); }
+        try { const client = window.supabase.createClient(cloudUrl, cloudKey, { auth: { persistSession: false, storageKey: 'test-cloud' } }); await checkWithTimeout(client); updateStatus('status_cloud', 'online', Date.now() - start); } catch(e) { updateStatus('status_cloud', 'offline'); }
     } else { document.getElementById('status_cloud').innerText = "No Config"; }
 
     // 2. Test Local
@@ -2141,7 +2149,7 @@ window.testServerConnections = async function() {
     const localKey = document.getElementById('sa_srv_key').value.trim();
     if(localUrl && localKey) {
         const start = Date.now();
-        try { const client = window.supabase.createClient(localUrl, localKey, { auth: { persistSession: false, storageKey: 'test-local' } }); await client.from('app_documents').select('key').limit(1); updateStatus('status_local', 'online', Date.now() - start); } catch(e) { updateStatus('status_local', 'offline'); }
+        try { const client = window.supabase.createClient(localUrl, localKey, { auth: { persistSession: false, storageKey: 'test-local' } }); await checkWithTimeout(client); updateStatus('status_local', 'online', Date.now() - start); } catch(e) { updateStatus('status_local', 'offline'); }
     } else { document.getElementById('status_local').innerText = "Not Configured"; }
 };
 
