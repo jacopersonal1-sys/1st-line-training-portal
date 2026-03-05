@@ -35,7 +35,7 @@ if (typeof window !== 'undefined' && window.supabase) {
             }
         };
         window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
-        console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}).`);
+        console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}) -> ${SUPABASE_URL}`);
     } catch (e) {
         console.error("Supabase Initialization Failed:", e); 
         // FAILSAFE: If Local fails, revert to Cloud immediately

@@ -499,7 +499,14 @@ window.onload = async function() {
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
-            const success = await loadFromServer();
+            // TIMEOUT WRAPPER: Don't let a slow server block boot for more than 15 seconds (Increased for Dev)
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Connection Timed Out")), 15000));
+            
+            const success = await Promise.race([
+                loadFromServer(),
+                timeoutPromise
+            ]);
+            
             if (!success) throw new Error("Initial Sync Failed");
             
             // --- SERVER AUTHORITY CHECK ---

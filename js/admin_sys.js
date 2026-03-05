@@ -1786,15 +1786,34 @@ async function saveSuperAdminConfig() {
         local_key: getVal('sa_srv_key', '').trim()
     };
 
+    const oldTarget = localStorage.getItem('active_server_target');
+    const newTarget = config.server_settings.active;
+
     // IMMEDIATE SWITCH: If Admin changes the target, apply it locally immediately
     // This prevents getting stuck on a dead 'local' server.
-    const currentTarget = localStorage.getItem('active_server_target');
-    if (config.server_settings.active !== currentTarget) {
+    if (newTarget !== oldTarget) {
         localStorage.setItem('active_server_target', config.server_settings.active);
     }
 
     localStorage.setItem('system_config', JSON.stringify(config));
+    
+    // STANDARD SAVE (To currently connected server)
     if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
+    
+    // DUAL-WRITE: If switching servers, try to update the CLOUD config specifically
+    // This ensures that even if we are on Local, the Cloud knows we are on Local (or vice versa).
+    // This acts as the "Master Signal" for all clients.
+    if (newTarget !== oldTarget && window.CLOUD_CREDENTIALS) {
+        try {
+            const cloudClient = window.supabase.createClient(window.CLOUD_CREDENTIALS.url, window.CLOUD_CREDENTIALS.key);
+            await cloudClient.from('app_documents').upsert({ 
+                key: 'system_config', 
+                content: config, 
+                updated_at: new Date().toISOString() 
+            });
+            console.log("System Config dual-written to Cloud Master.");
+        } catch(e) { console.warn("Could not dual-write config to Cloud:", e); }
+    }
     
     if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'System Config', 'Updated Super Admin Settings');
 

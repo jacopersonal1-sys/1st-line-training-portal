@@ -275,7 +275,7 @@ async function loadFromServer(silent = false) {
             // FAILSAFE: Auto-switch to Cloud if Local is dead
             const currentTarget = localStorage.getItem('active_server_target');
             if (currentTarget === 'local' && (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))) {
-                console.error("Local Server Dead. Switching to Cloud...");
+                console.error("Local Server Dead (Load Failed). Switching to Cloud...");
                 localStorage.setItem('active_server_target', 'cloud');
                 setTimeout(() => location.reload(), 2000);
             }
