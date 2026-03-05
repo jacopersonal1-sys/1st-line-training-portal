@@ -86,6 +86,8 @@ function renderAdminArena() {
     if (session.active) {
         ADMIN_MONITOR_INTERVAL = setTimeout(async () => {
             try {
+                // NEW: Ensure server matches local state (Fixes empty table after server switch)
+                await ensureVettingServerState();
                 await adminPollVettingSession(); // Force fetch latest data
             } catch(e) { console.error("Vetting Poll Error:", e); }
             loadVettingArena();
@@ -297,13 +299,38 @@ function updateVettingStats(session) {
     if (elCompleted) elCompleted.innerText = completedCount;
 }
 
+// --- NEW: STATE RESTORATION (Fixes Server Switch Gap) ---
+async function ensureVettingServerState() {
+    if (!window.supabaseClient) return;
+    
+    const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false, "sessionId":null}');
+    if (!localSession.active) return;
+    const sessionId = localSession.sessionId || 'global_session';
+
+    // Check if server has data
+    const { data, error } = await window.supabaseClient
+        .from('vetting_sessions')
+        .select('id')
+        .eq('id', sessionId)
+        .single();
+    
+    // If server is empty/missing but we are active, PUSH immediately
+    if (!data || error) {
+        console.warn("Vetting Session missing on server. Restoring from local state...");
+        await saveVettingSessionDirectly(localSession);
+    }
+}
+
 // --- NEW: ADMIN POLLER (Ensures visibility even if Realtime fails) ---
 async function adminPollVettingSession() {
     if (!window.supabaseClient) return;
+    const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+    const sessionId = localSession.sessionId || 'global_session';
+
     const { data, error } = await window.supabaseClient
         .from('vetting_sessions')
         .select('data')
-        .eq('id', 'global_session')
+        .eq('id', sessionId)
         .single();
     
     if (data && data.data) {
@@ -321,6 +348,7 @@ async function startVettingSession() {
     if (!testId) return alert("Select a test.");
     
     const session = {
+        sessionId: Date.now() + "_" + Math.random().toString(36).substr(2, 5), // NEW: Unique ID
         active: true,
         testId: testId,
         targetGroup: groupId,
@@ -343,8 +371,14 @@ async function endVettingSession() {
     session.active = false;
     
     localStorage.setItem('vettingSession', JSON.stringify(session));
-    await saveVettingSessionDirectly(session);
-    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true); // Sync to app_documents for consistency
+    
+    // Remove from server to keep table clean (or mark inactive)
+    if (window.supabaseClient && session.sessionId) {
+        await window.supabaseClient.from('vetting_sessions').delete().eq('id', session.sessionId);
+    } else {
+        await saveVettingSessionDirectly(session);
+    }
+    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true);
     
     if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
     loadVettingArena();
@@ -363,8 +397,9 @@ async function toggleSecurity(username, enable) {
 async function saveVettingSessionDirectly(session) {
     if (!window.supabaseClient) return;
     // Upsert to 'vetting_sessions' table with fixed ID
+    const id = session.sessionId || 'global_session';
     await window.supabaseClient.from('vetting_sessions').upsert({
-        id: 'global_session',
+        id: id,
         data: session,
         updated_at: new Date().toISOString()
     });
@@ -374,11 +409,14 @@ async function saveVettingSessionDirectly(session) {
 async function patchTraineeStatus(username, statusData) {
     if (!window.supabaseClient) return;
     
+    const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+    const sessionId = localSession.sessionId || 'global_session';
+
     // 1. Fetch latest server state
     const { data, error } = await window.supabaseClient
         .from('vetting_sessions')
         .select('data')
-        .eq('id', 'global_session')
+        .eq('id', sessionId)
         .single();
         
     if (error || !data) return;
@@ -390,7 +428,7 @@ async function patchTraineeStatus(username, statusData) {
     serverSession.trainees[username] = { ...(serverSession.trainees[username] || {}), ...statusData };
     
     // 3. Save back
-    await window.supabaseClient.from('vetting_sessions').update({ data: serverSession, updated_at: new Date().toISOString() }).eq('id', 'global_session');
+    await window.supabaseClient.from('vetting_sessions').update({ data: serverSession, updated_at: new Date().toISOString() }).eq('id', sessionId);
 }
 
 // --- TRAINEE CONTROLS ---
@@ -545,10 +583,11 @@ function startTraineePreFlight() {
     // Prefer Realtime for session updates. Fallback to polling if unavailable.
     let usingRealtime = false;
     if (window.supabaseClient) {
+        // Listen to ALL changes, filter in handler
         const channel = window.supabaseClient.channel('vetting_room_trainee')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
                 const serverSession = payload.new ? payload.new.data : { active: false };
-                handleVettingUpdate(serverSession);
+                checkAndHandleSession(serverSession);
             })
             .subscribe();
         VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
@@ -567,6 +606,24 @@ function startTraineePreFlight() {
     checkSystemCompliance(); // Run immediately
 }
 
+function checkAndHandleSession(serverSession) {
+    // Logic: Is this session for ME?
+    if (!serverSession.active) return; // Ignore inactive updates unless it's OUR session ending
+    
+    // 1. Check Group
+    let isTarget = false;
+    if (!serverSession.targetGroup || serverSession.targetGroup === 'all') isTarget = true;
+    else {
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const members = rosters[serverSession.targetGroup] || [];
+        if (members.some(m => m.toLowerCase() === CURRENT_USER.user.toLowerCase())) isTarget = true;
+    }
+
+    if (isTarget) {
+        handleVettingUpdate(serverSession);
+    }
+}
+
 function handleVettingUpdate(serverSession) {
     const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
 
@@ -574,6 +631,7 @@ function handleVettingUpdate(serverSession) {
     localSession.active = serverSession.active;
     localSession.testId = serverSession.testId;
     localSession.targetGroup = serverSession.targetGroup;
+    localSession.sessionId = serverSession.sessionId; // Sync ID
 
     if (serverSession.trainees && serverSession.trainees[CURRENT_USER.user]) {
         if (!localSession.trainees) localSession.trainees = {};
@@ -604,15 +662,15 @@ function handleVettingUpdate(serverSession) {
 async function pollVettingSession() {
     if (!window.supabaseClient) return;
     
-    // Fetch from TABLE
+    // Fetch ALL active sessions
     const { data, error } = await window.supabaseClient
         .from('vetting_sessions')
-        .select('data')
-        .eq('id', 'global_session')
-        .single();
+        .select('data');
         
-    if (data && data.data) {
-        handleVettingUpdate(data.data);
+    if (data && data.length > 0) {
+        data.forEach(row => {
+            checkAndHandleSession(row.data);
+        });
     }
 }
 
@@ -830,7 +888,12 @@ async function updateTraineeStatus(status, timerStr = "") {
     
     VETTING_SAVE_TIMEOUT = setTimeout(() => {
         // FIX: Use Patch instead of Overwrite to prevent wiping other trainees
-        const currentLocal = JSON.parse(localStorage.getItem('vettingSession'));
+        let currentLocal = null;
+        try {
+            currentLocal = JSON.parse(localStorage.getItem('vettingSession'));
+        } catch(e) {
+            console.error("Vetting Session Parse Error", e);
+        }
         if (currentLocal && currentLocal.trainees && currentLocal.trainees[CURRENT_USER.user]) {
              patchTraineeStatus(CURRENT_USER.user, currentLocal.trainees[CURRENT_USER.user]);
         }
@@ -852,7 +915,11 @@ async function patchTraineeStatus(username, statusData) {
     
     const serverSession = data.data;
     if (!serverSession.trainees) serverSession.trainees = {};
-    
+
+    // Safety check: If server session is inactive but we are trying to update status, 
+    // it might mean the server reset. We should probably respect the server state or re-activate it?
+    // For now, we just patch our data in.
+
     // 2. Merge ONLY this user's data
     serverSession.trainees[username] = { ...(serverSession.trainees[username] || {}), ...statusData };
     
@@ -943,33 +1010,40 @@ async function checkAndEnforceVetting() {
     if (!window.supabaseClient) return;
     
     try {
+        // Fetch ALL active sessions
         const { data, error } = await window.supabaseClient
             .from('vetting_sessions')
-            .select('data')
-            .eq('id', 'global_session')
-            .single();
+            .select('data');
             
-        if (data && data.data) {
-            const serverSession = data.data;
-            
-            // Use existing handler to update state and UI
-            if (typeof handleVettingUpdate === 'function') handleVettingUpdate(serverSession);
+        if (data && data.length > 0) {
+            // Find the first one that targets me
+            // (In rare case of multiple active tests for same group, last one wins or UI might flicker. 
+            // Ideally Admin shouldn't schedule overlapping vetting tests for same group)
+            let serverSession = null;
             
             // Update Sidebar Visibility (Show/Hide tab based on active status)
             if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
 
-            if (serverSession.active) {
+            // Find relevant session
+            for (const row of data) {
+                const s = row.data;
+                if (!s.active) continue;
+
                 // Check if I am target
                 let isTarget = false;
-                if (!serverSession.targetGroup || serverSession.targetGroup === 'all') isTarget = true;
+                if (!s.targetGroup || s.targetGroup === 'all') isTarget = true;
                 else {
                     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-                    const members = rosters[serverSession.targetGroup] || [];
+                    const members = rosters[s.targetGroup] || [];
                     // Case-insensitive check
                     if (members.some(m => m.toLowerCase() === CURRENT_USER.user.toLowerCase())) isTarget = true;
                 }
                 
                 if (isTarget) {
+                    serverSession = s;
+                    // Use existing handler to update state and UI
+                    if (typeof handleVettingUpdate === 'function') handleVettingUpdate(serverSession);
+
                     // Check if already completed
                     const myData = serverSession.trainees ? serverSession.trainees[CURRENT_USER.user] : null;
                     if (!myData || myData.status !== 'completed') {

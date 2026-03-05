@@ -81,6 +81,7 @@ const ROW_MAP = {
     'linkRequests': 'link_requests',
     'calendarEvents': 'calendar_events'
 };
+window.ROW_MAP = ROW_MAP; // Expose globally
 
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
@@ -283,6 +284,89 @@ async function loadFromServer(silent = false) {
     }
 }
 
+// --- SMART ORPHAN CLEANUP (Server Authority) ---
+// Removes local items that have been deleted from the server.
+// PROTECTS: New items that haven't been synced yet (not in hash_map).
+async function syncOrphans(silent = true) {
+    if (!window.supabaseClient) return;
+    if (!silent) console.log("Starting Smart Orphan Cleanup...");
+
+    let totalRemoved = 0;
+
+    for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
+        try {
+            // 1. Get all Server IDs (Lightweight)
+            // We fetch in batches to handle large datasets
+            let serverIds = new Set();
+            let page = 0;
+            const pageSize = 1000;
+            
+            while(true) {
+                const { data, error } = await supabaseClient
+                    .from(tableName)
+                    .select('id')
+                    .range(page * pageSize, (page + 1) * pageSize - 1);
+                
+                if (error) throw error;
+                if (!data || data.length === 0) break;
+                
+                data.forEach(row => serverIds.add(row.id.toString()));
+                if (data.length < pageSize) break;
+                page++;
+            }
+
+            // 2. Compare with Local
+            const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+            const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
+            
+            const cleanData = localData.filter(item => {
+                if (!item.id) return true; // Keep items without IDs (shouldn't happen but safe)
+                const id = item.id.toString();
+
+                // Case A: Exists on Server -> KEEP
+                if (serverIds.has(id)) return true;
+
+                // Case B: Missing on Server
+                // Check if we have synced it before (exists in hash_map)
+                if (hashMap[id]) {
+                    // It WAS synced, but now gone from server -> DELETED remotely.
+                    // We should delete it locally to match Server Truth.
+                    return false; 
+                }
+
+                // Case C: Missing on Server AND Not in Hash Map
+                // This is a NEW local item not yet uploaded. -> KEEP
+                return true;
+            });
+
+            if (localData.length !== cleanData.length) {
+                const removed = localData.length - cleanData.length;
+                totalRemoved += removed;
+                localStorage.setItem(localKey, JSON.stringify(cleanData));
+                if(!silent) console.log(`[${localKey}] Removed ${removed} zombie records.`);
+                
+                // Cleanup Hash Map for deleted items
+                const newHashMap = { ...hashMap };
+                localData.forEach(item => {
+                    if (item.id && !cleanData.find(c => c.id === item.id)) {
+                        delete newHashMap[item.id];
+                    }
+                });
+                localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(newHashMap));
+            }
+
+        } catch (e) {
+            console.warn(`Orphan check failed for ${localKey}:`, e);
+        }
+    }
+
+    if (totalRemoved > 0 && !silent) {
+        if(typeof showToast === 'function') showToast(`Synced: Removed ${totalRemoved} deleted items.`, 'info');
+        if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+    }
+    return totalRemoved;
+}
+
 let SERVER_LOOKOUT_INTERVAL = null;
 
 // --- SERVER LOOKOUT (Dual-Aware Monitoring) ---
@@ -470,7 +554,8 @@ if (typeof module !== 'undefined' && module.exports) {
         DB_SCHEMA,
         loadFromServer,
         saveToServer,
-        performSmartMerge
+        performSmartMerge,
+        syncOrphans
     };
 }
 

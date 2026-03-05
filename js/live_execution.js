@@ -1039,19 +1039,31 @@ async function endLiveSession() {
 
 // --- HELPER: SYNC LOCAL SESSION TO GLOBAL ARRAY ---
 window.updateGlobalSessionArray = async function(localSession, force = true) {
+    // 1. Update Local Cache (for UI responsiveness)
     let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    
-    // Remove old version of this session
     allSessions = allSessions.filter(s => s.sessionId !== localSession.sessionId);
-    
-    // Add new version (if active or just completed)
-    // We keep completed sessions briefly to ensure sync, but cleanup logic should exist elsewhere
     allSessions.push(localSession);
-    
     localStorage.setItem('liveSessions', JSON.stringify(allSessions));
     
-    if (typeof saveToServer === 'function') {
-        await saveToServer(['liveSessions'], force);
+    // 2. Direct Table Upsert (More robust than full array push)
+    if (window.supabaseClient) {
+        const row = {
+            id: localSession.sessionId,
+            trainer: localSession.trainer,
+            data: localSession,
+            updated_at: new Date().toISOString()
+        };
+
+        const { error } = await window.supabaseClient
+            .from('live_sessions')
+            .upsert(row);
+            
+        if (error) console.error("Live Session Sync Error:", error);
+    } else {
+        // Fallback for offline/local-only mode
+        if (typeof saveToServer === 'function') {
+            await saveToServer(['liveSessions'], force);
+        }
     }
 }
 

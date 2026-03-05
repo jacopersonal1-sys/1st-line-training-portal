@@ -501,6 +501,10 @@ window.onload = async function() {
         try {
             const success = await loadFromServer();
             if (!success) throw new Error("Initial Sync Failed");
+            
+            // --- SERVER AUTHORITY CHECK ---
+            // Immediately clean up any local records that don't exist on the server
+            if (typeof syncOrphans === 'function') await syncOrphans(true);
         } catch (e) {
             console.error("CRITICAL: Failed to load cloud data.", e);
             
@@ -1521,6 +1525,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.3.9": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed "Zombie Data" issue where deleted items would reappear after a server switch or sync.</li>
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Upgraded to support multiple, concurrent vetting sessions without conflicts.</li>
+                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Hardened real-time answer syncing to improve stability for multiple trainers.</li>
+            </ul>`,
         "2.3.8": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Solved issue where the app would get stuck on a disconnected Local Server. It will now auto-revert to Cloud immediately.</li>

@@ -707,7 +707,8 @@ async function remUser(username) {
         localStorage.setItem('users',JSON.stringify(users)); 
         
         // 4. SECURE SAVE (Safe Merge - relies on revokedUsers blacklist to enforce deletion)
-        await secureUserSave();
+        // UPDATED: Use force=true for users blob to ensure the deletion sticks immediately
+        if(typeof saveToServer === 'function') await saveToServer(['users', 'revokedUsers'], true);
 
         if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete User', `Deleted user ${username}`);
         loadAdminUsers(); 

@@ -322,10 +322,14 @@ async function submitTest(forceSubmit = false) {
         !s.archived
     );
     if (existing) {
-        if (!forceSubmit) alert("Error: Active submission already exists.");
+        // If forcing (e.g. timeout), we proceed to archive/overwrite instead of blocking
+        if (!forceSubmit) { alert("Error: Active submission already exists."); return; }
+        
+        // If forcing, archive the existing one so we can save the new final state
+        existing.archived = true;
+        localStorage.setItem('submissions', JSON.stringify(subs));
+        
         document.getElementById('test-timer-bar')?.remove();
-        if(typeof showTab === 'function') showTab('my-tests');
-        return;
     }
 
     if (!forceSubmit && !confirm("Finalize your assessment? Answers will be locked for review.")) {

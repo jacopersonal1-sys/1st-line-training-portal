@@ -2118,7 +2118,7 @@ window.testServerConnections = async function() {
 };
 
 window.forceMigrationPush = async function() {
-    if(!confirm("Force push ALL local data to the current server?\n\nUse this if you just switched servers and data is missing on the other side.")) return;
+    if(!confirm("Force push ALL local data to the current server?\n\nThis will OVERWRITE the server data with your local data.\n\nUse this if you just switched servers and want to make the server match your current state exactly.")) return;
     
     const btn = document.activeElement;
     btn.disabled = true; btn.innerText = "Migrating...";
@@ -2130,6 +2130,37 @@ window.forceMigrationPush = async function() {
     
     try {
         await saveToServer(null, false);
+        
+        // --- NEW: MIRROR CLEANUP (Kill Zombies) ---
+        // We need to ensure the server doesn't have extra records we deleted locally.
+        // This is expensive but necessary for a clean migration.
+        if (window.supabaseClient) {
+            const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
+            
+            for (const table of tables) {
+                // 1. Get all IDs from server
+                const { data: serverIds, error } = await window.supabaseClient.from(table).select('id');
+                if (error) continue;
+                
+                // 2. Get all IDs from local
+                // Map table name back to local key (reverse ROW_MAP)
+                const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
+                if (!localKey) continue;
+                
+                const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+                const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
+                
+                // 3. Find IDs on server that are NOT in local
+                const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
+                
+                // 4. Delete them
+                if (toDelete.length > 0) {
+                    await window.supabaseClient.from(table).delete().in('id', toDelete);
+                    console.log(`Mirror Sync: Deleted ${toDelete.length} zombie records from ${table}`);
+                }
+            }
+        }
+        
         alert("Migration Push Complete.");
     } catch(e) {
         alert("Migration Failed: " + e.message);
@@ -2139,6 +2170,18 @@ window.forceMigrationPush = async function() {
 };
 
 window.performOrphanCleanup = async function(silent = false) {
+    // Use the robust function from data.js if available
+    if (typeof syncOrphans === 'function') {
+        const btn = document.activeElement;
+        if(btn && btn.tagName === 'BUTTON') { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...'; }
+        
+        const count = await syncOrphans(silent);
+        
+        if(btn && btn.tagName === 'BUTTON') { btn.disabled = false; btn.innerText = "Sync Check (Orphans)"; }
+        if(!silent && count === 0) alert("Sync Check Complete. Local data is consistent with server.");
+        return;
+    }
+
     if(!silent && !confirm("Run Sync Check (Orphan Cleanup)?\n\nThis will compare your local data against the server. Any local items that do not exist on the server (because they were hard-deleted elsewhere) will be removed from this device.\n\nProceed?")) return;
 
     const btn = (!silent && document.activeElement && document.activeElement.tagName === 'BUTTON') ? document.activeElement : null;
