@@ -22,10 +22,14 @@ const stagingCreds = JSON.parse(localStorage.getItem('staging_credentials') || '
 if (activeTarget === 'staging' && stagingCreds.url && stagingCreds.key) {
     console.log("Using STAGING Server Credentials");
     SUPABASE_URL = stagingCreds.url;
+    // FIX: Auto-prepend http:// if protocol is missing (Common mistake with IP addresses)
+    if (!SUPABASE_URL.match(/^https?:\/\//)) SUPABASE_URL = 'http://' + SUPABASE_URL;
     SUPABASE_ANON_KEY = stagingCreds.key;
 } else if (activeTarget === 'local' && localSettings.local_url && localSettings.local_key) {
     console.log("Using LOCAL Server Credentials");
     SUPABASE_URL = localSettings.local_url;
+    // FIX: Auto-prepend http:// if protocol is missing
+    if (!SUPABASE_URL.match(/^https?:\/\//)) SUPABASE_URL = 'http://' + SUPABASE_URL;
     SUPABASE_ANON_KEY = localSettings.local_key;
 } else {
     console.log("Using CLOUD Server Credentials");

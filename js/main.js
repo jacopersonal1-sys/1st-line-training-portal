@@ -501,7 +501,13 @@ window.onload = async function() {
                 if(txt) txt.innerText = "Migrating Data to New Server...";
 
                 // EXCLUDE Global Config Keys to prevent overwriting server settings with stale local config
-                const configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
+                let configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
+                
+                // FIX: If switching to Staging, force a FULL CLONE (Upload Users, Rosters, Tests)
+                if (currentTarget === 'staging') {
+                    configKeys = ['system_config']; // Only protect config (contains server URL)
+                }
+
                 const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
                 await saveToServer(safeKeys, false); 
                 
@@ -1568,6 +1574,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.12": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Migration Tools:</strong> Finalized Staging Mode and Migration protocols for server switchover.</li>
+            </ul>`,
         "2.4.11": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Workflow:</strong> Implemented Staging Mode and Draft Releases for safer deployment.</li>

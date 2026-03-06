@@ -746,7 +746,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                         .from('app_documents')
                         .select('content')
                         .eq('key', key)
-                        .single();
+                        .maybeSingle();
                     
                     if (remoteRow && remoteRow.content) {
                         const serverObj = { [key]: remoteRow.content };

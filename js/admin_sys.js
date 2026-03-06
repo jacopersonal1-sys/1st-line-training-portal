@@ -918,6 +918,35 @@ function openSuperAdminConfig() {
     const lockdown = sec.lockdown_mode || false;
     const srv = config.server_settings || { active: 'cloud', local_url: '', local_key: '' };
 
+    // --- STAGING UI LOGIC ---
+    const currentLocalTarget = localStorage.getItem('active_server_target') || 'cloud';
+    const isStaging = currentLocalTarget === 'staging';
+
+    let statusBanner = '';
+    if (isStaging) {
+        statusBanner = `<div style="background:rgba(241, 196, 15, 0.1); border:1px solid #f1c40f; color:#f1c40f; padding:10px; border-radius:6px; margin-bottom:15px; text-align:center; font-weight:bold;">
+            <i class="fas fa-flask"></i> THIS TERMINAL IS IN STAGING MODE
+        </div>`;
+    }
+
+    let stagingBox = '';
+    if (isStaging) {
+        stagingBox = `
+            <div style="margin-top:15px; padding:10px; border:1px dashed #f1c40f; border-radius:6px; background:rgba(241, 196, 15, 0.05);">
+                <div style="font-weight:bold; margin-bottom:5px; color:#f1c40f;"><i class="fas fa-flask"></i> Staging Mode Active</div>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">You are connected to the Test Database and Beta Update Channel.</div>
+                <button class="btn-danger btn-sm" onclick="exitStaging()" style="width:100%;">Exit Staging (Revert to Production)</button>
+            </div>`;
+    } else {
+        stagingBox = `
+            <div style="margin-top:15px; padding:10px; border:1px dashed #f1c40f; border-radius:6px; background:rgba(241, 196, 15, 0.05);">
+                <div style="font-weight:bold; margin-bottom:5px; color:#f1c40f;"><i class="fas fa-flask"></i> Staging / Test Server (Local Override)</div>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Enabling Staging Mode connects to the Test Database AND subscribes to Pre-release Updates (Beta Channel).</div>
+                <div style="display:flex; gap:10px; margin-bottom:5px;"><input type="text" id="sa_stage_url" placeholder="Staging URL" style="flex:1;"><input type="text" id="sa_stage_key" placeholder="Staging Key" style="flex:1;"></div>
+                <button class="btn-warning btn-sm" onclick="switchToStaging()" style="width:100%;">Save & Switch to Staging Mode</button>
+            </div>`;
+    }
+
     const modalHtml = `
         <div id="superAdminModal" class="modal-overlay">
             <div class="modal-box" style="width:900px; max-height:90vh; display:flex; flex-direction:column; padding:0;">
@@ -1004,8 +1033,10 @@ function openSuperAdminConfig() {
                         <div class="card" style="margin-top:15px; border-left: 4px solid #9b59b6;">
                             <h4><i class="fas fa-server"></i> Server Failover Control</h4>
                             
+                            ${statusBanner}
+                            
                             <div style="display:flex; gap:10px; align-items:center; margin-bottom:15px; padding:10px; background:var(--bg-input); border-radius:6px;">
-                                <label style="margin:0; font-weight:bold;">Active Target:</label>
+                                <label style="margin:0; font-weight:bold;">Global Target (All Users):</label>
                                 <select id="sa_srv_active" style="flex:1;">
                                     <option value="cloud" ${srv.active === 'cloud' ? 'selected' : ''}>Cloud (Main)</option>
                                     <option value="local" ${srv.active === 'local' ? 'selected' : ''}>Local (VM)</option>
@@ -1029,12 +1060,8 @@ function openSuperAdminConfig() {
                                 </div>
                             </div>
                             
-                            <div style="margin-top:15px; padding:10px; border:1px dashed #f1c40f; border-radius:6px; background:rgba(241, 196, 15, 0.05);">
-                                <div style="font-weight:bold; margin-bottom:5px; color:#f1c40f;"><i class="fas fa-flask"></i> Staging / Test Server (Local Override)</div>
-                                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Enabling Staging Mode connects to the Test Database AND subscribes to Pre-release Updates (Beta Channel).</div>
-                                <div style="display:flex; gap:10px; margin-bottom:5px;"><input type="text" id="sa_stage_url" placeholder="Staging URL" style="flex:1;"><input type="text" id="sa_stage_key" placeholder="Staging Key" style="flex:1;"></div>
-                                <button class="btn-warning btn-sm" onclick="switchToStaging()" style="width:100%;">Save & Switch to Staging Mode</button>
-                            </div>
+                            ${stagingBox}
+
                             <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-color); text-align:right;">
                                 <button class="btn-warning btn-sm" onclick="forceMigrationPush()"><i class="fas fa-upload"></i> Force Data Migration</button>
                             </div>
@@ -2170,11 +2197,14 @@ window.testServerConnections = async function() {
 };
 
 window.switchToStaging = function() {
-    const url = document.getElementById('sa_stage_url').value.trim();
+    let url = document.getElementById('sa_stage_url').value.trim();
     const key = document.getElementById('sa_stage_key').value.trim();
     
     if(!url || !key) return alert("Enter Staging URL and Key.");
     
+    // FIX: Auto-prepend http:// if protocol is missing
+    if (!url.match(/^https?:\/\//)) url = 'http://' + url;
+
     localStorage.setItem('staging_credentials', JSON.stringify({ url, key }));
     localStorage.setItem('active_server_target', 'staging');
     // Clear recovery mode to ensure it sticks
@@ -2184,8 +2214,28 @@ window.switchToStaging = function() {
     location.reload();
 };
 
+window.exitStaging = function() {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const target = (config.server_settings && config.server_settings.active) ? config.server_settings.active : 'cloud';
+    
+    localStorage.setItem('active_server_target', target);
+    sessionStorage.removeItem('recovery_mode');
+    
+    alert(`Exiting Staging Mode.\n\nReverting to ${target.toUpperCase()} (Production).`);
+    location.reload();
+};
+
 window.forceMigrationPush = async function() {
-    if(!confirm("Force push ALL local data to the current server?\n\nThis will OVERWRITE the server data with your local data.\n\nUse this if you just switched servers and want to make the server match your current state exactly.")) return;
+    const target = localStorage.getItem('active_server_target') || 'cloud';
+    const targetName = target === 'local' ? 'LOCAL (VM)' : (target === 'staging' ? 'STAGING' : 'CLOUD (Production)');
+
+    if(!confirm(`Force push ALL local data to the ${targetName} server?\n\nThis will OVERWRITE the server data with your local data.\n\nUse this to seed a new server.`)) return;
+    
+    // SAFETY: Prevent accidental nuke of Cloud
+    if (target === 'cloud') {
+        const verify = await customPrompt("⚠️ CRITICAL WARNING", "You are about to overwrite the LIVE CLOUD DATABASE.\n\nThis is dangerous if other users are active.\n\nType 'OVERWRITE' to proceed:");
+        if (verify !== 'OVERWRITE') return;
+    }
     
     const btn = document.activeElement;
     btn.disabled = true; btn.innerText = "Migrating...";
