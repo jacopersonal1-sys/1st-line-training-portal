@@ -1009,6 +1009,7 @@ function openSuperAdminConfig() {
                                 <select id="sa_srv_active" style="flex:1;">
                                     <option value="cloud" ${srv.active === 'cloud' ? 'selected' : ''}>Cloud (Main)</option>
                                     <option value="local" ${srv.active === 'local' ? 'selected' : ''}>Local (VM)</option>
+                                    <option value="staging" disabled>Staging (Manual Only)</option>
                                 </select>
                                 <button class="btn-secondary btn-sm" onclick="testServerConnections()"><i class="fas fa-network-wired"></i> Test Connectivity</button>
                             </div>
@@ -1026,6 +1027,13 @@ function openSuperAdminConfig() {
                                     <label style="font-size:0.8rem;">URL</label><input type="text" id="sa_srv_url" value="${srv.local_url || ''}" placeholder="http://192.168.x.x:8000">
                                     <label style="font-size:0.8rem;">Anon Key</label><input type="text" id="sa_srv_key" value="${srv.local_key || ''}" placeholder="eyJh..." style="font-family:monospace; font-size:0.7rem;">
                                 </div>
+                            </div>
+                            
+                            <div style="margin-top:15px; padding:10px; border:1px dashed #f1c40f; border-radius:6px; background:rgba(241, 196, 15, 0.05);">
+                                <div style="font-weight:bold; margin-bottom:5px; color:#f1c40f;"><i class="fas fa-flask"></i> Staging / Test Server (Local Override)</div>
+                                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Enabling Staging Mode connects to the Test Database AND subscribes to Pre-release Updates (Beta Channel).</div>
+                                <div style="display:flex; gap:10px; margin-bottom:5px;"><input type="text" id="sa_stage_url" placeholder="Staging URL" style="flex:1;"><input type="text" id="sa_stage_key" placeholder="Staging Key" style="flex:1;"></div>
+                                <button class="btn-warning btn-sm" onclick="switchToStaging()" style="width:100%;">Save & Switch to Staging Mode</button>
                             </div>
                             <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-color); text-align:right;">
                                 <button class="btn-warning btn-sm" onclick="forceMigrationPush()"><i class="fas fa-upload"></i> Force Data Migration</button>
@@ -1158,6 +1166,12 @@ function openSuperAdminConfig() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     // Initial Load
     refreshClientHealthTable();
+    
+    // Load Staging Creds
+    const stage = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
+    if(document.getElementById('sa_stage_url')) document.getElementById('sa_stage_url').value = stage.url || '';
+    if(document.getElementById('sa_stage_key')) document.getElementById('sa_stage_key').value = stage.key || '';
+
     renderStorageVisualizer();
     setTimeout(testServerConnections, 500);
 }
@@ -2153,6 +2167,21 @@ window.testServerConnections = async function() {
         const start = Date.now();
         try { const client = window.supabase.createClient(localUrl, localKey, { auth: { persistSession: false, storageKey: 'test-local' } }); await checkWithTimeout(client); updateStatus('status_local', 'online', Date.now() - start); } catch(e) { updateStatus('status_local', 'offline'); }
     } else { document.getElementById('status_local').innerText = "Not Configured"; }
+};
+
+window.switchToStaging = function() {
+    const url = document.getElementById('sa_stage_url').value.trim();
+    const key = document.getElementById('sa_stage_key').value.trim();
+    
+    if(!url || !key) return alert("Enter Staging URL and Key.");
+    
+    localStorage.setItem('staging_credentials', JSON.stringify({ url, key }));
+    localStorage.setItem('active_server_target', 'staging');
+    // Clear recovery mode to ensure it sticks
+    sessionStorage.removeItem('recovery_mode');
+    
+    alert("Switched to Staging Mode. App will reload connected to the test server.");
+    location.reload();
 };
 
 window.forceMigrationPush = async function() {

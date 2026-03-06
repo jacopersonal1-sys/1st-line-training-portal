@@ -325,6 +325,9 @@ async function startServerLookout() {
         const currentTarget = localStorage.getItem('active_server_target') || 'cloud';
         const settings = localConfig.server_settings || { active: 'cloud' };
 
+        // SAFETY: If we are in Staging mode (Test), ignore remote switch commands
+        if (currentTarget === 'staging') return;
+
         // Define potential servers
         const servers = [
             { name: 'cloud', url: window.CLOUD_CREDENTIALS.url, key: window.CLOUD_CREDENTIALS.key },

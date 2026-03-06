@@ -33,6 +33,13 @@
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
 | `liveSessions` | Array | Row (`live_sessions`) | Active state of Live Assessments. |
 | `tests` | Array | Row (`tests`) | Assessment definitions (Questions, Settings). |
+| `liveSchedules` | Object | Blob | Configuration for Live Assessment slots (Start Date, Days). |
+| `agentNotes` | Object | Blob | Private admin notes on agents. |
+| `dailyTips` | Array | Blob | List of daily tips. |
+| `vettingTopics` | Array | Blob | List of Vetting topics. |
+| `cancellationCounts` | Object | Blob | Track trainee cancellations. |
+| `monitor_data` | Object | Special (Table) | Real-time activity state. Syncs to `monitor_state` table via Strategy B. |
+| `vettingSession` | Object | Blob + Table | Active Vetting Session state. Syncs to `app_documents` AND `vetting_sessions`. |
 | `liveBookings` | Array | Row (`live_bookings`) | Scheduled slots for live assessments. |
 | `attendance_records` | Array | Row (`attendance`) | Clock In/Out logs. |
 | `accessLogs` | Array | Row (`access_logs`) | Login/Logout history. |
@@ -54,7 +61,6 @@ Maps local `localStorage` keys to Supabase tables.
 - `accessLogs` -> `public.access_logs`
 - `error_reports` -> `public.error_reports`
 - `liveSessions` -> `public.live_sessions`
-- `tests` -> `public.tests`
 - `liveBookings` -> `public.live_bookings`
 - `attendance_records` -> `public.attendance`
 - `savedReports` -> `public.saved_reports`
@@ -136,6 +142,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `loadLiveExecution()`: Starts the Live Arena. Subscribes to `live_sessions` realtime channel.
     - `adminPushQuestion(idx)`: Updates session state to show a specific question.
     - `renderTraineeLivePanel()`: Renders the active question for the trainee.
+    - `initiateLiveSession()`: Admin starts a session from a booking.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
 
 #### `js/vetting_arena.js` (Security)
@@ -181,6 +188,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `sync()`: Pushes `monitor_data` to server.
     - `checkDailyReset()`: Archives daily logs to `monitor_history` at midnight.
     - `renderActivityMonitorContent()`: Renders the Admin view (Live Grid or Review Queue).
+    - `openStudyWindow(url, title)`: Opens the secure webview for reference material.
 
 #### `js/insight.js` (Analytics)
 - **Responsibility:** Performance dashboards.
@@ -288,3 +296,18 @@ Maps local `localStorage` keys to Supabase tables.
         git commit -m "feat: vX.X.X - Summary of changes"
         git push origin main
         ```
+
+### 7. Staging & Release Workflow
+
+To test an update before pushing to everyone:
+
+1.  **Push Code:** Commit and push as normal. GitHub Actions will build the release.
+2.  **Publish Draft:** Go to GitHub Releases. You will see a new **Draft** release.
+    *   Click **Edit**.
+    *   Check **"Set as a pre-release"**.
+    *   Click **Publish release**.
+    *   *Result:* Normal users (Production) will **NOT** see this update.
+    *   *Result:* You (in Staging Mode) **WILL** see this update and download it.
+3.  **Test:** Verify the new version on your Staging machine.
+4.  **Go Live:** Edit the release on GitHub -> **Uncheck** "Set as a pre-release" -> Save.
+    *   *Result:* All Production users will now auto-update to this version.

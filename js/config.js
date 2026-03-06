@@ -17,7 +17,13 @@ const localSettings = systemConfig.server_settings || {};
 let SUPABASE_URL = window.CLOUD_CREDENTIALS.url;
 let SUPABASE_ANON_KEY = window.CLOUD_CREDENTIALS.key;
 
-if (activeTarget === 'local' && localSettings.local_url && localSettings.local_key) {
+const stagingCreds = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
+
+if (activeTarget === 'staging' && stagingCreds.url && stagingCreds.key) {
+    console.log("Using STAGING Server Credentials");
+    SUPABASE_URL = stagingCreds.url;
+    SUPABASE_ANON_KEY = stagingCreds.key;
+} else if (activeTarget === 'local' && localSettings.local_url && localSettings.local_key) {
     console.log("Using LOCAL Server Credentials");
     SUPABASE_URL = localSettings.local_url;
     SUPABASE_ANON_KEY = localSettings.local_key;

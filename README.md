@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.4.11**: **Workflow**: Implemented Staging Mode and Draft Releases for safer deployment.
 - **v2.4.10**: **Maintenance**: General stability improvements and version synchronization.
 - **v2.4.7**: **Maintenance**: Version bump for deployment. Includes Schedule Link fixes and Notification polling updates.
 - **v2.4.6**: **Hotfix**: Fixed update notification polling and schedule link issues (SharePoint characters). Forced sync for trainees on schedule view.

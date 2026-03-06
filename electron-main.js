@@ -133,6 +133,17 @@ ipcMain.on('force-restart', () => {
     app.exit(0);
 });
 
+// IPC Listener for Update Channel (Staging vs Prod)
+ipcMain.on('set-update-channel', (event, channel) => {
+    const isStaging = (channel === 'staging');
+    if (autoUpdater.allowPrerelease !== isStaging) {
+        console.log(`Update Channel switched to: ${isStaging ? 'Staging (Pre-release)' : 'Production'}`);
+        autoUpdater.allowPrerelease = isStaging;
+        // Trigger a fresh check immediately if we just switched modes
+        autoUpdater.checkForUpdatesAndNotify();
+    }
+});
+
 // --- AUTO-UPDATER EVENTS ---
 // Send status updates to the renderer to show in Toasts
 

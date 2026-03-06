@@ -432,6 +432,18 @@ window.onload = async function() {
         });
     }
 
+    // --- UPDATE CHANNEL CONFIGURATION ---
+    // Tell Electron if we want Beta/Pre-releases based on our Staging status
+    if (typeof require !== 'undefined') {
+        const { ipcRenderer } = require('electron');
+        const target = localStorage.getItem('active_server_target');
+        if (target === 'staging') {
+            ipcRenderer.send('set-update-channel', 'staging');
+        } else {
+            ipcRenderer.send('set-update-channel', 'prod');
+        }
+    }
+
     // --- IMPERSONATION CHECK ---
     const realAdmin = sessionStorage.getItem('real_admin_identity');
     if (realAdmin) {
@@ -924,10 +936,23 @@ function updateSidebarVisibility() {
                 indicator.style.borderRadius = '4px';
                 indicator.style.verticalAlign = 'middle';
                 
-                const isLocal = activeTarget === 'local';
-                indicator.style.background = isLocal ? 'rgba(155, 89, 182, 0.2)' : 'rgba(52, 152, 219, 0.2)';
-                indicator.style.color = isLocal ? '#9b59b6' : '#3498db';
-                indicator.innerHTML = isLocal ? '<i class="fas fa-server"></i> Local' : '<i class="fas fa-cloud"></i> Cloud';
+                let label = '<i class="fas fa-cloud"></i> Cloud';
+                let color = '#3498db';
+                let bg = 'rgba(52, 152, 219, 0.2)';
+
+                if (activeTarget === 'local') {
+                    label = '<i class="fas fa-server"></i> Local';
+                    color = '#9b59b6';
+                    bg = 'rgba(155, 89, 182, 0.2)';
+                } else if (activeTarget === 'staging') {
+                    label = '<i class="fas fa-flask"></i> Staging';
+                    color = '#f1c40f';
+                    bg = 'rgba(241, 196, 15, 0.2)';
+                }
+                
+                indicator.style.background = bg;
+                indicator.style.color = color;
+                indicator.innerHTML = label;
                 header.appendChild(indicator);
             }
 
@@ -1543,6 +1568,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.11": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Workflow:</strong> Implemented Staging Mode and Draft Releases for safer deployment.</li>
+            </ul>`,
         "2.4.10": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Maintenance:</strong> General stability improvements and version synchronization.</li>
