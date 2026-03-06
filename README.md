@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.4.6**: **Hotfix**: Temporarily disabled automatic server switching (Lookout) to resolve login loops when Local Server is unstable.
 - **v2.4.5**: **Login Stability**: Implemented "Recovery Mode" to prevent infinite switching loops when the Local server is unreachable. Ensures Admins can always log in via Cloud to fix configuration.
 - **v2.4.4**: **Configuration Protection**: Implemented strict write protection for global system settings (`system_config`) to prevent older clients from overwriting server configuration during sync. Added explicit restore capability for Admins.
 - **v2.4.3**: **Data Integrity**: Implemented strict "Hard Delete" logic across all Admin modules (History, Groups, Reports, Schedule) to permanently remove data from the cloud and prevent "Zombie Data" recurrence.

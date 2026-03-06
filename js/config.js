@@ -39,7 +39,8 @@ if (typeof window !== 'undefined' && window.supabase) {
     } catch (e) {
         console.error("Supabase Initialization Failed:", e); 
         // FAILSAFE: If Local fails, revert to Cloud immediately
-        if (activeTarget === 'local') {
+        // BYPASS: If 'force_local' is set, do not revert (Manual Override)
+        if (activeTarget === 'local' && localStorage.getItem('force_local') !== 'true') {
             console.warn("Local Server Unreachable. Reverting to Cloud...");
             localStorage.setItem('active_server_target', 'cloud');
             sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop

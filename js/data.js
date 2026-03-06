@@ -79,11 +79,8 @@ const ROW_MAP = {
     'nps_responses': 'nps_responses',
     'graduated_agents': 'archived_users',
     'linkRequests': 'link_requests',
-    'calendarEvents': 'calendar_events',
-    'tests': 'tests' // NEW: Row-Level Sync for Assessments
+    'calendarEvents': 'calendar_events'
 };
-window.ROW_MAP = ROW_MAP; // Expose globally
-window.DB_SCHEMA = DB_SCHEMA; // Expose globally for Admin Tools
 
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
@@ -132,12 +129,17 @@ window.addEventListener('offline', () => {
 async function loadFromServer(silent = false) {
     try {
         if (window.supabaseClient) updateSyncUI('syncing');
-        if (!window.supabaseClient) return;
+        if (!window.supabaseClient) {
+            if(!silent) console.warn("loadFromServer: Supabase client not initialized.");
+            return false;
+        }
+
+        let criticalSuccess = false;
 
         const start = Date.now();
         
         // --- PHASE A: BLOB SYNC (Settings, Rosters, Users) ---
-        const { data: meta, error } = await supabaseClient
+        const { data: meta, error } = await window.supabaseClient
             .from('app_documents')
             .select('key, updated_at');
         window.CURRENT_LATENCY = Date.now() - start; // Measure RTT
@@ -158,7 +160,7 @@ async function loadFromServer(silent = false) {
         if (keysToFetch.length > 0) {
             if(!silent) console.log(`Syncing updates for: ${keysToFetch.join(', ')}`);
             
-            const { data: docs, error: fetchErr } = await supabaseClient
+            const { data: docs, error: fetchErr } = await window.supabaseClient
                 .from('app_documents')
                 .select('key, content, updated_at')
                 .in('key', keysToFetch);
@@ -185,6 +187,9 @@ async function loadFromServer(silent = false) {
             }
             
             if (keysToFetch.includes('system_config')) applySystemConfig();
+            criticalSuccess = true; // Config loaded
+        } else {
+            criticalSuccess = true; // Nothing new, but we have local cache
         }
 
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
@@ -192,7 +197,7 @@ async function loadFromServer(silent = false) {
         for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
             const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
             
-            const { data: newRows, error: rowErr } = await supabaseClient
+            const { data: newRows, error: rowErr } = await window.supabaseClient
                 .from(tableName)
                 .select('data, updated_at')
                 .gt('updated_at', lastSync)
@@ -212,6 +217,13 @@ async function loadFromServer(silent = false) {
                 const localObj = { [localKey]: localItems };
                 const merged = performSmartMerge(serverObj, localObj, 'server_wins');
                 
+                // CRITICAL FIX: Aggressively prune monitor_history to prevent quota errors
+                if (localKey === 'monitor_history') {
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - 14); // Keep only last 14 days
+                    merged[localKey] = merged[localKey].filter(h => new Date(h.date) > cutoff);
+                }
+
                 localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
                 
                 // Update Timestamp (Use the newest row's time)
@@ -220,16 +232,23 @@ async function loadFromServer(silent = false) {
                 
                 // Update Hash Map for these items to prevent re-uploading what we just downloaded
                 const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
-                serverItems.forEach(item => {
-                    if(item.id) hashMap[item.id] = JSON.stringify(item);
-                });
+                
+                // For monitor_history, we skip the hash map entirely to save space.
+                if (localKey === 'monitor_history') {
+                    localStorage.removeItem(`hash_map_${localKey}`);
+                } else {
+                    // Update Hash Map for all other tables
+                    serverItems.forEach(item => {
+                        if(item.id) hashMap[item.id] = generateChecksum(JSON.stringify(item));
+                    });
+                }
                 localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(hashMap));
             }
         }
 
         // --- PHASE C: MONITOR STATE SYNC (Real-time Activity) ---
         // Fetch all active user states from the table
-        const { data: monRows, error: monErr } = await supabaseClient
+        const { data: monRows, error: monErr } = await window.supabaseClient
             .from('monitor_state')
             .select('user_id, data');
             
@@ -273,119 +292,8 @@ async function loadFromServer(silent = false) {
             } else if (err.message && err.message.includes("row level security")) {
                 console.warn("DATABASE PERMISSION ERROR: Run the RLS Policy SQL in Supabase to allow access.");
             }
-            
-            // FAILSAFE: Auto-switch to Cloud if Local is dead
-            const currentTarget = localStorage.getItem('active_server_target');
-            if (currentTarget === 'local' && (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))) {
-                console.error("Local Server Dead (Load Failed). Switching to Cloud...");
-                localStorage.setItem('active_server_target', 'cloud');
-                setTimeout(() => location.reload(), 2000);
-            }
-            return false; // Signal Failure
         }
     }
-}
-
-// --- SMART ORPHAN CLEANUP (Server Authority) ---
-// Removes local items that have been deleted from the server.
-// PROTECTS: New items that haven't been synced yet (not in hash_map).
-async function syncOrphans(silent = true) {
-    if (!window.supabaseClient) return;
-    if (!silent) console.log("Starting Smart Orphan Cleanup...");
-
-    let totalRemoved = 0;
-
-    for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
-        try {
-            // 1. Get all Server IDs (Lightweight)
-            // We fetch in batches to handle large datasets
-            let serverIds = new Set();
-            let page = 0;
-            const pageSize = 1000;
-            
-            while(true) {
-                const { data, error } = await supabaseClient
-                    .from(tableName)
-                    .select('id')
-                    .range(page * pageSize, (page + 1) * pageSize - 1);
-                
-                if (error) throw error;
-                if (!data || data.length === 0) break;
-                
-                data.forEach(row => serverIds.add(row.id.toString()));
-                if (data.length < pageSize) break;
-                page++;
-            }
-
-            // 2. Compare with Local
-            const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
-            const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
-            
-            const cleanData = localData.filter(item => {
-                if (!item.id) return true; // Keep items without IDs (shouldn't happen but safe)
-                const id = item.id.toString();
-
-                // Case A: Exists on Server -> KEEP
-                if (serverIds.has(id)) return true;
-
-                // Case B: Missing on Server
-                // Check if we have synced it before (exists in hash_map)
-                if (hashMap[id]) {
-                    // It WAS synced, but now gone from server -> DELETED remotely.
-                    // We should delete it locally to match Server Truth.
-                    return false; 
-                }
-
-                // Case C: Missing on Server AND Not in Hash Map
-                // This is a NEW local item not yet uploaded. -> KEEP
-                return true;
-            });
-
-            if (localData.length !== cleanData.length) {
-                const removed = localData.length - cleanData.length;
-                totalRemoved += removed;
-                localStorage.setItem(localKey, JSON.stringify(cleanData));
-                if(!silent) console.log(`[${localKey}] Removed ${removed} zombie records.`);
-                
-                // Cleanup Hash Map for deleted items
-                const newHashMap = { ...hashMap };
-                localData.forEach(item => {
-                    if (item.id && !cleanData.find(c => c.id === item.id)) {
-                        delete newHashMap[item.id];
-                    }
-                });
-                localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(newHashMap));
-            }
-
-        } catch (e) {
-            console.warn(`Orphan check failed for ${localKey}:`, e);
-        }
-    }
-
-    if (totalRemoved > 0 && !silent) {
-        if(typeof showToast === 'function') showToast(`Synced: Removed ${totalRemoved} deleted items.`, 'info');
-        if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
-    }
-    return totalRemoved;
-}
-
-// --- GLOBAL REALTIME SYNC (Instant Updates) ---
-let GLOBAL_REALTIME_SUB = null;
-let REALTIME_DEBOUNCE = null;
-
-function initGlobalRealtime() {
-    if (!window.supabaseClient || GLOBAL_REALTIME_SUB) return;
-
-    // Listen to ALL public table changes
-    GLOBAL_REALTIME_SUB = window.supabaseClient.channel('global_db_changes')
-        .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
-            // Debounce to prevent flooding if multiple rows change at once
-            if (REALTIME_DEBOUNCE) clearTimeout(REALTIME_DEBOUNCE);
-            REALTIME_DEBOUNCE = setTimeout(() => loadFromServer(true), 500);
-        })
-        .subscribe();
-    
-    console.log("Global Realtime Sync Enabled ⚡");
 }
 
 let SERVER_LOOKOUT_INTERVAL = null;
@@ -432,10 +340,24 @@ async function startServerLookout() {
                     
                     // If a server tells us to switch, and we aren't already there
                     if (remoteActive && remoteActive !== currentTarget) {
-                        // SAFETY: If we just recovered from a dead Local server, ignore the command to go back
-                        if (sessionStorage.getItem('recovery_mode') === 'true' && remoteActive === 'local') {
-                            console.warn("Server Lookout: Ignoring switch to Local because we are in Recovery Mode.");
-                            continue;
+                        
+                        // NEW: Safety Check - If switching TO local, verify it is actually reachable
+                        // This prevents infinite loops if Cloud says "Go Local" but Local is down.
+                        if (remoteActive === 'local') {
+                            const lUrl = settings.local_url;
+                            const lKey = settings.local_key;
+                            if (!lUrl || !lKey) continue;
+
+                            try {
+                                const checkClient = window.supabase.createClient(lUrl, lKey, {
+                                    auth: { persistSession: false, autoRefreshToken: false, storageKey: 'ping-check-' + Date.now() }
+                                });
+                                const { error: pingErr } = await checkClient.from('app_documents').select('key').limit(1);
+                                if (pingErr) throw pingErr;
+                            } catch (pingEx) {
+                                console.warn("Server Lookout: Command to switch to Local ignored because Local is unreachable.", pingEx);
+                                continue; // Skip the switch
+                            }
                         }
 
                         console.warn(`Server Switch Detected on ${srv.name}! Switching to ${remoteActive}...`);
@@ -503,7 +425,7 @@ function applySystemConfig() {
     }
 
     // 3. Start Server Lookout
-    // startServerLookout(); // Disabled to prevent switching loops
+    startServerLookout();
 }
 
 // --- ERROR REPORTING SYSTEM ---
@@ -581,9 +503,7 @@ if (typeof module !== 'undefined' && module.exports) {
         DB_SCHEMA,
         loadFromServer,
         saveToServer,
-        performSmartMerge,
-        syncOrphans,
-        initGlobalRealtime
+        performSmartMerge
     };
 }
 
@@ -709,19 +629,6 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
         if(!silent) updateSyncUI('busy');
 
         for (const key of keysToSave) {
-            // GUARD: Protect System Config from non-Super Admins
-            // This prevents old/standard clients from overwriting global server settings
-            if (key === 'system_config') {
-                if (!CURRENT_USER || CURRENT_USER.role !== 'super_admin') {
-                    continue; 
-                }
-                // EXTRA GUARD: Only allow save if explicitly requested (targetKeys is not null)
-                // This prevents background syncs or bulk migrations from touching system_config
-                if (!targetKeys) {
-                    continue;
-                }
-            }
-
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
             
             // --- STRATEGY A: ROW-LEVEL SYNC (Records, Submissions, Logs) ---
@@ -772,17 +679,20 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                             row.id = item.sessionId || item.id; // Ensure sessionId is used as PK
                             row.trainer = item.trainer || null;
                         }
-                        else if (tableName === 'tests') {
-                            row.title = item.title;
-                            row.type = item.type;
-                        }
                         // error_reports only needs id, data, updated_at
                         
                         return row;
                     });
 
-                    const { error } = await supabaseClient.from(tableName).upsert(rows);
-                    if (error) throw error;
+                    // BATCH UPLOAD: Prevent statement timeouts on large syncs
+                    const BATCH_SIZE = 100; 
+                    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+                        const chunk = rows.slice(i, i + BATCH_SIZE);
+                        if(!silent && rows.length > BATCH_SIZE) console.log(`Uploading chunk ${i / BATCH_SIZE + 1} of ${Math.ceil(rows.length / BATCH_SIZE)} to ${tableName}`);
+                        
+                        const { error } = await window.supabaseClient.from(tableName).upsert(chunk);
+                        if (error) throw error;
+                    }
                     
                     // Save Hash Map only on success
                     localStorage.setItem(hashMapKey, JSON.stringify(hashMap));
@@ -798,7 +708,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                      const allMon = JSON.parse(localStorage.getItem('monitor_data') || '{}');
                      const myMon = allMon[CURRENT_USER.user];
                      if (myMon) {
-                         await supabaseClient.from('monitor_state').upsert({
+                         await window.supabaseClient.from('monitor_state').upsert({
                              user_id: CURRENT_USER.user,
                              data: myMon,
                              updated_at: new Date().toISOString()
@@ -812,7 +722,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
 
                 // Optimistic Merge (Fetch -> Merge -> Push)
                 if (!force) {
-                    const { data: remoteRow } = await supabaseClient
+                    const { data: remoteRow } = await window.supabaseClient
                         .from('app_documents')
                         .select('content')
                         .eq('key', key)
@@ -826,7 +736,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                     }
                 }
 
-                const { data: savedData, error: saveErr } = await supabaseClient
+                const { data: savedData, error: saveErr } = await window.supabaseClient
                     .from('app_documents')
                     .upsert({ 
                         key: key, 
@@ -1120,7 +1030,7 @@ async function fetchSystemStatus() {
         const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
         
         // OPTIMIZED: Select only specific columns instead of '*' to save bandwidth
-        const { data: activeUsers, error } = await supabaseClient
+        const { data: activeUsers, error } = await window.supabaseClient
             .from('sessions')
             .select('*') // Fallback to * to avoid column name errors during migration
             .gte('lastSeen', twoMinutesAgo);
@@ -1350,7 +1260,7 @@ async function sendHeartbeat() {
                 activity: safeActivity
             };
             
-            const { error } = await supabaseClient.from('sessions').upsert(fullPayload);
+            const { error } = await window.supabaseClient.from('sessions').upsert(fullPayload);
             if (!error) return; // Success
             
             console.warn("Heartbeat Full failed (Schema mismatch?). Downgrading to Safe Mode.");
@@ -1359,7 +1269,7 @@ async function sendHeartbeat() {
 
         // 2. Safe Mode (Common fields only)
         if (HEARTBEAT_SAFE_MODE === 'safe') {
-            const { error } = await supabaseClient.from('sessions').upsert({
+            const { error } = await window.supabaseClient.from('sessions').upsert({
                 username: CURRENT_USER.user, // New Schema
                 lastSeen: new Date().toISOString(),
                 isIdle: isIdle,
@@ -1373,7 +1283,7 @@ async function sendHeartbeat() {
 
         // 3. Minimal Mode (Absolute basics)
         if (HEARTBEAT_SAFE_MODE === 'minimal') {
-            await supabaseClient.from('sessions').upsert({
+            await window.supabaseClient.from('sessions').upsert({
                 username: CURRENT_USER.user, // New Schema
                 lastSeen: new Date().toISOString()
             });
@@ -1381,14 +1291,14 @@ async function sendHeartbeat() {
             
         // 2. Check for Remote Commands (Pending Actions)
         const { data: sessionData } = await supabaseClient
-            .from('sessions')
+            .from('sessions') // supabaseClient is likely defined in scope here if not window., but consistent use is better.
             .select('pending_action')
             .eq('username', CURRENT_USER.user) // New Schema
             .single();
             
         if (sessionData && sessionData.pending_action) {
             // Clear command first to prevent loops
-            await supabaseClient.from('sessions').update({ pending_action: null }).eq('username', CURRENT_USER.user);
+            await window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', CURRENT_USER.user);
             
             if (sessionData.pending_action === 'logout') {
                 if (typeof logout === 'function') logout();
