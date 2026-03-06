@@ -1543,6 +1543,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.10": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Maintenance:</strong> General stability improvements and version synchronization.</li>
+            </ul>`,
         "2.4.7": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Maintenance:</strong> Version bump to resolve deployment conflict. Includes fixes for Schedule Links and Update Notifications.</li>
