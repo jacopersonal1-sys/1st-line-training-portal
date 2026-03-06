@@ -529,6 +529,7 @@ window.onload = async function() {
                         if (!error) {
                             alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
                             localStorage.setItem('active_server_target', 'cloud');
+                            sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop
                             location.reload();
                             return;
                         }
@@ -1533,6 +1534,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.5": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed login loop issue when Local Server is offline. App now stays in Recovery Mode until manually reset.</li>
+            </ul>`,
         "2.4.4": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Security:</strong> Enhanced protection for global system settings to prevent accidental overwrites by older app versions.</li>

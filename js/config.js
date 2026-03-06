@@ -42,6 +42,7 @@ if (typeof window !== 'undefined' && window.supabase) {
         if (activeTarget === 'local') {
             console.warn("Local Server Unreachable. Reverting to Cloud...");
             localStorage.setItem('active_server_target', 'cloud');
+            sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop
             // Reload to apply
             setTimeout(() => location.reload(), 1000);
         }

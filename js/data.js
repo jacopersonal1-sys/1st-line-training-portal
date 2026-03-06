@@ -432,6 +432,12 @@ async function startServerLookout() {
                     
                     // If a server tells us to switch, and we aren't already there
                     if (remoteActive && remoteActive !== currentTarget) {
+                        // SAFETY: If we just recovered from a dead Local server, ignore the command to go back
+                        if (sessionStorage.getItem('recovery_mode') === 'true' && remoteActive === 'local') {
+                            console.warn("Server Lookout: Ignoring switch to Local because we are in Recovery Mode.");
+                            continue;
+                        }
+
                         console.warn(`Server Switch Detected on ${srv.name}! Switching to ${remoteActive}...`);
                         
                         // Update Local Config to match

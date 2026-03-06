@@ -1803,6 +1803,7 @@ async function saveSuperAdminConfig() {
     // This prevents getting stuck on a dead 'local' server.
     if (newTarget !== oldTarget) {
         localStorage.setItem('active_server_target', config.server_settings.active);
+        sessionStorage.removeItem('recovery_mode'); // Clear safety flag to allow manual switch
     }
 
     localStorage.setItem('system_config', JSON.stringify(config));
