@@ -70,7 +70,13 @@ function loadMarkingQueue() {
     }
 
     if (pending.length === 0) {
-        container.innerHTML = '<div style="padding:15px; text-align:center; color:var(--text-muted); background:var(--bg-input); border-radius:8px;">No assessments awaiting review.</div>';
+        container.innerHTML = `
+            <div style="padding:15px; text-align:center; color:var(--text-muted); background:var(--bg-input); border-radius:8px;">
+                No assessments awaiting review.
+                <div style="margin-top:10px;">
+                    <button class="btn-secondary btn-sm" onclick="if(typeof forceResyncRows === 'function') forceResyncRows()"><i class="fas fa-sync"></i> Check Server</button>
+                </div>
+            </div>`;
         return;
     }
 

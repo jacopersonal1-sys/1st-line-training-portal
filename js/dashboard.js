@@ -683,7 +683,40 @@ function buildAdminWidgets(container) {
     // Insight "Awaiting Review" Badge
     // Calculate how many trainees have scores < IMPROVE and might need attention
     const IMPROVE_LIMIT = (typeof IMPROVE !== 'undefined') ? IMPROVE : 80;
-    const actionRequiredCount = records.filter(r => r.score < IMPROVE_LIMIT).length; 
+    
+    // FIX: Deduplicate failures per trainee (Highest Score Wins) to match Insight Dashboard logic
+    // This prevents "Ghost Notifications" where retaken/passed tests still show as failures in the badge.
+    const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
+    const uniqueTrainees = new Set(records.map(r => r.trainee));
+    let actionRequiredCount = 0;
+
+    uniqueTrainees.forEach(trainee => {
+        if (!trainee) return;
+        
+        // 1. Check Manual Review Override (Admin decision overrides scores)
+        const review = reviews.find(r => r.trainee === trainee);
+        if (review) {
+            if (review.status !== 'Pass') actionRequiredCount++;
+            return;
+        }
+
+        // 2. Check Auto-Calc (Best Score Logic)
+        const myRecs = records.filter(r => r.trainee === trainee);
+        const bestScores = {};
+        
+        myRecs.forEach(r => {
+            if (!r.assessment) return;
+            const key = r.assessment.trim().toLowerCase();
+            if (bestScores[key] === undefined || r.score > bestScores[key]) {
+                bestScores[key] = r.score;
+            }
+        });
+        
+        // If any assessment's BEST score is below limit, flag trainee
+        const hasFailure = Object.values(bestScores).some(score => score < IMPROVE_LIMIT);
+        if (hasFailure) actionRequiredCount++;
+    });
+
     const badgeInsight = actionRequiredCount > 0 
         ? `<span class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${actionRequiredCount}</span>` 
         : '';
@@ -697,7 +730,7 @@ function buildAdminWidgets(container) {
         : '';
 
     // Attendance Alert (Unconfirmed Lates)
-    const unconfirmedLates = attRecords.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored).length;
+    const unconfirmedLates = attRecords.filter(r => r.date === today && r.isLate && !r.lateConfirmed && !r.isIgnored).length;
     const badgeAtt = unconfirmedLates > 0 
         ? `<span id="badgeAtt" class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${unconfirmedLates}</span>` 
         : '';

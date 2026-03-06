@@ -1574,6 +1574,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.14": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Added time buffer to resolve clock skew issues preventing trainee submissions from appearing.</li>
+                <li style="margin-bottom: 8px;"><strong>Dashboard:</strong> Fixed Attendance widget to only count unconfirmed lates for the current day.</li>
+                <li style="margin-bottom: 8px;"><strong>Dashboard:</strong> Fixed Insight widget to correctly calculate "Action Required" counts by ignoring retaken/passed tests.</li>
+            </ul>`,
         "2.4.13": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Hard Delete Protocol" to permanently remove deleted items from the cloud and prevent "Ghost Data" reappearance.</li>

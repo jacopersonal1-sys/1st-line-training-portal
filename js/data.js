@@ -259,10 +259,13 @@ async function loadFromServer(silent = false) {
         for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
             const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
             
+            // CLOCK SKEW FIX: Subtract 10 minutes from lastSync to catch items from clients with lagging clocks
+            const safeSyncTime = new Date(new Date(lastSync).getTime() - 600000).toISOString();
+
             const { data: newRows, error: rowErr } = await window.supabaseClient
                 .from(tableName)
                 .select('data, updated_at')
-                .gt('updated_at', lastSync)
+                .gt('updated_at', safeSyncTime)
                 .limit(1000); // Batch limit
 
             if (rowErr) console.warn(`Row sync failed for ${tableName}`, rowErr);
