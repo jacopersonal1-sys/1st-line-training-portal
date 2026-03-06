@@ -20,6 +20,8 @@ const DB_SCHEMA = {
     insightReviews: [], 
     exemptions: [], 
     notices: [],
+    tl_task_submissions: [], // Team Leader Daily Submissions
+    tl_personal_lists: {},   // TL Roster { "tl_user": ["agent1", "agent2"] }
     attendance_records: [],
     attendance_settings: {
         platforms: ["WhatsApp", "Microsoft Teams", "Call", "SMS"],
@@ -79,7 +81,8 @@ const ROW_MAP = {
     'nps_responses': 'nps_responses',
     'graduated_agents': 'archived_users',
     'linkRequests': 'link_requests',
-    'calendarEvents': 'calendar_events'
+    'calendarEvents': 'calendar_events',
+    'tl_task_submissions': 'tl_task_submissions'
 };
 
 // --- GLOBAL INTERACTION TRACKER ---

@@ -417,6 +417,10 @@
             <i class="fas fa-search"></i><span class="nav-text">Agent Search</span>
         </button>
         
+        <button class="nav-item" onclick="showTab('tl-hub')" title="Teamleader Hub">
+            <i class="fas fa-users-cog"></i><span class="nav-text">Teamleader Hub</span>
+        </button>
+        
         <button class="nav-item" id="nav-live-assessment" onclick="showTab('live-assessment')" title="Live Assessment Booking">
             <i class="fas fa-calendar-check"></i><span class="nav-text">Live Assessment Booking</span>
         </button>
@@ -576,6 +580,13 @@
             <div id="agentSearchResults" class="hidden">
                 <!-- Dynamic Content Injected Here -->
             </div>
+        </section>
+
+        <section id="tl-hub">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2>Teamleader Hub</h2>
+            </div>
+            <div id="tl-hub-content"></div>
         </section>
 
         <section id="test-records" class="admin-only-section">
@@ -1157,6 +1168,7 @@
 <script src="js/assessment_trainee.js"></script>
 <script src="js/live_execution.js"></script>
 <script src="js/agent_search.js"></script>
+<script src="js/tl_tasks.js"></script>
 <script src="js/admin_history.js"></script>
 <script src="js/attendance.js"></script>
 <script src="js/study_monitor.js"></script>

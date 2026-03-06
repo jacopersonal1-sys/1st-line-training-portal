@@ -1041,7 +1041,8 @@ function updateSidebarVisibility() {
         } 
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
-            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture'];
+            // NOTE: 'tl-hub' hidden temporarily while in development
+            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -1170,7 +1171,15 @@ function showTab(id, btn) {
       if(id === 'agent-search') {
           if(typeof loadAgentSearch === 'function') loadAgentSearch();
       }
-      
+
+      if(id === 'tl-hub') {
+          if(typeof TLTasks !== 'undefined' && typeof TLTasks.renderUI === 'function') {
+              TLTasks.renderUI();
+          } else {
+              console.error("TLTasks module not loaded. Check js/tl_tasks.js");
+          }
+      }
+
       if(id === 'live-assessment') {
           if(typeof renderLiveTable === 'function') renderLiveTable();
       }
@@ -1574,6 +1583,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.15": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Teamleader Hub:</strong> Implemented initial structure for Daily/Weekly Operations Timeline and Roster Management (Currently Admin-Only for testing).</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Updated architecture documentation.</li>
+            </ul>`,
         "2.4.14": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Added time buffer to resolve clock skew issues preventing trainee submissions from appearing.</li>

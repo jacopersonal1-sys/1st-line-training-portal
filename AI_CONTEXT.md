@@ -231,6 +231,14 @@ Maps local `localStorage` keys to Supabase tables.
     - `renderAttendanceRegister()`: Admin view of lates/absences.
     - `updateAttendanceUI()`: Refreshes the Admin Register UI when realtime data arrives.
 
+#### `js/tl_tasks.js` (Team Leader Hub)
+- **Responsibility:** Daily/Weekly operational checklists and team roster management.
+- **Key Functions:**
+    - `renderUI()`: Main router for Timeline, My Team, and Overview tabs.
+    - `renderTimeline()`: Renders the daily/weekly task list with custom inputs.
+    - `submitDay()`: Commits the day's tasks and advances the date.
+    - `renderRoster()`: UI for managing the TL's specific agent list.
+
 ---
 
 ## 4. Critical Workflows
