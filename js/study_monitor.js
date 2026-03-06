@@ -1428,6 +1428,9 @@ StudyMonitor.expandTimeline = function(agentName) {
 StudyMonitor.updateWidget = function() {
     const modal = document.getElementById('activityMonitorModal');
     if (modal && !modal.classList.contains('hidden')) {
-        renderActivityMonitorContent();
+        // Only refresh if we are NOT in queue mode (to prevent losing selections)
+        if (StudyMonitor.viewMode !== 'queue') {
+            renderActivityMonitorContent();
+        }
     }
 };

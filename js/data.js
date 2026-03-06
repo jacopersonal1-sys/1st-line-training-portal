@@ -217,11 +217,27 @@ async function loadFromServer(silent = false) {
                 const localObj = { [localKey]: localItems };
                 const merged = performSmartMerge(serverObj, localObj, 'server_wins');
                 
-                // CRITICAL FIX: Aggressively prune monitor_history to prevent quota errors
+                // CRITICAL FIX: Aggressively prune logs to prevent quota errors
                 if (localKey === 'monitor_history') {
                     const cutoff = new Date();
                     cutoff.setDate(cutoff.getDate() - 14); // Keep only last 14 days
                     merged[localKey] = merged[localKey].filter(h => new Date(h.date) > cutoff);
+                } else if (localKey === 'accessLogs') {
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - 30); // Keep last 30 days
+                    merged[localKey] = merged[localKey].filter(l => new Date(l.date) > cutoff);
+                } else if (localKey === 'error_reports') {
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - 14); // Keep last 14 days
+                    merged[localKey] = merged[localKey].filter(r => new Date(r.timestamp) > cutoff);
+                } else if (localKey === 'liveSessions') {
+                    // Prune old/stale sessions locally (older than 7 days)
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - 7);
+                    merged[localKey] = merged[localKey].filter(s => {
+                        const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
+                        return start > cutoff.getTime();
+                    });
                 }
 
                 localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
@@ -233,16 +249,16 @@ async function loadFromServer(silent = false) {
                 // Update Hash Map for these items to prevent re-uploading what we just downloaded
                 const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
                 
-                // For monitor_history, we skip the hash map entirely to save space.
-                if (localKey === 'monitor_history') {
+                // For heavy logs, we skip the hash map entirely to save space.
+                if (['monitor_history', 'accessLogs', 'error_reports'].includes(localKey)) {
                     localStorage.removeItem(`hash_map_${localKey}`);
                 } else {
                     // Update Hash Map for all other tables
                     serverItems.forEach(item => {
                         if(item.id) hashMap[item.id] = generateChecksum(JSON.stringify(item));
                     });
+                    localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(hashMap));
                 }
-                localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(hashMap));
             }
         }
 
@@ -253,7 +269,8 @@ async function loadFromServer(silent = false) {
             .select('user_id, data');
             
         if (monRows) {
-            const monData = {};
+            // Merge server state into local monitor_data
+            const monData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
             monRows.forEach(r => monData[r.user_id] = r.data);
             
             // Preserve MY local state (Optimistic UI) - Don't let server overwrite my own live status

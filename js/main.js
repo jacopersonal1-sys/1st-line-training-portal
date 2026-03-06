@@ -53,17 +53,6 @@ async function secureInitSave() {
 }
 
 window.onload = async function() {
-    // EMERGENCY STORAGE CLEANUP
-    // If storage is near full, wipe the heaviest non-critical logs to allow boot
-    try {
-        const total = JSON.stringify(localStorage).length;
-        if (total > 4500000) { // ~4.5MB (Limit is usually 5MB)
-            console.warn("Storage Critical. Wiping local history cache.");
-            localStorage.removeItem('monitor_history');
-            localStorage.removeItem('hash_map_monitor_history');
-        }
-    } catch(e) {}
-
     // --- INJECT GLOBAL VISUAL STYLES ---
     if (!document.getElementById('global-visuals')) {
         // --- CLIENT IDENTITY ---
@@ -499,29 +488,26 @@ window.onload = async function() {
                 const txt = document.getElementById('loader-text');
                 if(txt) txt.innerText = "Migrating Data to New Server...";
 
-                // Use 'false' for force to enable Smart Merge for Blobs (safer), but cleared hash_maps force Rows.
-                await saveToServer(null, false); 
-                console.log("Migration: Local data pushed to new server.");
-            } catch(e) { console.error("Migration Push Failed:", e); }
+                // EXCLUDE Global Config Keys to prevent overwriting server settings with stale local config
+                const configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
+                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
+                await saveToServer(safeKeys, false); 
+                
+                console.log("Migration: User data pushed to new server (Config skipped).");
+            } catch(e) { 
+                console.error("Migration Push Failed (Non-Critical):", e); 
+                // Continue anyway so we don't get stuck in a loop
+            }
         }
+        // CRITICAL FIX: Update this AFTER attempt, regardless of success, to stop the loop.
+        localStorage.setItem('last_connected_server', currentTarget);
     }
-    localStorage.setItem('last_connected_server', currentTarget);
 
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
-            // TIMEOUT WRAPPER: Increased to 120s to allow for heavy migration/sync on first connect
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Connection Timed Out")), 120000));
-            
-            const success = await Promise.race([
-                loadFromServer(),
-                timeoutPromise
-            ]);
-            
-            if (!success) {
-                console.warn("Boot: loadFromServer returned false (Check data.js logs).");
-                throw new Error("Initial Sync Failed");
-            }
+            const success = await loadFromServer();
+            if (!success) throw new Error("Initial Sync Failed");
             
             // --- SERVER AUTHORITY CHECK ---
             // Immediately clean up any local records that don't exist on the server
@@ -539,17 +525,11 @@ window.onload = async function() {
                         const cloudClient = window.supabase.createClient(window.CLOUD_CREDENTIALS.url, window.CLOUD_CREDENTIALS.key, {
                             auth: { persistSession: false }
                         });
-                        
-                        // TIMEOUT for Recovery Check (10s) - Relaxed to prevent false positives
-                        const recoveryTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Recovery Timeout")), 10000));
-                        const { error } = await Promise.race([
-                            cloudClient.from('app_documents').select('key').limit(1),
-                            recoveryTimeout
-                        ]);
-
+                        const { error } = await cloudClient.from('app_documents').select('key').limit(1);
                         if (!error) {
                             alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
                             localStorage.setItem('active_server_target', 'cloud');
+                            sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop
                             location.reload();
                             return;
                         }
@@ -562,7 +542,11 @@ window.onload = async function() {
             // Prevent auto-save to avoid overwriting cloud data with empty local data
             if(typeof AUTO_BACKUP !== 'undefined') AUTO_BACKUP = false; 
         }
+        // FIX: Always hide loader after load attempt, even if it failed
+        if(loader) loader.classList.add('hidden');
     }
+    // Fallback: Ensure loader is hidden if loadFromServer is missing
+    else if(loader) loader.classList.add('hidden');
 
     // --- APPLY CONFIG & START FAILOVER LOOKOUT ---
     if (typeof applySystemConfig === 'function') applySystemConfig();
@@ -570,9 +554,6 @@ window.onload = async function() {
     // --- NEW: Start Real-Time Polling (Heartbeat & Sync) ---
     // This activates the Supabase polling defined in data.js
     if (typeof startRealtimeSync === 'function') {
-        // Enable Instant Updates (Push)
-        if (typeof initGlobalRealtime === 'function') initGlobalRealtime();
-        // Start Polling (Fallback/Heartbeat)
         startRealtimeSync();
     }
     // ------------------------------------
@@ -730,13 +711,19 @@ window.onload = async function() {
     // Also run once immediately if logged in
     if(savedSession) setTimeout(updateNotifications, 1000); 
 
+    // --- NEW: AUTO-UPDATE POLLER ---
+    // Actively check for updates every 30 minutes so the bell icon appears for open apps
+    if (typeof require !== 'undefined') {
+        setInterval(() => {
+            const { ipcRenderer } = require('electron');
+            ipcRenderer.send('manual-update-check');
+        }, 1800000); // 30 mins
+    }
+
     // --- MANDATORY ATTENDANCE CHECK (Session Restore) ---
     if (savedSession && typeof checkAttendanceStatus === 'function') {
         setTimeout(checkAttendanceStatus, 1500); 
     }
-
-    // HIDE LOADER
-    if(loader) loader.classList.add('hidden');
 };
 
 // --- REFERENCE VIEWER (Draggable Window) ---
@@ -752,10 +739,8 @@ window.openReferenceViewer = function(url) {
     
     let content = '';
     // Simple check for images vs webpages
-    if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith('data:image')) {
+    if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
         content = `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`;
-    } else if (url.match(/\.pdf$/i) || url.startsWith('data:application/pdf')) {
-        content = `<iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>`;
     } else {
         content = `<webview src="${url}" style="width:100%; height:100%; border:none;" allowpopups></webview>`;
     }
@@ -943,28 +928,6 @@ function updateSidebarVisibility() {
                 indicator.style.background = isLocal ? 'rgba(155, 89, 182, 0.2)' : 'rgba(52, 152, 219, 0.2)';
                 indicator.style.color = isLocal ? '#9b59b6' : '#3498db';
                 indicator.innerHTML = isLocal ? '<i class="fas fa-server"></i> Local' : '<i class="fas fa-cloud"></i> Cloud';
-                
-                // Add Ping Button
-                const pingBtn = document.createElement('i');
-                pingBtn.className = 'fas fa-network-wired';
-                pingBtn.style.marginLeft = '8px';
-                pingBtn.style.cursor = 'pointer';
-                pingBtn.style.fontSize = '0.8rem';
-                pingBtn.style.opacity = '0.7';
-                pingBtn.title = "Test Latency";
-                pingBtn.onclick = async function() {
-                    this.className = 'fas fa-circle-notch fa-spin';
-                    const start = Date.now();
-                    try {
-                        if (window.supabaseClient) {
-                            await window.supabaseClient.from('app_documents').select('key').limit(1);
-                            const ms = Date.now() - start;
-                            this.className = 'fas fa-network-wired';
-                            alert(`Latency: ${ms}ms`);
-                        } else { alert("Offline"); this.className = 'fas fa-ban'; }
-                    } catch(e) { this.className = 'fas fa-exclamation-triangle'; alert("Ping Failed"); }
-                };
-                indicator.appendChild(pingBtn);
                 header.appendChild(indicator);
             }
 
@@ -1580,30 +1543,19 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
-        "2.4.3": `
+        "2.4.6": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed issue where deleted records would reappear. Deletions are now permanent across all devices.</li>
+                <li style="margin-bottom: 8px;"><strong>Notifications:</strong> Fixed issue where update notifications (Bell Icon) wouldn't appear unless the app was restarted. Now checks every 30 minutes.</li>
+                <li style="margin-bottom: 8px;"><strong>Schedule:</strong> Fixed broken "Study Material" links containing special characters (SharePoint).</li>
+                <li style="margin-bottom: 8px;"><strong>Sync:</strong> Forced schedule updates for trainees to ensure new links appear immediately.</li>
             </ul>`,
-        "2.4.2": `
+        "2.4.5": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Team Leaders:</strong> Added ability to post Broadcast Messages/Announcements to trainees.</li>
-                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Added support for uploading PDF documents as reference material.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added protection to prevent older clients from overwriting global server configuration.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed login loop issue when Local Server is offline. App now stays in Recovery Mode until manually reset.</li>
             </ul>`,
-        "2.4.1": `
+        "2.4.4": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System Tools:</strong> Added manual "Ping" button to server indicator for latency testing.</li>
-                <li style="margin-bottom: 8px;"><strong>Bug Fixes:</strong> Resolved display error in Admin Database status check.</li>
-            </ul>`,
-        "2.4.0": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Global Realtime:</strong> System now uses instant push updates instead of polling, improving speed and reducing bandwidth.</li>
-                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Assessments now support Image Uploads and sync more efficiently.</li>
-                <li style="margin-bottom: 8px;"><strong>Team Leaders:</strong> Added "My Team" widget for quick attendance and score visibility.</li>
-            </ul>`,
-        "2.3.10": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Finalized robust failover logic and data integrity checks for dual-server environments.</li>
+                <li style="margin-bottom: 8px;"><strong>Security:</strong> Enhanced protection for global system settings to prevent accidental overwrites by older app versions.</li>
             </ul>`,
         "2.3.9": `
             <ul style="padding-left: 20px; margin: 0;">

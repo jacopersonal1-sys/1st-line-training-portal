@@ -1046,6 +1046,11 @@ async function confirmAndSaveLiveSession() {
     await updateGlobalSessionArray(session, false); // Sync session state first
     if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], true);
 
+    // HARD DELETE: Remove completed session from real-time table to prevent bloat
+    if (window.supabaseClient && session.sessionId) {
+        await window.supabaseClient.from('live_sessions').delete().eq('id', session.sessionId);
+    }
+
     if(typeof showToast === 'function') showToast(`Session Completed. Score: ${percentage}%`, "success");
     showTab('live-assessment');
 }

@@ -324,6 +324,11 @@ async function updateDashboardHealth() {
         if (typeof StudyMonitor !== 'undefined' && typeof StudyMonitor.updateWidget === 'function') {
             StudyMonitor.updateWidget();
         }
+        
+        // --- NEW: Update Attendance UI (if open) ---
+        if (typeof updateAttendanceUI === 'function') {
+            updateAttendanceUI();
+        }
     } catch (e) {
         console.error("Dashboard health check failed", e);
         if(latencyEl) {

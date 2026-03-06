@@ -69,6 +69,13 @@ function renderSchedule() {
     const container = document.getElementById('assessment-schedule');
     if (!container) return;
 
+    // --- FORCE SYNC FOR TRAINEES ---
+    // Ensure they see the latest links immediately when opening the tab
+    if (CURRENT_USER.role === 'trainee' && typeof loadFromServer === 'function' && !window._schedSyncDone) {
+        window._schedSyncDone = true; // Run once per session/tab-load to prevent loops
+        loadFromServer(true).then(() => { renderSchedule(); }); // Re-render with new data
+    }
+
     let schedules = JSON.parse(localStorage.getItem('schedules') || 'null');
 
     // Initialization Logic
@@ -237,7 +244,10 @@ function buildTimeline(items, isAdmin) {
                 } else {
                     // Render standard link
                     // UPDATED: Use StudyMonitor to open internally
-                    materialLinkHtml = `<div style="margin-top:10px;"><button onclick="StudyMonitor.openStudyWindow('${item.materialLink}', '${item.courseName.replace(/'/g, "\\'")}')" class="btn-link" style="font-size:0.9rem; cursor:pointer; background:transparent; border:1px solid var(--border-color); color:var(--text-main);"><i class="fas fa-book-open"></i> Study Material</button></div>`;
+                    // FIX: Escape URL to prevent syntax errors with SharePoint links containing quotes
+                    const safeLink = item.materialLink.replace(/'/g, "\\'");
+                    const safeTitle = item.courseName.replace(/'/g, "\\'");
+                    materialLinkHtml = `<div style="margin-top:10px;"><button onclick="StudyMonitor.openStudyWindow('${safeLink}', '${safeTitle}')" class="btn-link" style="font-size:0.9rem; cursor:pointer; background:transparent; border:1px solid var(--border-color); color:var(--text-main);"><i class="fas fa-book-open"></i> Study Material</button></div>`;
                 }
             }
             // -------------------------------------
