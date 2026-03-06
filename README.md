@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.4.7**: **Maintenance**: Version bump for deployment. Includes Schedule Link fixes and Notification polling updates.
 - **v2.4.6**: **Hotfix**: Fixed update notification polling and schedule link issues (SharePoint characters). Forced sync for trainees on schedule view.
 - **v2.4.7**: **Storage Optimization**: Implemented aggressive pruning for activity logs and disabled hash mapping for history tables to prevent LocalStorage quota errors and boot loops.
 - **v2.4.6**: **Hotfix**: Temporarily disabled automatic server switching (Lookout) to resolve login loops when Local Server is unstable.

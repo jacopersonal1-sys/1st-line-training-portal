@@ -1543,6 +1543,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.7": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Maintenance:</strong> Version bump to resolve deployment conflict. Includes fixes for Schedule Links and Update Notifications.</li>
+            </ul>`,
         "2.4.6": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Notifications:</strong> Fixed issue where update notifications (Bell Icon) wouldn't appear unless the app was restarted. Now checks every 30 minutes.</li>
