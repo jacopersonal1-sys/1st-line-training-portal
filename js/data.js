@@ -36,7 +36,7 @@ const DB_SCHEMA = {
         monitoring: { tolerance_ms: 180000, whitelist_strict: false },
         announcement: { active: false, message: "", type: "info" },
         broadcast: { id: 0, message: "" },
-        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-pro", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" },
+        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-1.5-flash", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent" },
         // NEW: Server Failover Settings
         server_settings: { active: 'cloud', local_url: '', local_key: '' }
     },
@@ -112,6 +112,63 @@ function isUserTyping() {
     const tag = el.tagName.toLowerCase();
     // Returns true if user is in an Input, Textarea, or Select box
     return (tag === 'input' || tag === 'textarea' || tag === 'select');
+}
+
+// --- HARD DELETE PROTOCOL (Ghost Data Fix) ---
+const PENDING_DEL_KEY = 'system_pending_deletes';
+
+// Queues a delete operation and attempts to execute it immediately
+async function hardDelete(tableName, id) {
+    if (!tableName || !id) return;
+    
+    // 1. Queue it (Persistence)
+    const queue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+    // Avoid duplicates
+    if (!queue.some(i => i.type === 'id' && i.table === tableName && i.id === id)) {
+        queue.push({ type: 'id', table: tableName, id: id, ts: Date.now() });
+        localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(queue));
+    }
+
+    // 2. Try to execute
+    await processPendingDeletes();
+}
+
+// Queues a bulk delete by query (e.g. delete all records for user X)
+async function hardDeleteByQuery(tableName, column, value) {
+    if (!tableName || !column || !value) return;
+
+    const queue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+    queue.push({ type: 'query', table: tableName, col: column, val: value, ts: Date.now() });
+    localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(queue));
+
+    await processPendingDeletes();
+}
+
+// Flushes the delete queue to Supabase
+async function processPendingDeletes() {
+    if (!window.supabaseClient) return;
+    
+    const queue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+    if (queue.length === 0) return;
+
+    console.log(`Processing ${queue.length} pending deletes...`);
+    const remaining = [];
+
+    for (const item of queue) {
+        try {
+            let error = null;
+            if (item.type === 'id') {
+                ({ error } = await window.supabaseClient.from(item.table).delete().eq('id', item.id));
+            } else if (item.type === 'query') {
+                ({ error } = await window.supabaseClient.from(item.table).delete().eq(item.col, item.val));
+            }
+            if (error) throw error;
+        } catch (e) {
+            console.warn("Delete failed, keeping in queue:", e);
+            remaining.push(item);
+        }
+    }
+    localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(remaining));
 }
 
 // --- NETWORK STATE LISTENERS (Auto-Recovery) ---
@@ -192,6 +249,11 @@ async function loadFromServer(silent = false) {
             criticalSuccess = true; // Nothing new, but we have local cache
         }
 
+        // --- PRE-PROCESS: Load Pending Deletes to prevent Ghost Data ---
+        const pendingQueue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+        const pendingIds = new Set(pendingQueue.filter(i => i.type === 'id').map(i => i.id));
+        const pendingQueries = pendingQueue.filter(i => i.type === 'query');
+
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
         // Only fetch rows newer than our last sync timestamp
         for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
@@ -209,7 +271,27 @@ async function loadFromServer(silent = false) {
                 if(!silent) console.log(`Downloaded ${newRows.length} new rows for ${localKey}`);
                 
                 // Extract data objects
-                const serverItems = newRows.map(r => r.data);
+                // GHOST DATA FIX: Filter out items that are pending deletion locally
+                const serverItems = newRows.filter(r => {
+                    const id = r.data.id || r.id;
+                    // 1. Check ID-based deletes
+                    if (pendingIds.has(id)) return false;
+
+                    // 2. Check Query-based deletes (e.g. "Delete all records for User X")
+                    const isQueryDeleted = pendingQueries.some(q => {
+                        if (q.table !== tableName) return false;
+                        // Map DB column to Local Property (e.g. user_id -> user)
+                        let localProp = q.col;
+                        if (q.col === 'user_id') localProp = 'user';
+                        if (q.col === 'trainee') localProp = 'trainee';
+                        
+                        const val = r.data[localProp] || r.data[q.col];
+                        return val === q.val;
+                    });
+                    if (isQueryDeleted) return false;
+                    return true;
+                }).map(r => r.data);
+
                 const localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
                 
                 // Merge using existing logic (Server Wins)
@@ -271,7 +353,13 @@ async function loadFromServer(silent = false) {
         if (monRows) {
             // Merge server state into local monitor_data
             const monData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-            monRows.forEach(r => monData[r.user_id] = r.data);
+            monRows.forEach(r => {
+                // GHOST DATA FIX: Check if this user is pending deletion
+                const isDeleted = pendingQueries.some(q => q.table === 'monitor_state' && q.col === 'user_id' && q.val === r.user_id);
+                if (!isDeleted) {
+                    monData[r.user_id] = r.data;
+                }
+            });
             
             // Preserve MY local state (Optimistic UI) - Don't let server overwrite my own live status
             if (CURRENT_USER) {
@@ -523,7 +611,9 @@ if (typeof module !== 'undefined' && module.exports) {
         DB_SCHEMA,
         loadFromServer,
         saveToServer,
-        performSmartMerge
+        performSmartMerge,
+        hardDelete,
+        hardDeleteByQuery
     };
 }
 
@@ -647,6 +737,9 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
 
         const keysToSave = targetKeys || Object.keys(DB_SCHEMA);
         if(!silent) updateSyncUI('busy');
+
+        // 0. Process Deletes First (Ensure server is clean before we push)
+        await processPendingDeletes();
 
         for (const key of keysToSave) {
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
@@ -1622,7 +1715,78 @@ function startRealtimeSync() {
         }
     }, beatRate);
     
+    // 3. GLOBAL REALTIME SUBSCRIPTIONS (Push Architecture)
+    setupRealtimeListeners();
+    
     console.log("Real-time sync & heartbeat engine started (High Performance Mode).");
+}
+
+// --- REALTIME LISTENERS (The Fix for Live Updates) ---
+function setupRealtimeListeners() {
+    if (!window.supabaseClient) return;
+
+    // Subscribe to critical tables
+    const channel = window.supabaseClient.channel('global_app_changes')
+        // 1. MONITOR STATE (Activity Monitor)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'monitor_state' }, (payload) => {
+            handleMonitorRealtime(payload);
+        })
+        // 2. ATTENDANCE (Register)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload) => {
+            handleAttendanceRealtime(payload);
+        })
+        // 3. SESSIONS (Active Users)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, (payload) => {
+            // Debounce dashboard update to prevent flickering on every heartbeat
+            if (window.DASH_UPDATE_TIMEOUT) clearTimeout(window.DASH_UPDATE_TIMEOUT);
+            window.DASH_UPDATE_TIMEOUT = setTimeout(() => {
+                if (typeof updateDashboardHealth === 'function') updateDashboardHealth();
+            }, 1000);
+        })
+        .subscribe();
+}
+
+function handleMonitorRealtime(payload) {
+    let data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    
+    if (payload.eventType === 'DELETE') {
+        if (payload.old && payload.old.user_id) delete data[payload.old.user_id];
+    } else {
+        if (payload.new && payload.new.user_id) data[payload.new.user_id] = payload.new.data;
+    }
+    
+    localStorage.setItem('monitor_data', JSON.stringify(data));
+    
+    // Trigger UI Refresh if Monitor is open
+    if (typeof StudyMonitor !== 'undefined' && typeof StudyMonitor.updateWidget === 'function') {
+        StudyMonitor.updateWidget();
+    }
+}
+
+function handleAttendanceRealtime(payload) {
+    let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    
+    if (payload.eventType === 'DELETE') {
+        records = records.filter(r => r.id !== payload.old.id);
+    } else {
+        const newRow = payload.new;
+        // Convert DB row back to App Object format if needed, or assume direct mapping
+        // The app expects 'data' column content merged with ID
+        const item = newRow.data || {};
+        item.id = newRow.id;
+        item.user = newRow.user_id; // Ensure user mapping
+        
+        const idx = records.findIndex(r => r.id === item.id);
+        if (idx > -1) records[idx] = item;
+        else records.push(item);
+    }
+    
+    localStorage.setItem('attendance_records', JSON.stringify(records));
+    
+    // Trigger UI Refresh if Register is open
+    if (typeof updateAttendanceUI === 'function') {
+        updateAttendanceUI();
+    }
 }
 
 // 6. FACTORY RESET (Cloud & Local)

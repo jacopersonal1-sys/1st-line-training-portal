@@ -37,7 +37,7 @@ function createWindow() {
             nodeIntegration: true,
             contextIsolation: false, // Needed for some legacy JS interactions
             webviewTag: true, // ENABLED: Required for SharePoint/External Reference Viewer
-            devTools: !app.isPackaged // Disable DevTools in production (.exe)
+            devTools: true // ENABLED: Required for Super Admin access (Shortcuts blocked below)
         }
     });
 
@@ -69,6 +69,22 @@ function createWindow() {
     mainWindow.once('ready-to-show', () => {
         autoUpdater.checkForUpdatesAndNotify();
     });
+
+    // SECURITY: Block DevTools shortcuts & Context Menu in Production
+    if (app.isPackaged) {
+        mainWindow.webContents.on('before-input-event', (event, input) => {
+            if (input.control && input.shift && input.key.toLowerCase() === 'i') {
+                event.preventDefault();
+            }
+            if (input.key === 'F12') {
+                event.preventDefault();
+            }
+        });
+        
+        mainWindow.webContents.on('context-menu', (e) => {
+            e.preventDefault();
+        });
+    }
 
     // SECURITY: Prevent closing during Vetting Lockdown
     mainWindow.on('close', (e) => {
@@ -142,6 +158,11 @@ ipcMain.on('set-update-channel', (event, channel) => {
         // Trigger a fresh check immediately if we just switched modes
         autoUpdater.checkForUpdatesAndNotify();
     }
+});
+
+// IPC Listener for DevTools (Super Admin Only)
+ipcMain.on('open-devtools', () => {
+    if (mainWindow) mainWindow.webContents.openDevTools();
 });
 
 // --- AUTO-UPDATER EVENTS ---

@@ -274,8 +274,10 @@ async function deleteBulkRecords() {
     
     localStorage.setItem('records', JSON.stringify(records));
     
-    if (window.supabaseClient && idsToDelete.length > 0) {
-        await window.supabaseClient.from('records').delete().in('id', idsToDelete);
+    if (typeof hardDelete === 'function' && idsToDelete.length > 0) {
+        for (const id of idsToDelete) {
+            await hardDelete('records', id);
+        }
     }
     
     if(typeof saveToServer === 'function') await saveToServer(['records'], true);
@@ -324,8 +326,8 @@ async function delRec(i) {
         r.splice(i,1); 
         localStorage.setItem('records', JSON.stringify(r)); 
         
-        if (target && target.id && window.supabaseClient) {
-            await window.supabaseClient.from('records').delete().eq('id', target.id);
+        if (target && target.id && typeof hardDelete === 'function') {
+            await hardDelete('records', target.id);
         }
         
         // 3. Force Save
@@ -981,6 +983,7 @@ function openSuperAdminConfig() {
                             <div style="display:flex; gap:10px;">
                                 <button class="btn-secondary btn-sm" onclick="AICore.openConsole()"><i class="fas fa-terminal"></i> Launch Console</button>
                                 <button class="btn-danger btn-sm" onclick="viewSystemErrors()"><i class="fas fa-bug"></i> Error Reports</button>
+                                <button class="btn-warning btn-sm" onclick="openDevTools()"><i class="fas fa-code"></i> DevTools</button>
                             </div>
                         </div>
 
@@ -1156,8 +1159,8 @@ function openSuperAdminConfig() {
                                 </div>
                             </div>
                             <div style="display:flex; gap:10px;">
-                                <input type="text" id="sa_ai_input" placeholder="Type your question here..." style="flex:1; padding:10px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" onkeydown="if(event.key==='Enter') sendSaAiMessage()">
-                                <button class="btn-primary" onclick="sendSaAiMessage()"><i class="fas fa-paper-plane"></i></button>
+                                <textarea id="sa_ai_input" placeholder="Type your question here..." style="flex:1; padding:10px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main); height: 60px; resize: none; font-family: inherit;" onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendSaAiMessage(); }"></textarea>
+                                <button class="btn-primary" onclick="sendSaAiMessage()" style="height: 60px;"><i class="fas fa-paper-plane"></i></button>
                             </div>
                         </div>
                     </div>
@@ -2148,7 +2151,15 @@ async function viewSystemErrors() {
 async function clearSystemErrors() {
     if(!confirm("Clear all error reports?")) return;
     localStorage.setItem('error_reports', '[]');
-    if(typeof saveToServer === 'function') await saveToServer(['error_reports'], true);
+    
+    // FIX: Explicitly wipe the table for Row-Level Sync to ensure they don't reappear
+    if (window.supabaseClient) {
+        const { error } = await window.supabaseClient
+            .from('error_reports')
+            .delete()
+            .neq('id', 'placeholder'); // Delete all rows
+    }
+
     document.getElementById('errorReportModal').remove();
     viewSystemErrors();
 }
@@ -2428,5 +2439,12 @@ window.verifyServerSchema = async function() {
         alert("Verification Error: " + e.message);
     } finally {
         if(btn) { btn.innerText = "Verify Schema"; btn.disabled = false; }
+    }
+};
+
+window.openDevTools = function() {
+    if (typeof require !== 'undefined') {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.send('open-devtools');
     }
 };

@@ -1574,6 +1574,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.13": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Hard Delete Protocol" to permanently remove deleted items from the cloud and prevent "Ghost Data" reappearance.</li>
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Added Pending Delete Queue to filter out deleted items during synchronization.</li>
+            </ul>`,
         "2.4.12": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Migration Tools:</strong> Finalized Staging Mode and Migration protocols for server switchover.</li>

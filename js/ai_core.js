@@ -326,8 +326,8 @@ const AICore = {
                         ).join('')}
                     </div>
                     <div style="display:flex; gap:10px;">
-                        <input type="text" id="aiInput" placeholder="Ask Gemini to check system health..." style="flex:1; padding:10px; border-radius:4px; border:1px solid #444; background: #2d2d2d; color: white;" onkeydown="if(event.key==='Enter') AICore.sendMessage()">
-                        <button class="btn-primary" onclick="AICore.sendMessage()">Send</button>
+                        <textarea id="aiInput" placeholder="Ask Gemini to check system health..." style="flex:1; padding:10px; border-radius:4px; border:1px solid #444; background: #2d2d2d; color: white; height: 60px; resize: none; font-family: inherit;" onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); AICore.sendMessage(); }"></textarea>
+                        <button class="btn-primary" onclick="AICore.sendMessage()" style="height: 60px;">Send</button>
                     </div>
                 </div>
             </div>
@@ -407,7 +407,9 @@ const AICore = {
 
         try {
             // Call Gemini API (Google Generative Language)
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${config.ai.apiKey}`;
+            // FIX: Use gemini-1.5-flash as default if model is missing or set to legacy gemini-pro
+            const model = (config.ai.model && config.ai.model !== 'gemini-pro') ? config.ai.model : 'gemini-1.5-flash';
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.ai.apiKey}`;
             const payload = {
                 contents: [{
                     parts: [{ text: systemContext + "\nUser: " + text }]

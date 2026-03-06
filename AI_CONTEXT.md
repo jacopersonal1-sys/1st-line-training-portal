@@ -32,14 +32,7 @@
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
 | `liveSessions` | Array | Row (`live_sessions`) | Active state of Live Assessments. |
-| `tests` | Array | Row (`tests`) | Assessment definitions (Questions, Settings). |
-| `liveSchedules` | Object | Blob | Configuration for Live Assessment slots (Start Date, Days). |
-| `agentNotes` | Object | Blob | Private admin notes on agents. |
-| `dailyTips` | Array | Blob | List of daily tips. |
-| `vettingTopics` | Array | Blob | List of Vetting topics. |
-| `cancellationCounts` | Object | Blob | Track trainee cancellations. |
-| `monitor_data` | Object | Special (Table) | Real-time activity state. Syncs to `monitor_state` table via Strategy B. |
-| `vettingSession` | Object | Blob + Table | Active Vetting Session state. Syncs to `app_documents` AND `vetting_sessions`. |
+| `tests` | Array | Blob | Assessment definitions (Questions, Settings). |
 | `liveBookings` | Array | Row (`live_bookings`) | Scheduled slots for live assessments. |
 | `attendance_records` | Array | Row (`attendance`) | Clock In/Out logs. |
 | `accessLogs` | Array | Row (`access_logs`) | Login/Logout history. |
@@ -87,18 +80,20 @@ Maps local `localStorage` keys to Supabase tables.
     - `checkReleaseNotes(ver)`: Shows changelog popup on update.
 
 #### `js/data.js` (Sync Engine)
-- **Responsibility:** Data synchronization logic (Pull/Push/Merge).
+ - **Responsibility:** Data synchronization logic (Pull/Push/Merge) and **Realtime Subscriptions**.
 - **Key Functions:**
     - `loadFromServer(silent)`: Pulls data.
         - **Phase A (Blobs):** Checks `updated_at` timestamps in `app_documents`.
         - **Phase B (Rows):** Queries tables for rows newer than local `row_sync_ts`.
         - **Phase C (Monitor):** Merges `monitor_state` table.
     - `saveToServer(keys, force)`: Pushes data.
-        - **Strategy A (Rows):** Calculates checksums. Upserts changed items to tables. Batches large uploads.
+        - **Strategy A (Rows):** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue.
         - **Strategy B (Monitor):** Upserts to `monitor_state`.
         - **Strategy C (Blobs):** Upserts to `app_documents`. **Guarded:** `system_config` requires Super Admin.
     - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name.
-    - `syncOrphans()`: Removes local records that no longer exist on the server (Hard Delete sync).
+    - `setupRealtimeListeners()`: **NEW**. Subscribes to Supabase `postgres_changes` for `monitor_state`, `attendance`, and `sessions`.
+    - `handleMonitorRealtime(payload)`: Updates local `monitor_data` and triggers `StudyMonitor.updateWidget`.
+    - `handleAttendanceRealtime(payload)`: Updates local `attendance_records` and triggers `updateAttendanceUI`.
 
 #### `js/auth.js` (Authentication)
 - **Responsibility:** Login, Session Management, Security Checks.
@@ -111,6 +106,7 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/config.js` (Configuration)
 - **Responsibility:** Supabase Client initialization.
 - **Logic:** Reads `active_server_target`. Initializes `window.supabaseClient`. Handles connection failures by triggering **Recovery Mode** (revert to Cloud).
+- **Staging:** Overrides credentials if `active_server_target` is 'staging'.
 
 ### Assessment Engine
 
@@ -142,7 +138,6 @@ Maps local `localStorage` keys to Supabase tables.
     - `loadLiveExecution()`: Starts the Live Arena. Subscribes to `live_sessions` realtime channel.
     - `adminPushQuestion(idx)`: Updates session state to show a specific question.
     - `renderTraineeLivePanel()`: Renders the active question for the trainee.
-    - `initiateLiveSession()`: Admin starts a session from a booking.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
 
 #### `js/vetting_arena.js` (Security)
@@ -171,6 +166,17 @@ Maps local `localStorage` keys to Supabase tables.
     - `performBlobToRowMigration()`: Utility to move data from legacy Blobs to new Tables.
     - `forceMigrationPush()`: Manually triggers the Server Switch migration logic.
     - `checkRowSyncStatus()`: Compares local vs cloud row counts.
+    - `performOrphanCleanup()`: Removes local records that no longer exist on the server (Hard Delete sync).
+    - `switchToStaging()` / `exitStaging()`: Toggles between Production and Staging environments.
+    - `clearSystemErrors()`: **Hard Deletes** all error reports from the cloud table.
+    - `openDevTools()`: Opens Electron Developer Tools (Super Admin only).
+
+#### `js/ai_core.js` (AI System Analyst)
+- **Responsibility:** Gemini Integration (`gemini-1.5-flash`). Handles natural language commands, system diagnostics, and error analysis.
+- **Key Functions:**
+    - `processRequest(text)`: Sends prompts to Gemini API.
+    - `analyzeError(msg)`: Auto-diagnoses system errors.
+    - `runSelfRepair()`: Fixes data integrity issues.
 
 #### `js/schedule.js` (Calendar)
 - **Responsibility:** Scheduling and Live Bookings.
@@ -188,7 +194,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `sync()`: Pushes `monitor_data` to server.
     - `checkDailyReset()`: Archives daily logs to `monitor_history` at midnight.
     - `renderActivityMonitorContent()`: Renders the Admin view (Live Grid or Review Queue).
-    - `openStudyWindow(url, title)`: Opens the secure webview for reference material.
+    - `updateWidget()`: Refreshes the Admin Monitor UI when realtime data arrives.
 
 #### `js/insight.js` (Analytics)
 - **Responsibility:** Performance dashboards.
@@ -223,6 +229,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `checkAttendanceStatus()`: Prompts user to clock in.
     - `submitClockIn()` / `submitClockOut()`: Saves timestamp.
     - `renderAttendanceRegister()`: Admin view of lates/absences.
+    - `updateAttendanceUI()`: Refreshes the Admin Register UI when realtime data arrives.
 
 ---
 
@@ -235,7 +242,7 @@ Maps local `localStorage` keys to Supabase tables.
     *   If successful: Render UI.
     *   If failed (Timeout/Error): Check `active_server_target`.
         *   If Local: Trigger **Auto-Recovery** (Switch to Cloud, set `recovery_mode` flag, reload).
-4.  **Start Engine:** Call `startRealtimeSync()` to begin polling/heartbeat.
+4.  **Start Engine:** Call `startRealtimeSync()` to begin polling/heartbeat and **subscribe to Realtime channels**.
 
 ### B. Data Synchronization (`data.js`)
 1.  **Pull (Load):**
@@ -249,6 +256,7 @@ Maps local `localStorage` keys to Supabase tables.
     *   If changed:
         *   **Rows:** Upload changed items individually (`upsert`).
         *   **Blobs:** Upload full object.
+        *   **Deletes:** Explicitly executes `DELETE` on Supabase for items removed locally to prevent "Ghost Data" (Server-side persistence of locally deleted items).
     *   **Protection:** `system_config` is only saved if user is Super Admin and save is explicit.
 
 ### C. Vetting Arena Security
@@ -266,6 +274,14 @@ Maps local `localStorage` keys to Supabase tables.
     *   **Switch:** Update local config, reload app.
 3.  **Migration:** On reboot, `main.js` detects the switch and pushes local data to the new server.
 
+### E. Global Realtime Sync (Push Architecture)
+1.  **Initialization:** `data.js` -> `setupRealtimeListeners()` connects to Supabase channels.
+2.  **Events:**
+    *   `monitor_state`: Updates Agent Activity Monitor instantly.
+    *   `attendance`: Updates Attendance Register instantly.
+    *   `sessions`: Updates Active Users dashboard widget instantly.
+3.  **Handling:** Incoming payloads update `localStorage` directly and trigger specific UI refresh functions (`updateWidget`, `updateAttendanceUI`, `updateDashboardHealth`).
+
 ---
 
 ## 5. IPC Channels (Electron Main)
@@ -274,6 +290,8 @@ Maps local `localStorage` keys to Supabase tables.
 - `set-kiosk-mode`: Toggles Kiosk mode.
 - `get-process-list`: Returns running processes (for Vetting).
 - `get-active-window`: Returns title of foreground window (for Study Monitor).
+- `set-update-channel`: Switches between 'prod' and 'staging' (beta) update channels.
+- `open-devtools`: Opens the Chromium Developer Tools.
 
 ---
 
@@ -296,18 +314,3 @@ Maps local `localStorage` keys to Supabase tables.
         git commit -m "feat: vX.X.X - Summary of changes"
         git push origin main
         ```
-
-### 7. Staging & Release Workflow
-
-To test an update before pushing to everyone:
-
-1.  **Push Code:** Commit and push as normal. GitHub Actions will build the release.
-2.  **Publish Draft:** Go to GitHub Releases. You will see a new **Draft** release.
-    *   Click **Edit**.
-    *   Check **"Set as a pre-release"**.
-    *   Click **Publish release**.
-    *   *Result:* Normal users (Production) will **NOT** see this update.
-    *   *Result:* You (in Staging Mode) **WILL** see this update and download it.
-3.  **Test:** Verify the new version on your Staging machine.
-4.  **Go Live:** Edit the release on GitHub -> **Uncheck** "Set as a pre-release" -> Save.
-    *   *Result:* All Production users will now auto-update to this version.

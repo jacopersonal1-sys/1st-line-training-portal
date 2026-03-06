@@ -215,7 +215,7 @@ function openAttendanceRegister() {
 }
 
 // --- NEW: REALTIME HOOK ---
-// Called by dashboard.js updateDashboardHealth or data.js sync
+// Called by data.js handleAttendanceRealtime
 window.updateAttendanceUI = function() {
     const modal = document.getElementById('attendanceAdminModal');
     if (modal && !modal.classList.contains('hidden')) {

@@ -216,6 +216,9 @@ function renderDashboard() {
     }
 }
 
+// Global timeout for debouncing realtime updates
+window.DASH_UPDATE_TIMEOUT = null;
+
 // --- SYSTEM HEALTH & ACTIVE USERS (DASHBOARD SPECIFIC - MIGRATED TO SUPABASE) ---
 async function updateDashboardHealth() {
     const storageEl = document.getElementById('dashStorage');
