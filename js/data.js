@@ -503,7 +503,7 @@ function applySystemConfig() {
     }
 
     // 3. Start Server Lookout
-    startServerLookout();
+    // startServerLookout(); // Disabled to prevent switching loops
 }
 
 // --- ERROR REPORTING SYSTEM ---
