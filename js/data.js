@@ -83,6 +83,7 @@ const ROW_MAP = {
     'tests': 'tests' // NEW: Row-Level Sync for Assessments
 };
 window.ROW_MAP = ROW_MAP; // Expose globally
+window.DB_SCHEMA = DB_SCHEMA; // Expose globally for Admin Tools
 
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
@@ -707,6 +708,11 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
             if (key === 'system_config') {
                 if (!CURRENT_USER || CURRENT_USER.role !== 'super_admin') {
                     continue; 
+                }
+                // EXTRA GUARD: Only allow save if explicitly requested (targetKeys is not null)
+                // This prevents background syncs or bulk migrations from touching system_config
+                if (!targetKeys) {
+                    continue;
                 }
             }
 

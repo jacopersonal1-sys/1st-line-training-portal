@@ -490,7 +490,8 @@ window.importDatabase = function(input) {
             });
 
             console.log("Restoring backup to cloud...");
-            if (typeof saveToServer === 'function') await saveToServer(null, true); // Force save ALL keys
+            // Explicitly pass all keys to bypass the system_config guard in data.js
+            if (typeof saveToServer === 'function') await saveToServer(Object.keys(data), true); 
 
             alert("Database restored successfully.");
             location.reload();
