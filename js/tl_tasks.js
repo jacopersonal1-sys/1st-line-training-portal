@@ -108,6 +108,10 @@ const TLTasks = {
     // --- MAIN RENDERER ---
     renderUI: function() {
         const container = document.getElementById('tl-hub-content');
+        const submission = this.getSubmission(this.currentDate) || { data: {} };
+        const data = submission.data || {};
+        const phases = this.activeTab === 'daily' ? this.dailyPhases : this.weeklyPhases;
+
         if (!container) {
             console.error("TL Hub container not found!");
             return;
@@ -130,7 +134,23 @@ const TLTasks = {
             </div>
         `;
 
-        // 2. Content
+        // 2. Progress Bar (Global for the day/week)
+        if (this.currentView === 'timeline') {
+            let totalTasks = 0;
+            let completedTasks = 0;
+            
+            phases.forEach(p => {
+                p.tasks.forEach(t => {
+                    totalTasks++;
+                    const val = data[p.id] ? data[p.id][t.id] : null;
+                    if (val && (val === true || val.value || (typeof val === 'object' && Object.keys(val).length > 0))) completedTasks++;
+                });
+            });
+            const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+            html += `<div class="progress-track" style="margin-bottom:20px; height:8px;"><div class="progress-fill" style="width:${pct}%; background:linear-gradient(90deg, var(--primary), #2ecc71);"></div></div>`;
+        }
+
+        // 3. Content
         if (this.currentView === 'timeline') {
             html += this.renderTimeline();
         } else if (this.currentView === 'my_team') {
@@ -185,6 +205,7 @@ const TLTasks = {
         // Submit Day Button
         html += `
             <div style="margin-top:30px; padding-top:20px; border-top:1px solid var(--border-color); text-align:right;">
+                <button class="btn-secondary btn-lg" onclick="TLTasks.generateShiftReport()" style="margin-right:10px;"><i class="fas fa-file-alt"></i> Shift Report</button>
                 <button class="btn-success btn-lg" onclick="TLTasks.submitDay()"><i class="fas fa-check-circle"></i> Submit Day</button>
             </div>
         `;
@@ -456,6 +477,55 @@ const TLTasks = {
         if (typeof showToast === 'function') showToast("Day submitted successfully. Moving to next day.", "success");
     },
 
+    generateShiftReport: function() {
+        const submission = this.getSubmission(this.currentDate);
+        if (!submission || !submission.data) return alert("No data found for this date.");
+        
+        const data = submission.data;
+        const phases = this.activeTab === 'daily' ? this.dailyPhases : this.weeklyPhases;
+        let report = `SHIFT REPORT - ${this.currentDate} (${this.activeTab.toUpperCase()})\n`;
+        report += `Team Leader: ${CURRENT_USER.user}\n`;
+        report += `Generated: ${new Date().toLocaleString()}\n\n`;
+
+        phases.forEach(p => {
+            const pData = data[p.id] || {};
+            let hasContent = false;
+            let sectionText = `--- ${p.title.toUpperCase()} ---\n`;
+            
+            p.tasks.forEach(t => {
+                const val = pData[t.id];
+                if (val) {
+                    hasContent = true;
+                    sectionText += `[x] ${t.label}: `;
+                    if (typeof val === 'object') {
+                        if (val.value) sectionText += val.value; // Textarea/Gauge
+                        else if (t.type.includes('team')) {
+                            // Team data summary
+                            const count = Object.keys(val).length;
+                            sectionText += `${count} entries (See dashboard for details)`;
+                        } else {
+                            sectionText += JSON.stringify(val);
+                        }
+                    } else {
+                        sectionText += val;
+                    }
+                    sectionText += '\n';
+                }
+            });
+            if (hasContent) report += sectionText + '\n';
+        });
+
+        // Download text file
+        const blob = new Blob([report], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Shift_Report_${this.currentDate}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    },
+
     // --- UPDATE HELPERS ---
     updateObjectTask: function(phaseId, taskId, key, val) {
         const sub = this.getSubmission(this.currentDate);
@@ -557,7 +627,7 @@ const TLTasks = {
         if (!lists[CURRENT_USER.user].includes(val)) {
             lists[CURRENT_USER.user].push(val);
             localStorage.setItem('tl_personal_lists', JSON.stringify(lists));
-            if (typeof saveToServer === 'function') saveToServer(['tl_personal_lists'], false);
+            if (typeof saveToServer === 'function') saveToServer(['tl_personal_lists'], true);
         }
         this.renderUI();
     },
@@ -570,7 +640,7 @@ const TLTasks = {
             lists[CURRENT_USER.user] = lists[CURRENT_USER.user].filter(a => a !== name);
             localStorage.setItem('tl_personal_lists', JSON.stringify(lists));
             
-            if (typeof saveToServer === 'function') saveToServer(['tl_personal_lists'], false);
+            if (typeof saveToServer === 'function') saveToServer(['tl_personal_lists'], true);
             this.renderUI();
         }
     },
@@ -597,7 +667,7 @@ const TLTasks = {
         lists[CURRENT_USER.user] = agents;
         localStorage.setItem('tl_personal_lists', JSON.stringify(lists));
         
-        if (typeof saveToServer === 'function') saveToServer(['tl_personal_lists'], false);
+        if (typeof saveToServer === 'function') saveToServer(['tl_personal_lists'], true);
         
         this.renderUI();
         if (typeof showToast === 'function') showToast(`Restored ${agents.length} agents from ${lastSub.date}`, "success");

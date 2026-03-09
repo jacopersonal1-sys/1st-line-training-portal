@@ -133,7 +133,7 @@ async function hardDelete(tableName, id) {
     }
 
     // 2. Try to execute
-    await processPendingDeletes();
+    return await processPendingDeletes();
 }
 
 // Queues a bulk delete by query (e.g. delete all records for user X)
@@ -144,7 +144,7 @@ async function hardDeleteByQuery(tableName, column, value) {
     queue.push({ type: 'query', table: tableName, col: column, val: value, ts: Date.now() });
     localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(queue));
 
-    await processPendingDeletes();
+    return await processPendingDeletes();
 }
 
 // Flushes the delete queue to Supabase
@@ -155,6 +155,7 @@ async function processPendingDeletes() {
     if (queue.length === 0) return;
 
     console.log(`Processing ${queue.length} pending deletes...`);
+    let allSucceeded = true;
     const remaining = [];
 
     for (const item of queue) {
@@ -168,10 +169,12 @@ async function processPendingDeletes() {
             if (error) throw error;
         } catch (e) {
             console.warn("Delete failed, keeping in queue:", e);
+            allSucceeded = false;
             remaining.push(item);
         }
     }
     localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(remaining));
+    return allSucceeded;
 }
 
 // --- NETWORK STATE LISTENERS (Auto-Recovery) ---
@@ -232,7 +235,12 @@ async function loadFromServer(silent = false) {
                 // We use 'server_wins' strategy here: If an item exists in both, Server version is the truth.
                 const localVal = JSON.parse(localStorage.getItem(doc.key));
                 
-                if (localVal && (Array.isArray(localVal) || typeof localVal === 'object')) {
+                // FIX: For specific Admin keys (Rosters, Schedules, Tests), do NOT merge. 
+                // Merging restores deleted items if the server hasn't updated yet or if we are out of sync.
+                // We trust the Server's snapshot if it is newer, or our local overwrite if we just saved.
+                const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics'];
+                
+                if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(doc.key)) {
                     let strategy = 'server_wins';
                     
                     const serverObj = { [doc.key]: doc.content };
@@ -240,7 +248,7 @@ async function loadFromServer(silent = false) {
                     const merged = performSmartMerge(serverObj, localObj, strategy);
                     localStorage.setItem(doc.key, JSON.stringify(merged[doc.key]));
                 } else {
-                    // Fallback for primitives or empty local data
+                    // Fallback for primitives OR no-merge keys (Direct Overwrite)
                     localStorage.setItem(doc.key, JSON.stringify(doc.content));
                 }
                 localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
@@ -271,7 +279,14 @@ async function loadFromServer(silent = false) {
                 .gt('updated_at', safeSyncTime)
                 .limit(1000); // Batch limit
 
-            if (rowErr) console.warn(`Row sync failed for ${tableName}`, rowErr);
+            if (rowErr) {
+                // Gracefully handle missing table (404) to prevent sync crash
+                if (rowErr.code === 'PGRST205' || rowErr.message.includes('Could not find the table')) {
+                    console.warn(`Sync Warning: Table '${tableName}' does not exist on server. Skipping.`);
+                } else {
+                    console.warn(`Row sync failed for ${tableName}`, rowErr);
+                }
+            }
             
             if (newRows && newRows.length > 0) {
                 if(!silent) console.log(`Downloaded ${newRows.length} new rows for ${localKey}`);
@@ -735,6 +750,26 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
             return;
         }
 
+        // VERSION GATE: Prevent old clients from pushing bad data
+        if (config.security && config.security.min_version && window.APP_VERSION) {
+            const currentParts = window.APP_VERSION.split('.').map(Number);
+            const minParts = config.security.min_version.split('.').map(Number);
+            
+            let isOutdated = false;
+            for (let i = 0; i < Math.max(currentParts.length, minParts.length); i++) {
+                const curr = currentParts[i] || 0;
+                const min = minParts[i] || 0;
+                if (curr < min) { isOutdated = true; break; }
+                if (curr > min) { isOutdated = false; break; }
+            }
+            
+            if (isOutdated) {
+                console.error(`Save Blocked: Client Version ${window.APP_VERSION} is below minimum ${config.security.min_version}`);
+                if(!silent) updateSyncUI('error'); // Show error state
+                return;
+            }
+        }
+
         if (!window.supabaseClient) {
             console.warn("Supabase client not ready. Offline?");
             if(!silent) updateSyncUI('error');
@@ -764,7 +799,8 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                         if (!item.id) item.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
                         
                         const currentHash = generateChecksum(JSON.stringify(item));
-                        const lastHash = hashMap[item.id];
+                        // SAFETY: If force=true, ignore hash map and upload everything (Authoritative)
+                        const lastHash = force ? null : hashMap[item.id];
                         
                         if (currentHash !== lastHash) {
                             itemsToUpload.push(item);
@@ -790,7 +826,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
                         if (['records', 'submissions', 'live_bookings', 'saved_reports', 'insight_reviews', 'exemptions', 'link_requests'].includes(tableName)) {
                             row.trainee = item.trainee || item.user || null;
                         } 
-                        else if (['audit_logs', 'monitor_history', 'attendance', 'access_logs', 'nps_responses', 'archived_users'].includes(tableName)) {
+                        else if (['audit_logs', 'monitor_history', 'attendance', 'access_logs', 'nps_responses', 'archived_users', 'tl_task_submissions'].includes(tableName)) {
                             row.user_id = item.user || null;
                         }
                         else if (tableName === 'live_sessions') {
@@ -873,6 +909,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
 
         if(!silent) updateSyncUI('success');
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        return true;
 
     } catch (err) {
         // RETRY LOGIC: Try once more if it failed (Network blip)
@@ -892,6 +929,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
         }
         
         if(typeof showToast === 'function' && !silent) showToast("Save Failed: " + msg, 'error');
+        return false;
     }
 }
 

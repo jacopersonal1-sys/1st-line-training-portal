@@ -9,7 +9,8 @@ async function secureAuthSave() {
     if (typeof saveToServer === 'function') {
         try {
             // PARAMETER 'false' = SAFE MERGE
-            await saveToServer(['users'], false);
+            // UPDATED: Use force=true to ensure password/profile changes are authoritative and not overwritten by a background sync.
+            await saveToServer(['users'], true); 
         } catch(e) {
             console.error("Auth Save Error:", e);
         }
@@ -106,11 +107,19 @@ async function attemptLogin() {
       return;
   }
 
+  // --- SECURITY CHECK 1.2: PENDING UPDATE ---
+  if (window.UPDATE_DOWNLOADED) {
+      document.getElementById('loginError').innerText = "Update Ready. Please restart to install.";
+      return;
+  }
+
   // --- SECURITY CHECK 1.5: PRE-AUTH CHECKS (Version, Client ID) ---
   const config = JSON.parse(localStorage.getItem('system_config') || '{}');
   if (config.security) {
       // Version Check (Semantic Comparison)
-      if (config.security.min_version && window.APP_VERSION) {
+      if (config.security.min_version) {
+          // Default to 0.0.0 if APP_VERSION is missing (e.g. dev mode or load error) to force check
+          const appVer = window.APP_VERSION || '0.0.0';
           const currentParts = window.APP_VERSION.split('.').map(Number);
           const minParts = config.security.min_version.split('.').map(Number);
           
@@ -124,6 +133,10 @@ async function attemptLogin() {
 
           if (isOutdated) {
              document.getElementById('loginError').innerText = `Update Required. Min Version: ${config.security.min_version}`;
+             // Force check for updates if outdated
+             if (typeof require !== 'undefined') {
+                 try { require('electron').ipcRenderer.send('manual-update-check'); } catch(e){}
+             }
              return;
           }
       }
@@ -352,7 +365,15 @@ async function autoLogin() {
   if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
 
   // Redirect based on role
-  if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') showTab('dashboard-view'); 
+  if (window.RESTORE_TAB) {
+      showTab(window.RESTORE_TAB);
+      window.RESTORE_TAB = null;
+      // Auto-restore drafts if this was an update reboot
+      if (window.IS_UPDATE_RESTORE) {
+          if (typeof restoreAssessmentDraft === 'function') restoreAssessmentDraft();
+          if (typeof restoreBuilderDraft === 'function') restoreBuilderDraft();
+      }
+  } else if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') showTab('dashboard-view'); 
   else if(CURRENT_USER.role === 'trainee') showTab('dashboard-view');
   else showTab('monthly'); // Team Leader
 }

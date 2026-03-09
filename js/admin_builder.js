@@ -621,15 +621,20 @@ function loadManageTests() {
 
 async function deleteTest(id) {
     if (!confirm("Delete test permanently? Attempt history will be lost.")) return;
+    
     let tests = JSON.parse(localStorage.getItem('tests') || '[]');
     tests = tests.filter(t => t.id != id);
-    localStorage.setItem('tests', JSON.stringify(tests));
     
-    // HARD DELETE: Remove from server table immediately
-    if (window.supabaseClient) {
-        await window.supabaseClient.from('tests').delete().eq('id', id);
+    // AUTHORITATIVE DELETE: Save to server first.
+    if(typeof saveToServer === 'function') {
+        const success = await saveToServer(['tests'], true);
+        if (!success) {
+            alert("Failed to delete test from server. Please check connection.");
+            return; // Abort on failure
+        }
     }
-    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
+
+    localStorage.setItem('tests', JSON.stringify(tests));
     
     loadManageTests();
 }

@@ -663,7 +663,8 @@ async function createNewLiveSchedule() {
             assigned: null 
         };
         localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
-        await secureScheduleSave();
+        // Force save to ensure creation is authoritative
+        if(typeof saveToServer === 'function') await saveToServer(['liveSchedules'], true);
         ACTIVE_LIVE_SCHED_ID = nextKey;
         renderLiveTable();
     }
@@ -802,7 +803,8 @@ async function deleteLiveSchedule(id) {
     }
     
     localStorage.setItem('liveSchedules', JSON.stringify(newSchedules));
-    await secureScheduleSave();
+    // FIX: Use force=true to prevent ghost data (merge restoring deleted schedule)
+    if(typeof saveToServer === 'function') await saveToServer(['liveSchedules'], true);
     ACTIVE_LIVE_SCHED_ID = Object.keys(newSchedules).sort()[0];
     renderLiveTable();
 }
@@ -1139,7 +1141,8 @@ async function addTimelineItem() {
         courseName: "New Item", materialLink: "", dueDate: "", openTime: "08:00", closeTime: "17:00"
     });
     localStorage.setItem('schedules', JSON.stringify(schedules));
-    await secureScheduleSave();
+    // Force save new item
+    if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
     renderSchedule();
     editTimelineItem(schedules[ACTIVE_SCHED_ID].items.length - 1);
 }
@@ -1149,7 +1152,8 @@ async function deleteTimelineItem(index) {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     schedules[ACTIVE_SCHED_ID].items.splice(index, 1);
     localStorage.setItem('schedules', JSON.stringify(schedules));
-    await secureScheduleSave();
+    // FIX: Use force=true to prevent ghost data (merge restoring deleted item)
+    if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
     renderSchedule();
 }
 
@@ -1354,10 +1358,8 @@ async function deleteSchedule(id) {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     delete schedules[id];
     
-    // Re-index keys to ensure continuity (A, B, C...)
     const oldKeys = Object.keys(schedules).sort();
     const newSchedules = {};
-    
     if (oldKeys.length === 0) {
         newSchedules["A"] = { items: [], assigned: null };
     } else {
@@ -1367,9 +1369,16 @@ async function deleteSchedule(id) {
         });
     }
     
+    // AUTHORITATIVE DELETE: Save to server first.
+    if(typeof saveToServer === 'function') {
+        const success = await saveToServer(['schedules'], true);
+        if (!success) {
+            alert("Failed to delete schedule from server. Please check connection.");
+            return; // Abort on failure
+        }
+    }
+
     localStorage.setItem('schedules', JSON.stringify(newSchedules));
-    // HARD DELETE: Force overwrite of the schedules blob
-    if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
     
     // Switch to first available
     ACTIVE_SCHED_ID = Object.keys(newSchedules).sort()[0];

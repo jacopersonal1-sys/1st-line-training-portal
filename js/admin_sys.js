@@ -263,24 +263,31 @@ async function deleteBulkRecords() {
     if(!confirm(`Permanently delete ${checks.length} records?`)) return;
     
     const records = JSON.parse(localStorage.getItem('records') || '[]');
-    // Sort descending to delete from end without shifting indices
     const indicesToDelete = Array.from(checks).map(c => parseInt(c.value)).sort((a,b) => b-a);
-    const idsToDelete = [];
-    
-    indicesToDelete.forEach(idx => { 
-        if (records[idx] && records[idx].id) idsToDelete.push(records[idx].id);
-        records.splice(idx, 1); 
-    });
-    
-    localStorage.setItem('records', JSON.stringify(records));
-    
+    const idsToDelete = indicesToDelete.map(idx => records[idx] ? records[idx].id : null).filter(id => id);
+
+    // 1. Delete from Server First
     if (typeof hardDelete === 'function' && idsToDelete.length > 0) {
+        const btn = document.activeElement;
+        if(btn) { btn.disabled = true; btn.innerText = 'Deleting...'; }
+        
+        let allSucceeded = true;
         for (const id of idsToDelete) {
-            await hardDelete('records', id);
+            const success = await hardDelete('records', id);
+            if (!success) allSucceeded = false;
+        }
+        
+        if(btn) { btn.disabled = false; btn.innerText = 'Delete Selected'; }
+
+        if (!allSucceeded) {
+            alert("Some records could not be deleted from the server. Please check connection and try again. The UI will not be updated.");
+            return;
         }
     }
     
-    if(typeof saveToServer === 'function') await saveToServer(['records'], true);
+    // 2. Update Local State on Success
+    indicesToDelete.forEach(idx => { records.splice(idx, 1); });
+    localStorage.setItem('records', JSON.stringify(records));
 
     loadAdminDatabase();
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
@@ -323,15 +330,18 @@ async function delRec(i) {
         const r = JSON.parse(localStorage.getItem('records')); 
         const target = r[i];
         
-        r.splice(i,1); 
-        localStorage.setItem('records', JSON.stringify(r)); 
-        
+        // 1. Delete from server first
         if (target && target.id && typeof hardDelete === 'function') {
-            await hardDelete('records', target.id);
+            const success = await hardDelete('records', target.id);
+            if (!success) {
+                alert("Failed to delete record from server. Please check connection.");
+                return;
+            }
         }
         
-        // 3. Force Save
-        if(typeof saveToServer === 'function') await saveToServer(['records'], true);
+        // 2. Update local state
+        r.splice(i,1); 
+        localStorage.setItem('records', JSON.stringify(r)); 
 
         loadAdminDatabase(); 
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();

@@ -323,6 +323,10 @@ async function confirmLate(recordId) {
         rec.lateConfirmed = true;
         rec.adminComment = comment; // Save persistent comment
         localStorage.setItem('attendance_records', JSON.stringify(records));
+        
+        // OPTIMISTIC SYNC LOCK: Prevent an immediate data pull from reverting this change.
+        localStorage.setItem('row_sync_ts_attendance_records', new Date().toISOString());
+
         if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
         
         renderAttendanceRegister();
@@ -332,18 +336,23 @@ async function confirmLate(recordId) {
 
 async function deleteLateEntry(recordId) {
     if(!confirm("Delete this late entry? It will be removed from the record.")) return;
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const idx = records.findIndex(r => r.id === recordId);
-    if(idx > -1) {
-        records.splice(idx, 1);
-        localStorage.setItem('attendance_records', JSON.stringify(records));
-        
-        if (window.supabaseClient) await window.supabaseClient.from('attendance').delete().eq('id', recordId);
-        
-        if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
-        renderAttendanceRegister();
-        if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
+
+    // 1. AUTHORITATIVE DELETE (Server First)
+    if (typeof hardDelete === 'function') {
+        const success = await hardDelete('attendance', recordId);
+        if (!success) {
+            alert("Failed to delete entry from server. Please check connection.");
+            return;
+        }
     }
+
+    // 2. Update Local State on Success
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const updatedRecords = records.filter(r => r.id !== recordId);
+    localStorage.setItem('attendance_records', JSON.stringify(updatedRecords));
+    
+    renderAttendanceRegister();
+    if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
 }
 
 function manageAgentAttendance(username) {
@@ -529,20 +538,22 @@ window.saveAttendanceEdit = async function(id, username) {
 async function deleteAttendanceRecord(id, username) {
     if(!confirm("Permanently delete this attendance entry?")) return;
     
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const idx = records.findIndex(r => r.id === id);
-    
-    if(idx > -1) {
-        records.splice(idx, 1);
-        localStorage.setItem('attendance_records', JSON.stringify(records));
-        
-        if (window.supabaseClient) await window.supabaseClient.from('attendance').delete().eq('id', id);
-        
-        if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
-        
-        manageAgentAttendance(username);
-        if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
+    // 1. AUTHORITATIVE DELETE (Server First)
+    if (typeof hardDelete === 'function') {
+        const success = await hardDelete('attendance', id);
+        if (!success) {
+            alert("Failed to delete entry from server. Please check connection.");
+            return;
+        }
     }
+
+    // 2. Update Local State
+    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const updatedRecords = records.filter(r => r.id !== id);
+    localStorage.setItem('attendance_records', JSON.stringify(updatedRecords));
+    
+    manageAgentAttendance(username);
+    if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
 }
 
 function checkMissingClockIns() {

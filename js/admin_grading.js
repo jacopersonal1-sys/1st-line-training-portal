@@ -426,18 +426,20 @@ async function allowRetake(subId) {
 // UPDATED: Async Delete
 async function deleteSubmission(id) {
     if(!confirm("Delete submission?")) return;
-    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const sub = subs.find(s => s.id === id);
     
+    // 1. AUTHORITATIVE DELETE (Server First)
+    if (typeof hardDelete === 'function') {
+        const success = await hardDelete('submissions', id);
+        if (!success) {
+            alert("Failed to delete submission from server. Please check connection.");
+            return;
+        }
+    }
+
+    // 2. Update Local State
+    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     subs = subs.filter(s => s.id != id);
     localStorage.setItem('submissions', JSON.stringify(subs));
-    
-    // Hard Delete on Cloud
-    if (window.supabaseClient) {
-        await window.supabaseClient.from('submissions').delete().eq('id', id);
-    }
-    
-    // No need to force save 'submissions' locally since we handled the cloud update manually above
     
     loadTestRecords();
 }

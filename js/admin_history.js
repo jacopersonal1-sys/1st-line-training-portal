@@ -150,33 +150,37 @@ async function deleteHistorySubmission(id) {
         return;
     }
     
-    // 1. Remove from Submissions (Local)
-    subs = subs.filter(s => s.id !== id);
-    localStorage.setItem('submissions', JSON.stringify(subs));
-    
-    // 2. Remove from Records (Local)
+    // Identify associated record
     let records = JSON.parse(localStorage.getItem('records') || '[]');
-    // Find record to delete on server
     const targetRecord = records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle);
     
-    records = records.filter(r => !(r.trainee === sub.trainee && r.assessment === sub.testTitle));
-    localStorage.setItem('records', JSON.stringify(records));
-    
-    // 3. CLOUD HARD DELETE
-    if (window.supabaseClient) {
-        await window.supabaseClient.from('submissions').delete().eq('id', id);
+    // 1. AUTHORITATIVE DELETE (Server First)
+    if (typeof hardDelete === 'function') {
+        const btn = document.activeElement;
+        if(btn) { btn.disabled = true; btn.innerText = "Deleting..."; }
 
-        // Hard Delete Record (if found)
+        // Delete Submission
+        const subSuccess = await hardDelete('submissions', id);
+        if (!subSuccess) {
+            alert("Failed to delete submission from server. Please check connection.");
+            if(btn) { btn.disabled = false; btn.innerText = "Delete Permanently"; }
+            return;
+        }
+
+        // Delete Associated Record (if exists)
         if (targetRecord && targetRecord.id) {
-            await window.supabaseClient.from('records').delete().eq('id', targetRecord.id);
-        } else {
-            // Fallback match
-            await window.supabaseClient.from('records').delete().match({ trainee: sub.trainee, assessment: sub.testTitle });
+            await hardDelete('records', targetRecord.id);
         }
     }
 
-    // 3. Force Sync to Cloud (Instant Overwrite)
-    if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], true);
+    // 2. Update Local State (Only after server success)
+    subs = subs.filter(s => s.id !== id);
+    localStorage.setItem('submissions', JSON.stringify(subs));
+
+    if (targetRecord) {
+        records = records.filter(r => r.id !== targetRecord.id);
+        localStorage.setItem('records', JSON.stringify(records));
+    }
     
     // FIX: Blur active element to prevent Electron focus loss
     if (document.activeElement instanceof HTMLElement) {

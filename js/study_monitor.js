@@ -448,6 +448,12 @@ const StudyMonitor = {
             }
         });
 
+        // NEW: Capture navigation attempts before they happen
+        webview.addEventListener('will-navigate', (e) => {
+            // Ensure we track the intent, even if it redirects
+            this.track(`Studying: ${title} (Navigating...)`);
+        });
+
         // Force new windows to open in the same webview (Keep them captured)
         webview.addEventListener('new-window', (e) => {
             e.preventDefault();
@@ -723,8 +729,8 @@ StudyMonitor.toggleQueueItem = function(val, checked) {
 
 function renderReviewQueue(container) {
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    const whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
-    const reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]');
+    const whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]').filter(s => s && s.trim());
+    const reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]').filter(s => s && s.trim());
     const groups = {}; // Group by Process ID [proc]
     const ungrouped = new Set();
     
@@ -931,13 +937,15 @@ function renderActivitySummary(container) {
         const idleTimeStr = Math.round(idleMs / 60000) + 'm';
 
         // 3. Top Activities Breakdown
+        // LOGIC UPDATE: Show Top Activity + Anything > 10 mins
         const sortedTopics = Object.entries(topicMap)
             .sort((a, b) => b[1].ms - a[1].ms)
-            .slice(0, 3); // Top 3
+            
+        const topTopics = sortedTopics.filter((t, idx) => idx === 0 || t[1].ms > 600000); // Top 1 OR > 10 mins
             
         let breakdownHtml = '<div class="topic-breakdown">';
-        if (sortedTopics.length > 0) {
-            breakdownHtml += sortedTopics.map(([topic, data]) => {
+        if (topTopics.length > 0) {
+            breakdownHtml += topTopics.map(([topic, data]) => {
                 const isExternal = data.type === 'external';
                 const ms = data.ms;
                 

@@ -20,8 +20,9 @@ async function secureUserSave() {
         }
 
         try {
-            // Safe Merge (false) - Blacklist handles deletions safely
-            await saveToServer(['users', 'rosters', 'revokedUsers'], false); 
+            // UPDATED: Use force=true to ensure User/Roster edits are authoritative.
+            // This prevents "Ghost Reverts" when changing passwords or updating groups.
+            await saveToServer(['users', 'rosters', 'revokedUsers'], true); 
         } catch(e) {
             console.error("User Save Error:", e);
         } finally {
@@ -98,19 +99,27 @@ async function saveRoster() {
     // Expected format: username.surname@herotel.com
     const lines = rawInput.split('\n').map(l => l.trim()).filter(l => l);
     
-    if(!lines.length) return alert("Please enter at least one trainee email or name.");
+    if(!lines.length) return alert("Please enter at least one trainee email address.");
 
     const names = [];
     const emails = [];
+    const emailMap = {}; // Map Name -> Email for user creation
 
     lines.forEach(line => {
         // Basic email validation/extraction
         if (line.includes('@')) {
+            // Validation Check
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(line)) {
+                alert(`Invalid email format detected: "${line}". Please correct it.`);
+                throw new Error("Validation Error"); // Break loop and stop execution
+            }
             emails.push(line);
             // Extract name: "john.doe@..." -> "John Doe"
             const namePart = line.split('@')[0];
             const fullName = namePart.split(/[._]/).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
             names.push(fullName);
+            emailMap[fullName] = line;
         } else {
             names.push(line); // Fallback for plain names
         }
@@ -145,15 +154,15 @@ async function saveRoster() {
     }
 
     localStorage.setItem('rosters', JSON.stringify(rosters));
+
+    // 3. Clear Input
+    document.getElementById('newGroupNames').value = ''; 
     
     // 1. Generate Users (Safely)
-    await scanAndGenerateUsers(); 
+    await scanAndGenerateUsers(false, emailMap); 
     
     // 2. INSTANT SAVE
     await secureUserSave();
-    
-    // 3. Clear Input
-    document.getElementById('newGroupNames').value = ''; 
     
     refreshAllDropdowns();
     
@@ -232,10 +241,18 @@ async function deleteGroup(groupId) {
     
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     delete rosters[groupId];
-    localStorage.setItem('rosters', JSON.stringify(rosters));
     
-    // HARD DELETE: Force overwrite rosters to ensure deletion persists
-    if(typeof saveToServer === 'function') await saveToServer(['rosters'], true);
+    // AUTHORITATIVE DELETE: Save to server first.
+    if(typeof saveToServer === 'function') {
+        const success = await saveToServer(['rosters'], true);
+        if (!success) {
+            alert("Failed to delete group from server. Please check your connection and try again.");
+            return; // Abort on failure
+        }
+    }
+    
+    // On success, update local state and UI
+    localStorage.setItem('rosters', JSON.stringify(rosters));
     
     if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Group', `Deleted group ${groupId}`);
     refreshAllDropdowns();
@@ -306,6 +323,7 @@ async function deleteAgentFromSystem(agentName, groupId) {
         await hardDeleteByQuery('exemptions', 'trainee', agentName);
         await hardDeleteByQuery('link_requests', 'trainee', agentName);
         await hardDeleteByQuery('monitor_state', 'user_id', agentName);
+        await hardDeleteByQuery('tl_task_submissions', 'user_id', agentName);
         // Note: agentNotes, rosters, users are Blobs, so saveToServer handles them automatically.
     }
 
@@ -313,7 +331,7 @@ async function deleteAgentFromSystem(agentName, groupId) {
     if(typeof saveToServer === 'function') {
         await saveToServer([
             'rosters', 'users', 'revokedUsers', 'records', 'submissions', 
-            'attendance_records', 'liveBookings', 'savedReports', 
+            'attendance_records', 'liveBookings', 'savedReports', 'tl_task_submissions',
             'insightReviews', 'exemptions', 'agentNotes', 'monitor_data', 'linkRequests', 'cancellationCounts'
         ], true);
     }
@@ -356,7 +374,7 @@ function populateTraineeDropdown() {
 
 // --- USER & TRAINEE MANAGEMENT ---
 
-async function scanAndGenerateUsers(silent = false) { 
+async function scanAndGenerateUsers(silent = false, emailMap = {}) { 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
     const records = JSON.parse(localStorage.getItem('records') || '[]'); 
@@ -397,7 +415,18 @@ async function scanAndGenerateUsers(silent = false) {
             } else {
                 pin = Math.floor(1000 + Math.random() * 9000).toString();
             }
-            users.push({ user: name, pass: pin, role: 'trainee' }); 
+            
+            const newUser = { user: name, pass: pin, role: 'trainee' };
+            
+            // Inject Email if available from Roster creation
+            if (emailMap && emailMap[name]) {
+                newUser.traineeData = {
+                    email: emailMap[name],
+                    contact: emailMap[name]
+                };
+            }
+            
+            users.push(newUser); 
             createdCount++; 
         } 
     }); 
@@ -428,9 +457,41 @@ function loadAdminUsers() {
 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const savedReports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
     const search = document.getElementById('userSearch') ? document.getElementById('userSearch').value.toLowerCase() : '';
     const roleFilter = document.getElementById('userRoleFilter') ? document.getElementById('userRoleFilter').value : '';
     
+    // --- INJECT GROUP FILTER ---
+    const controls = document.getElementById('admin-user-controls');
+    if (controls && !document.getElementById('userGroupFilter')) {
+        const sel = document.createElement('select');
+        sel.id = 'userGroupFilter';
+        sel.style.cssText = "padding: 5px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-main); max-width: 150px;";
+        sel.onchange = () => loadAdminUsers();
+        
+        // Insert before search input
+        const searchInput = document.getElementById('userSearch');
+        if(searchInput) controls.insertBefore(sel, searchInput);
+        else controls.appendChild(sel);
+    }
+    
+    // Populate Filter
+    const groupSelect = document.getElementById('userGroupFilter');
+    let groupFilter = '';
+    if (groupSelect) {
+        if (document.activeElement !== groupSelect) {
+            const val = groupSelect.value;
+            groupSelect.innerHTML = '<option value="">All Groups</option>';
+            Object.keys(rosters).sort().reverse().forEach(gid => {
+                const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
+                groupSelect.add(new Option(label, gid));
+            });
+            groupSelect.value = val;
+        }
+        groupFilter = groupSelect.value;
+    }
+    // ---------------------------
+
     let createContainer = document.getElementById('createUserContainer');
     if (!createContainer) {
         const input = document.getElementById('newUserName');
@@ -460,13 +521,31 @@ function loadAdminUsers() {
         displayUsers = users.filter(u => {
             const matchesSearch = u.user.toLowerCase().includes(search);
             const matchesRole = roleFilter ? u.role === roleFilter : true;
-            return matchesSearch && matchesRole;
+            
+            let matchesGroup = true;
+            if (groupFilter) {
+                const members = rosters[groupFilter] || [];
+                matchesGroup = members.some(m => m.toLowerCase() === u.user.toLowerCase());
+            }
+
+            return matchesSearch && matchesRole && matchesGroup;
         });
     } else if (CURRENT_USER.role === 'special_viewer') {
         if(createContainer) createContainer.classList.add('hidden');
         if(scanBtn) scanBtn.classList.add('hidden');
         // Special viewer sees all users but cannot edit
-        displayUsers = users.filter(u => u.user.toLowerCase().includes(search) && (roleFilter ? u.role === roleFilter : true));
+        displayUsers = users.filter(u => {
+            const matchesSearch = u.user.toLowerCase().includes(search);
+            const matchesRole = roleFilter ? u.role === roleFilter : true;
+            // Note: Group filter logic duplicated here for consistency if needed, 
+            // but special viewer logic often simpler. Adding it for completeness:
+            let matchesGroup = true;
+            if (groupFilter) {
+                const members = rosters[groupFilter] || [];
+                matchesGroup = members.some(m => m.toLowerCase() === u.user.toLowerCase());
+            }
+            return matchesSearch && matchesRole && matchesGroup;
+        });
     } 
     else {
         if(createContainer) createContainer.classList.add('hidden');
@@ -787,9 +866,13 @@ function openUserEdit(username) {
         ? `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">Bound to Client: <code>${u.boundClientId}</code> <button class="btn-danger btn-sm" onclick="unbindUserClient(${index})" style="padding:0 5px; margin-left:5px;">Unbind</button></div>` 
         : `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">No Client Binding (Will bind on next login)</div>`;
 
-    document.getElementById('adminEditTitle').innerText = `Edit User: ${u.user}`;
+    document.getElementById('adminEditTitle').innerHTML = `Edit User: ${u.user} <button class="btn-secondary btn-sm" onclick="renameUser('${u.user.replace(/'/g, "\\'")}')" style="font-size:0.7rem; margin-left:10px; padding:2px 8px;">Rename</button>`;
     
     document.getElementById('adminEditContent').innerHTML = `
+        <label>Email Address</label>
+        <input type="text" id="editUserEmail" value="${(u.traineeData && u.traineeData.email) ? u.traineeData.email : ''}" placeholder="name@example.com">
+        <label>Phone Number</label>
+        <input type="text" id="editUserPhone" value="${(u.traineeData && u.traineeData.phone) ? u.traineeData.phone : ''}" placeholder="082...">
         <label>Password</label>
         <input type="text" id="editUserPass" placeholder="Enter new password to change..." autocomplete="off">
         <label>Role</label>
@@ -829,6 +912,76 @@ window.unbindUserClient = async function(index) {
     openUserEdit(users[index].user);
 };
 
+window.renameUser = async function(oldName) {
+    const newName = await customPrompt("Rename User", `Enter new username for ${oldName}:`, oldName);
+    if (!newName || newName === oldName) return;
+    
+    // Check if exists
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    if (users.some(u => u.user.toLowerCase() === newName.toLowerCase())) return alert("Username already exists.");
+    
+    if (!confirm(`Rename '${oldName}' to '${newName}'?\n\nThis will update all records, attendance, and reports associated with this user.`)) return;
+    
+    // Perform Migration
+    // 1. Users
+    const uIdx = users.findIndex(u => u.user === oldName);
+    if (uIdx > -1) users[uIdx].user = newName;
+    localStorage.setItem('users', JSON.stringify(users));
+    
+    // 2. Rosters
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    Object.keys(rosters).forEach(gid => {
+        const idx = rosters[gid].indexOf(oldName);
+        if (idx > -1) rosters[gid][idx] = newName;
+    });
+    localStorage.setItem('rosters', JSON.stringify(rosters));
+    
+    // 3. Records, Submissions, Attendance, etc.
+    const migrate = (key, field) => {
+        const data = JSON.parse(localStorage.getItem(key) || '[]');
+        let changed = false;
+        data.forEach(item => {
+            if (item[field] === oldName) {
+                item[field] = newName;
+                changed = true;
+            }
+        });
+        if (changed) localStorage.setItem(key, JSON.stringify(data));
+    };
+    
+    migrate('records', 'trainee');
+    migrate('submissions', 'trainee');
+    migrate('attendance_records', 'user');
+    migrate('liveBookings', 'trainee');
+    migrate('savedReports', 'trainee');
+    migrate('insightReviews', 'trainee');
+    migrate('exemptions', 'trainee');
+    migrate('linkRequests', 'trainee');
+    migrate('tl_task_submissions', 'user');
+    
+    // Object keys (Agent Notes, Monitor Data)
+    const migrateObj = (key) => {
+        const data = JSON.parse(localStorage.getItem(key) || '{}');
+        if (data[oldName]) {
+            data[newName] = data[oldName];
+            delete data[oldName];
+            localStorage.setItem(key, JSON.stringify(data));
+        }
+    };
+    migrateObj('agentNotes');
+    migrateObj('monitor_data');
+    migrateObj('cancellationCounts');
+    
+    // Sync
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['users', 'rosters', 'records', 'submissions', 'attendance_records', 'liveBookings', 'savedReports', 'insightReviews', 'exemptions', 'linkRequests', 'agentNotes', 'monitor_data', 'cancellationCounts', 'tl_task_submissions'], true);
+    }
+    
+    alert("User renamed successfully.");
+    document.getElementById('adminEditModal').classList.add('hidden');
+    loadAdminUsers();
+};
+
 async function saveUserEdit() {
     const users = JSON.parse(localStorage.getItem('users'));
     const newPass = document.getElementById('editUserPass').value;
@@ -856,6 +1009,16 @@ async function saveUserEdit() {
     const timeoutVal = parseInt(document.getElementById('editUserTimeout').value);
     users[editTargetIndex].idleTimeout = (timeoutVal && timeoutVal > 0) ? timeoutVal : 15;
     
+    // Update Contact Info (traineeData)
+    if (!users[editTargetIndex].traineeData) users[editTargetIndex].traineeData = {};
+    
+    const newEmail = document.getElementById('editUserEmail').value.trim();
+    const newPhone = document.getElementById('editUserPhone').value.trim();
+    
+    users[editTargetIndex].traineeData.email = newEmail;
+    users[editTargetIndex].traineeData.phone = newPhone;
+    users[editTargetIndex].traineeData.contact = `${newEmail} | ${newPhone}`; // Legacy support
+
     localStorage.setItem('users', JSON.stringify(users));
 
     // FIX: Update current session if editing self
@@ -1090,15 +1253,17 @@ function generateOnboardingEmail(emails) {
 
 Hope this finds you well.
 
-Kindly assist with access to the following programs (the error the onboards are getting is either their email address is not found or incorrect username & password):
+Kindly assist with acess to the followings programs (the error the onbaords are getting is either there email address is not found or incorrect username & password :
 
 Q-Contact
 Corteza (CRM Instance present)
 ACS
-Odoo portal
+Radius
 
-Please find the onboards whom require access below:
-${emails.join('\n')}`;
+Please find the onbaords whom require access below : 
+${emails.join('\n')}
+
+Kind regards.`;
 
     const mailtoLink = `mailto:${toAddress}?cc=${ccAddresses}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mailtoLink;

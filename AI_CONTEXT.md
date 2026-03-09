@@ -8,7 +8,7 @@
 **Runtime:** Electron (Node.js + Chromium)
 **Frontend:** Vanilla JavaScript, HTML5, CSS3
 **Backend:** Supabase (PostgreSQL + Realtime)
-**Sync Strategy:** Hybrid Row-Level Sync (Optimistic UI)
+**Sync Strategy:** Hybrid Row-Level Sync (Optimistic UI with Authoritative Deletes)
 
 ### Core Principles
 1.  **Local-First:** `localStorage` is the primary data source for the UI. The app works offline and syncs when online.
@@ -16,6 +16,7 @@
     *   **Blobs (`app_documents` table):** Low-volume, atomic data (Config, Rosters, Users) syncs as full JSON objects.
     *   **Rows (Dedicated Tables):** High-volume data (Records, Logs, Submissions) syncs as individual rows to save bandwidth and prevent overwrites.
 3.  **Dual-Server Failover:** The client can hot-swap between a Cloud Supabase instance and a Local Docker Supabase instance based on `system_config`.
+4.  **Authoritative Deletes:** Critical deletions (Groups, Records, Tests) are executed on the server *first* before updating local state to prevent "Ghost Data" recurrence.
 
 ---
 
@@ -87,7 +88,7 @@ Maps local `localStorage` keys to Supabase tables.
         - **Phase B (Rows):** Queries tables for rows newer than local `row_sync_ts`.
         - **Phase C (Monitor):** Merges `monitor_state` table.
     - `saveToServer(keys, force)`: Pushes data.
-        - **Strategy A (Rows):** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue.
+        - **Strategy A (Rows):** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue or Authoritative Call.
         - **Strategy B (Monitor):** Upserts to `monitor_state`.
         - **Strategy C (Blobs):** Upserts to `app_documents`. **Guarded:** `system_config` requires Super Admin.
     - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name.
@@ -264,7 +265,7 @@ Maps local `localStorage` keys to Supabase tables.
     *   If changed:
         *   **Rows:** Upload changed items individually (`upsert`).
         *   **Blobs:** Upload full object.
-        *   **Deletes:** Explicitly executes `DELETE` on Supabase for items removed locally to prevent "Ghost Data" (Server-side persistence of locally deleted items).
+        *   **Deletes:** Explicitly executes `DELETE` on Supabase for items removed locally to prevent "Ghost Data". Critical items use `force=true` (Authoritative) logic.
     *   **Protection:** `system_config` is only saved if user is Super Admin and save is explicit.
 
 ### C. Vetting Arena Security

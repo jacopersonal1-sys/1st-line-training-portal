@@ -3,6 +3,7 @@
 // --- GLOBAL CONSOLE RECORDER (For AI Analysis) ---
 // Captures logs, warns, and errors so the AI can analyze app history.
 window.CONSOLE_HISTORY = [];
+window.UPDATE_DOWNLOADED = false; // Track update status
 const MAX_LOG_SIZE = 200; // Keep last 200 entries to manage memory
 
 function captureLog(type, args) {
@@ -624,6 +625,22 @@ window.onload = async function() {
     if(typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
     if(typeof loadRostersList === 'function') loadRostersList();
     
+    // --- UPDATE RESTORATION LOGIC ---
+    const restoreStateStr = localStorage.getItem('pending_update_restore');
+    if (restoreStateStr) {
+        try {
+            const state = JSON.parse(restoreStateStr);
+            localStorage.removeItem('pending_update_restore');
+            
+            if (state.user) {
+                console.log("Restoring session after update...");
+                sessionStorage.setItem('currentUser', JSON.stringify(state.user));
+                window.RESTORE_TAB = state.tab; // Signal autoLogin to switch tabs
+                window.IS_UPDATE_RESTORE = true; // Signal to bypass draft prompts
+            }
+        } catch(e) { console.error("Restore Error:", e); }
+    }
+
     // Restore Session (With IP Security Check)
     const savedSession = sessionStorage.getItem('currentUser');
     if(savedSession) {
@@ -1474,34 +1491,93 @@ if (typeof require !== 'undefined') {
     });
 
     ipcRenderer.on('update-downloaded', (event) => {
-        if(typeof showToast === 'function') showToast("Update downloaded. Restart to apply.", "success");
+        window.UPDATE_DOWNLOADED = true;
         
         // NEW: Set flag for notification bell
         sessionStorage.setItem('update_ready', 'true');
         if(typeof updateNotifications === 'function') updateNotifications();
 
-        // NEW: Check if this was a Forced Update from Admin
-        if (sessionStorage.getItem('force_update_active') === 'true') {
-            sessionStorage.removeItem('force_update_active');
-            restartAndInstall();
-            return;
+        // 1. IF LOGGED IN: INTRUSIVE MODAL
+        if (CURRENT_USER) {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.style.zIndex = '10000';
+            modal.style.background = 'rgba(0,0,0,0.9)'; // Darker background
+            modal.innerHTML = `
+                <div class="modal-box" style="text-align:center; border-left:5px solid #2ecc71; max-width:500px;">
+                    <i class="fas fa-arrow-circle-up" style="font-size:4rem; color:#2ecc71; margin-bottom:20px;"></i>
+                    <h2 style="margin-top:0;">Update Ready</h2>
+                    <p style="font-size:1.1rem; margin-bottom:20px;">A new version of the application has been downloaded.</p>
+                    
+                    <div style="background:var(--bg-input); padding:15px; border-radius:8px; text-align:left; margin-bottom:25px; border:1px solid var(--border-color);">
+                        <strong style="color:var(--primary);">Don't Worry!</strong>
+                        <ul style="margin:10px 0 0 20px; color:var(--text-muted);">
+                            <li>Your current progress (Assessments, Vetting) will be saved.</li>
+                            <li>The app will restart automatically.</li>
+                            <li>You will be logged back in exactly where you left off.</li>
+                        </ul>
+                    </div>
+
+                    <button class="btn-success btn-lg" onclick="performUpdateRestart()" style="width:100%; font-weight:bold; padding:15px;">
+                        <i class="fas fa-save"></i> Save State & Restart
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        } 
+        // 2. IF LOGIN SCREEN: BLOCK LOGIN
+        else {
+            const loginBtn = document.querySelector('.login-btn-main');
+            if(loginBtn) {
+                loginBtn.innerText = "Restart & Install Update";
+                loginBtn.onclick = (e) => { e.preventDefault(); performUpdateRestart(); };
+                loginBtn.classList.remove('btn-primary');
+                loginBtn.classList.add('btn-success');
+                loginBtn.classList.add('pulse-anim'); // Add visual cue
+            }
+            const err = document.getElementById('loginError');
+            if(err) {
+                err.innerText = "Update Ready. Please restart to continue.";
+                err.style.color = "#2ecc71";
+            }
         }
 
-        // Add a restart button to the footer for easy access
-        const footer = document.getElementById('user-footer');
-        if (footer) {
-            if (!document.getElementById('btn-footer-restart')) {
-                const btn = document.createElement('button');
-                btn.id = 'btn-footer-restart';
-                btn.className = 'btn-success btn-sm';
-                btn.style.marginLeft = '15px';
-                btn.innerHTML = '<i class="fas fa-arrow-circle-up"></i> Restart Now';
-                btn.onclick = restartAndInstall;
-                footer.appendChild(btn);
-            }
+        // Check if this was a Forced Update from Admin (Legacy check)
+        if (sessionStorage.getItem('force_update_active') === 'true') {
+            sessionStorage.removeItem('force_update_active');
+            performUpdateRestart();
         }
     });
 }
+
+// --- UPDATE RESTART HANDLER ---
+window.performUpdateRestart = function() {
+    // 1. Save State if Logged In
+    if (CURRENT_USER) {
+        // Force blur to trigger any pending 'change' events on inputs
+        if (document.activeElement) document.activeElement.blur();
+
+        // Trigger Draft Saves
+        if (typeof saveAssessmentDraft === 'function') saveAssessmentDraft();
+        if (typeof saveBuilderDraft === 'function') saveBuilderDraft();
+
+        const state = {
+            user: CURRENT_USER,
+            tab: document.querySelector('section.active')?.id,
+            timestamp: Date.now()
+        };
+        localStorage.setItem('pending_update_restore', JSON.stringify(state));
+        
+        // Attempt authoritative sync (Best effort)
+        if (typeof saveToServer === 'function') {
+            // We don't await here to ensure restart happens even if network is slow
+            saveToServer(null, true).catch(e => console.warn("Update Sync Warning:", e));
+        }
+    }
+
+    // 2. Trigger Restart
+    restartAndInstall();
+};
 
 /* ================= INACTIVITY & DRAFT HANDLING ================= */
 
@@ -1532,6 +1608,9 @@ window.cacheAndLogout = async function() {
 };
 
 function checkForDrafts() {
+    // If we are auto-restoring from an update, skip the prompts (handled in autoLogin)
+    if (window.IS_UPDATE_RESTORE) return;
+
     // 1. Check Assessment Draft
     const draftAssess = localStorage.getItem('draft_assessment');
     if (draftAssess) {
@@ -1583,6 +1662,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.16": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Authoritative Delete" protocol for Groups, Schedules, and Tests to permanently fix "Ghost Data" issues.</li>
+                <li style="margin-bottom: 8px;"><strong>User Management:</strong> Enhanced "Add Group" to use email addresses and automated Outlook templates. Added "Rename User" feature.</li>
+            </ul>`,
         "2.4.15": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Teamleader Hub:</strong> Implemented initial structure for Daily/Weekly Operations Timeline and Roster Management (Currently Admin-Only for testing).</li>
