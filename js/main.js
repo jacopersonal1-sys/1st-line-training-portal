@@ -1667,6 +1667,11 @@ function getChangelog(version) {
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Authoritative Delete" protocol for Groups, Schedules, and Tests to permanently fix "Ghost Data" issues.</li>
                 <li style="margin-bottom: 8px;"><strong>User Management:</strong> Enhanced "Add Group" to use email addresses and automated Outlook templates. Added "Rename User" feature.</li>
             </ul>`,
+        "2.4.16": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Authoritative Delete" protocol for Groups, Schedules, and Tests to permanently fix "Ghost Data" issues.</li>
+                <li style="margin-bottom: 8px;"><strong>User Management:</strong> Enhanced "Add Group" to use email addresses and automated Outlook templates. Added "Rename User" feature.</li>
+            </ul>`,
         "2.4.15": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Teamleader Hub:</strong> Implemented initial structure for Daily/Weekly Operations Timeline and Roster Management (Currently Admin-Only for testing).</li>
