@@ -319,18 +319,35 @@ async function confirmLate(recordId) {
     const message = `Review Late Entry for ${rec.user}:\n\nDate: ${rec.date}\nTime: ${rec.clockIn}\nReason: ${reason}\n${informed}\n\nEnter Admin Comment (Optional):`;
     const comment = await customPrompt("Confirm Late Entry", message, "");
 
-    if(comment !== null) {
-        rec.lateConfirmed = true;
-        rec.adminComment = comment; // Save persistent comment
-        localStorage.setItem('attendance_records', JSON.stringify(records));
-        
-        // OPTIMISTIC SYNC LOCK: Prevent an immediate data pull from reverting this change.
-        localStorage.setItem('row_sync_ts_attendance_records', new Date().toISOString());
+    if (comment !== null) {
+        // --- AUTHORITATIVE UPDATE (Fix for Ghost Data) ---
+        const originalRecordsJSON = localStorage.getItem('attendance_records') || '[]';
+        const tempRecords = JSON.parse(originalRecordsJSON);
+        const recIndex = tempRecords.findIndex(r => r.id === recordId);
+        if (recIndex === -1) return;
 
-        if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
-        
+        // 1. Prepare the change in a temporary variable
+        tempRecords[recIndex].lateConfirmed = true;
+        tempRecords[recIndex].adminComment = comment;
+
+        // 2. Temporarily update localStorage for saveToServer to read
+        localStorage.setItem('attendance_records', JSON.stringify(tempRecords));
+
+        // 3. Attempt to save to server first
+        let success = false;
+        if (typeof saveToServer === 'function') {
+            success = await saveToServer(['attendance_records'], true);
+        }
+
+        // 4. If save fails, revert local state to prevent UI mismatch
+        if (!success) {
+            localStorage.setItem('attendance_records', originalRecordsJSON);
+            alert("Failed to save review to the server. Please check your connection and try again.");
+        }
+
+        // 5. Re-render UI from the final, correct state in localStorage
         renderAttendanceRegister();
-        if(typeof checkMissingClockIns === 'function') checkMissingClockIns(); // Refresh badge
+        if (typeof checkMissingClockIns === 'function') checkMissingClockIns();
     }
 }
 

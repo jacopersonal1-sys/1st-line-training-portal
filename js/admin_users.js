@@ -883,8 +883,6 @@ function openUserEdit(username) {
             <option value="special_viewer">Special Viewer</option>
             ${isSuper ? '<option value="super_admin">Super Admin</option>' : ''}
         </select>
-        <label>Idle Timeout (Minutes)</label>
-        <input type="number" id="editUserTimeout" value="${u.idleTimeout || 15}" min="1" placeholder="Default: 15">
         ${bindingInfo}`;
     
     if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
@@ -1006,9 +1004,6 @@ async function saveUserEdit() {
         users[editTargetIndex].role = newRole;
     }
 
-    const timeoutVal = parseInt(document.getElementById('editUserTimeout').value);
-    users[editTargetIndex].idleTimeout = (timeoutVal && timeoutVal > 0) ? timeoutVal : 15;
-    
     // Update Contact Info (traineeData)
     if (!users[editTargetIndex].traineeData) users[editTargetIndex].traineeData = {};
     
@@ -1023,7 +1018,6 @@ async function saveUserEdit() {
 
     // FIX: Update current session if editing self
     if (CURRENT_USER && users[editTargetIndex].user === CURRENT_USER.user) {
-        CURRENT_USER.idleTimeout = users[editTargetIndex].idleTimeout;
         sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
     }
     

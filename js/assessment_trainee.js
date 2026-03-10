@@ -241,7 +241,13 @@ function renderTestPaper(containerId = 'takingQuestions') {
     }
 
     if (window.CURRENT_TEST.type === 'vetting' && window.CURRENT_TEST.duration) {
-        startTestTimer(parseInt(window.CURRENT_TEST.duration));
+        // Resume timer if draft exists, else start fresh
+        if (window.CURRENT_TEST.remainingSeconds) {
+            // Pass seconds directly if we have them
+            startTestTimer(window.CURRENT_TEST.remainingSeconds / 60);
+        } else {
+            startTestTimer(parseInt(window.CURRENT_TEST.duration));
+        }
     }
 
     let html = `
@@ -279,6 +285,12 @@ function renderTestPaper(containerId = 'takingQuestions') {
     setTimeout(() => {
         content.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
     }, 0);
+
+    // --- AUTO-SAVE ON INTERACTION ---
+    // Save draft immediately whenever the user types or selects an answer
+    content.addEventListener('input', () => saveAssessmentDraft());
+    content.addEventListener('change', () => saveAssessmentDraft());
+    // --------------------------------
 }
 
 // --- DRAFT HANDLING (INACTIVITY) ---
@@ -287,6 +299,7 @@ function saveAssessmentDraft() {
     const draft = {
         test: window.CURRENT_TEST,
         answers: window.USER_ANSWERS,
+        // Timer state is saved inside window.CURRENT_TEST.remainingSeconds by startTestTimer
         timestamp: Date.now()
     };
     localStorage.setItem('draft_assessment', JSON.stringify(draft));
@@ -520,6 +533,9 @@ function startTestTimer(mins) {
             if(typeof showToast === 'function') showToast("Time's up! Submitting automatically.", "warning");
             submitTest(true);
         }
+        
+        // Update global state for draft saving
+        if (window.CURRENT_TEST) window.CURRENT_TEST.remainingSeconds = secs;
         secs--;
     }, 1000);
 }

@@ -903,7 +903,11 @@ async function confirmBooking() {
         // 1. CRITICAL: Force Sync before validating to prevent double-booking
         // This pulls the very latest bookings from the cloud (Smart Merge).
         if(typeof loadFromServer === 'function') {
-            await loadFromServer(true); 
+            const success = await loadFromServer(true); 
+            if (!success) {
+                alert("Network Error: Unable to sync with schedule server. Please check your connection and try again.");
+                return;
+            }
         }
 
         // 2. Re-Read Data (It might have changed after the sync)

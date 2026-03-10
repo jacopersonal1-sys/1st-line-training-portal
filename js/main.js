@@ -53,6 +53,12 @@ async function secureInitSave() {
     }
 }
 
+// --- GLOBAL CRASH/CLOSE PROTECTION ---
+window.addEventListener('beforeunload', () => {
+    if (typeof saveAssessmentDraft === 'function') saveAssessmentDraft();
+    if (typeof saveBuilderDraft === 'function') saveBuilderDraft();
+});
+
 window.onload = async function() {
     // --- INJECT GLOBAL VISUAL STYLES ---
     if (!document.getElementById('global-visuals')) {
@@ -1662,6 +1668,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.17": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Live Assessment:</strong> Implemented Realtime Sync for bookings to prevent double-booking and ensure instant updates across all clients.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed "Ghost Data" issues in Attendance Review and Schedule Deletion using authoritative server-first logic.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Added Clock Sync Warning to alert users if their system time drifts significantly from the server.</li>
+            </ul>`,
         "2.4.16": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Authoritative Delete" protocol for Groups, Schedules, and Tests to permanently fix "Ghost Data" issues.</li>

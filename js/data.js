@@ -1787,6 +1787,10 @@ function setupRealtimeListeners() {
                 if (typeof updateDashboardHealth === 'function') updateDashboardHealth();
             }, 1000);
         })
+        // 4. LIVE BOOKINGS (Schedule Updates)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'live_bookings' }, (payload) => {
+            handleLiveBookingRealtime(payload);
+        })
         .subscribe();
 }
 
@@ -1831,6 +1835,29 @@ function handleAttendanceRealtime(payload) {
     if (typeof updateAttendanceUI === 'function') {
         updateAttendanceUI();
     }
+}
+
+function handleLiveBookingRealtime(payload) {
+    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    
+    if (payload.eventType === 'DELETE') {
+        bookings = bookings.filter(b => b.id !== payload.old.id);
+    } else {
+        const newRow = payload.new;
+        const item = newRow.data || {};
+        item.id = newRow.id; // Ensure ID consistency
+        
+        const idx = bookings.findIndex(b => b.id === item.id);
+        if (idx > -1) bookings[idx] = item;
+        else bookings.push(item);
+    }
+    
+    localStorage.setItem('liveBookings', JSON.stringify(bookings));
+    
+    // Trigger UI Refresh if Schedule is open
+    if (typeof renderLiveTable === 'function') renderLiveTable();
+    // Update Dashboard Badges
+    if (typeof updateNotifications === 'function') updateNotifications();
 }
 
 // 6. FACTORY RESET (Cloud & Local)
