@@ -85,6 +85,17 @@ const ROW_MAP = {
     'tl_task_submissions': 'tl_task_submissions'
 };
 
+// --- SERVER AUTHORITY CONFIGURATION ---
+// Tables that must always reflect the exact state of the server (No Merging, Full Overwrite).
+// This fixes "Ghost Data" and synchronization lag for critical shared resources.
+const AUTHORITATIVE_TABLES = [
+    'live_bookings',
+    'live_sessions',
+    'tl_task_submissions',
+    'link_requests',
+    'calendar_events'
+];
+
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -181,7 +192,12 @@ async function processPendingDeletes() {
 window.addEventListener('online', () => {
     console.log("Network Online. Resuming sync...");
     updateSyncUI('syncing');
-    setTimeout(() => loadFromServer(true), 1500); // Delay to allow connection to stabilize
+    setTimeout(async () => {
+        // 1. Push any offline changes first (Prevent overwrite)
+        if (typeof saveToServer === 'function') await saveToServer(null, false, true);
+        // 2. Then pull authoritative state
+        loadFromServer(true);
+    }, 1500);
 });
 window.addEventListener('offline', () => {
     updateSyncUI('error');
@@ -196,6 +212,9 @@ async function loadFromServer(silent = false) {
             if(!silent) console.warn("loadFromServer: Supabase client not initialized.");
             return false;
         }
+
+        // 0. Process Deletes First (Ensure server is clean before we pull)
+        await processPendingDeletes();
 
         let criticalSuccess = false;
 
@@ -238,7 +257,7 @@ async function loadFromServer(silent = false) {
                 // FIX: For specific Admin keys (Rosters, Schedules, Tests), do NOT merge. 
                 // Merging restores deleted items if the server hasn't updated yet or if we are out of sync.
                 // We trust the Server's snapshot if it is newer, or our local overwrite if we just saved.
-                const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics'];
+                const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules'];
                 
                 if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(doc.key)) {
                     let strategy = 'server_wins';
@@ -273,11 +292,33 @@ async function loadFromServer(silent = false) {
             // CLOCK SKEW FIX: Subtract 10 minutes from lastSync to catch items from clients with lagging clocks
             const safeSyncTime = new Date(new Date(lastSync).getTime() - 600000).toISOString();
 
-            const { data: newRows, error: rowErr } = await window.supabaseClient
-                .from(tableName)
-                .select('data, updated_at')
-                .gt('updated_at', safeSyncTime)
-                .limit(1000); // Batch limit
+            let query = window.supabaseClient.from(tableName).select('data, updated_at');
+            
+            // If Authoritative, fetch EVERYTHING (Full Sync). Otherwise, fetch Deltas.
+            const isAuthoritative = AUTHORITATIVE_TABLES.includes(tableName);
+            
+            if (!isAuthoritative) {
+                query = query.gt('updated_at', safeSyncTime);
+            } else {
+                // OPTIMIZATION: For Authoritative tables, apply a "Rolling Window" to prevent unbounded growth.
+                // We only need recent history + future. This keeps the "Full Sync" fast forever.
+                if (tableName === 'live_bookings' || tableName === 'calendar_events' || tableName === 'tl_task_submissions' || tableName === 'link_requests') {
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - 45); // Keep 45 days history
+                    const dateStr = cutoff.toISOString().split('T')[0];
+                    // Filter JSONB column 'data' -> field 'date'
+                    query = query.gte('data->>date', dateStr);
+                }
+                else if (tableName === 'live_sessions') {
+                    // Live sessions are transient. Only fetch active/recent ones (last 24h).
+                    const yesterday = new Date(Date.now() - 86400000).toISOString();
+                    query = query.gt('updated_at', yesterday);
+                }
+            }
+            
+            // Limit batch size (Authoritative tables shouldn't be massive, but safety first)
+            // For authoritative, we might need pagination if it grows, but for now 2000 is plenty for bookings.
+            const { data: newRows, error: rowErr } = await query.limit(2000);
 
             if (rowErr) {
                 // Gracefully handle missing table (404) to prevent sync crash
@@ -289,8 +330,15 @@ async function loadFromServer(silent = false) {
             }
             
             if (newRows && newRows.length > 0) {
-                if(!silent) console.log(`Downloaded ${newRows.length} new rows for ${localKey}`);
+                if(!silent) console.log(`Downloaded ${newRows.length} rows for ${localKey} (${isAuthoritative ? 'Full' : 'Delta'})`);
                 
+                if (isAuthoritative) {
+                    // AUTHORITATIVE SYNC: Server is Truth. Overwrite local.
+                    const serverItems = newRows.map(r => r.data);
+                    localStorage.setItem(localKey, JSON.stringify(serverItems));
+                    // Update timestamp to now (though unused for full sync, good for debug)
+                    localStorage.setItem(`row_sync_ts_${localKey}`, new Date().toISOString());
+                } else {
                 // Extract data objects
                 // GHOST DATA FIX: Filter out items that are pending deletion locally
                 const serverItems = newRows.filter(r => {
@@ -362,6 +410,11 @@ async function loadFromServer(silent = false) {
                     });
                     localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(hashMap));
                 }
+                }
+            } else if (isAuthoritative && !rowErr) {
+                // If authoritative and 0 rows returned, it means table is empty. Clear local.
+                if(!silent) console.log(`Clearing ${localKey} (Server Empty)`);
+                localStorage.setItem(localKey, '[]');
             }
         }
 

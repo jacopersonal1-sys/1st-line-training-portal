@@ -8,7 +8,7 @@
 **Runtime:** Electron (Node.js + Chromium)
 **Frontend:** Vanilla JavaScript, HTML5, CSS3
 **Backend:** Supabase (PostgreSQL + Realtime)
-**Sync Strategy:** Hybrid Row-Level Sync (Optimistic UI with Authoritative Deletes)
+**Sync Strategy:** Hybrid Row-Level Sync (Optimistic UI with Authoritative Deletes & Server Authority for Critical Tables)
 
 ### Core Principles
 1.  **Local-First:** `localStorage` is the primary data source for the UI. The app works offline and syncs when online.
@@ -17,6 +17,7 @@
     *   **Rows (Dedicated Tables):** High-volume data (Records, Logs, Submissions) syncs as individual rows to save bandwidth and prevent overwrites.
 3.  **Dual-Server Failover:** The client can hot-swap between a Cloud Supabase instance and a Local Docker Supabase instance based on `system_config`.
 4.  **Authoritative Deletes:** Critical deletions (Groups, Records, Tests) are executed on the server *first* before updating local state to prevent "Ghost Data" recurrence.
+5.  **Server Authority:** Critical shared tables (`live_bookings`, `live_sessions`) use a "Full Sync" strategy (overwrite local) to ensure absolute consistency.
 
 ---
 
@@ -79,6 +80,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `startRealtimeSync()`: Starts the background polling loops for Data Sync and Heartbeat.
     - `applySystemConfig()`: Applies hot-reload settings (Announcements, Sync Rates).
     - `checkReleaseNotes(ver)`: Shows changelog popup on update.
+    - `performUpdateRestart()`: Saves user state (drafts, active tab) and restarts the app after an update is downloaded.
 
 #### `js/data.js` (Sync Engine)
  - **Responsibility:** Data synchronization logic (Pull/Push/Merge) and **Realtime Subscriptions**.
@@ -86,6 +88,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `loadFromServer(silent)`: Pulls data.
         - **Phase A (Blobs):** Checks `updated_at` timestamps in `app_documents`.
         - **Phase B (Rows):** Queries tables for rows newer than local `row_sync_ts`.
+        - **Phase B (Authoritative):** For critical tables (`live_bookings`), fetches ALL rows and overwrites local cache.
         - **Phase C (Monitor):** Merges `monitor_state` table.
     - `saveToServer(keys, force)`: Pushes data.
         - **Strategy A (Rows):** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue or Authoritative Call.

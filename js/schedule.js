@@ -4,6 +4,7 @@
 let ACTIVE_SCHED_ID = 'A'; 
 let ACTIVE_LIVE_SCHED_ID = 'A'; // NEW: Track Live Schedule Tab
 let VIEW_MODE = 'list'; // 'list' or 'calendar'
+let LIVE_SCHEDULE_REALTIME_UNSUB = null; // Realtime subscription handler
 let DRAG_SRC_INDEX = null; // Track item being dragged
 let CALENDAR_MONTH = new Date();
 
@@ -390,9 +391,26 @@ function getNextBusinessDays(startDateStr, count) {
     return days;
 }
 
-function renderLiveTable() {
+async function renderLiveTable() {
     const tbody = document.getElementById('liveBookingBody');
     if(!tbody) return;
+
+    // --- REALTIME & SYNC ---
+    // 1. Trainee Force Sync on Tab Load
+    if (CURRENT_USER.role === 'trainee' && !window._liveSyncDone) {
+        window._liveSyncDone = true; // Prevent loops
+        if (typeof loadFromServer === 'function') {
+            await loadFromServer(true);
+        }
+    }
+
+    // 2. Realtime Subscription for Admins/Trainees
+    if (typeof subscribeToDocKey === 'function' && !LIVE_SCHEDULE_REALTIME_UNSUB) {
+        LIVE_SCHEDULE_REALTIME_UNSUB = subscribeToDocKey('liveSchedules', (content) => {
+            localStorage.setItem('liveSchedules', JSON.stringify(content));
+            renderLiveTable();
+        });
+    }
     
     // --- FOCUS PROTECTION ---
     if (!document.getElementById('bookingModal').classList.contains('hidden')) return;
@@ -699,7 +717,10 @@ async function assignRosterToLiveSchedule(schedId, groupId) {
 
     liveSchedules[schedId].assigned = groupId;
     localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
-    await secureScheduleSave();
+    // FIX: Use authoritative save to ensure assignment sticks immediately
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['liveSchedules'], true);
+    }
     renderLiveTable();
 }
 

@@ -41,7 +41,7 @@ function toggleLoginMode(mode) {
       if(el && !el.classList.contains('login-input')) el.classList.add('login-input');
   });
   
-  const btnLogin = document.querySelector('button[onclick="attemptLogin()"]');
+  const btnLogin = document.querySelector('#login-screen button[type="submit"]');
   if(btnLogin && !btnLogin.classList.contains('login-btn-main')) btnLogin.classList.add('login-btn-main');
 
   const btnAdmin = document.getElementById('btn-admin');

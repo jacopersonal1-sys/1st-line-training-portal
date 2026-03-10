@@ -1078,6 +1078,15 @@ function updateSidebarVisibility() {
 let TAB_SWITCH_TIMEOUT = null;
 
 function showTab(id, btn) {
+  // --- REALTIME CLEANUP ---
+  // Unsubscribe from live schedule updates if we navigate away from that tab
+  if (id !== 'live-assessment' && typeof LIVE_SCHEDULE_REALTIME_UNSUB === 'function' && LIVE_SCHEDULE_REALTIME_UNSUB) {
+      try {
+          LIVE_SCHEDULE_REALTIME_UNSUB();
+          LIVE_SCHEDULE_REALTIME_UNSUB = null;
+      } catch(e) {}
+  }
+
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
@@ -1533,7 +1542,7 @@ if (typeof require !== 'undefined') {
         } 
         // 2. IF LOGIN SCREEN: BLOCK LOGIN
         else {
-            const loginBtn = document.querySelector('.login-btn-main');
+            const loginBtn = document.querySelector('#login-screen button[type="submit"]');
             if(loginBtn) {
                 loginBtn.innerText = "Restart & Install Update";
                 loginBtn.onclick = (e) => { e.preventDefault(); performUpdateRestart(); };
@@ -1668,6 +1677,22 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.19": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented "Server Authority" mode for critical tables (Live Bookings, Schedules). This forces a full sync from the server to prevent local data inconsistencies.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed issue where local cache would not update correctly for shared resources.</li>
+            </ul>`,
+        "2.4.19": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented "Server Authority" mode for critical tables (Live Bookings, Schedules). This forces a full sync from the server to prevent local data inconsistencies.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed issue where local cache would not update correctly for shared resources.</li>
+            </ul>`,
+        "2.4.18": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Implemented an intrusive update system. The app now saves your state and forces a restart when an update is ready.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Progress is now saved automatically on every interaction and restored after a crash or update.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Removed the idle timeout feature completely.</li>
+            </ul>`,
         "2.4.17": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Live Assessment:</strong> Implemented Realtime Sync for bookings to prevent double-booking and ensure instant updates across all clients.</li>
