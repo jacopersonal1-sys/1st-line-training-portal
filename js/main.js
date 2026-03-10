@@ -1683,6 +1683,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.21": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Resolved an issue where old, marked tests could reappear as "Pending" during a sync.</li>
+                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Hardened the booking system to prevent duplicate sessions and provide clearer "Rejoin" options.</li>
+                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Implemented instant "Join Now" alerts for trainees when an admin starts a session.</li>
+            </ul>`,
         "2.4.20": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Optimized Live Assessment sync to use an on-demand "Server Authority" model, drastically reducing background bandwidth and latency.</li>

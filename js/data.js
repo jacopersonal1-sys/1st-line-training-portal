@@ -90,6 +90,7 @@ const ROW_MAP = {
 // This fixes "Ghost Data" and synchronization lag for critical shared resources.
 const AUTHORITATIVE_TABLES = [
     'live_sessions',
+    'live_bookings',
     'tl_task_submissions',
     'link_requests',
     'calendar_events'
@@ -1097,7 +1098,6 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                             localItem.trainee === serverItem.trainee &&
                             localItem.testId === serverItem.testId &&
                             localItem.timestamp === serverItem.timestamp &&
-                            localItem.score === serverItem.score &&
                             localItem.date === serverItem.date
                         );
                     }
@@ -1896,6 +1896,10 @@ function setupRealtimeListeners() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'live_bookings' }, (payload) => {
             handleLiveBookingRealtime(payload);
         })
+        // 5. LIVE SESSIONS (Instant Dashboard Alert)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, (payload) => {
+            handleLiveSessionRealtime(payload);
+        })
         .subscribe();
 }
 
@@ -1963,6 +1967,28 @@ function handleLiveBookingRealtime(payload) {
     if (typeof renderLiveTable === 'function') renderLiveTable();
     // Update Dashboard Badges
     if (typeof updateNotifications === 'function') updateNotifications();
+}
+
+function handleLiveSessionRealtime(payload) {
+    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    
+    if (payload.eventType === 'DELETE') {
+        allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
+    } else {
+        const newData = payload.new.data;
+        if (newData) {
+            if (!newData.sessionId) newData.sessionId = payload.new.id;
+            allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
+            allSessions.push(newData);
+        }
+    }
+    localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+    
+    // Trigger Dashboard Refresh if active (to show/hide "Join Now" banner)
+    const dashView = document.getElementById('dashboard-view');
+    if (dashView && dashView.classList.contains('active') && typeof renderDashboard === 'function') {
+        renderDashboard();
+    }
 }
 
 // 6. FACTORY RESET (Cloud & Local)

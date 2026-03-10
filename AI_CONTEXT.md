@@ -94,10 +94,11 @@ Maps local `localStorage` keys to Supabase tables.
         - **Strategy A (Rows):** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue or Authoritative Call.
         - **Strategy B (Monitor):** Upserts to `monitor_state`.
         - **Strategy C (Blobs):** Upserts to `app_documents`. **Guarded:** `system_config` requires Super Admin.
-    - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name.
-    - `setupRealtimeListeners()`: **NEW**. Subscribes to Supabase `postgres_changes` for `monitor_state`, `attendance`, `sessions`, and `live_bookings`.
+    - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name/Composite Key.
+    - `setupRealtimeListeners()`: **NEW**. Subscribes to Supabase `postgres_changes` for `monitor_state`, `attendance`, `sessions`, `live_bookings`, and `live_sessions`.
     - `handleMonitorRealtime(payload)`: Updates local `monitor_data` and triggers `StudyMonitor.updateWidget`.
     - `handleAttendanceRealtime(payload)`: Updates local `attendance_records` and triggers `updateAttendanceUI`.
+    - `handleLiveSessionRealtime(payload)`: Updates local `liveSessions` and triggers `renderDashboard` to show/hide "Join Now" banner.
 
 #### `js/auth.js` (Authentication)
 - **Responsibility:** Login, Session Management, Security Checks.
@@ -292,6 +293,7 @@ Maps local `localStorage` keys to Supabase tables.
     *   `monitor_state`: Updates Agent Activity Monitor instantly.
     *   `attendance`: Updates Attendance Register instantly.
     *   `sessions`: Updates Active Users dashboard widget instantly.
+    *   `live_sessions`: Updates Trainee dashboard instantly with "Join Now" banner.
 3.  **Handling:** Incoming payloads update `localStorage` directly and trigger specific UI refresh functions (`updateWidget`, `updateAttendanceUI`, `updateDashboardHealth`).
 
 ---

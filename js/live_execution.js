@@ -465,31 +465,25 @@ async function updateLiveConnectionStatus(traineeUser, elementId = 'live-conn-st
             .single();
 
         if (error || !data) {
-            el.innerText = 'Connection: Unknown';
-            el.style.color = 'var(--text-muted)';
+            el.innerHTML = '<i class="fas fa-question-circle" style="color:var(--text-muted);"></i> Connection: Unknown';
             return;
         }
 
         const lastSeen = new Date(data.lastSeen).getTime();
         const now = Date.now();
         const ageMs = now - lastSeen;
-
         const online = ageMs < 90000; // seen in last 90s (Accommodates 60s heartbeat)
         const idleSecs = Math.round((data.idleTime || 0) / 1000);
 
         if (!online) {
-            el.innerText = 'Connection: Offline (last seen ' + Math.round(ageMs/1000) + 's ago)';
-            el.style.color = '#ff5252';
+            el.innerHTML = `<i class="fas fa-times-circle" style="color:#ff5252;"></i> Connection: Offline (last seen ${Math.round(ageMs/1000)}s ago)`;
         } else if (data.isIdle) {
-            el.innerText = 'Connection: Online (idle ' + idleSecs + 's)';
-            el.style.color = 'orange';
+            el.innerHTML = `<i class="fas fa-hourglass-half" style="color:#f1c40f;"></i> Connection: Online (Idle ${idleSecs}s)`;
         } else {
-            el.innerText = 'Connection: Online (active)';
-            el.style.color = '#2ecc71';
+            el.innerHTML = `<i class="fas fa-check-circle" style="color:#2ecc71;"></i> Connection: Online (Active)`;
         }
     } catch (e) {
-        el.innerText = 'Connection: Unknown';
-        el.style.color = 'var(--text-muted)';
+        el.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:var(--text-muted);"></i> Connection: Error';
     }
 }
 
