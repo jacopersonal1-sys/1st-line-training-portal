@@ -161,6 +161,10 @@ async function approveSubmission(subId) {
 
     localStorage.setItem('records', JSON.stringify(recs));
     
+    // OPTIMISTIC SYNC LOCK: Prevent a background pull from reverting this change.
+    localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
+    localStorage.setItem('row_sync_ts_records', new Date().toISOString());
+
     await secureAssessmentSave(); 
     
     alert("Approved & Recorded.");
@@ -538,6 +542,10 @@ async function finalizeAdminMarking(subId) {
     }
     
     localStorage.setItem('records', JSON.stringify(records));
+
+    // OPTIMISTIC SYNC LOCK: Prevent a background pull from reverting this change.
+    localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
+    localStorage.setItem('row_sync_ts_records', new Date().toISOString());
 
     await secureAssessmentSave(); 
 

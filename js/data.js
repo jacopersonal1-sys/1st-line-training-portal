@@ -89,7 +89,6 @@ const ROW_MAP = {
 // Tables that must always reflect the exact state of the server (No Merging, Full Overwrite).
 // This fixes "Ghost Data" and synchronization lag for critical shared resources.
 const AUTHORITATIVE_TABLES = [
-    'live_bookings',
     'live_sessions',
     'tl_task_submissions',
     'link_requests',
@@ -302,14 +301,7 @@ async function loadFromServer(silent = false) {
             } else {
                 // OPTIMIZATION: For Authoritative tables, apply a "Rolling Window" to prevent unbounded growth.
                 // We only need recent history + future. This keeps the "Full Sync" fast forever.
-                if (tableName === 'live_bookings' || tableName === 'calendar_events' || tableName === 'tl_task_submissions' || tableName === 'link_requests') {
-                    const cutoff = new Date();
-                    cutoff.setDate(cutoff.getDate() - 45); // Keep 45 days history
-                    const dateStr = cutoff.toISOString().split('T')[0];
-                    // Filter JSONB column 'data' -> field 'date'
-                    query = query.gte('data->>date', dateStr);
-                }
-                else if (tableName === 'live_sessions') {
+                if (tableName === 'live_sessions') {
                     // Live sessions are transient. Only fetch active/recent ones (last 24h).
                     const yesterday = new Date(Date.now() - 86400000).toISOString();
                     query = query.gt('updated_at', yesterday);
@@ -676,6 +668,66 @@ function checkErrorAlerts() {
     
     if (reports.length > lastCount) {
         if (typeof showToast === 'function') showToast(`⚠️ ${reports.length - lastCount} New System Errors Reported!`, 'error');
+    }
+}
+
+// --- NEW: DEDICATED FULL SYNC FUNCTION ---
+// Performs a one-time, server-authoritative sync for a specific table.
+async function forceFullSync(localKey) {
+    if (!window.supabaseClient || !localKey) return false;
+
+    const tableName = ROW_MAP[localKey];
+    if (!tableName) {
+        console.error(`forceFullSync: No table mapping found for key '${localKey}'`);
+        return false;
+    }
+
+    console.log(`Performing authoritative full sync for '${localKey}'...`);
+
+    try {
+        // Fetch ALL rows for this table.
+        const { data, error } = await window.supabaseClient.from(tableName).select('data').limit(5000); // High limit for full sync
+        if (error) throw error;
+
+        // Overwrite local storage completely.
+        const serverItems = data.map(r => r.data);
+        localStorage.setItem(localKey, JSON.stringify(serverItems));
+
+        console.log(`Full sync for '${localKey}' complete. ${serverItems.length} items loaded.`);
+        return true;
+    } catch (e) {
+        console.error(`Full sync for '${localKey}' failed:`, e);
+        return false;
+    }
+}
+
+// --- NEW: DEDICATED FULL SYNC FUNCTION ---
+// Performs a one-time, server-authoritative sync for a specific table.
+async function forceFullSync(localKey) {
+    if (!window.supabaseClient || !localKey) return false;
+
+    const tableName = ROW_MAP[localKey];
+    if (!tableName) {
+        console.error(`forceFullSync: No table mapping found for key '${localKey}'`);
+        return false;
+    }
+
+    console.log(`Performing authoritative full sync for '${localKey}'...`);
+
+    try {
+        // Fetch ALL rows for this table.
+        const { data, error } = await window.supabaseClient.from(tableName).select('data').limit(5000); // High limit for full sync
+        if (error) throw error;
+
+        // Overwrite local storage completely.
+        const serverItems = data.map(r => r.data);
+        localStorage.setItem(localKey, JSON.stringify(serverItems));
+
+        console.log(`Full sync for '${localKey}' complete. ${serverItems.length} items loaded.`);
+        return true;
+    } catch (e) {
+        console.error(`Full sync for '${localKey}' failed:`, e);
+        return false;
     }
 }
 

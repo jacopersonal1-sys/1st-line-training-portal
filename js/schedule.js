@@ -395,12 +395,13 @@ async function renderLiveTable() {
     const tbody = document.getElementById('liveBookingBody');
     if(!tbody) return;
 
-    // --- REALTIME & SYNC ---
-    // 1. Trainee Force Sync on Tab Load
-    if (CURRENT_USER.role === 'trainee' && !window._liveSyncDone) {
+    // --- AUTHORITATIVE SYNC ON LOAD ---
+    // On first load of this tab, perform a full sync of bookings to get the source of truth.
+    // Subsequent updates will be handled by the lightweight real-time listener.
+    if (!window._liveSyncDone) {
         window._liveSyncDone = true; // Prevent loops
-        if (typeof loadFromServer === 'function') {
-            await loadFromServer(true);
+        if (typeof forceFullSync === 'function') {
+            await forceFullSync('liveBookings');
         }
     }
 

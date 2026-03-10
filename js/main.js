@@ -1078,6 +1078,12 @@ function updateSidebarVisibility() {
 let TAB_SWITCH_TIMEOUT = null;
 
 function showTab(id, btn) {
+  // --- SYNC & REALTIME FLAGS ---
+  // Reset one-time sync flags when navigating away from relevant tabs.
+  if (id !== 'live-assessment' && window._liveSyncDone) {
+      window._liveSyncDone = false;
+  }
+
   // --- REALTIME CLEANUP ---
   // Unsubscribe from live schedule updates if we navigate away from that tab
   if (id !== 'live-assessment' && typeof LIVE_SCHEDULE_REALTIME_UNSUB === 'function' && LIVE_SCHEDULE_REALTIME_UNSUB) {
@@ -1677,6 +1683,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.20": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Optimized Live Assessment sync to use an on-demand "Server Authority" model, drastically reducing background bandwidth and latency.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Resolved issue where some users would see stale booking data while others saw live updates.</li>
+            </ul>`,
         "2.4.19": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented "Server Authority" mode for critical tables (Live Bookings, Schedules). This forces a full sync from the server to prevent local data inconsistencies.</li>
