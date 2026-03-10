@@ -92,7 +92,7 @@ Maps local `localStorage` keys to Supabase tables.
         - **Strategy B (Monitor):** Upserts to `monitor_state`.
         - **Strategy C (Blobs):** Upserts to `app_documents`. **Guarded:** `system_config` requires Super Admin.
     - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name.
-    - `setupRealtimeListeners()`: **NEW**. Subscribes to Supabase `postgres_changes` for `monitor_state`, `attendance`, and `sessions`.
+    - `setupRealtimeListeners()`: **NEW**. Subscribes to Supabase `postgres_changes` for `monitor_state`, `attendance`, `sessions`, and `live_bookings`.
     - `handleMonitorRealtime(payload)`: Updates local `monitor_data` and triggers `StudyMonitor.updateWidget`.
     - `handleAttendanceRealtime(payload)`: Updates local `attendance_records` and triggers `updateAttendanceUI`.
 

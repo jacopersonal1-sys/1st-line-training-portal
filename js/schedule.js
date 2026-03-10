@@ -963,8 +963,8 @@ async function confirmBooking() {
         bookings.push(newBooking);
         localStorage.setItem('liveBookings', JSON.stringify(bookings));
         
-        // --- CLOUD SYNC (INSTANT OVERWRITE) ---
-        await secureScheduleSave();
+        // --- CLOUD SYNC (AUTHORITATIVE) ---
+        if (typeof saveToServer === 'function') await saveToServer(['liveBookings'], true);
         
         closeBookingModal();
         renderLiveTable();
@@ -1004,7 +1004,10 @@ async function cancelBooking(id) {
     }
     
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
-    await secureScheduleSave();
+    // Also save cancellation counts authoritatively
+    if(typeof saveToServer === 'function') {
+        await saveToServer(['liveBookings', 'cancellationCounts'], true);
+    }
     renderLiveTable();
 }
 
@@ -1015,7 +1018,7 @@ async function markBookingComplete(id) {
         target.status = 'Completed';
     }
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
-    await secureScheduleSave();
+    if(typeof saveToServer === 'function') await saveToServer(['liveBookings'], true);
     renderLiveTable();
 }
 
@@ -1050,21 +1053,29 @@ async function saveLiveScheduleSettings() {
 
 async function clearLiveBookings() {
     if(!confirm("Are you sure? This will remove ALL booking history.")) return;
-    
-    // BUG FIX: Aggressive wipe for "Reset Persistence"
-    localStorage.setItem('liveBookings', '[]');
-    localStorage.setItem('cancellationCounts', '{}'); 
-    
-    // HARD DELETE: Wipe table rows for Row-Level Sync
-    if (window.supabaseClient) {
-        await window.supabaseClient.from('live_bookings').delete().neq('id', 'placeholder');
-        // cancellationCounts is a blob, handled by secureScheduleSave
-    }
 
-    await secureScheduleSave();
-    
-    renderLiveTable();
-    alert("Bookings cleared.");
+    const btn = document.activeElement;
+    if(btn) { btn.disabled = true; btn.innerText = 'Clearing...'; }
+
+    try {
+        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        if (bookings.length > 0 && typeof hardDelete === 'function') {
+            for (const booking of bookings) {
+                // This will send a standard DELETE event for each booking, which all clients can process.
+                await hardDelete('live_bookings', booking.id);
+            }
+        }
+        
+        localStorage.setItem('liveBookings', '[]');
+        localStorage.setItem('cancellationCounts', '{}'); 
+        
+        if(typeof saveToServer === 'function') await saveToServer(['cancellationCounts'], true);
+        
+        renderLiveTable();
+        alert("Bookings cleared.");
+    } finally {
+        if(btn) { btn.disabled = false; btn.innerText = 'Reset All Bookings'; }
+    }
 }
 
 // --- UTILS & HELPERS FOR SCHEDULE ---
