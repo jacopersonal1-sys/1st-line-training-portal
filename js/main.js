@@ -1701,6 +1701,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.23": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Critical Fix (Live Assessments):</strong> Resolved an issue where submitting one agent's live assessment could overwrite the scores of another.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed a mismatch where the "Assessment Manager" showed a different number of pending tests than the "Marking Queue".</li>
+                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added a new "Emergency Repair" tool to the Super Admin console to fix local data corruption and sync issues.</li>
+            </ul>`,
         "2.4.22": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed app freezing issues by optimizing how heavy logs are synced in the background.</li>

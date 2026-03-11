@@ -1066,7 +1066,7 @@ async function confirmAndSaveLiveSession() {
 
     // 5. Sync All
     await updateGlobalSessionArray(session, false); // Sync session state first
-    if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], true);
+    if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], false);
 
     // HARD DELETE: Remove completed session from real-time table to prevent bloat
     if (window.supabaseClient && session.sessionId) {

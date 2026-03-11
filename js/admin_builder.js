@@ -551,6 +551,7 @@ function loadManageTests() {
     
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]'); // For Ghost Data check
     const search = document.getElementById('testManagerSearch') ? document.getElementById('testManagerSearch').value.toLowerCase() : '';
     
     // Filter
@@ -576,7 +577,17 @@ function loadManageTests() {
 
     filtered.forEach(t => {
         const testSubs = subs.filter(s => s.testId == t.id);
-        const pending = testSubs.filter(s => s.status === 'pending').length;
+        
+        // GHOST DATA FIX: Filter out pending submissions that already have a final record.
+        const pendingSubs = testSubs.filter(s => s.status === 'pending');
+        const validPending = pendingSubs.filter(s => {
+            const hasRecord = records.some(r => 
+                r.trainee && s.trainee && r.trainee.toLowerCase() === s.trainee.toLowerCase() && 
+                r.assessment && s.testTitle && r.assessment.toLowerCase() === s.testTitle.toLowerCase()
+            );
+            return !hasRecord;
+        });
+        const pending = validPending.length;
         const completed = testSubs.filter(s => s.status === 'completed').length;
 
         let icon = '<i class="fas fa-file-alt" style="color:var(--text-muted);"></i>';

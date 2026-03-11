@@ -1153,6 +1153,7 @@ function openSuperAdminConfig() {
                                 <button class="btn-danger btn-sm" onclick="cleanupCloudDuplicates()"><i class="fas fa-broom"></i> Cleanup Cloud Duplicates</button>
                                 <button class="btn-danger btn-sm" onclick="cleanupLocalDuplicates()"><i class="fas fa-laptop-medical"></i> Cleanup Local Duplicates</button>
                                 <button class="btn-warning btn-sm" onclick="performOrphanCleanup()"><i class="fas fa-link"></i> Sync Check (Orphans)</button>
+                                <button class="btn-danger btn-sm" onclick="emergencyDataRepair()"><i class="fas fa-toolbox"></i> Emergency Repair</button>
                                 <button class="btn-secondary btn-sm" onclick="verifyServerSchema()"><i class="fas fa-stethoscope"></i> Verify Schema</button>
                             </div>
                         </div>
@@ -1516,6 +1517,40 @@ window.cleanupLocalDuplicates = function() {
     alert(`Cleanup complete.\n- Removed ${totalRemoved} general duplicates.\n- Optimized Activity Logs (Pruned details > 7 days).`);
     checkRowSyncStatus();
     renderStorageVisualizer();
+};
+
+// --- EMERGENCY DATA REPAIR ---
+window.emergencyDataRepair = async function() {
+    if (!confirm("Run Emergency Data Repair?\n\nThis tool fixes 'Ghost Data', stuck syncs, and local corruptions.\n\nActions:\n1. Clears pending upload queues.\n2. Wipes volatile cache (Live Sessions).\n3. Forces a fresh download from the server.\n\nProceed?")) return;
+
+    const btn = document.activeElement;
+    if(btn) { btn.innerText = "Repairing..."; btn.disabled = true; }
+
+    try {
+        // 1. Clear Internal Queues (Stuck uploads/deletes)
+        localStorage.removeItem('system_pending_deletes');
+        
+        // 2. Clear Hash Maps (Forces re-evaluation of all data)
+        Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('hash_map_')) localStorage.removeItem(k);
+        });
+        
+        // 3. Clear Volatile Data
+        localStorage.setItem('liveSessions', '[]'); // Clear cached sessions
+        localStorage.setItem('liveSession', '{"active":false}'); // Reset active session state
+
+        // 4. Wipe Sync Timestamps (Forces full fresh pull)
+        Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
+        });
+
+        alert("Repair successful. The application will now reload to fetch fresh data.");
+        location.reload();
+
+    } catch(e) {
+        alert("Repair Error: " + e.message);
+        if(btn) { btn.innerText = "Emergency Repair"; btn.disabled = false; }
+    }
 };
 
 window.performBlobToRowMigration = async function() {

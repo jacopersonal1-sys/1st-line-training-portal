@@ -160,6 +160,11 @@ async function hardDelete(tableName, id) {
     if (!tombstones.includes(id)) {
         tombstones.push(id);
         localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(tombstones));
+        // FIX: Sync the tombstone list so other clients know about the deletion.
+        // Use a silent, non-forced save to run in the background.
+        if (typeof saveToServer === 'function') {
+            saveToServer(['system_tombstones'], false, true);
+        }
     }
 
     // 2. Try to execute
@@ -198,9 +203,15 @@ async function processPendingDeletes() {
             }
             if (error) throw error;
         } catch (e) {
-            console.warn("Delete failed, keeping in queue:", e);
-            allSucceeded = false;
-            remaining.push(item);
+            // If table doesn't exist, discard the delete op, don't retry.
+            if (e.code === 'PGRST205' || (e.message && e.message.includes('does not exist'))) {
+                console.warn(`Delete failed because table '${item.table}' does not exist. Discarding operation.`);
+                // Do not add to 'remaining' queue.
+            } else {
+                console.warn("Delete failed, keeping in queue:", e);
+                allSucceeded = false;
+                remaining.push(item);
+            }
         }
     }
     localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(remaining));
@@ -311,7 +322,7 @@ async function loadFromServer(silent = false) {
 
         for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
             // Skip heavy tables unless it's a forced full sync (Optimization)
-            if (silent && heavyTables.includes(localKey)) {
+            if (silent && heavyTables.includes(tableName)) {
                 continue;
             }
 
@@ -340,9 +351,8 @@ async function loadFromServer(silent = false) {
             
             // Limit batch size (Authoritative tables shouldn't be massive, but safety first)
             // For authoritative, we might need pagination if it grows, but for now 2000 is plenty for bookings.
-            // OPTIMIZATION: Reduce limit for background syncs to avoid UI thread blocking.
-            // Allow larger limit for non-silent (forced) syncs.
-            const fetchLimit = silent ? 50 : 2000;
+            // OPTIMIZATION: Reduce limit for background syncs to avoid UI thread blocking
+            const fetchLimit = silent ? 200 : 2000;
             const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
 
             if (rowErr) {
@@ -978,9 +988,17 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
                         const chunk = rows.slice(i, i + BATCH_SIZE);
                         if(!silent && rows.length > BATCH_SIZE) console.log(`Uploading chunk ${i / BATCH_SIZE + 1} of ${Math.ceil(rows.length / BATCH_SIZE)} to ${tableName}`);
-                        
-                        const { error } = await window.supabaseClient.from(tableName).upsert(chunk);
-                        if (error) throw error;
+
+                        try {
+                            const { error } = await window.supabaseClient.from(tableName).upsert(chunk);
+                            if (error) throw error;
+                        } catch (e) {
+                            // If table doesn't exist, warn and skip, don't crash the whole sync.
+                            if (e.code === 'PGRST205' || (e.message && e.message.includes('does not exist'))) {
+                                console.warn(`Save failed for '${key}' because table '${tableName}' does not exist. Skipping.`);
+                                break; // Break out of the chunk loop for this table
+                            } else throw e; // Re-throw other errors to be caught by the main try/catch
+                        }
                     }
                     
                     // Save Hash Map only on success
@@ -1935,7 +1953,7 @@ function setupRealtimeListeners() {
 
 // --- NEW: QUEUE INDICATOR ---
 function updateQueueIndicator() {
-    const el = document.getElementById('sync-indicator');
+    const el = document.getElementById('sync-indicator'); // This is the footer indicator
     if (!el) return;
 
     if (INCOMING_DATA_QUEUE.length > 0) {
@@ -1977,7 +1995,10 @@ function processIncomingDataQueue() {
     INCOMING_DATA_QUEUE = []; 
 
     // Show processing status
-    updateSyncUI('processing_queue');
+    const el = document.getElementById('sync-indicator');
+    if (el) {
+        el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing: ${queue.length}`;
+    }
 
     // Batch updates by type to prevent multiple writes/renders
     const batches = {
