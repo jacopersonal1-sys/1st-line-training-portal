@@ -59,17 +59,42 @@ function loadMarkingQueue() {
     if (!container) return;
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const pending = subs.filter(s => s.status === 'pending');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+
+    // Filter pending
+    let pending = subs.filter(s => s.status === 'pending');
+
+    // GHOST DATA CLEANUP:
+    // If a Record exists for this test, the pending submission is invalid/stale.
+    // We auto-archive these to clean up the queue.
+    const ghosts = [];
+    const validPending = [];
+
+    pending.forEach(s => {
+        const hasRecord = records.some(r => 
+            r.trainee && s.trainee && r.trainee.toLowerCase() === s.trainee.toLowerCase() && 
+            r.assessment && s.testTitle && r.assessment.toLowerCase() === s.testTitle.toLowerCase()
+        );
+        if (hasRecord) ghosts.push(s);
+        else validPending.push(s);
+    });
+
+    if (ghosts.length > 0) {
+        console.log("Auto-archiving ghost submissions:", ghosts);
+        ghosts.forEach(g => { g.status = 'completed'; g.archived = true; });
+        localStorage.setItem('submissions', JSON.stringify(subs)); // Save updated state
+        if(typeof saveToServer === 'function') saveToServer(['submissions'], false);
+    }
 
     // Update Badge
     const badge = document.getElementById('markingCountBadge');
     if (badge) {
-        badge.innerText = pending.length;
-        if (pending.length > 0) badge.classList.remove('hidden');
+        badge.innerText = validPending.length;
+        if (validPending.length > 0) badge.classList.remove('hidden');
         else badge.classList.add('hidden');
     }
 
-    if (pending.length === 0) {
+    if (validPending.length === 0) {
         container.innerHTML = `
             <div style="padding:15px; text-align:center; color:var(--text-muted); background:var(--bg-input); border-radius:8px;">
                 No assessments awaiting review.
@@ -80,7 +105,7 @@ function loadMarkingQueue() {
         return;
     }
 
-    container.innerHTML = pending.map(s => `
+    container.innerHTML = validPending.map(s => `
         <div class="test-card-row" style="border-left: 4px solid var(--primary); margin-bottom:10px;">
             <div style="display:flex; align-items:center; gap:10px;">
                 ${getAvatarHTML(s.trainee)}

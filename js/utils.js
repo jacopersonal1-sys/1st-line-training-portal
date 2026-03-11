@@ -376,6 +376,17 @@ window.openUnifiedProfileSettings = function() {
                     </div>
                 </div>
 
+                <div class="card" style="margin-bottom:15px;">
+                    <h4 style="margin-top:0;"><i class="fas fa-cloud-download-alt"></i> System Update</h4>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-size:0.8rem; color:var(--text-muted);">Current Version</div>
+                            <div style="font-weight:bold;">v${window.APP_VERSION || 'Unknown'}</div>
+                        </div>
+                        <button id="btnProfileCheckUpdate" class="btn-secondary btn-sm" onclick="triggerProfileUpdateCheck()">Check for Updates</button>
+                    </div>
+                </div>
+
                 <div class="card">
                     <h4 style="margin-top:0;"><i class="fas fa-key"></i> Security</h4>
                     <label style="font-size:0.8rem;">Change Password</label>
@@ -394,6 +405,24 @@ window.openUnifiedProfileSettings = function() {
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.triggerProfileUpdateCheck = function() {
+    if (typeof require !== 'undefined') {
+        const { ipcRenderer } = require('electron');
+        const btn = document.getElementById('btnProfileCheckUpdate');
+        if(btn) {
+            btn.innerText = "Checking...";
+            btn.disabled = true;
+        }
+        ipcRenderer.send('manual-update-check');
+        // Reset if no response (timeout fallback)
+        setTimeout(() => {
+            if(btn && btn.disabled) { btn.innerText = "Check for Updates"; btn.disabled = false; }
+        }, 5000);
+    } else {
+        alert("Updates are managed by the browser in web mode.");
+    }
 };
 
 window.updateProfileZoom = function(val) {

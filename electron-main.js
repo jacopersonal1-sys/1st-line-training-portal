@@ -19,6 +19,7 @@ if (!app.isPackaged) {
 
 let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
+let updateReady = false; // Track if update is downloaded
 
 function createWindow() {
     // Create the browser window.
@@ -127,6 +128,11 @@ ipcMain.handle('get-app-version', () => {
     return app.getVersion();
 });
 
+// IPC Listener for Update Status (Check on Load)
+ipcMain.handle('get-update-status', () => {
+    return updateReady;
+});
+
 // IPC Listener for Manual Update Check
 ipcMain.on('manual-update-check', () => {
     if (!app.isPackaged) {
@@ -191,6 +197,7 @@ autoUpdater.on('download-progress', (progressObj) => {
 });
 
 autoUpdater.on('update-downloaded', (info) => {
+    updateReady = true;
     if(mainWindow) mainWindow.webContents.send('update-downloaded');
 });
 

@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+- **v2.4.22**: **Stability & Integrity**: Fixed background sync freezing issues. Implemented "Tombstone" protocol for permanent deletions. Improved Sync Queue UI.
 - **v2.4.21**: **Data Integrity & Live Arena**: Resolved "Ghost Pending Test" sync bug. Hardened the Live Assessment booking system to prevent duplicate sessions and provide instant "Join Now" alerts for trainees.
 - **v2.4.12**: **Migration Tools**: Finalized Staging Mode and Migration protocols for server switchover.
 - **v2.4.11**: **Workflow**: Implemented Staging Mode and Draft Releases for safer deployment.

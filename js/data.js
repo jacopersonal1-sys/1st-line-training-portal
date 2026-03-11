@@ -42,6 +42,7 @@ const DB_SCHEMA = {
         // NEW: Server Failover Settings
         server_settings: { active: 'cloud', local_url: '', local_key: '' }
     },
+    system_tombstones: [], // Persistent blacklist for deleted item IDs
     ai_suggestions: [], // Stores background improvement suggestions
     revokedUsers: [], // Added to ensure blacklist syncs
     auditLogs: [], // Critical Action History
@@ -96,6 +97,16 @@ const AUTHORITATIVE_TABLES = [
     'calendar_events'
 ];
 
+// --- NEW: DEBOUNCED SAVE QUEUE (PERFORMANCE) ---
+// This prevents the UI from freezing on large data saves by queueing the save
+// and processing it a few seconds later in the background.
+let SAVE_QUEUE = new Set();
+let SAVE_TIMEOUT = null;
+const SAVE_DEBOUNCE_MS = 3000; // 3 seconds
+
+// --- NEW: INCOMING DATA QUEUE (STABILITY) ---
+let INCOMING_DATA_QUEUE = [];
+let QUEUE_PROCESSOR_INTERVAL = null;
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -130,6 +141,7 @@ function isUserTyping() {
 
 // --- HARD DELETE PROTOCOL (Ghost Data Fix) ---
 const PENDING_DEL_KEY = 'system_pending_deletes';
+const TOMBSTONE_KEY = 'system_tombstones'; // New: Persistent Blacklist for Deleted IDs
 
 // Queues a delete operation and attempts to execute it immediately
 async function hardDelete(tableName, id) {
@@ -141,6 +153,13 @@ async function hardDelete(tableName, id) {
     if (!queue.some(i => i.type === 'id' && i.table === tableName && i.id === id)) {
         queue.push({ type: 'id', table: tableName, id: id, ts: Date.now() });
         localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(queue));
+    }
+
+    // 1.5 Add to Tombstones (Local Blacklist) to prevent immediate reappearance
+    const tombstones = JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]');
+    if (!tombstones.includes(id)) {
+        tombstones.push(id);
+        localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(tombstones));
     }
 
     // 2. Try to execute
@@ -282,11 +301,20 @@ async function loadFromServer(silent = false) {
         // --- PRE-PROCESS: Load Pending Deletes to prevent Ghost Data ---
         const pendingQueue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
         const pendingIds = new Set(pendingQueue.filter(i => i.type === 'id').map(i => i.id));
+        const tombstoneIds = new Set(JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]'));
         const pendingQueries = pendingQueue.filter(i => i.type === 'query');
 
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
         // Only fetch rows newer than our last sync timestamp
+        // OPTIMIZATION: Skip heavy logs in background sync to prevent freezing
+        const heavyTables = ['error_reports', 'accessLogs', 'auditLogs', 'monitor_history'];
+
         for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
+            // Skip heavy tables unless it's a forced full sync (Optimization)
+            if (silent && heavyTables.includes(localKey)) {
+                continue;
+            }
+
             const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
             
             // CLOCK SKEW FIX: Subtract 10 minutes from lastSync to catch items from clients with lagging clocks
@@ -294,24 +322,28 @@ async function loadFromServer(silent = false) {
 
             let query = window.supabaseClient.from(tableName).select('data, updated_at');
             
-            // If Authoritative, fetch EVERYTHING (Full Sync). Otherwise, fetch Deltas.
             const isAuthoritative = AUTHORITATIVE_TABLES.includes(tableName);
             
-            if (!isAuthoritative) {
-                query = query.gt('updated_at', safeSyncTime);
-            } else {
-                // OPTIMIZATION: For Authoritative tables, apply a "Rolling Window" to prevent unbounded growth.
-                // We only need recent history + future. This keeps the "Full Sync" fast forever.
+            // If it's a silent background sync, ALWAYS treat it as a normal delta sync.
+            // Authoritative full syncs should only be triggered by explicit UI actions (e.g., opening a tab via forceFullSync).
+            if (isAuthoritative && !silent) {
+                // This block will now rarely be hit by the main sync loop, only by direct calls.
                 if (tableName === 'live_sessions') {
-                    // Live sessions are transient. Only fetch active/recent ones (last 24h).
                     const yesterday = new Date(Date.now() - 86400000).toISOString();
                     query = query.gt('updated_at', yesterday);
+                } else if (tableName === 'live_bookings') {
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - 30);
+                    query = query.gt('data->>date', cutoff.toISOString().split('T')[0]);
                 }
             }
             
             // Limit batch size (Authoritative tables shouldn't be massive, but safety first)
             // For authoritative, we might need pagination if it grows, but for now 2000 is plenty for bookings.
-            const { data: newRows, error: rowErr } = await query.limit(2000);
+            // OPTIMIZATION: Reduce limit for background syncs to avoid UI thread blocking.
+            // Allow larger limit for non-silent (forced) syncs.
+            const fetchLimit = silent ? 50 : 2000;
+            const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
 
             if (rowErr) {
                 // Gracefully handle missing table (404) to prevent sync crash
@@ -337,7 +369,8 @@ async function loadFromServer(silent = false) {
                 const serverItems = newRows.filter(r => {
                     const id = r.data.id || r.id;
                     // 1. Check ID-based deletes
-                    if (pendingIds.has(id)) return false;
+                    if (pendingIds.has(id)) return false; 
+                    if (tombstoneIds.has(id)) return false; // Check Tombstones
 
                     // 2. Check Query-based deletes (e.g. "Delete all records for User X")
                     const isQueryDeleted = pendingQueries.some(q => {
@@ -702,36 +735,6 @@ async function forceFullSync(localKey) {
     }
 }
 
-// --- NEW: DEDICATED FULL SYNC FUNCTION ---
-// Performs a one-time, server-authoritative sync for a specific table.
-async function forceFullSync(localKey) {
-    if (!window.supabaseClient || !localKey) return false;
-
-    const tableName = ROW_MAP[localKey];
-    if (!tableName) {
-        console.error(`forceFullSync: No table mapping found for key '${localKey}'`);
-        return false;
-    }
-
-    console.log(`Performing authoritative full sync for '${localKey}'...`);
-
-    try {
-        // Fetch ALL rows for this table.
-        const { data, error } = await window.supabaseClient.from(tableName).select('data').limit(5000); // High limit for full sync
-        if (error) throw error;
-
-        // Overwrite local storage completely.
-        const serverItems = data.map(r => r.data);
-        localStorage.setItem(localKey, JSON.stringify(serverItems));
-
-        console.log(`Full sync for '${localKey}' complete. ${serverItems.length} items loaded.`);
-        return true;
-    } catch (e) {
-        console.error(`Full sync for '${localKey}' failed:`, e);
-        return false;
-    }
-}
-
 // Export for Jest testing (Node.js environment)
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -828,6 +831,8 @@ function updateSyncUI(status) {
         el.innerHTML = `<i class="fas ${icon}" style="color:#ff5252;"></i> ${msg} <button onclick="retrySync()" style="background:transparent; border:1px solid #ff5252; color:#ff5252; border-radius:4px; cursor:pointer; font-size:0.7rem; padding:1px 5px; margin-left:5px;">Retry</button>`;
     } else if (status === 'pending') {
         el.innerHTML = '<i class="fas fa-pen" style="color:#f1c40f;"></i> Unsaved...';
+    } else if (status === 'processing_queue') {
+        el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing...`;
     }
 }
 
@@ -839,16 +844,37 @@ function generateChecksum(str) {
     return (hash >>> 0).toString(16);
 }
 
-// 3. SMART SAVE (UPDATED: HYBRID ROW-LEVEL PUSH)
-// Splits data into Blobs (app_documents) and Rows (tables) based on ROW_MAP
-async function saveToServer(targetKeys = null, force = false, silent = false, retryCount = 0) {
-    try {
-        // Legacy support: if first arg is boolean, treat as force for ALL keys
-        if (typeof targetKeys === 'boolean') {
-            force = targetKeys;
-            targetKeys = null; // Save all
-        }
+// 3. SAVE CONTROLLER (Public Function)
+// Queues save operations and processes them after a debounce period for performance.
+async function saveToServer(targetKeys = null, force = false, silent = false) {
+    // Legacy support: if first arg is boolean, treat as force for ALL keys
+    if (typeof targetKeys === 'boolean') {
+        force = targetKeys;
+        targetKeys = null; // Save all
+    }
 
+    const keysToQueue = targetKeys || Object.keys(DB_SCHEMA);
+    keysToQueue.forEach(k => SAVE_QUEUE.add(k));
+
+    if (!silent) updateSyncUI('pending');
+
+    if (force) {
+        if (SAVE_TIMEOUT) clearTimeout(SAVE_TIMEOUT);
+        SAVE_TIMEOUT = null;
+        // Await the actual processing when forced
+        return await _processSaveQueue(force, silent);
+    } else {
+        if (SAVE_TIMEOUT) clearTimeout(SAVE_TIMEOUT);
+        SAVE_TIMEOUT = setTimeout(() => _processSaveQueue(force, silent), SAVE_DEBOUNCE_MS);
+        // Return optimistically for debounced saves
+        return true;
+    }
+}
+
+// 4. SAVE PROCESSOR (Internal Function)
+// The original saveToServer logic, now processes the queue.
+async function _processSaveQueue(force = false, silent = false, retryCount = 0) {
+    try {
         // LOCKDOWN CHECK
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
         if (config.security && config.security.lockdown_mode && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
@@ -882,7 +908,9 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
             return;
         }
 
-        const keysToSave = targetKeys || Object.keys(DB_SCHEMA);
+        const keysToSave = Array.from(SAVE_QUEUE);
+        if (keysToSave.length === 0) return true; // Nothing to do
+        SAVE_QUEUE.clear(); // Clear queue immediately
         if(!silent) updateSyncUI('busy');
 
         // 0. Process Deletes First (Ensure server is clean before we push)
@@ -1021,7 +1049,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false, re
         // RETRY LOGIC: Try once more if it failed (Network blip)
         if (retryCount < 1) {
             console.warn("Sync failed, retrying...", err);
-            return saveToServer(targetKeys, force, silent, retryCount + 1);
+            return _processSaveQueue(force, silent, retryCount + 1);
         }
 
         if(!silent) updateSyncUI('error');
@@ -1097,7 +1125,6 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                         return (
                             localItem.trainee === serverItem.trainee &&
                             localItem.testId === serverItem.testId &&
-                            localItem.timestamp === serverItem.timestamp &&
                             localItem.date === serverItem.date
                         );
                     }
@@ -1809,6 +1836,9 @@ function startRealtimeSync() {
         }
     }
 
+    // Start the Incoming Queue Processor (Checks every 2 seconds)
+    startQueueProcessor();
+
     console.log(`Starting Sync Engine. Sync: ${syncRate/1000}s, Heartbeat: ${beatRate/1000}s`);
     
     // 1. DATA SYNC: Poll every 60 Seconds (High Performance / Cohort Safe)
@@ -1903,92 +1933,165 @@ function setupRealtimeListeners() {
         .subscribe();
 }
 
-function handleMonitorRealtime(payload) {
-    let data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    
-    if (payload.eventType === 'DELETE') {
-        if (payload.old && payload.old.user_id) delete data[payload.old.user_id];
+// --- NEW: QUEUE INDICATOR ---
+function updateQueueIndicator() {
+    const el = document.getElementById('sync-indicator');
+    if (!el) return;
+
+    if (INCOMING_DATA_QUEUE.length > 0) {
+        el.style.transition = 'none';
+        el.style.opacity = '1';
+        el.innerHTML = `<i class="fas fa-inbox" style="color:#3498db;"></i> Queued: ${INCOMING_DATA_QUEUE.length}`;
     } else {
-        if (payload.new && payload.new.user_id) data[payload.new.user_id] = payload.new.data;
+        // If queue is empty, and we are not in another permanent state like 'error', show success.
+        const isError = el.innerHTML.includes('Offline') || el.innerHTML.includes('Sync Failed');
+        if (!isError) updateSyncUI('success');
     }
-    
-    localStorage.setItem('monitor_data', JSON.stringify(data));
-    
-    // Trigger UI Refresh if Monitor is open
-    if (typeof StudyMonitor !== 'undefined' && typeof StudyMonitor.updateWidget === 'function') {
-        StudyMonitor.updateWidget();
+}
+
+// --- NEW: QUEUE PROCESSOR ---
+function startQueueProcessor() {
+    if (QUEUE_PROCESSOR_INTERVAL) clearInterval(QUEUE_PROCESSOR_INTERVAL);
+    // Run frequently (2s) to keep data fresh, but gives a buffer window
+    QUEUE_PROCESSOR_INTERVAL = setInterval(processIncomingDataQueue, 2000);
+}
+
+function processIncomingDataQueue() {
+    if (INCOMING_DATA_QUEUE.length === 0) {
+        const el = document.getElementById('sync-indicator');
+        if (el && (el.innerHTML.includes('Queued:') || el.innerHTML.includes('Processing'))) {
+            updateSyncUI('success');
+        }
+        return;
     }
+
+    // PROTECTION: Don't update if user is actively interacting/typing.
+    // OVERRIDE: If user hasn't interacted for 30s, assume they left focus by accident and process anyway.
+    const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
+    if (isUserTyping() && timeSinceInteraction < 30000) {
+        return;
+    }
+
+    // Take snapshot of current queue and clear global
+    const queue = [...INCOMING_DATA_QUEUE];
+    INCOMING_DATA_QUEUE = []; 
+
+    // Show processing status
+    updateSyncUI('processing_queue');
+
+    // Batch updates by type to prevent multiple writes/renders
+    const batches = {
+        monitor: [],
+        attendance: [],
+        bookings: [],
+        sessions: []
+    };
+
+    queue.forEach(item => {
+        if (batches[item.type]) batches[item.type].push(item.payload);
+    });
+
+    // 1. Process Monitor
+    if (batches.monitor.length > 0) {
+        let data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        batches.monitor.forEach(p => {
+            if (p.eventType === 'DELETE') {
+                if (p.old && p.old.user_id) delete data[p.old.user_id];
+            } else {
+                if (p.new && p.new.user_id) data[p.new.user_id] = p.new.data;
+            }
+        });
+        localStorage.setItem('monitor_data', JSON.stringify(data));
+        if (typeof StudyMonitor !== 'undefined' && typeof StudyMonitor.updateWidget === 'function') {
+            StudyMonitor.updateWidget();
+        }
+    }
+
+    // 2. Process Attendance
+    if (batches.attendance.length > 0) {
+        let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+        batches.attendance.forEach(p => {
+            if (p.eventType === 'DELETE') {
+                records = records.filter(r => r.id !== p.old.id);
+            } else {
+                const newRow = p.new;
+                const item = newRow.data || {};
+                item.id = newRow.id;
+                item.user = newRow.user_id;
+                const idx = records.findIndex(r => r.id === item.id);
+                if (idx > -1) records[idx] = item;
+                else records.push(item);
+            }
+        });
+        localStorage.setItem('attendance_records', JSON.stringify(records));
+        if (typeof updateAttendanceUI === 'function') updateAttendanceUI();
+    }
+
+    // 3. Process Bookings
+    if (batches.bookings.length > 0) {
+        let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        batches.bookings.forEach(p => {
+            if (p.eventType === 'DELETE') {
+                bookings = bookings.filter(b => b.id !== p.old.id);
+            } else {
+                const newRow = p.new;
+                const item = newRow.data || {};
+                item.id = newRow.id;
+                const idx = bookings.findIndex(b => b.id === item.id);
+                if (idx > -1) bookings[idx] = item;
+                else bookings.push(item);
+            }
+        });
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+        if (typeof renderLiveTable === 'function') renderLiveTable();
+        if (typeof updateNotifications === 'function') updateNotifications();
+    }
+
+    // 4. Process Sessions (Dashboard Banner Only)
+    if (batches.sessions.length > 0) {
+        let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        batches.sessions.forEach(p => {
+            if (p.eventType === 'DELETE') {
+                allSessions = allSessions.filter(s => s.sessionId !== p.old.id);
+            } else {
+                const newData = p.new.data;
+                if (newData) {
+                    if (!newData.sessionId) newData.sessionId = p.new.id;
+                    allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
+                    allSessions.push(newData);
+                }
+            }
+        });
+        localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+        const dashView = document.getElementById('dashboard-view');
+        if (dashView && dashView.classList.contains('active') && typeof renderDashboard === 'function') {
+            renderDashboard();
+        }
+    }
+
+    // After processing, update the indicator with the current queue state.
+    updateQueueIndicator();
+}
+
+// --- UPDATED HANDLERS: PUSH TO QUEUE INSTEAD OF PROCESS ---
+function handleMonitorRealtime(payload) {
+    INCOMING_DATA_QUEUE.push({ type: 'monitor', payload });
+    updateQueueIndicator();
 }
 
 function handleAttendanceRealtime(payload) {
-    let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    
-    if (payload.eventType === 'DELETE') {
-        records = records.filter(r => r.id !== payload.old.id);
-    } else {
-        const newRow = payload.new;
-        // Convert DB row back to App Object format if needed, or assume direct mapping
-        // The app expects 'data' column content merged with ID
-        const item = newRow.data || {};
-        item.id = newRow.id;
-        item.user = newRow.user_id; // Ensure user mapping
-        
-        const idx = records.findIndex(r => r.id === item.id);
-        if (idx > -1) records[idx] = item;
-        else records.push(item);
-    }
-    
-    localStorage.setItem('attendance_records', JSON.stringify(records));
-    
-    // Trigger UI Refresh if Register is open
-    if (typeof updateAttendanceUI === 'function') {
-        updateAttendanceUI();
-    }
+    INCOMING_DATA_QUEUE.push({ type: 'attendance', payload });
+    updateQueueIndicator();
 }
 
 function handleLiveBookingRealtime(payload) {
-    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    
-    if (payload.eventType === 'DELETE') {
-        bookings = bookings.filter(b => b.id !== payload.old.id);
-    } else {
-        const newRow = payload.new;
-        const item = newRow.data || {};
-        item.id = newRow.id; // Ensure ID consistency
-        
-        const idx = bookings.findIndex(b => b.id === item.id);
-        if (idx > -1) bookings[idx] = item;
-        else bookings.push(item);
-    }
-    
-    localStorage.setItem('liveBookings', JSON.stringify(bookings));
-    
-    // Trigger UI Refresh if Schedule is open
-    if (typeof renderLiveTable === 'function') renderLiveTable();
-    // Update Dashboard Badges
-    if (typeof updateNotifications === 'function') updateNotifications();
+    INCOMING_DATA_QUEUE.push({ type: 'bookings', payload });
+    updateQueueIndicator();
 }
 
 function handleLiveSessionRealtime(payload) {
-    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    
-    if (payload.eventType === 'DELETE') {
-        allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
-    } else {
-        const newData = payload.new.data;
-        if (newData) {
-            if (!newData.sessionId) newData.sessionId = payload.new.id;
-            allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
-            allSessions.push(newData);
-        }
-    }
-    localStorage.setItem('liveSessions', JSON.stringify(allSessions));
-    
-    // Trigger Dashboard Refresh if active (to show/hide "Join Now" banner)
-    const dashView = document.getElementById('dashboard-view');
-    if (dashView && dashView.classList.contains('active') && typeof renderDashboard === 'function') {
-        renderDashboard();
-    }
+    INCOMING_DATA_QUEUE.push({ type: 'sessions', payload });
+    updateQueueIndicator();
 }
 
 // 6. FACTORY RESET (Cloud & Local)

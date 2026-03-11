@@ -701,6 +701,34 @@ function handleRealtimeInput(qIdx) {
 async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     if (!confirm(`Start live session for ${traineeName}?`)) return;
 
+    // --- ROBUSTNESS FIX: Clean up ALL previous sessions for this TRAINEE ---
+    // This prevents loading a completed-but-not-ended session when starting a new one.
+    if (window.supabaseClient) {
+        const { error: deleteError } = await window.supabaseClient
+            .from('live_sessions')
+            .delete()
+            .eq('data->>trainee', traineeName); // Target ALL sessions for this trainee
+        
+        if (deleteError) {
+            console.warn("Stale session cleanup failed:", deleteError.message);
+        } else {
+            console.log(`Cleaned up all previous sessions for trainee: ${traineeName}.`);
+        }
+    }
+    // --- END FIX ---
+
+    // RACE CONDITION CHECK: Ensure session doesn't already exist
+    // (Prevents double-clicks or two admins starting same slot)
+    const allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const existing = allSessions.find(s => s.bookingId === bookingId && s.active);
+    if (existing) {
+        alert("A session is already active for this booking. Joining existing session...");
+        localStorage.setItem('currentLiveSessionId', existing.sessionId);
+        showTab('live-execution');
+        loadLiveExecution();
+        return;
+    }
+
     // Find the Test Definition
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     // Match by title (assuming Admin named them identically as per instructions)

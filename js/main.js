@@ -437,6 +437,24 @@ window.onload = async function() {
             // NEW: Check for release notes
             if (typeof checkReleaseNotes === 'function') checkReleaseNotes(ver);
         });
+
+        // NEW: Check if update is ALREADY waiting (Handle Reloads/Logouts)
+        ipcRenderer.invoke('get-update-status').then(isReady => {
+            if (isReady) {
+                window.UPDATE_DOWNLOADED = true;
+                // Transform Login Button immediately if visible
+                const loginBtn = document.querySelector('#login-screen button[type="submit"]');
+                if(loginBtn) {
+                    loginBtn.innerText = "Restart & Install Update";
+                    loginBtn.onclick = (e) => { e.preventDefault(); performUpdateRestart(); };
+                    loginBtn.classList.remove('btn-primary');
+                    loginBtn.classList.add('btn-success');
+                    loginBtn.classList.add('pulse-anim');
+                }
+                const err = document.getElementById('loginError');
+                if(err) { err.innerText = "Update Ready. Please restart."; err.style.color = "#2ecc71"; }
+            }
+        });
     }
 
     // --- UPDATE CHANNEL CONFIGURATION ---
@@ -1683,6 +1701,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.22": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed app freezing issues by optimizing how heavy logs are synced in the background.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Tombstone" protocol to permanently prevent deleted items ("Ghost Data") from reappearing.</li>
+                <li style="margin-bottom: 8px;"><strong>UX:</strong> Improved Sync Queue indicator to show real-time processing status.</li>
+            </ul>`,
         "2.4.21": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Resolved an issue where old, marked tests could reappear as "Pending" during a sync.</li>
