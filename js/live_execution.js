@@ -153,11 +153,20 @@ async function syncLiveSessionState() {
 function processLiveSessionState(allSessions) {
     // FIND MY RELEVANT SESSION
     let myServerSession = null;
+    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
         // Admin: Prefer the session we are explicitly viewing
         const viewingId = localStorage.getItem('currentLiveSessionId');
         if (viewingId) {
             myServerSession = allSessions.find(s => s.sessionId === viewingId) || null;
+            
+            // CRITICAL FIX: If the session ID we are trying to view isn't in the server list yet (latency),
+            // but matches our local "just started" session, trust the local one.
+            // This prevents falling back to an old/stale session ("Rejoin Logic") immediately after starting a new one.
+            if (!myServerSession && localSession.sessionId === viewingId && localSession.active) {
+                myServerSession = localSession;
+            }
         }
         // REJOIN LOGIC: If not found, attach to first active session where this admin is trainer
         if (!myServerSession) {
@@ -193,7 +202,6 @@ function processLiveSessionState(allSessions) {
     }
 
     // Update the local "Active Session" proxy for UI rendering
-    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
     
     // Only update if state actually changed
     if (JSON.stringify(myServerSession) !== JSON.stringify(localSession)) {
@@ -537,7 +545,7 @@ function renderTraineeLivePanel(container) {
         container.innerHTML = `
             <div style="text-align:center; padding:100px; color:var(--text-muted);">
                 <i class="fas fa-hourglass-half" style="font-size:5rem; margin-bottom:20px; opacity:0.5;"></i>
-                <h1>Waiting for Trainer...</h1>
+                <h1>Waiting for ${session.trainer || 'Trainer'}...</h1>
                 <p>Your live assessment session has not started yet.</p>
             </div>`;
         return;
@@ -756,6 +764,12 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     // 1. Update Local Proxy
     localStorage.setItem('liveSession', JSON.stringify(session));
     localStorage.setItem('currentLiveSessionId', session.sessionId); // Track what Admin is looking at
+    
+    // 1.5. Clean Local Array Immediately (Prevent Ghosting in UI before sync)
+    let currentGlobal = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    currentGlobal = currentGlobal.filter(s => s.trainee !== traineeName); // Remove old trainee sessions
+    currentGlobal.push(session); // Add new one
+    localStorage.setItem('liveSessions', JSON.stringify(currentGlobal));
     
     // 2. Update Global Array
     await updateGlobalSessionArray(session, false); // Safe Merge to prevent wiping other admins

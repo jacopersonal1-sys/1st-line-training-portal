@@ -1,5 +1,23 @@
 /* ================= AUTHENTICATION ================= */
 
+// --- NEW: INJECT NETWORK BUTTON (Moved here for correct load order) ---
+function injectNetworkButton() {
+    // Find the container where the Notification Bell lives
+    const bubble = document.querySelector('.control-bubble .bubble-content');
+    
+    if (bubble && !document.getElementById('btn-net-diag')) {
+        const btn = document.createElement('button');
+        btn.id = 'btn-net-diag';
+        btn.className = 'icon-btn';
+        btn.title = 'Run Network Diagnostics';
+        btn.innerHTML = '<i class="fas fa-wifi"></i>';
+        // Use window.NetworkDiag to ensure it's found globally
+        btn.onclick = () => { if(window.NetworkDiag) window.NetworkDiag.openModal(); };
+        // Insert before notifications if possible, or prepend
+        bubble.prepend(btn);
+    }
+}
+
 // --- HELPER: ASYNC SAVE ---
 // Ensures critical user profile updates are saved before proceeding.
 async function secureAuthSave() {
@@ -321,6 +339,9 @@ async function autoLogin() {
   // Revert to Standard Footer (Profile moved to Header)
   document.getElementById('user-footer').innerHTML = `Logged in as: <strong>${CURRENT_USER.user}</strong> (${CURRENT_USER.role}) <span id="sync-indicator" style="margin-left:15px; transition: opacity 0.5s; font-size: 0.9em;"></span>`;
   
+  // Ensure header buttons (like Network Diag) are injected now that the main UI is visible
+  if(typeof injectNetworkButton === 'function') injectNetworkButton();
+
   // LOG LOGIN
   if(typeof logAccessEvent === 'function') logAccessEvent(CURRENT_USER.user, 'Login');
   

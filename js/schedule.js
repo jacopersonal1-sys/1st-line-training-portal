@@ -425,6 +425,8 @@ async function renderLiveTable() {
                 startDate: oldSettings.startDate || new Date().toISOString().split('T')[0],
                 days: oldSettings.days || 5,
                 activeSlots: oldSettings.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+                trainers: ["Trainer 1", "Trainer 2"], // Default
+                dailyTrainers: {}, // NEW: Per-day overrides
                 assigned: null
             }
         };
@@ -463,16 +465,20 @@ async function renderLiveTable() {
             adminPanel.classList.remove('hidden');
             
             // Inject Tabs & Toolbar
-            let controlsHtml = buildLiveTabs(liveSchedules) + buildLiveToolbar(currentSched);
+            let controlsHtml = buildLiveTabs(liveSchedules) + buildLiveToolbar(currentSched, isAdmin);
             
             // Inject Settings Form (Existing inputs)
             controlsHtml += `
-                <div style="margin-top:15px; padding-top:15px; border-top:1px dashed var(--border-color);">
-                    <div style="display:flex; gap:15px; align-items:end;">
+                <div class="card" style="margin-top:15px; background:var(--bg-input);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <h4 style="margin:0;"><i class="fas fa-cogs"></i> Schedule Configuration</h4>
+                        <button class="btn-secondary btn-sm" onclick="openLiveStatsModal()"><i class="fas fa-chart-pie"></i> View Trainee Stats Breakdown</button>
+                    </div>
+                    <div style="display:flex; gap:15px; align-items:end; margin-bottom:10px;">
                         <div><label>Start Date</label><input type="date" id="liveStartDate" value="${currentSched.startDate}"></div>
                         <div><label>Days</label><input type="number" id="liveNumDays" value="${currentSched.days}" min="1" max="30" style="width:80px;"></div>
+                        <div style="flex:1;"><label>Default Trainers</label><input type="text" id="liveTrainersInput" value="${(currentSched.trainers || ['Trainer 1', 'Trainer 2']).join(', ')}" placeholder="Trainer 1, Trainer 2..."></div>
                         <button class="btn-primary" onclick="saveLiveScheduleSettings()" style="height:38px;">Update Settings</button>
-                        <button class="btn-danger" onclick="clearLiveBookings()" style="height:38px; margin-left:auto;">Clear All Bookings</button>
                     </div>
                     <div id="liveSlotConfig" style="margin-top:10px; display:flex; gap:15px; flex-wrap:wrap;">
                         <label style="font-size:0.9rem; font-weight:bold;">Active Hours:</label>
@@ -481,6 +487,7 @@ async function renderLiveTable() {
                                 <input type="checkbox" id="slot_${slot.replace(/[: ]/g, '')}" ${currentSched.activeSlots && currentSched.activeSlots.includes(slot) ? 'checked' : ''}> ${slot}
                             </label>
                         `).join('')}
+                        <button class="btn-danger btn-sm" onclick="clearLiveBookings()" style="margin-left:auto;">Reset / Clear</button>
                     </div>
                 </div>
             `;
@@ -503,7 +510,7 @@ async function renderLiveTable() {
     const activeSlots = currentSched.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
     
     const validDays = getNextBusinessDays(startDate, daysCount);
-    const trainers = ["Trainer 1", "Trainer 2"];
+    const defaultTrainers = currentSched.trainers || ["Trainer 1", "Trainer 2"];
     const searchTerm = document.getElementById('liveBookingSearch') ? document.getElementById('liveBookingSearch').value.toLowerCase() : '';
 
     let html = '';
@@ -512,24 +519,44 @@ async function renderLiveTable() {
         const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         const dateKey = d.toISOString().split('T')[0];
 
+        // DETERMINE TRAINERS FOR THIS SPECIFIC DAY
+        // Priority: Daily Override > Default List
+        let dayTrainers = defaultTrainers;
+        if (currentSched.dailyTrainers && currentSched.dailyTrainers[dateKey]) {
+            dayTrainers = currentSched.dailyTrainers[dateKey];
+        }
+        
+        const trainerCountInfo = `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:5px;">${dayTrainers.length} Trainers</div>`;
+
         html += `<tr><td style="background:var(--bg-input); border-right:2px solid var(--border-color); vertical-align:middle;">
             <strong>${dayStr}</strong><br><span style="font-size:0.8rem; color:var(--text-muted);">${dateKey}</span>
+            ${isAdmin ? `<button class="btn-secondary btn-sm" style="display:block; margin-top:8px; width:100%; font-size:0.7rem;" onclick="editDailyTrainers('${dateKey}')"><i class="fas fa-user-edit"></i> Edit Trainers</button>` : ''}
         </td>`;
 
         activeSlots.forEach(time => {
             html += `<td style="vertical-align:top; padding:5px;">`;
             
-            // Render Both Trainer Slots per Time Cell
-            trainers.forEach(trainer => {
+            // SMART TRAINER LIST: Merge Config + Actual Bookings
+            // This ensures if a trainer is removed from settings, their existing booking stays visible.
+            const slotBookings = bookings.filter(b => b.date === dateKey && b.time === time && b.status !== 'Cancelled');
+            const bookedTrainerNames = slotBookings.map(b => b.trainer);
+            
+            // Combine Day Config list with any extras found in bookings (Legacy/Removed trainers)
+            const effectiveTrainers = [...new Set([...dayTrainers, ...bookedTrainerNames])];
+
+            effectiveTrainers.forEach(trainer => {
                 const slotId = `${dateKey}_${time}_${trainer.replace(' ','')}`;
                 
+                // DROP ZONE WRAPPER
+                // We wrap the slot in a div that accepts drops.
+                // data attributes store the target coordinates.
+                html += `<div class="live-drop-zone" data-date="${dateKey}" data-time="${time}" data-trainer="${trainer}" 
+                    ondragover="liveDragOver(event)" ondragleave="liveDragLeave(event)" ondrop="liveDrop(event)"
+                    style="min-height:50px; border:2px dashed transparent; border-radius:4px; padding:4px; transition:0.2s; margin-bottom:5px;">`;
+                
                 // Find booking for this SPECIFIC slot (Trainer + Time + Date)
-                const booking = bookings.find(b => 
-                    b.date === dateKey && 
-                    b.time === time && 
-                    b.trainer === trainer &&
-                    b.status !== 'Cancelled'
-                );
+                // We already filtered slotBookings above, just find the match
+                const booking = slotBookings.find(b => b.trainer === trainer);
 
                 const isTaken = !!booking;
                 const isMine = booking && booking.trainee === CURRENT_USER.user;
@@ -545,7 +572,7 @@ async function renderLiveTable() {
                 let slotHtml = '';
                 
                 // HEADER FOR TRAINER
-                slotHtml += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:2px; font-weight:bold; text-transform:uppercase;">${trainer}</div>`;
+                html += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:2px; font-weight:bold; text-transform:uppercase;">${trainer}</div>`;
 
                 if (isTaken) {
                     // BOOKED STATE
@@ -581,8 +608,11 @@ async function renderLiveTable() {
                         actions += `<button class="btn-cancel" onclick="cancelBooking('${booking.id}')">Cancel</button>`;
                     }
 
-                    slotHtml += `
-                        <div class="slot-item ${statusClass} ${highlightClass}" style="margin-bottom:8px;">
+                    // DRAGGABLE ATTRIBUTES (Admin Only)
+                    const dragAttr = isAdmin ? `draggable="true" ondragstart="liveDragStart(event, '${booking.id}')" style="cursor:grab;"` : '';
+
+                    html += `
+                        <div class="slot-item ${statusClass} ${highlightClass}" ${dragAttr} style="margin-bottom:8px;">
                             ${info}
                             <div style="margin-top:4px;">${actions}</div>
                         </div>`;
@@ -602,18 +632,18 @@ async function renderLiveTable() {
                     if (CURRENT_USER.role === 'trainee') {
                         if (userBookedThisHour) {
                             // User is already booked in the other trainer slot for this hour
-                            slotHtml += `<div style="padding:5px; background:var(--bg-input); border-radius:4px; color:var(--text-muted); font-size:0.75rem; text-align:center; margin-bottom:8px;">Slot Limit</div>`;
+                            html += `<div style="padding:5px; background:var(--bg-input); border-radius:4px; color:var(--text-muted); font-size:0.75rem; text-align:center; margin-bottom:8px;">Slot Limit</div>`;
                         } else {
                             // Available to book
-                            slotHtml += `<button class="btn-slot btn-book" style="margin-bottom:8px;" onclick="openBookingModal('${dateKey}', '${time}', '${trainer}')">+ Book</button>`;
+                            html += `<button class="btn-slot btn-book" style="margin-bottom:8px;" onclick="openBookingModal('${dateKey}', '${time}', '${trainer}')">+ Book</button>`;
                         }
                     } else {
                          // Admin sees empty
-                         slotHtml += `<div style="padding:10px; border:1px dashed var(--border-color); border-radius:4px; margin-bottom:8px; text-align:center; color:var(--text-muted); font-size:0.7rem;">Available</div>`;
+                         html += `<div style="padding:10px; border:1px dashed var(--border-color); border-radius:4px; margin-bottom:8px; text-align:center; color:var(--text-muted); font-size:0.7rem;">Available</div>`;
                     }
                 }
 
-                html += slotHtml;
+                html += `</div>`; // Close Drop Zone
             });
 
             html += `</td>`;
@@ -623,6 +653,229 @@ async function renderLiveTable() {
 
     tbody.innerHTML = html;
 }
+
+// --- NEW: PER-DAY TRAINER EDIT ---
+window.editDailyTrainers = async function(dateKey) {
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const current = liveSchedules[ACTIVE_LIVE_SCHED_ID];
+    
+    const defaults = current.trainers || ["Trainer 1", "Trainer 2"];
+    const currentOverride = (current.dailyTrainers && current.dailyTrainers[dateKey]) ? current.dailyTrainers[dateKey] : defaults;
+    
+    const input = await customPrompt("Edit Trainers for " + dateKey, "Enter trainer names separated by commas (e.g. Jaco, Darren, Netta):", currentOverride.join(', '));
+    
+    if (input !== null) {
+        const newTrainers = input.split(',').map(t => t.trim()).filter(t => t.length > 0);
+        if (newTrainers.length === 0) return alert("Must have at least one trainer.");
+        
+        if (!current.dailyTrainers) current.dailyTrainers = {};
+        current.dailyTrainers[dateKey] = newTrainers;
+        
+        localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+        await secureScheduleSave();
+        renderLiveTable();
+    }
+};
+
+// --- DRAG AND DROP HANDLERS (LIVE) ---
+window.liveDragStart = function(e, id) {
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.effectAllowed = "move";
+    e.target.style.opacity = '0.5';
+};
+
+window.liveDragOver = function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const zone = e.target.closest('.live-drop-zone');
+    if (zone) zone.style.borderColor = 'var(--primary)';
+    if (zone) zone.style.background = 'rgba(243, 112, 33, 0.1)';
+};
+
+window.liveDragLeave = function(e) {
+    const zone = e.target.closest('.live-drop-zone');
+    if (zone) {
+        zone.style.borderColor = 'transparent';
+        zone.style.background = 'transparent';
+    }
+};
+
+window.liveDrop = async function(e) {
+    e.preventDefault();
+    const zone = e.target.closest('.live-drop-zone');
+    if (!zone) return;
+    
+    // Reset visual
+    zone.style.borderColor = 'transparent';
+    zone.style.background = 'transparent';
+
+    const bookingId = e.dataTransfer.getData("text/plain");
+    const targetDate = zone.dataset.date;
+    const targetTime = zone.dataset.time;
+    const targetTrainer = zone.dataset.trainer;
+
+    if (!bookingId || !targetDate || !targetTime || !targetTrainer) return;
+    
+    await moveLiveBooking(bookingId, targetDate, targetTime, targetTrainer);
+};
+
+async function moveLiveBooking(id, date, time, trainer) {
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const targetBooking = bookings.find(b => b.id === id);
+    
+    if (!targetBooking) return;
+
+    // Check Target Availability
+    const conflict = bookings.find(b => b.date === date && b.time === time && b.trainer === trainer && b.status !== 'Cancelled' && b.id !== id);
+    if (conflict) return alert("Target slot is already occupied.");
+
+    targetBooking.date = date;
+    targetBooking.time = time;
+    targetBooking.trainer = trainer;
+    
+    localStorage.setItem('liveBookings', JSON.stringify(bookings));
+    await secureScheduleSave();
+    renderLiveTable();
+}
+
+// --- NEW: LIVE ASSESSMENT STATS MODAL ---
+window.openLiveStatsModal = function() {
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+    const currentSched = liveSchedules[ACTIVE_LIVE_SCHED_ID];
+    
+    if (!currentSched || !currentSched.assigned) {
+        alert("No group assigned to this schedule.");
+        return;
+    }
+
+    const groupId = currentSched.assigned;
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const trainees = rosters[groupId] || [];
+    
+    // Get Data
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
+    
+    // Calculate Total Available Live Assessments
+    const liveTestsDef = assessments.filter(a => a.live);
+    const totalAvailable = liveTestsDef.length;
+
+    let rows = '';
+    
+    // Aggregate stats per trainee
+    trainees.sort().forEach(t => {
+        // Filter bookings for this trainee
+        // Note: We don't filter by date here, we look at ALL history for completion status
+        const myBookings = bookings.filter(b => b.trainee === t && b.status !== 'Cancelled');
+        
+        const completedCount = myBookings.filter(b => b.status === 'Completed').length;
+        const bookedCount = myBookings.filter(b => b.status === 'Booked').length;
+        const remaining = Math.max(0, totalAvailable - completedCount);
+        
+        // Calculate progress percentage
+        const pct = totalAvailable > 0 ? Math.round((completedCount / totalAvailable) * 100) : 0;
+        let statusColor = '#f1c40f'; // Orange
+        if (pct >= 100) statusColor = '#2ecc71'; // Green
+        else if (pct === 0) statusColor = '#e74c3c'; // Red
+
+        rows += `
+            <tr>
+                <td><div style="display:flex; align-items:center;">${getAvatarHTML(t, 24)} <strong>${t}</strong></div></td>
+                <td class="text-center">${bookedCount}</td>
+                <td class="text-center" style="font-weight:bold; color:#2ecc71;">${completedCount}</td>
+                <td class="text-center">${remaining}</td>
+                <td>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="flex:1; height:6px; background:#333; border-radius:3px; overflow:hidden;">
+                            <div style="width:${pct}%; background:${statusColor}; height:100%;"></div>
+                        </div>
+                        <span style="font-size:0.8rem; width:35px;">${pct}%</span>
+                    </div>
+                </td>
+                <td class="text-right">
+                    <button class="btn-secondary btn-sm" onclick="viewTraineeLiveDetails('${t}')"><i class="fas fa-eye"></i> Details</button>
+                </td>
+            </tr>
+        `;
+    });
+
+    const modalHtml = `
+        <div id="liveStatsModal" class="modal-overlay">
+            <div class="modal-box" style="width:800px; max-width:95%;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                    <h3 style="margin:0;"><i class="fas fa-chart-pie"></i> Assessment Breakdown: ${groupId}</h3>
+                    <button class="btn-secondary" onclick="document.getElementById('liveStatsModal').remove()">&times;</button>
+                </div>
+                <div style="margin-bottom:15px; font-size:0.9rem; color:var(--text-muted);">
+                    <strong>Total Live Assessments Available:</strong> ${totalAvailable}
+                </div>
+                <div class="table-responsive" style="max-height:60vh; overflow-y:auto;">
+                    <table class="admin-table">
+                        <thead><tr><th>Trainee</th><th class="text-center">Booked</th><th class="text-center">Completed</th><th class="text-center">Remaining</th><th>Progress</th><th>Action</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.viewTraineeLiveDetails = function(trainee) {
+    // Get Definitions
+    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
+    const liveTests = assessments.filter(a => a.live);
+    
+    // Get Data
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const myBookings = bookings.filter(b => b.trainee === trainee && b.status !== 'Cancelled');
+    
+    let rows = '';
+    
+    liveTests.forEach(test => {
+        const booking = myBookings.find(b => b.assessment === test.name);
+        let statusHtml = '<span class="status-badge" style="background:var(--bg-input); color:var(--text-muted);">Not Started</span>';
+        let details = '-';
+        let action = '';
+        
+        if (booking) {
+            if (booking.status === 'Completed') {
+                statusHtml = `<span class="status-badge status-pass">Completed</span>`;
+                details = `<div style="font-size:0.8rem;">Score: <strong>${booking.score || 0}%</strong></div><div style="font-size:0.75rem; color:var(--text-muted);">${booking.date}</div>`;
+            } else {
+                statusHtml = `<span class="status-badge status-improve">Booked</span>`;
+                details = `<div style="font-size:0.8rem;">${booking.date} @ ${booking.time}</div><div style="font-size:0.75rem; color:var(--text-muted);">Trainer: ${booking.trainer}</div>`;
+                // Allow quick cancel or move from here? Maybe keep it simple for now.
+            }
+        }
+        
+        rows += `
+            <tr>
+                <td>${test.name}</td>
+                <td>${statusHtml}</td>
+                <td>${details}</td>
+            </tr>
+        `;
+    });
+    
+    const modalHtml = `
+        <div id="liveDetailsModal" class="modal-overlay" style="z-index:10005;">
+            <div class="modal-box" style="width:600px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                    <h3 style="margin:0;"><i class="fas fa-list"></i> ${trainee} - Live Assessments</h3>
+                    <button class="btn-secondary" onclick="document.getElementById('liveDetailsModal').remove()">&times;</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="admin-table">
+                        <thead><tr><th>Assessment</th><th>Status</th><th>Details</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+        
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
 
 // --- LIVE SCHEDULE HELPERS ---
 
@@ -653,12 +906,14 @@ function buildLiveTabs(liveSchedules) {
     return html;
 }
 
-function buildLiveToolbar(scheduleData) {
+function buildLiveToolbar(scheduleData, isAdmin) {
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;">
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;">
             <div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div>
-            <div><button class="btn-danger btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', null)">Unassign</button></div>
+            <div>
+                <button class="btn-danger btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', null)">Unassign</button>
+            </div>
         </div>`;
     } else {
         return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;">
@@ -686,6 +941,7 @@ async function createNewLiveSchedule() {
             startDate: new Date().toISOString().split('T')[0],
             days: 5,
             activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+            trainers: ["Trainer 1", "Trainer 2"],
             assigned: null 
         };
         localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
@@ -1056,9 +1312,14 @@ async function markBookingComplete(id) {
 async function saveLiveScheduleSettings() {
     const start = document.getElementById('liveStartDate').value;
     const days = document.getElementById('liveNumDays').value;
+    const trainersStr = document.getElementById('liveTrainersInput').value;
     
     if(!start || !days) return alert("Please fill in start date and duration.");
     
+    // Parse Trainers
+    const trainers = trainersStr.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    if (trainers.length === 0) return alert("Please specify at least one trainer.");
+
     // Capture Active Slots
     const activeSlots = [];
     ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].forEach(slot => {
@@ -1072,6 +1333,7 @@ async function saveLiveScheduleSettings() {
     liveSchedules[ACTIVE_LIVE_SCHED_ID].startDate = start;
     liveSchedules[ACTIVE_LIVE_SCHED_ID].days = days;
     liveSchedules[ACTIVE_LIVE_SCHED_ID].activeSlots = activeSlots;
+    liveSchedules[ACTIVE_LIVE_SCHED_ID].trainers = trainers;
 
     localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
     

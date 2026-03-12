@@ -46,6 +46,7 @@ const DB_SCHEMA = {
     ai_suggestions: [], // Stores background improvement suggestions
     revokedUsers: [], // Added to ensure blacklist syncs
     auditLogs: [], // Critical Action History
+    network_diagnostics: [], // New: Network Health Reports
     accessLogs: [], // Login/Logout/Timeout History
     vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
     linkRequests: [], // Requests from TLs for assessment links
@@ -83,6 +84,7 @@ const ROW_MAP = {
     'graduated_agents': 'archived_users',
     'linkRequests': 'link_requests',
     'calendarEvents': 'calendar_events',
+    'network_diagnostics': 'network_diagnostics',
     'tl_task_submissions': 'tl_task_submissions'
 };
 

@@ -1701,6 +1701,17 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.25": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Network Diagnostics tool to sidebar for all users.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Admin view to Network Diagnostics to review historical reports.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed crash in Network Diagnostics tool and resolved button visibility issues.</li>
+            </ul>`,
+        "2.4.24": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Fix:</strong> Resolved issue where the Network Diagnostics button was not appearing in the header.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed console errors related to the missing 'network_diagnostics' table.</li>
+            </ul>`,
         "2.4.23": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Critical Fix (Live Assessments):</strong> Resolved an issue where submitting one agent's live assessment could overwrite the scores of another.</li>

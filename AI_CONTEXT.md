@@ -40,6 +40,7 @@
 | `accessLogs` | Array | Row (`access_logs`) | Login/Logout history. |
 | `error_reports` | Array | Row (`error_reports`) | Client-side error logs. |
 | `savedReports` | Array | Row (`saved_reports`) | Generated Onboard Reports (HTML snapshots). |
+| `network_diagnostics` | Array | Row (`network_diagnostics`) | Network health reports (Ping, CPU, RAM). |
 | `insightReviews` | Array | Row (`insight_reviews`) | Admin manual reviews of agents. |
 | `exemptions` | Array | Row (`exemptions`) | Assessment exemptions. |
 | `nps_responses` | Array | Row (`nps_responses`) | Trainee feedback. |
@@ -65,6 +66,7 @@ Maps local `localStorage` keys to Supabase tables.
 - `graduated_agents` -> `public.archived_users`
 - `linkRequests` -> `public.link_requests`
 - `calendarEvents` -> `public.calendar_events`
+- `network_diagnostics` -> `public.network_diagnostics`
 
 ---
 
@@ -98,6 +100,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `setupRealtimeListeners()`: **NEW**. Subscribes to Supabase `postgres_changes` for `monitor_state`, `attendance`, `sessions`, `live_bookings`, and `live_sessions`.
     - `handleMonitorRealtime(payload)`: Updates local `monitor_data` and triggers `StudyMonitor.updateWidget`.
     - `handleAttendanceRealtime(payload)`: Updates local `attendance_records` and triggers `updateAttendanceUI`.
+    - `handleLiveBookingRealtime(payload)`: Updates bookings and triggers `renderLiveTable`.
     - `handleLiveSessionRealtime(payload)`: Updates local `liveSessions` and triggers `renderDashboard` to show/hide "Join Now" banner.
 
 #### `js/auth.js` (Authentication)
@@ -144,6 +147,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `adminPushQuestion(idx)`: Updates session state to show a specific question.
     - `renderTraineeLivePanel()`: Renders the active question for the trainee.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
+    - `updateLiveConnectionStatus()`: Checks `sessions` table for trainee connectivity health (Online/Idle/Offline).
 
 #### `js/vetting_arena.js` (Security)
 - **Responsibility:** Secure testing environment (Kiosk Mode).
@@ -174,6 +178,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `performOrphanCleanup()`: Removes local records that no longer exist on the server (Hard Delete sync).
     - `switchToStaging()` / `exitStaging()`: Toggles between Production and Staging environments.
     - `clearSystemErrors()`: **Hard Deletes** all error reports from the cloud table.
+    - `emergencyDataRepair()`: Clears local queues/cache and forces a fresh full download (Soft Reset).
     - `openDevTools()`: Opens Electron Developer Tools (Super Admin only).
 
 #### `js/ai_core.js` (AI System Analyst)
@@ -189,6 +194,18 @@ Maps local `localStorage` keys to Supabase tables.
     - `renderSchedule()`: Renders the Timeline or Calendar view.
     - `renderLiveTable()`: Renders the Live Assessment booking grid.
     - `confirmBooking()`: Validates and saves a new booking.
+    - `editDailyTrainers(date)`: Configures specific trainers for a single day.
+    - `openLiveStatsModal()`: Shows booking stats breakdown per trainee.
+    - `liveDrop(event)`: Handles Drag & Drop re-scheduling for live bookings.
+
+#### `js/network_diag.js` (Network Diagnostics)
+- **Responsibility:** Real-time network health check (Ping Gateway/Internet/Server) and System Stats (CPU/RAM/Disk).
+- **Key Functions:**
+    - `NetworkDiag.openModal()`: Opens the diagnostics UI.
+    - `NetworkDiag.startTests()`: Starts continuous ping loop via IPC.
+    - `NetworkDiag.analyze()`: Interprets metrics to give plain English status (e.g., "Local Gateway Issue").
+    - `NetworkDiag.reportToCloud()`: Auto-saves diagnostics to `network_diagnostics` table every 10 mins.
+    - `NetworkDiag.init()`: Initializes on load (injected via `index.html`).
 
 ### Monitoring & Analytics
 
@@ -305,6 +322,8 @@ Maps local `localStorage` keys to Supabase tables.
 - `get-process-list`: Returns running processes (for Vetting).
 - `get-active-window`: Returns title of foreground window (for Study Monitor).
 - `set-update-channel`: Switches between 'prod' and 'staging' (beta) update channels.
+- `perform-network-test`: Pings a target IP/Host and returns latency in ms.
+- `get-system-stats`: Returns CPU load, RAM usage, Disk usage (C:), and Connection Type (Ethernet/Wireless).
 - `open-devtools`: Opens the Chromium Developer Tools.
 
 ---

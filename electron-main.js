@@ -2,6 +2,7 @@ const { app, BrowserWindow, shell, ipcMain, screen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { exec } = require('child_process');
+const os = require('os');
 
 // Enable logging for the auto-updater (helps debug "nothing happening")
 autoUpdater.logger = console;
@@ -288,6 +289,82 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
             resolve(result);
         });
     });
+});
+
+// --- NETWORK DIAGNOSTICS IPC ---
+
+ipcMain.handle('perform-network-test', async (event, target) => {
+    return new Promise((resolve) => {
+        // Windows uses -n, Linux/Mac uses -c. Timeout 1000ms.
+        const cmd = process.platform === 'win32' 
+            ? `ping -n 1 -w 1000 ${target}` 
+            : `ping -c 1 -W 1 ${target}`;
+            
+        const start = Date.now();
+        exec(cmd, (error, stdout, stderr) => {
+            const duration = Date.now() - start;
+            if (error) {
+                resolve({ success: false, time: null, output: stderr || error.message });
+            } else {
+                // Attempt to parse actual time from stdout for precision
+                let time = duration;
+                // Windows: "time=14ms" or "time<1ms"
+                const match = stdout.match(/time[=<]([\d\.]+)ms/);
+                if (match) time = parseFloat(match[1]);
+                
+                resolve({ success: true, time: time });
+            }
+        });
+    });
+});
+
+ipcMain.handle('get-system-stats', async () => {
+    const cpus = os.cpus();
+    const load = cpus.reduce((acc, cpu) => {
+        const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
+        const idle = cpu.times.idle;
+        return acc + ((total - idle) / total);
+    }, 0) / cpus.length;
+
+    let connectionType = 'Unknown';
+    const nets = os.networkInterfaces();
+    
+    // Heuristic to detect active interface type
+    for (const name of Object.keys(nets)) {
+        const lower = name.toLowerCase();
+        // Skip internal/loopback
+        if (nets[name].some(net => !net.internal && net.family === 'IPv4')) {
+            if (lower.includes('wi-fi') || lower.includes('wireless') || lower.includes('wlan')) connectionType = 'Wireless';
+            else if (lower.includes('ethernet') || lower.includes('eth')) connectionType = 'Ethernet';
+        }
+    }
+
+    // Basic Disk Check (Windows C:)
+    // Uses 'wmic' which is standard on Windows. Safe to fail silently on others.
+    let diskUsage = "N/A";
+    if (process.platform === 'win32') {
+        try {
+            const { execSync } = require('child_process');
+            // Get Size and FreeSpace for C:
+            const output = execSync('wmic logicaldisk where "DeviceID=\'C:\'" get Size,FreeSpace /value', { timeout: 500, encoding: 'utf8' });
+            const sizeMatch = output.match(/Size=(\d+)/);
+            const freeMatch = output.match(/FreeSpace=(\d+)/);
+            if (sizeMatch && freeMatch) {
+                const total = parseInt(sizeMatch[1]);
+                const free = parseInt(freeMatch[1]);
+                const usedPct = Math.round(((total - free) / total) * 100);
+                diskUsage = `${usedPct}% (C:)`;
+            }
+        } catch(e) {}
+    }
+
+    return {
+        cpu: (load * 100).toFixed(1),
+        ram: ((os.totalmem() - os.freemem()) / 1024 / 1024 / 1024).toFixed(2), // GB Used
+        ramTotal: (os.totalmem() / 1024 / 1024 / 1024).toFixed(2), // GB Total
+        connType: connectionType,
+        disk: diskUsage
+    };
 });
 
 // --- ACTIVE WINDOW TRACKING (Activity Monitor) ---
