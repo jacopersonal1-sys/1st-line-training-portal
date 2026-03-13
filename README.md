@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.29**: **Team Leader Hub Overhaul**: Implemented mandatory field validation, multi-entry support for outages/handovers, and enhanced UI for operational tasks.
 - **v2.4.28**: **Data Integrity & Stability**: Fixed Live Assessment completion bug. Implemented "Deep Clean" user deletion. Added Network Health history view for Admins.
 - **v2.4.27**: **Network Tool Fix**: Moved Network Test to the main sidebar for reliable visibility. Fixed related startup crashes and console warnings.
 - **v2.4.25**: **Network Diagnostics**: Added a comprehensive Network Diagnostics tool with historical admin view. Fixed related UI and stability issues.

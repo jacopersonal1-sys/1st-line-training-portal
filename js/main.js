@@ -1704,6 +1704,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.29": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Team Leader Hub:</strong> Major upgrade to Operations Timeline. Added mandatory comment enforcement for Attendance, Support, and Coaching tasks.</li>
+                <li style="margin-bottom: 8px;"><strong>Team Leader Hub:</strong> Enabled multi-entry logging for Network Outages, Handover Problem Tickets, and Bottlenecks.</li>
+                <li style="margin-bottom: 8px;"><strong>UX:</strong> Improved validation logic to prevent submitting daily logs with missing mandatory information.</li>
+            </ul>`,
         "2.4.28": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Fixed a critical bug preventing sessions from being marked as 'Completed'.</li>

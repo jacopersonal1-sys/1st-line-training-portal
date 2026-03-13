@@ -1,0 +1,108 @@
+/* ================= MODULE DATA LAYER ================= */
+/* Handles LocalStorage and Cloud Sync for Team Projects */
+
+const DataService = {
+    // --- NEW: DATA FETCHER ---
+    loadInitialData: async function() {
+        if (!AppContext.supabase) return;
+        
+        console.log("[Team Hub] Fetching initial data from cloud...");
+        
+        // Fetch all required data blobs in parallel
+        const [users, taskSubs, personalLists, backendData] = await Promise.all([
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'users').single(),
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_task_submissions').single(),
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_personal_lists').single(),
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_backend_data').single()
+        ]);
+
+        if (users.data) localStorage.setItem('users', JSON.stringify(users.data.content || []));
+        if (taskSubs.data) localStorage.setItem('tl_task_submissions', JSON.stringify(taskSubs.data.content || []));
+        if (personalLists.data) localStorage.setItem('tl_personal_lists', JSON.stringify(personalLists.data.content || {}));
+        if (backendData.data) localStorage.setItem('tl_backend_data', JSON.stringify(backendData.data.content || {}));
+    },
+    
+    // Get Submission for specific date
+    getSubmission: function(date) {
+        if (!AppContext.user) return null;
+        const submissions = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+        return submissions.find(s => s.user === AppContext.user.user && s.date === date) || { data: {} };
+    },
+
+    // Save Submission (Local + Cloud)
+    saveSubmission: function(date, data) {
+        if (!AppContext.user) return;
+        const submissions = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+        const idx = submissions.findIndex(s => s.user === AppContext.user.user && s.date === date);
+
+        const payload = {
+            id: (idx > -1) ? submissions[idx].id : Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+            user: AppContext.user.user,
+            date: date,
+            lastUpdated: new Date().toISOString(),
+            data: data
+        };
+
+        if (idx > -1) submissions[idx] = payload;
+        else submissions.push(payload);
+
+        localStorage.setItem('tl_task_submissions', JSON.stringify(submissions));
+        this.syncTable('tl_task_submissions', submissions);
+    },
+
+    // Get Personal Roster
+    getMyTeam: function() {
+        if (!AppContext.user) return [];
+        const lists = JSON.parse(localStorage.getItem('tl_personal_lists') || '{}');
+        const list = lists[AppContext.user.user] || [];
+        
+        // Normalize legacy strings to objects with default role
+        return list.map(item => (typeof item === 'string') ? { name: item, role: 'First Line Agent' } : item);
+    },
+
+    // Save Personal Roster
+    saveMyTeam: function(teamList) {
+        if (!AppContext.user) return;
+        const lists = JSON.parse(localStorage.getItem('tl_personal_lists') || '{}');
+        lists[AppContext.user.user] = teamList;
+        localStorage.setItem('tl_personal_lists', JSON.stringify(lists));
+        this.syncTable('tl_personal_lists', lists);
+    },
+
+    // --- BACKEND DATA (CONFIG) ---
+    getBackendData: function() {
+        return JSON.parse(localStorage.getItem('tl_backend_data') || '{"outage_areas":[]}');
+    },
+
+    saveBackendData: function(data) {
+        if (!AppContext.user) return;
+        localStorage.setItem('tl_backend_data', JSON.stringify(data));
+        this.syncTable('tl_backend_data', data);
+    },
+
+    // --- BACKEND DATA (CONFIG) ---
+    getBackendData: function() {
+        return JSON.parse(localStorage.getItem('tl_backend_data') || '{"outage_areas":[]}');
+    },
+
+    saveBackendData: function(data) {
+        if (!AppContext.user) return;
+        localStorage.setItem('tl_backend_data', JSON.stringify(data));
+        this.syncTable('tl_backend_data', data);
+    },
+
+    // --- INTERNAL SYNC HELPER ---
+    // Mimics the main app's saveToServer for BLOB data
+    syncTable: async function(table, data) {
+        if (!AppContext.supabase) return; // Offline mode
+        
+        try {
+            const { error } = await AppContext.supabase.from('app_documents').upsert({
+                key: table,
+                content: data,
+                updated_at: new Date().toISOString()
+            });
+            if (error) throw error;
+        } catch (e) { console.error(`[Module Sync] Failed to sync ${table}:`, e); }
+    }
+};

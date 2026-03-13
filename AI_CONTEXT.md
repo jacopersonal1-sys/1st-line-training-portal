@@ -30,6 +30,7 @@
 | `rosters` | Object | Blob | Group definitions `{ "GroupA": ["User1", "User2"] }`. |
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
+| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_task_submissions`, `tl_personal_lists`, `tl_backend_data`. |
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
@@ -253,13 +254,18 @@ Maps local `localStorage` keys to Supabase tables.
     - `renderAttendanceRegister()`: Admin view of lates/absences.
     - `updateAttendanceUI()`: Refreshes the Admin Register UI when realtime data arrives.
 
-#### `js/tl_tasks.js` (Team Leader Hub)
-- **Responsibility:** Daily/Weekly operational checklists and team roster management.
-- **Key Functions:**
-    - `renderUI()`: Main router for Timeline, My Team, and Overview tabs.
-    - `renderTimeline()`: Renders the daily/weekly task list with custom inputs.
-    - `submitDay()`: Commits the day's tasks and advances the date.
-    - `renderRoster()`: UI for managing the TL's specific agent list.
+#### `modules/team_projects/` (Teamleader Hub - Isolated Module)
+- **Architecture:** "Program within a Program". Runs inside a `<webview>` for complete isolation.
+- **Entry Point:** `index.html` loaded by `js/tl_tasks.js` with encoded credentials in URL.
+- **Files:**
+    - `js/main.js`: Core controller. Handles routing (Timeline, My Team, Backend Data).
+    - `js/data.js`: Independent data layer. Fetches blobs directly from Supabase (`tl_task_submissions`, `tl_backend_data`).
+    - `js/ui_timeline.js`: Renders the Operations Timeline. Supports custom inputs:
+        - `outage_form`: Auto-fills areas from backend config.
+        - `ticket_backlog`: Tracks total/oldest tickets.
+        - `handover_notes`: Structured handover tracking with problem ticket flagging.
+    - `js/ui_team.js`: Renders Roster and Calendar views. Supports role assignment (FLA/ESA).
+    - `js/ui_backend.js`: Configuration UI for dropdowns (Outage Areas).
 
 ---
 
