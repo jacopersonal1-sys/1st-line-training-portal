@@ -358,6 +358,12 @@ async function loadFromServer(silent = false) {
             const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
 
             if (rowErr) {
+                // ERROR HANDLING: Check if response was actually HTML (Cloudflare Error)
+                // PostgREST client might wrap this, but usually it throws a syntax error on JSON parse.
+                // If rowErr has no code but has a message, it might be a fetch failure.
+                if (rowErr.message && (rowErr.message.includes('<!DOCTYPE') || rowErr.message.includes('521') || rowErr.message.includes('503'))) {
+                    console.warn(`Sync Warning: Server returned HTML error (likely down). Skipping.`);
+                } else
                 // Gracefully handle missing table (404) to prevent sync crash
                 if (rowErr.code === 'PGRST205' || rowErr.message.includes('Could not find the table')) {
                     console.warn(`Sync Warning: Table '${tableName}' does not exist on server. Skipping.`);
@@ -995,6 +1001,12 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                             const { error } = await window.supabaseClient.from(tableName).upsert(chunk);
                             if (error) throw error;
                         } catch (e) {
+                            // NETWORK/SERVER ERROR: Pause sync if server is vomiting HTML or 5xx
+                            if (e.message && (e.message.includes('<!DOCTYPE') || e.message.includes('521') || e.message.includes('503'))) {
+                                console.warn(`Save aborted: Server unavailable (${tableName}).`);
+                                if(!silent) updateSyncUI('error');
+                                return false; // Stop processing queue
+                            }
                             // If table doesn't exist, warn and skip, don't crash the whole sync.
                             if (e.code === 'PGRST205' || (e.message && e.message.includes('does not exist'))) {
                                 console.warn(`Save failed for '${key}' because table '${tableName}' does not exist. Skipping.`);

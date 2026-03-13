@@ -213,7 +213,7 @@ function loadRostersList() {
                 const safeName = m.replace(/'/g, "\\'");
                 return `<li style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid var(--border-color); font-size:0.85rem;">
                     <span>${m}</span>
-                    <button class="btn-danger btn-sm" onclick="deleteAgentFromSystem('${safeName}', '${k}')" style="padding:2px 6px; font-size:0.7rem;" title="Permanently Delete Agent & Data"><i class="fas fa-trash"></i></button>
+                    <button class="btn-danger btn-sm" onclick="deleteAgentFromSystem('${safeName}', '${safeId}')" style="padding:2px 6px; font-size:0.7rem;" title="Permanently Delete Agent & All Data"><i class="fas fa-trash"></i></button>
                 </li>`;
             }).join('');
 
@@ -259,86 +259,119 @@ async function deleteGroup(groupId) {
     setTimeout(loadRostersList, 50); // Force reload of the list with slight delay for stability
 }
 
-async function deleteAgentFromSystem(agentName, groupId) {
-    if(!confirm(`CRITICAL WARNING:\n\nYou are about to permanently delete '${agentName}' from the system.\n\nThis will remove:\n- User Account\n- Assessment Records\n- Attendance History\n- Reports & Notes\n- Everything associated with this agent.\n\nThis action CANNOT be undone.\n\nProceed?`)) return;
+async function deleteAgentFromSystem(agentName, groupKey) {
+    // groupKey might be safeId (with underscores), so we need to find the real key if passed incorrectly, 
+    // but for rosters, we iterate all groups anyway to be safe.
+    if(!confirm(`CRITICAL WARNING:\n\nYou are about to PERMANENTLY DELETE '${agentName}' from the entire system.\n\nThis will remove:\n- User Login & Password\n- Assessment Records & Submissions\n- Attendance History\n- Live Bookings\n- Reports & Notes\n\nThis action CANNOT be undone.\n\nProceed?`)) return;
     
-    // 1. Remove from Roster
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    if(rosters[groupId]) {
-        rosters[groupId] = rosters[groupId].filter(m => m !== agentName);
-        localStorage.setItem('rosters', JSON.stringify(rosters));
-    }
-    
-    // 2. Remove User Account
-    let users = JSON.parse(localStorage.getItem('users') || '[]');
-    users = users.filter(u => u.user !== agentName);
-    localStorage.setItem('users', JSON.stringify(users));
-    
-    // 3. Add to Revoked (Blacklist)
-    let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-    if(!revoked.includes(agentName)) {
-        revoked.push(agentName);
-        localStorage.setItem('revokedUsers', JSON.stringify(revoked));
-    }
-    
-    // 4. Wipe Data
-    const wipeData = (key, userField) => {
-        let data = JSON.parse(localStorage.getItem(key) || '[]');
-        if(Array.isArray(data)) {
-            const originalLen = data.length;
-            data = data.filter(item => item[userField] !== agentName);
-            if(data.length !== originalLen) localStorage.setItem(key, JSON.stringify(data));
-        }
-    };
-    
-    wipeData('records', 'trainee');
-    wipeData('submissions', 'trainee');
-    wipeData('attendance_records', 'user');
-    wipeData('liveBookings', 'trainee');
-    wipeData('savedReports', 'trainee');
-    wipeData('insightReviews', 'trainee');
-    wipeData('exemptions', 'trainee');
-    wipeData('linkRequests', 'trainee');
-    
-    // Object based data
-    const wipeObjectData = (key) => {
-        let data = JSON.parse(localStorage.getItem(key) || '{}');
-        if(data[agentName]) {
-            delete data[agentName];
-            localStorage.setItem(key, JSON.stringify(data));
-        }
-    };
-    wipeObjectData('agentNotes');
-    wipeObjectData('monitor_data');
-    wipeObjectData('cancellationCounts');
-    
-    // 4.5. CLOUD WIPE (Critical for Row-Level Sync)
-    if (typeof hardDeleteByQuery === 'function') {
-        await hardDeleteByQuery('records', 'trainee', agentName);
-        await hardDeleteByQuery('submissions', 'trainee', agentName);
-        await hardDeleteByQuery('attendance', 'user_id', agentName);
-        await hardDeleteByQuery('live_bookings', 'trainee', agentName);
-        await hardDeleteByQuery('saved_reports', 'trainee', agentName);
-        await hardDeleteByQuery('insight_reviews', 'trainee', agentName);
-        await hardDeleteByQuery('exemptions', 'trainee', agentName);
-        await hardDeleteByQuery('link_requests', 'trainee', agentName);
-        await hardDeleteByQuery('monitor_state', 'user_id', agentName);
-        await hardDeleteByQuery('tl_task_submissions', 'user_id', agentName);
-        // Note: agentNotes, rosters, users are Blobs, so saveToServer handles them automatically.
-    }
+    const btn = document.activeElement;
+    if(btn) { btn.disabled = true; btn.innerText = 'Deleting...'; }
 
-    // 5. Force Sync
-    if(typeof saveToServer === 'function') {
-        await saveToServer([
-            'rosters', 'users', 'revokedUsers', 'records', 'submissions', 
-            'attendance_records', 'liveBookings', 'savedReports', 'tl_task_submissions',
-            'insightReviews', 'exemptions', 'agentNotes', 'monitor_data', 'linkRequests', 'cancellationCounts'
-        ], true);
+    try {
+        // 1. Remove from ALL Rosters (just in case they are in multiple)
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        Object.keys(rosters).forEach(gid => {
+            if (rosters[gid]) {
+                rosters[gid] = rosters[gid].filter(m => m !== agentName);
+            }
+        });
+        localStorage.setItem('rosters', JSON.stringify(rosters));
+        
+        // 2. Remove User Account
+        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        users = users.filter(u => u.user !== agentName);
+        localStorage.setItem('users', JSON.stringify(users));
+        
+        // 3. Add to Revoked (Blacklist) to prevent resurrection
+        let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        if(!revoked.includes(agentName)) {
+            revoked.push(agentName);
+            localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+        }
+        
+        // 4. Wipe Data (Local)
+        const wipeData = (key, userField) => {
+            let data = JSON.parse(localStorage.getItem(key) || '[]');
+            if(Array.isArray(data)) {
+                const originalLen = data.length;
+                // Case insensitive check just to be sure
+                data = data.filter(item => {
+                    const val = item[userField];
+                    return !val || val.toLowerCase() !== agentName.toLowerCase();
+                });
+                if(data.length !== originalLen) localStorage.setItem(key, JSON.stringify(data));
+            }
+        };
+        
+        wipeData('records', 'trainee');
+        wipeData('submissions', 'trainee');
+        wipeData('attendance_records', 'user');
+        wipeData('liveBookings', 'trainee');
+        wipeData('savedReports', 'trainee');
+        wipeData('insightReviews', 'trainee');
+        wipeData('exemptions', 'trainee');
+        wipeData('linkRequests', 'trainee');
+        // Also clean up Monitor History (might be large)
+        wipeData('monitor_history', 'user');
+        // Also clean up Access Logs
+        wipeData('accessLogs', 'user');
+        
+        // Object based data
+        const wipeObjectData = (key) => {
+            let data = JSON.parse(localStorage.getItem(key) || '{}');
+            if(data[agentName]) {
+                delete data[agentName];
+                localStorage.setItem(key, JSON.stringify(data));
+            }
+        };
+        wipeObjectData('agentNotes');
+        wipeObjectData('monitor_data');
+        wipeObjectData('cancellationCounts');
+        
+        // 4.5. CLOUD WIPE (Critical for Row-Level Sync)
+        if (typeof hardDeleteByQuery === 'function') {
+            // Fire off deletes in parallel for speed
+            const promises = [
+                hardDeleteByQuery('records', 'trainee', agentName),
+                hardDeleteByQuery('submissions', 'trainee', agentName),
+                hardDeleteByQuery('attendance', 'user_id', agentName),
+                hardDeleteByQuery('live_bookings', 'trainee', agentName),
+                hardDeleteByQuery('saved_reports', 'trainee', agentName),
+                hardDeleteByQuery('insight_reviews', 'trainee', agentName),
+                hardDeleteByQuery('exemptions', 'trainee', agentName),
+                hardDeleteByQuery('link_requests', 'trainee', agentName),
+                hardDeleteByQuery('monitor_state', 'user_id', agentName),
+                hardDeleteByQuery('tl_task_submissions', 'user_id', agentName),
+                hardDeleteByQuery('monitor_history', 'user_id', agentName),
+                hardDeleteByQuery('access_logs', 'user_id', agentName)
+            ];
+            
+            await Promise.all(promises);
+        }
+
+        // 5. Force Sync (Update Blobs)
+        if(typeof saveToServer === 'function') {
+            await saveToServer([
+                'rosters', 'users', 'revokedUsers', 'records', 'submissions', 
+                'attendance_records', 'liveBookings', 'savedReports', 'tl_task_submissions',
+                'insightReviews', 'exemptions', 'agentNotes', 'monitor_data', 'linkRequests', 'cancellationCounts',
+                'monitor_history', 'accessLogs'
+            ], true);
+        }
+        
+        if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Agent', `Obliterated agent ${agentName}`);
+        
+        // Refresh UI
+        loadRostersList(); // Re-render the list immediately
+        if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        if(typeof showToast === 'function') showToast(`Agent ${agentName} obliterated from system.`, "success");
+
+    } catch (e) {
+        console.error("Delete Agent Error:", e);
+        alert("Error deleting agent: " + e.message);
+    } finally {
+        if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash"></i>'; } // Restore icon button state
     }
-    
-    if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Agent', `Obliterated agent ${agentName}`);
-    refreshAllDropdowns();
-    if(typeof showToast === 'function') showToast(`Agent ${agentName} obliterated.`, "success");
 }
 
 function loadRostersToSelect(elementId = 'selectedGroup') { 

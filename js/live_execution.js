@@ -969,6 +969,10 @@ async function confirmAndSaveLiveSession() {
     const test = tests.find(t => t.id == session.testId);
 
     // ROBUSTNESS: Scrape inputs to ensure latest edits are captured
+    // FIX: Ensure container objects exist before assigning properties
+    if (!session.comments) session.comments = {};
+    if (!session.scores) session.scores = {};
+
     // (Fixes issue where comments don't save if user doesn't click away first)
     document.querySelectorAll('.live-final-comment').forEach(input => {
         const idx = input.getAttribute('data-idx');
@@ -983,7 +987,7 @@ async function confirmAndSaveLiveSession() {
     let totalScore = 0;
     let maxScore = 0;
     test.questions.forEach((q, idx) => {
-        maxScore += parseFloat(q.points || 1);
+        maxScore += parseFloat(q.points || 1); // Default to 1 if missing
         totalScore += parseFloat(session.scores[idx] || 0);
     });
     const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
@@ -1025,7 +1029,7 @@ async function confirmAndSaveLiveSession() {
     // 2. Update Booking Status
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
     const booking = bookings.find(b => b.id === session.bookingId);
-    if (booking) {
+    if (booking && booking.status !== 'Cancelled') {
         booking.status = 'Completed';
         booking.score = percentage;
     }
@@ -1081,10 +1085,12 @@ async function confirmAndSaveLiveSession() {
     // 5. Sync All
     await updateGlobalSessionArray(session, false); // Sync session state first
     if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], false);
-
+    
     // HARD DELETE: Remove completed session from real-time table to prevent bloat
     if (window.supabaseClient && session.sessionId) {
-        await window.supabaseClient.from('live_sessions').delete().eq('id', session.sessionId);
+        // Use 'safe' delete (fire and forget) to prevent UI hang on network error
+        // We don't await this because the local state is already cleared.
+        window.supabaseClient.from('live_sessions').delete().eq('id', session.sessionId).then(() => {});
     }
 
     if(typeof showToast === 'function') showToast(`Session Completed. Score: ${percentage}%`, "success");
@@ -1123,11 +1129,25 @@ window.updateGlobalSessionArray = async function(localSession, force = true) {
             updated_at: new Date().toISOString()
         };
 
-        const { error } = await window.supabaseClient
-            .from('live_sessions')
-            .upsert(row);
-            
-        if (error) console.error("Live Session Sync Error:", error);
+        // RETRY LOGIC: 3 Attempts with backoff to handle network instability
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const { error } = await window.supabaseClient
+                    .from('live_sessions')
+                    .upsert(row);
+                
+                if (error) throw error;
+                break; // Success
+            } catch (e) {
+                console.warn(`Live Session Sync attempt ${attempt} failed:`, e);
+                if (attempt === 3) {
+                    console.error("Live Session Sync Final Failure:", e);
+                    if (typeof showToast === 'function') showToast("Network unstable: Session sync failed.", "error");
+                } else {
+                    await new Promise(r => setTimeout(r, 500 * attempt)); // Backoff: 500ms, 1000ms
+                }
+            }
+        }
     } else {
         // Fallback for offline/local-only mode
         if (typeof saveToServer === 'function') {

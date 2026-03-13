@@ -807,6 +807,10 @@ function refreshSystemStatus() {
     if(typeof refreshAccessLogs === 'function') {
         refreshAccessLogs();
     }
+
+    if(typeof renderNetworkHealthTable === 'function') {
+        renderNetworkHealthTable();
+    }
 }
 
 async function sendRemoteCommand(username, action) {
@@ -2027,6 +2031,64 @@ async function refreshClientHealthTable() {
     container.innerHTML = html;
 }
 
+// --- NETWORK HEALTH HISTORY (ADMIN VIEW) ---
+window.renderNetworkHealthTable = async function() {
+    // Container injection logic handled in index.html or dynamic builder below
+    const container = document.getElementById('networkHealthTableContainer');
+    if (!container) return; // Exit if container not present (will be added via HTML update)
+
+    container.innerHTML = '<div style="color:var(--text-muted); padding:10px;"><i class="fas fa-circle-notch fa-spin"></i> Loading network history...</div>';
+
+    if (!window.supabaseClient) {
+        container.innerHTML = '<div style="color:#ff5252;">Offline: Cannot fetch history.</div>';
+        return;
+    }
+
+    // Fetch last 50 records
+    const { data: reports, error } = await window.supabaseClient
+        .from('network_diagnostics')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(50);
+
+    if (error) {
+        container.innerHTML = `<div style="color:#ff5252;">Error: ${error.message}</div>`;
+        return;
+    }
+
+    if (!reports || reports.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-muted); padding:10px;">No network reports found.</div>';
+        return;
+    }
+
+    let html = `<table class="admin-table compressed-table">
+        <thead><tr><th>Time</th><th>User</th><th>Gateway</th><th>Internet</th><th>Type</th><th>Status</th></tr></thead>
+        <tbody>`;
+
+    reports.forEach(row => {
+        const r = row.data || {};
+        const date = new Date(row.updated_at).toLocaleString();
+        const gate = r.pings ? r.pings.gateway : '-';
+        const net = r.pings ? r.pings.internet : '-';
+        
+        let status = '<span style="color:#2ecc71">Good</span>';
+        if (gate === -1 || gate > 50 || net === -1 || net > 200) status = '<span style="color:#ff5252; font-weight:bold;">Poor</span>';
+        else if (gate > 20 || net > 100) status = '<span style="color:#f1c40f">Fair</span>';
+
+        html += `<tr>
+            <td style="font-size:0.8rem;">${date}</td>
+            <td><strong>${r.user}</strong></td>
+            <td style="font-family:monospace;">${gate}ms</td>
+            <td style="font-family:monospace;">${net}ms</td>
+            <td>${r.stats ? r.stats.connType : '-'}</td>
+            <td>${status}</td>
+        </tr>`;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+};
+
 async function promptRemoteMessage(username) {
     const msg = await customPrompt("Send Message", `Send private message to ${username}:`);
     if(msg) {
@@ -2239,7 +2301,7 @@ window.testServerConnections = async function() {
     const cloudKey = window.CLOUD_CREDENTIALS ? window.CLOUD_CREDENTIALS.key : '';
     if(cloudUrl && cloudKey) {
         const start = Date.now();
-        try { const client = window.supabase.createClient(cloudUrl, cloudKey, { auth: { persistSession: false, storageKey: 'test-cloud' } }); await checkWithTimeout(client); updateStatus('status_cloud', 'online', Date.now() - start); } catch(e) { updateStatus('status_cloud', 'offline'); }
+        try { const client = window.supabase.createClient(cloudUrl, cloudKey, { auth: { persistSession: false, storageKey: 'test-cloud-' + Date.now() } }); await checkWithTimeout(client); updateStatus('status_cloud', 'online', Date.now() - start); } catch(e) { updateStatus('status_cloud', 'offline'); }
     } else { document.getElementById('status_cloud').innerText = "No Config"; }
 
     // 2. Test Local
@@ -2248,7 +2310,7 @@ window.testServerConnections = async function() {
     const localKey = document.getElementById('sa_srv_key').value.trim();
     if(localUrl && localKey) {
         const start = Date.now();
-        try { const client = window.supabase.createClient(localUrl, localKey, { auth: { persistSession: false, storageKey: 'test-local' } }); await checkWithTimeout(client); updateStatus('status_local', 'online', Date.now() - start); } catch(e) { updateStatus('status_local', 'offline'); }
+        try { const client = window.supabase.createClient(localUrl, localKey, { auth: { persistSession: false, storageKey: 'test-local-' + Date.now() } }); await checkWithTimeout(client); updateStatus('status_local', 'online', Date.now() - start); } catch(e) { updateStatus('status_local', 'offline'); }
     } else { document.getElementById('status_local').innerText = "Not Configured"; }
 };
 

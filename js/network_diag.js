@@ -38,6 +38,12 @@ window.NetworkDiag = {
                 this.config.server = url.hostname;
             } catch(e) {}
         }
+
+        // Attach listener to sidebar button
+        const btn = document.getElementById('btn-sidebar-net-test');
+        if (btn) {
+            btn.onclick = () => this.openModal();
+        }
     },
 
     openModal: function() {
@@ -133,8 +139,11 @@ window.NetworkDiag = {
     },
 
     runLoop: async function() {
-        // ROBUSTNESS FIX: If modal is closed or test is stopped, exit immediately.
-        if (!this.isRunning || !document.getElementById('netDiagModal')) {
+        const modal = document.getElementById('netDiagModal');
+
+        // ROBUSTNESS FIX: If modal is closed (or never opened) or test is stopped, exit immediately.
+        // This prevents the "Cannot set properties of null" error if the loop runs after the modal is gone.
+        if (!this.isRunning || !modal) {
             this.stopTests(); // Ensure it's fully stopped
             return;
         }

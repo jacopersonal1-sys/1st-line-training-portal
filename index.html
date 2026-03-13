@@ -404,6 +404,10 @@
         <button class="nav-item" onclick="showTab('monthly')" title="Assessment Records">
             <i class="fas fa-table"></i><span class="nav-text">Assessment Records</span>
         </button>
+
+        <button id="btn-sidebar-net-test" class="nav-item" title="Run Network Diagnostics">
+            <i class="fas fa-wifi"></i><span class="nav-text">Network Test</span>
+        </button>
         
         <button class="nav-item admin-only" onclick="showTab('test-records')" title="Test Records">
             <i class="fas fa-tasks"></i><span class="nav-text">Test Records</span>
@@ -1031,6 +1035,16 @@
                         </div>
                         <div style="max-height:200px; overflow-y:auto; border:1px solid var(--border-color); border-radius:8px;">
                             <table class="admin-table"><thead><tr><th>Date/Time</th><th>User</th><th>Event</th></tr></thead><tbody id="accessLogTable"></tbody></table>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="margin:0; color:var(--text-muted); font-size:0.9rem;">Network Health History</h4>
+                            <button class="btn-secondary btn-sm" onclick="renderNetworkHealthTable()"><i class="fas fa-sync"></i> Refresh</button>
+                        </div>
+                        <div id="networkHealthTableContainer" style="max-height:200px; overflow-y:auto; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
+                            <div style="padding:10px; color:var(--text-muted);">Loading...</div>
                         </div>
                     </div>
 

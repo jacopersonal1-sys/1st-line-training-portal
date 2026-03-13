@@ -19,7 +19,10 @@ function captureLog(type, args) {
 
         // --- SILENT CLOUD REPORTING ---
         // Send error to Super Admin instead of showing local popup
-        if ((type === 'error' || type === 'fatal') && typeof reportSystemError === 'function') {
+        // FILTER: Ignore network/fetch errors to prevent loops
+        const strMsg = msg.toString();
+        if ((type === 'error' || type === 'fatal') && typeof reportSystemError === 'function' && 
+            !strMsg.includes('Failed to fetch') && !strMsg.includes('NetworkError') && !strMsg.includes('521')) {
             reportSystemError(msg, type);
         }
     } catch(e) { /* Prevent infinite loops if logging fails */ }
@@ -1701,6 +1704,23 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.28": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Fixed a critical bug preventing sessions from being marked as 'Completed'.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented a "Deep Clean" delete function in Group Management to permanently remove all of a user's associated data.</li>
+                <li style="margin-bottom: 8px;"><strong>Network Tools:</strong> Added a historical view for Admins to review agent network health reports.</li>
+            </ul>`,
+        "2.4.27": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Fix:</strong> Moved Network Test button to the main sidebar for reliable visibility across all roles.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed a crash in the Network Diagnostics tool caused by a race condition on startup.</li>
+                <li style="margin-bottom: 8px;"><strong>Cleanup:</strong> Resolved console warnings related to Supabase client instances.</li>
+            </ul>`,
+        "2.4.26": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>UX Improvement:</strong> Moved "Network Test" to the main Sidebar for reliable access by all users.</li>
+                <li style="margin-bottom: 8px;"><strong>Cleanup:</strong> Removed unreliable header button injection logic.</li>
+            </ul>`,
         "2.4.25": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Network Diagnostics tool to sidebar for all users.</li>

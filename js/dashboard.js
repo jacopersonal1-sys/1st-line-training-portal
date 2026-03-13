@@ -192,9 +192,6 @@ function renderDashboard() {
         
         // Trigger Dashboard-specific health check
         updateDashboardHealth();
-
-        // NEW: Ensure Network Diag button is present
-        if(typeof injectNetworkButton === 'function') injectNetworkButton();
     } else if (role === 'teamleader') {
         // Urgent Notices (Top for TL)
         const noticeHtml = buildNoticeBanners(role);
@@ -209,9 +206,6 @@ function renderDashboard() {
         manager.style.marginTop = '20px';
         manager.innerHTML = buildNoticeManager();
         container.appendChild(manager);
-
-        // NEW: Ensure Network Diag button is present
-        if(typeof injectNetworkButton === 'function') injectNetworkButton();
     } else {
         // Urgent Notices (Top for Trainee)
         const noticeHtml = buildNoticeBanners(role);
@@ -219,9 +213,6 @@ function renderDashboard() {
         
         buildTraineeWidgets(content);
         container.appendChild(content);
-
-        // NEW: Ensure Network Diag button is present
-        if(typeof injectNetworkButton === 'function') injectNetworkButton();
     }
 }
 
