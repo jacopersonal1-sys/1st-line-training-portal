@@ -62,36 +62,58 @@ function renderAdminArena() {
 
     // 2. Render Active Sessions with Tabs
     if (activeSessions.length > 0) {
-        // Ensure a tab is selected
-        if (!ACTIVE_VETTING_TAB || !activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB)) {
-            ACTIVE_VETTING_TAB = activeSessions[0].sessionId;
-        }
-
-        const currentSession = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
-        if (currentSession) {
-            // Keep the legacy single-session cache updated for interoperability with external functions
-            localStorage.setItem('vettingSession', JSON.stringify(currentSession));
-        }
-
-        // Tabs UI
-        html += `<div style="display:flex; gap:10px; margin-top:20px; margin-bottom:15px; overflow-x:auto; padding-bottom:5px;">`;
-        activeSessions.forEach((s, idx) => {
-            const isActive = ACTIVE_VETTING_TAB === s.sessionId ? 'background:var(--primary); color:white; box-shadow:0 4px 10px rgba(243, 112, 33, 0.3);' : 'background:var(--bg-card); color:var(--text-muted); border:1px solid var(--border-color);';
-            const groupName = s.targetGroup === 'all' ? 'All Groups' : ((typeof getGroupLabel === 'function') ? getGroupLabel(s.targetGroup).split('[')[0] : s.targetGroup);
-            const activeCount = Object.values(s.trainees || {}).filter(t => t.status === 'started').length;
-
+        // Toggle view controls
+        if (activeSessions.length > 1) {
             html += `
-            <button onclick="switchVettingTab('${s.sessionId}')" style="padding:10px 20px; border-radius:8px; cursor:pointer; min-width:150px; text-align:left; transition:0.3s; ${isActive}">
-                <div style="font-size:0.8rem; text-transform:uppercase; opacity:0.8;">Session ${idx+1}</div>
-                <div style="font-weight:bold; font-size:1.1rem; margin:5px 0;">${groupName}</div>
-                <div style="font-size:0.8rem;"><i class="fas fa-users"></i> ${activeCount} Active</div>
-            </button>`;
-        });
-        html += `</div>`;
+            <div style="display:flex; justify-content:flex-end; margin-top:15px; margin-bottom:5px; gap:10px;">
+                <button class="btn-secondary btn-sm ${ADMIN_VETTING_VIEW_MODE === 'tabbed' ? 'active' : ''}" onclick="setVettingViewMode('tabbed')"><i class="fas fa-folder"></i> Tabbed View</button>
+                <button class="btn-secondary btn-sm ${ADMIN_VETTING_VIEW_MODE === 'split' ? 'active' : ''}" onclick="setVettingViewMode('split')"><i class="fas fa-columns"></i> Split View</button>
+            </div>
+            `;
+        }
 
-        // Active Session Monitor UI
-        if (currentSession) {
-            html += renderActiveAdminShell(currentSession);
+        if (ADMIN_VETTING_VIEW_MODE === 'split' && activeSessions.length > 1) {
+            // SPLIT VIEW
+            html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap:20px; margin-top:10px;">`;
+            activeSessions.forEach((s, idx) => {
+                html += `<div style="display:flex; flex-direction:column; gap:15px; background:var(--bg-app); border:2px dashed var(--border-color); padding:15px; border-radius:12px;">`;
+                html += renderActiveAdminShell(s, idx + 1);
+                html += `</div>`;
+            });
+            html += `</div>`;
+        } else {
+            // TABBED VIEW
+            // Ensure a tab is selected
+            if (!ACTIVE_VETTING_TAB || !activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB)) {
+                ACTIVE_VETTING_TAB = activeSessions[0].sessionId;
+            }
+
+            const currentSession = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+            if (currentSession) {
+                // Keep the legacy single-session cache updated for interoperability with external functions
+                localStorage.setItem('vettingSession', JSON.stringify(currentSession));
+            }
+
+            // Tabs UI
+            html += `<div style="display:flex; gap:10px; margin-top:20px; margin-bottom:15px; overflow-x:auto; padding-bottom:5px;">`;
+            activeSessions.forEach((s, idx) => {
+                const isActive = ACTIVE_VETTING_TAB === s.sessionId ? 'background:var(--primary); color:white; box-shadow:0 4px 10px rgba(243, 112, 33, 0.3);' : 'background:var(--bg-card); color:var(--text-muted); border:1px solid var(--border-color);';
+                const groupName = s.targetGroup === 'all' ? 'All Groups' : ((typeof getGroupLabel === 'function') ? getGroupLabel(s.targetGroup).split('[')[0] : s.targetGroup);
+                const activeCount = Object.values(s.trainees || {}).filter(t => t.status === 'started').length;
+
+                html += `
+                <button onclick="switchVettingTab('${s.sessionId}')" style="padding:10px 20px; border-radius:8px; cursor:pointer; min-width:150px; text-align:left; transition:0.3s; ${isActive}">
+                    <div style="font-size:0.8rem; text-transform:uppercase; opacity:0.8;">Session ${idx+1}</div>
+                    <div style="font-weight:bold; font-size:1.1rem; margin:5px 0;">${groupName}</div>
+                    <div style="font-size:0.8rem;"><i class="fas fa-users"></i> ${activeCount} Active</div>
+                </button>`;
+            });
+            html += `</div>`;
+
+            // Active Session Monitor UI
+            if (currentSession) {
+                html += renderActiveAdminShell(currentSession);
+            }
         }
     }
 
@@ -103,8 +125,12 @@ function renderAdminArena() {
     populateVettingDropdowns();
 
     if (activeSessions.length > 0) {
-        const currentSession = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
-        if (currentSession) updateVettingTableRows(currentSession);
+        if (ADMIN_VETTING_VIEW_MODE === 'split' && activeSessions.length > 1) {
+            activeSessions.forEach(s => updateVettingTableRows(s));
+        } else {
+            const currentSession = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+            if (currentSession) updateVettingTableRows(currentSession);
+        }
     }
 
     // Realtime Subscription
@@ -142,6 +168,11 @@ function renderAdminArena() {
         }, 5000);
     }
 }
+
+window.setVettingViewMode = function(mode) {
+    ADMIN_VETTING_VIEW_MODE = mode;
+    renderAdminArena();
+};
 
 window.switchVettingTab = function(sessionId) {
     ACTIVE_VETTING_TAB = sessionId;
@@ -202,11 +233,12 @@ function renderIdleAdminShell(isCompact = false) {
     `;
 }
 
-function renderActiveAdminShell(session) {
+function renderActiveAdminShell(session, indexLabel = '') {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const activeTest = tests.find(t => t.id == session.testId);
     const title = activeTest ? activeTest.title : "Unknown Test";
     const targetGroup = session.targetGroup === 'all' || !session.targetGroup ? 'All Groups' : ((typeof getGroupLabel === 'function') ? getGroupLabel(session.targetGroup) : session.targetGroup);
+    const sessionTitle = indexLabel ? `Session ${indexLabel}: ${title}` : title;
     
     // Calculate Stats
     const trainees = session.trainees || {};
@@ -223,7 +255,7 @@ function renderActiveAdminShell(session) {
                         <i class="fas fa-shield-alt"></i>
                     </div>
                     <div>
-                        <h3 style="margin:0; color:#2ecc71; display:flex; align-items:center;">${title} <span class="pulse-dot" title="Live Session Active"></span></h3>
+                        <h3 style="margin:0; color:#2ecc71; display:flex; align-items:center;">${sessionTitle} <span class="pulse-dot" title="Live Session Active"></span></h3>
                         <p style="margin:5px 0 0 0; color:var(--text-muted);">Target: <strong>${targetGroup}</strong></p>
                     </div>
                 </div>
@@ -253,7 +285,7 @@ function renderActiveAdminShell(session) {
                         <th>Controls</th>
                     </tr>
                 </thead>
-                <tbody id="vetting-monitor-body">
+            <tbody id="vetting-monitor-body-${session.sessionId}">
                     <!-- Rows injected via updateVettingTableRows -->
                 </tbody>
             </table>
@@ -262,7 +294,7 @@ function renderActiveAdminShell(session) {
 }
 
 function updateVettingTableRows(session) {
-    const tbody = document.getElementById('vetting-monitor-body');
+    const tbody = document.getElementById(`vetting-monitor-body-${session.sessionId}`);
     if (!tbody) return;
 
     const trainees = session.trainees || {};
@@ -313,9 +345,9 @@ function updateVettingTableRows(session) {
 
         let mainAction = '';
         if (data.status === 'started') {
-            if (CURRENT_USER.role !== 'special_viewer') mainAction = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${user}')" title="Force Stop"><i class="fas fa-stop"></i></button>`;
+            if (CURRENT_USER.role !== 'special_viewer') mainAction = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${session.sessionId}', '${user}')" title="Force Stop"><i class="fas fa-stop"></i></button>`;
         } else if (data.status === 'blocked' && !data.override && CURRENT_USER.role !== 'special_viewer') {
-            mainAction = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${user}')" title="Override"><i class="fas fa-key"></i></button>`;
+            mainAction = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${session.sessionId}', '${user}')" title="Override"><i class="fas fa-key"></i></button>`;
         }
 
         // NEW: Security Switch (Replaces Lock Button)
@@ -325,7 +357,7 @@ function updateVettingTableRows(session) {
         
         const switchHtml = `
             <label class="switch" style="margin-bottom:0;" title="Toggle Security Rules">
-                    <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="toggleSecurity('${user}', !this.checked)">
+                    <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="toggleSecurity('${session.sessionId}', '${user}', !this.checked)">
                     <span class="slider round"></span>
             </label>
         `;
@@ -352,24 +384,6 @@ function updateVettingTableRows(session) {
     if (tbody.innerHTML !== html) {
         tbody.innerHTML = html;
     }
-}
-
-function updateVettingStats(session) {
-    const trainees = session.trainees || {};
-    const total = Object.keys(trainees).length;
-    const activeCount = Object.values(trainees).filter(t => t.status === 'started').length;
-    const blockedCount = Object.values(trainees).filter(t => t.status === 'blocked').length;
-    const completedCount = Object.values(trainees).filter(t => t.status === 'completed').length;
-
-    const elTotal = document.getElementById('v-stat-total');
-    const elActive = document.getElementById('v-stat-active');
-    const elBlocked = document.getElementById('v-stat-blocked');
-    const elCompleted = document.getElementById('v-stat-completed');
-
-    if (elTotal) elTotal.innerText = total;
-    if (elActive) elActive.innerText = activeCount;
-    if (elBlocked) elBlocked.innerText = blockedCount;
-    if (elCompleted) elCompleted.innerText = completedCount;
 }
 
 // --- NEW: STATE RESTORATION (Fixes Server Switch Gap) ---
@@ -438,6 +452,8 @@ async function startVettingSession() {
     
     localStorage.setItem('vettingSession', JSON.stringify(session));
     ACTIVE_VETTING_TAB = session.sessionId;
+    
+    if (activeSessions.length > 1) ADMIN_VETTING_VIEW_MODE = 'split'; // Auto split for new concurrent sessions
 
     await saveVettingSessionDirectly(session);
     if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true); // Sync to app_documents for consistency
@@ -477,28 +493,28 @@ async function endVettingSession(sessionIdToClose) {
 }
 
 // --- NEW: MULTI-SESSION AWARE ADMIN ACTIONS ---
-window.forceSubmitTrainee = async function(username) {
+window.forceSubmitTrainee = async function(sessionId, username) {
     if(!confirm(`Force submit and kick ${username} out of the arena?`)) return;
     
     let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
-    const session = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+    const session = activeSessions.find(s => s.sessionId === sessionId);
     if (!session) return;
 
     if (!session.trainees[username]) session.trainees[username] = {};
     session.trainees[username].status = 'completed'; // Setting to completed locks them out securely
     
     localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
-    localStorage.setItem('vettingSession', JSON.stringify(session));
+    if (ACTIVE_VETTING_TAB === sessionId || ADMIN_VETTING_VIEW_MODE === 'split') localStorage.setItem('vettingSession', JSON.stringify(session));
     
     await saveVettingSessionDirectly(session);
     renderAdminArena();
 };
 
-window.overrideSecurity = async function(username) {
+window.overrideSecurity = async function(sessionId, username) {
     if(!confirm(`Override security blocks for ${username}? They will be allowed to enter.`)) return;
 
     let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
-    const session = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+    const session = activeSessions.find(s => s.sessionId === sessionId);
     if (!session) return;
 
     if (!session.trainees[username]) session.trainees[username] = {};
@@ -506,22 +522,22 @@ window.overrideSecurity = async function(username) {
     session.trainees[username].status = 'ready'; // Reset to ready so they can enter
     
     localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
-    localStorage.setItem('vettingSession', JSON.stringify(session));
+    if (ACTIVE_VETTING_TAB === sessionId || ADMIN_VETTING_VIEW_MODE === 'split') localStorage.setItem('vettingSession', JSON.stringify(session));
     
     await saveVettingSessionDirectly(session);
     renderAdminArena();
 };
 
-async function toggleSecurity(username, enable) {
+async function toggleSecurity(sessionId, username, enable) {
     let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
-    const session = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+    const session = activeSessions.find(s => s.sessionId === sessionId);
     if (!session) return;
 
     if (!session.trainees[username]) session.trainees[username] = {};
     session.trainees[username].relaxed = enable;
     
     localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
-    localStorage.setItem('vettingSession', JSON.stringify(session));
+    if (ACTIVE_VETTING_TAB === sessionId || ADMIN_VETTING_VIEW_MODE === 'split') localStorage.setItem('vettingSession', JSON.stringify(session));
     
     await saveVettingSessionDirectly(session);
     renderAdminArena();

@@ -1704,6 +1704,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.31": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added "Split View" to seamlessly monitor multiple active testing groups side-by-side.</li>
+                <li style="margin-bottom: 8px;"><strong>UI Polish:</strong> Improved active session layout and multi-tasking capabilities for administrators.</li>
+            </ul>`,
         "2.4.30": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Upgraded architecture to support running and monitoring multiple live vetting sessions concurrently.</li>
