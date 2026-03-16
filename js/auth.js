@@ -1,5 +1,8 @@
 /* ================= AUTHENTICATION ================= */
 
+// Global State
+let LOGIN_MODE = 'admin';
+
 // --- HELPER: ASYNC SAVE ---
 // Ensures critical user profile updates are saved before proceeding.
 async function secureAuthSave() {

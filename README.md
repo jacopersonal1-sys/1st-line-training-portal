@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.30**: **Multi-Session Vetting**: Upgraded Vetting Arena to support concurrent live sessions with a multi-tab admin interface.
  - **v2.4.29**: **Team Leader Hub Overhaul**: Implemented mandatory field validation, multi-entry support for outages/handovers, and enhanced UI for operational tasks.
 - **v2.4.28**: **Data Integrity & Stability**: Fixed Live Assessment completion bug. Implemented "Deep Clean" user deletion. Added Network Health history view for Admins.
 - **v2.4.27**: **Network Tool Fix**: Moved Network Test to the main sidebar for reliable visibility. Fixed related startup crashes and console warnings.

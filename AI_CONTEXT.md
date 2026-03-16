@@ -261,9 +261,10 @@ Maps local `localStorage` keys to Supabase tables.
     - `js/main.js`: Core controller. Handles routing (Timeline, My Team, Backend Data).
     - `js/data.js`: Independent data layer. Fetches blobs directly from Supabase (`tl_task_submissions`, `tl_backend_data`).
     - `js/ui_timeline.js`: Renders the Operations Timeline. Supports custom inputs:
-        - `outage_form`: Auto-fills areas from backend config.
+        - `outage_form`: Auto-fills areas from backend config. Supports multiple entries.
         - `ticket_backlog`: Tracks total/oldest tickets.
-        - `handover_notes`: Structured handover tracking with problem ticket flagging.
+        - `handover_notes`: Structured handover tracking with multiple problem tickets.
+        - `bottleneck_form`: Identifies operational bottlenecks with file/link uploads.
     - `js/ui_team.js`: Renders Roster and Calendar views. Supports role assignment (FLA/ESA).
     - `js/ui_backend.js`: Configuration UI for dropdowns (Outage Areas).
 

@@ -14,9 +14,13 @@ app.commandLine.appendSwitch('auth-server-whitelist', '*'); // Allow all domains
 // DATA ISOLATION: Separate Dev vs Prod
 // This ensures your "Test Version" doesn't use the same LocalStorage/Cache as your "Installed Version".
 if (!app.isPackaged) {
-    const userDataPath = app.getPath('userData');
-    app.setPath('userData', userDataPath + '-Dev');
+    const currentPath = app.getPath('userData');
+    if (!currentPath.includes('-Dev')) {
+        app.setPath('userData', currentPath + '-Dev');
+    }
 }
+
+const gotTheLock = app.requestSingleInstanceLock();
 
 let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
@@ -97,13 +101,36 @@ function createWindow() {
 }
 
 // App Life Cycle
-const gotTheLock = app.requestSingleInstanceLock();
 
 // SECURITY: Enforce Single Instance Lock in Production (Trainees)
 // We allow multiple instances in Dev Mode (!app.isPackaged) for testing.
-if (!gotTheLock && app.isPackaged) {
-    app.quit();
+if (!gotTheLock) {
+    if (!app.isPackaged) {
+        // MULTI-INSTANCE TESTING FIX:
+        // Relaunch the clone with a completely isolated storage directory.
+        const clonePath = app.getPath('userData') + '-Clone-' + Date.now();
+        app.relaunch({ args: process.argv.slice(1).concat([`--user-data-dir=${clonePath}`]) });
+        app.exit(0);
+    } else {
+        // Production behavior: only one instance allowed
+        app.quit();
+    }
 } else {
+    
+    // --- AUTO-CLEANUP (Runs only on the Main Instance) ---
+    // FIX: Ensure clones don't delete their own data folders!
+    if (!app.isPackaged && !app.getPath('userData').includes('-Dev-Clone-')) {
+        try {
+            const fs = require('fs');
+            const baseDir = path.dirname(app.getPath('userData'));
+            fs.readdirSync(baseDir).forEach(f => {
+                if (f.includes('-Dev-Clone-')) {
+                    fs.rm(path.join(baseDir, f), { recursive: true, force: true }, () => {});
+                }
+            });
+        } catch(e) { console.error("Clone cleanup error:", e); }
+    }
+
     app.on('second-instance', () => {
         // Someone tried to run a second instance, we should focus our window.
         if (mainWindow) {

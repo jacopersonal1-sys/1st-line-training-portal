@@ -11,6 +11,7 @@ let ADMIN_VETTING_REALTIME_UNSUB = null;
 let VETTING_SAVE_TIMEOUT = null; // OPTIMIZATION: Debounce saves
 let SECURITY_VIOLATION_INTERVAL = null; // Track the fast security poll
 let IS_SUBMITTING_VIOLATION = false; // Prevent alert loops
+let ACTIVE_VETTING_TAB = null; // Track which session the Admin is currently viewing
 
 function loadVettingArena() {
     // FEATURE FLAG CHECK
@@ -23,6 +24,9 @@ function loadVettingArena() {
 
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
         renderAdminArena();
+        adminPollVettingSession().then(() => {
+            renderAdminArena();
+        });
     } else {
         renderTraineeArena();
     }
@@ -49,67 +53,106 @@ function renderAdminArena() {
     }
 
     const container = document.getElementById('vetting-arena-content');
-    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false, "testId":null, "trainees":{}}');
+    const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
     
-    // FLICKER FIX: Check current view mode to avoid full re-render
-    const currentMode = container.getAttribute('data-view-mode');
-    const targetMode = session.active ? 'active' : 'idle';
+    let html = '';
 
-    if (currentMode !== targetMode) {
-        container.setAttribute('data-view-mode', targetMode);
-        if (session.active) {
-            renderActiveAdminShell(container, session);
-        } else {
-            renderIdleAdminShell(container);
+    // 1. Render New Session Form (Compact if sessions are already running)
+    html += renderIdleAdminShell(activeSessions.length > 0);
+
+    // 2. Render Active Sessions with Tabs
+    if (activeSessions.length > 0) {
+        // Ensure a tab is selected
+        if (!ACTIVE_VETTING_TAB || !activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB)) {
+            ACTIVE_VETTING_TAB = activeSessions[0].sessionId;
+        }
+
+        const currentSession = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+        if (currentSession) {
+            // Keep the legacy single-session cache updated for interoperability with external functions
+            localStorage.setItem('vettingSession', JSON.stringify(currentSession));
+        }
+
+        // Tabs UI
+        html += `<div style="display:flex; gap:10px; margin-top:20px; margin-bottom:15px; overflow-x:auto; padding-bottom:5px;">`;
+        activeSessions.forEach((s, idx) => {
+            const isActive = ACTIVE_VETTING_TAB === s.sessionId ? 'background:var(--primary); color:white; box-shadow:0 4px 10px rgba(243, 112, 33, 0.3);' : 'background:var(--bg-card); color:var(--text-muted); border:1px solid var(--border-color);';
+            const groupName = s.targetGroup === 'all' ? 'All Groups' : ((typeof getGroupLabel === 'function') ? getGroupLabel(s.targetGroup).split('[')[0] : s.targetGroup);
+            const activeCount = Object.values(s.trainees || {}).filter(t => t.status === 'started').length;
+
+            html += `
+            <button onclick="switchVettingTab('${s.sessionId}')" style="padding:10px 20px; border-radius:8px; cursor:pointer; min-width:150px; text-align:left; transition:0.3s; ${isActive}">
+                <div style="font-size:0.8rem; text-transform:uppercase; opacity:0.8;">Session ${idx+1}</div>
+                <div style="font-weight:bold; font-size:1.1rem; margin:5px 0;">${groupName}</div>
+                <div style="font-size:0.8rem;"><i class="fas fa-users"></i> ${activeCount} Active</div>
+            </button>`;
+        });
+        html += `</div>`;
+
+        // Active Session Monitor UI
+        if (currentSession) {
+            html += renderActiveAdminShell(currentSession);
         }
     }
 
-    // Update Data (Only if active)
-    if (session.active) {
-        updateVettingTableRows(session);
+    // Apply HTML to DOM
+    if (container.innerHTML !== html) {
+        container.innerHTML = html;
+    }
+
+    populateVettingDropdowns();
+
+    if (activeSessions.length > 0) {
+        const currentSession = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+        if (currentSession) updateVettingTableRows(currentSession);
     }
 
     // Realtime Subscription
     if (window.supabaseClient) {
         const channel = window.supabaseClient.channel('vetting_room')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
-                const currentSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-                
+                let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
                 if (payload.eventType === 'DELETE') {
-                    if (payload.old.id === currentSession.sessionId) {
-                        // Session ended remotely
-                        currentSession.active = false;
-                        localStorage.setItem('vettingSession', JSON.stringify(currentSession));
-                        renderAdminArena();
-                    }
-                } else {
-                    const content = payload.new ? payload.new.data : null;
-                    // Filter: Only update if it matches our current session ID (Multi-session support)
-                    if (content && content.sessionId === currentSession.sessionId) {
-                        localStorage.setItem('vettingSession', JSON.stringify(content));
-                        const c = document.getElementById('vetting-arena-content');
-                        if (c && c.offsetParent !== null) renderAdminArena();
+                    sessions = sessions.filter(s => s.sessionId !== payload.old.id);
+                } else if (payload.new && payload.new.data) {
+                    const newData = payload.new.data;
+                    const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
+                    if (newData.active) {
+                        if (idx > -1) sessions[idx] = newData;
+                        else sessions.push(newData);
+                    } else {
+                        sessions = sessions.filter(s => s.sessionId !== newData.sessionId);
                     }
                 }
+                localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+                renderAdminArena();
             })
             .subscribe();
         ADMIN_VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
     }
 
     // Auto-Refresh Monitor every 5 seconds if active
-    if (session.active) {
+    if (activeSessions.length > 0) {
         ADMIN_MONITOR_INTERVAL = setTimeout(async () => {
             try {
-                // NEW: Ensure server matches local state (Fixes empty table after server switch)
                 await ensureVettingServerState();
-                await adminPollVettingSession(); // Force fetch latest data
+                await adminPollVettingSession();
             } catch(e) { console.error("Vetting Poll Error:", e); }
-            loadVettingArena();
+            renderAdminArena();
         }, 5000);
     }
 }
 
-function renderIdleAdminShell(container) {
+window.switchVettingTab = function(sessionId) {
+    ACTIVE_VETTING_TAB = sessionId;
+    renderAdminArena();
+};
+
+window.populateVettingDropdowns = function() {
+    const testSel = document.getElementById('vettingTestSelect');
+    const groupSel = document.getElementById('vettingGroupSelect');
+    if (!testSel || !groupSel) return;
+
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const vettingTests = tests.filter(t => t.type === 'vetting');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
@@ -120,30 +163,46 @@ function renderIdleAdminShell(container) {
     } else {
         options += '<option value="" disabled>No Vetting Tests Available (Create in Test Engine)</option>';
     }
+    testSel.innerHTML = options;
     
     let groupOptions = '<option value="all">All Groups</option>';
     Object.keys(rosters).sort().reverse().forEach(gid => {
             const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
             groupOptions += `<option value="${gid}">${label}</option>`;
     });
+    groupSel.innerHTML = groupOptions;
+};
 
-    container.innerHTML = `
-        <div class="card" style="text-align:center; padding:20px;">
-            <i class="fas fa-dungeon" style="font-size:3rem; color:var(--text-muted); margin-bottom:20px;"></i>
-            <h3>Start Vetting Session</h3>
-            <p style="color:var(--text-muted); margin-bottom:20px;">Select a test and target group. This will enable the Vetting Arena tab for them.</p>
-            <div style="max-width:500px; margin:0 auto; display:flex; flex-direction:column; gap:10px;">
-                <label style="text-align:left; font-weight:bold;">1. Select Vetting Test</label>
-                <select id="vettingTestSelect" style="margin:0;">${options}</select>
-                <label style="text-align:left; font-weight:bold;">2. Select Target Group</label>
-                <select id="vettingGroupSelect" style="margin:0;" ${CURRENT_USER.role === 'special_viewer' ? 'disabled' : ''}>${groupOptions}</select>
-                <button class="btn-primary" style="margin-top:10px;" onclick="startVettingSession()">PUSH TEST</button>
+function renderIdleAdminShell(isCompact = false) {
+    let displayStyle = isCompact ? 'display:flex; align-items:center; gap:15px; padding:15px;' : 'text-align:center; padding:50px;';
+    let iconStyle = isCompact ? 'font-size:2rem; margin:0;' : 'font-size:3rem; margin-bottom:20px;';
+    let titleStyle = isCompact ? 'margin:0; font-size:1.2rem;' : '';
+    let descHtml = isCompact ? '' : '<p style="color:var(--text-muted); margin-bottom:20px;">Select a test and target group. This will enable the Vetting Arena tab for them.</p>';
+    let formLayout = isCompact ? 'display:flex; gap:10px; align-items:flex-end; flex:1;' : 'max-width:500px; margin:0 auto; display:flex; flex-direction:column; gap:10px;';
+
+    return `
+        <div class="card" style="${displayStyle} background:var(--bg-card); border:1px dashed var(--border-color);">
+            ${isCompact ? '' : `<i class="fas fa-dungeon" style="color:var(--text-muted); ${iconStyle}"></i>`}
+            <div style="${isCompact ? 'min-width:200px;' : ''}">
+                <h3 style="${titleStyle}">Start New Session</h3>
+                ${descHtml}
+            </div>
+            <div style="${formLayout}">
+                <div style="${isCompact ? 'flex:1;' : ''}">
+                    <label style="text-align:left; font-weight:bold; font-size:0.85rem;">${isCompact?'':'1. '}Select Test</label>
+                    <select id="vettingTestSelect" style="margin:0; width:100%;"><option value="">Loading...</option></select>
+                </div>
+                <div style="${isCompact ? 'flex:1;' : ''}">
+                    <label style="text-align:left; font-weight:bold; font-size:0.85rem;">${isCompact?'':'2. '}Select Group</label>
+                    <select id="vettingGroupSelect" style="margin:0; width:100%;" ${CURRENT_USER.role === 'special_viewer' ? 'disabled' : ''}><option value="">Loading...</option></select>
+                </div>
+                <button class="btn-primary" style="height:38px; ${isCompact?'padding:0 25px;':'margin-top:10px;'}" onclick="startVettingSession()">PUSH TEST</button>
             </div>
         </div>
     `;
 }
 
-function renderActiveAdminShell(container, session) {
+function renderActiveAdminShell(session) {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const activeTest = tests.find(t => t.id == session.testId);
     const title = activeTest ? activeTest.title : "Unknown Test";
@@ -156,7 +215,7 @@ function renderActiveAdminShell(container, session) {
     const blockedCount = Object.values(trainees).filter(t => t.status === 'blocked').length;
     const completedCount = Object.values(trainees).filter(t => t.status === 'completed').length;
     
-    container.innerHTML = `
+    return `
         <div class="card" style="border-left:5px solid #2ecc71; background: linear-gradient(to right, rgba(46, 204, 113, 0.05), transparent);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                 <div style="display:flex; align-items:center; gap:15px;">
@@ -168,7 +227,7 @@ function renderActiveAdminShell(container, session) {
                         <p style="margin:5px 0 0 0; color:var(--text-muted);">Target: <strong>${targetGroup}</strong></p>
                     </div>
                 </div>
-                ${CURRENT_USER.role === 'special_viewer' ? '' : `<button class="btn-danger" onclick="endVettingSession()"><i class="fas fa-stop-circle"></i> END SESSION</button>`}
+                ${CURRENT_USER.role === 'special_viewer' ? '' : `<button class="btn-danger" onclick="endVettingSession('${session.sessionId}')"><i class="fas fa-stop-circle"></i> END SESSION</button>`}
             </div>
             
             <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px;">
@@ -317,38 +376,37 @@ function updateVettingStats(session) {
 async function ensureVettingServerState() {
     if (!window.supabaseClient) return;
     
-    const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false, "sessionId":null}');
-    if (!localSession.active) return;
-    const sessionId = localSession.sessionId || 'global_session';
+    const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    if (activeSessions.length === 0) return;
 
-    // Check if server has data
-    const { data, error } = await window.supabaseClient
-        .from('vetting_sessions')
-        .select('id')
-        .eq('id', sessionId)
-        .single();
-    
-    // If server is empty/missing but we are active, PUSH immediately
-    if (!data || error) {
-        console.warn("Vetting Session missing on server. Restoring from local state...");
-        await saveVettingSessionDirectly(localSession);
+    // Fetch all IDs currently on server
+    const { data, error } = await window.supabaseClient.from('vetting_sessions').select('id');
+    const serverIds = new Set(data ? data.map(r => r.id) : []);
+
+    for (const session of activeSessions) {
+        if (!serverIds.has(session.sessionId)) {
+            console.warn(`Vetting Session ${session.sessionId} missing on server. Restoring...`);
+            await saveVettingSessionDirectly(session);
+        }
     }
 }
 
-// --- NEW: ADMIN POLLER (Ensures visibility even if Realtime fails) ---
+// --- NEW: ADMIN POLLER (Fetch all sessions) ---
 async function adminPollVettingSession() {
     if (!window.supabaseClient) return;
-    const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-    const sessionId = localSession.sessionId || 'global_session';
 
     const { data, error } = await window.supabaseClient
         .from('vetting_sessions')
-        .select('data')
-        .eq('id', sessionId)
-        .single();
+        .select('data');
     
-    if (data && data.data) {
-        localStorage.setItem('vettingSession', JSON.stringify(data.data));
+    if (data) {
+        const activeSessions = data.map(r => r.data).filter(s => s && s.active);
+        localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
+        
+        if (ACTIVE_VETTING_TAB) {
+            const current = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+            if (current) localStorage.setItem('vettingSession', JSON.stringify(current));
+        }
     }
 }
 
@@ -361,6 +419,11 @@ async function startVettingSession() {
     const groupId = document.getElementById('vettingGroupSelect').value;
     if (!testId) return alert("Select a test.");
     
+    const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    if (activeSessions.some(s => s.targetGroup === groupId)) {
+        if(!confirm(`A session is already active for target: ${groupId}. Proceeding might cause conflicts. Continue?`)) return;
+    }
+
     const session = {
         sessionId: Date.now() + "_" + Math.random().toString(36).substr(2, 5), // NEW: Unique ID
         active: true,
@@ -370,41 +433,98 @@ async function startVettingSession() {
         trainees: {}
     };
     
+    activeSessions.push(session);
+    localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
+    
     localStorage.setItem('vettingSession', JSON.stringify(session));
+    ACTIVE_VETTING_TAB = session.sessionId;
+
     await saveVettingSessionDirectly(session);
     if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true); // Sync to app_documents for consistency
     
-    loadVettingArena();
+    renderAdminArena();
     alert("Session Started. Trainees can now access the Vetting Arena.");
 }
 
-async function endVettingSession() {
-    if(!confirm("End the session? This will close the arena for all trainees.")) return;
+async function endVettingSession(sessionIdToClose) {
+    if(!confirm("End this session? This will close the arena for all trainees in this group.")) return;
     
-    const session = JSON.parse(localStorage.getItem('vettingSession'));
-    session.active = false;
+    const sId = sessionIdToClose || ACTIVE_VETTING_TAB;
+    let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    const session = activeSessions.find(s => s.sessionId === sId);
     
-    localStorage.setItem('vettingSession', JSON.stringify(session));
-    
-    // Remove from server to keep table clean (or mark inactive)
-    if (window.supabaseClient && session.sessionId) {
-        await window.supabaseClient.from('vetting_sessions').delete().eq('id', session.sessionId);
-    } else {
-        await saveVettingSessionDirectly(session);
+    if (session) {
+        session.active = false;
+        
+        if (ACTIVE_VETTING_TAB === sId) {
+            localStorage.setItem('vettingSession', JSON.stringify(session));
+        }
+        
+        if (window.supabaseClient && session.sessionId) {
+            await window.supabaseClient.from('vetting_sessions').delete().eq('id', session.sessionId);
+        } else {
+            await saveVettingSessionDirectly(session);
+        }
+        if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true);
     }
-    if(typeof saveToServer === 'function') await saveToServer(['vettingSession'], true);
+    
+    activeSessions = activeSessions.filter(s => s.sessionId !== sId);
+    localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
+    if (ACTIVE_VETTING_TAB === sId) ACTIVE_VETTING_TAB = null;
     
     if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
-    loadVettingArena();
+    renderAdminArena();
 }
 
+// --- NEW: MULTI-SESSION AWARE ADMIN ACTIONS ---
+window.forceSubmitTrainee = async function(username) {
+    if(!confirm(`Force submit and kick ${username} out of the arena?`)) return;
+    
+    let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    const session = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+    if (!session) return;
+
+    if (!session.trainees[username]) session.trainees[username] = {};
+    session.trainees[username].status = 'completed'; // Setting to completed locks them out securely
+    
+    localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
+    localStorage.setItem('vettingSession', JSON.stringify(session));
+    
+    await saveVettingSessionDirectly(session);
+    renderAdminArena();
+};
+
+window.overrideSecurity = async function(username) {
+    if(!confirm(`Override security blocks for ${username}? They will be allowed to enter.`)) return;
+
+    let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    const session = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+    if (!session) return;
+
+    if (!session.trainees[username]) session.trainees[username] = {};
+    session.trainees[username].override = true;
+    session.trainees[username].status = 'ready'; // Reset to ready so they can enter
+    
+    localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
+    localStorage.setItem('vettingSession', JSON.stringify(session));
+    
+    await saveVettingSessionDirectly(session);
+    renderAdminArena();
+};
+
 async function toggleSecurity(username, enable) {
-    const session = JSON.parse(localStorage.getItem('vettingSession'));
+    let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    const session = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
+    if (!session) return;
+
     if (!session.trainees[username]) session.trainees[username] = {};
     session.trainees[username].relaxed = enable;
+    
+    localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
     localStorage.setItem('vettingSession', JSON.stringify(session));
+    
     await saveVettingSessionDirectly(session);
-    loadVettingArena();
+    renderAdminArena();
 }
 
 // --- NEW: DIRECT TABLE SAVE (Bypass Blob) ---
@@ -600,8 +720,12 @@ function startTraineePreFlight() {
         // Listen to ALL changes, filter in handler
         const channel = window.supabaseClient.channel('vetting_room_trainee')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
-                const serverSession = payload.new ? payload.new.data : { active: false };
-                checkAndHandleSession(serverSession);
+                if (payload.eventType === 'DELETE') {
+                    checkAndHandleSession(null, 'DELETE', payload.old.id);
+                } else {
+                    const serverSession = payload.new ? payload.new.data : { active: false };
+                    checkAndHandleSession(serverSession);
+                }
             })
             .subscribe();
         VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
@@ -620,9 +744,22 @@ function startTraineePreFlight() {
     checkSystemCompliance(); // Run immediately
 }
 
-function checkAndHandleSession(serverSession) {
-    // Logic: Is this session for ME?
-    if (!serverSession.active) return; // Ignore inactive updates unless it's OUR session ending
+function checkAndHandleSession(serverSession, eventType = null, deletedId = null) {
+    const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+
+    // CRITICAL: Safely handle if the server explicitly deleted OUR active session
+    if (eventType === 'DELETE' && localSession.sessionId === deletedId) {
+        handleVettingUpdate({ active: false });
+        return;
+    }
+
+    if (!serverSession || !serverSession.active) {
+        // If it's a generic update marking OUR session as inactive
+        if (serverSession && localSession.sessionId === serverSession.sessionId) {
+             handleVettingUpdate({ active: false });
+        }
+        return; 
+    }
     
     // 1. Check Group
     let isTarget = false;
@@ -914,33 +1051,6 @@ async function updateTraineeStatus(status, timerStr = "") {
     }, 1500);
 }
 
-// --- NEW: SAFE PATCH FOR TRAINEES (Prevents Data Loss) ---
-async function patchTraineeStatus(username, statusData) {
-    if (!window.supabaseClient) return;
-    
-    // 1. Fetch latest server state
-    const { data, error } = await window.supabaseClient
-        .from('vetting_sessions')
-        .select('data')
-        .eq('id', 'global_session')
-        .single();
-        
-    if (error || !data) return;
-    
-    const serverSession = data.data;
-    if (!serverSession.trainees) serverSession.trainees = {};
-
-    // Safety check: If server session is inactive but we are trying to update status, 
-    // it might mean the server reset. We should probably respect the server state or re-activate it?
-    // For now, we just patch our data in.
-
-    // 2. Merge ONLY this user's data
-    serverSession.trainees[username] = { ...(serverSession.trainees[username] || {}), ...statusData };
-    
-    // 3. Save back
-    await window.supabaseClient.from('vetting_sessions').update({ data: serverSession, updated_at: new Date().toISOString() }).eq('id', 'global_session');
-}
-
 function startActiveTestMonitoring() {
     if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
     if (SECURITY_VIOLATION_INTERVAL) clearInterval(SECURITY_VIOLATION_INTERVAL);
@@ -1029,12 +1139,10 @@ async function checkAndEnforceVetting() {
             .from('vetting_sessions')
             .select('data');
             
-        if (data && data.length > 0) {
-            // Find the first one that targets me
-            // (In rare case of multiple active tests for same group, last one wins or UI might flicker. 
-            // Ideally Admin shouldn't schedule overlapping vetting tests for same group)
-            let serverSession = null;
+        const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
+        let foundTargetSession = null;
             
+        if (data && data.length > 0) {
             // Update Sidebar Visibility (Show/Hide tab based on active status)
             if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
 
@@ -1054,21 +1162,24 @@ async function checkAndEnforceVetting() {
                 }
                 
                 if (isTarget) {
-                    serverSession = s;
-                    // Use existing handler to update state and UI
-                    if (typeof handleVettingUpdate === 'function') handleVettingUpdate(serverSession);
-
-                    // Check if already completed
-                    const myData = serverSession.trainees ? serverSession.trainees[CURRENT_USER.user] : null;
-                    if (!myData || myData.status !== 'completed') {
-                        // Check if already on the tab
-                        const activeTab = document.querySelector('section.active');
-                        if (!activeTab || activeTab.id !== 'vetting-arena') {
-                            if (typeof showTab === 'function') showTab('vetting-arena');
-                        }
-                    }
+                    foundTargetSession = s;
+                    break; // Found our session, process it
                 }
             }
+        }
+        
+        if (foundTargetSession) {
+            if (typeof handleVettingUpdate === 'function') handleVettingUpdate(foundTargetSession);
+            const myData = foundTargetSession.trainees ? foundTargetSession.trainees[CURRENT_USER.user] : null;
+            if (!myData || myData.status !== 'completed') {
+                const activeTab = document.querySelector('section.active');
+                if (!activeTab || activeTab.id !== 'vetting-arena') {
+                    if (typeof showTab === 'function') showTab('vetting-arena');
+                }
+            }
+        } else if (localSession.active) {
+            // FAILSAFE: We are locally active, but NO server session targets us anymore. The session was aborted.
+            if (typeof handleVettingUpdate === 'function') handleVettingUpdate({ active: false });
         }
     } catch(e) { console.error("Vetting Enforcer Error:", e); }
 }

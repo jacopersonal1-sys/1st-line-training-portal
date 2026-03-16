@@ -614,11 +614,11 @@ window.onload = async function() {
         defaultsChanged = true;
     }
     if(!localStorage.getItem('assessments')) {
-        localStorage.setItem('assessments', JSON.stringify(DEFAULT_ASSESSMENTS)); 
+        localStorage.setItem('assessments', JSON.stringify(typeof DEFAULT_ASSESSMENTS !== 'undefined' ? DEFAULT_ASSESSMENTS : [])); 
         defaultsChanged = true;
     }
     if(!localStorage.getItem('vettingTopics')) {
-        localStorage.setItem('vettingTopics', JSON.stringify(DEFAULT_VETTING_TOPICS));
+        localStorage.setItem('vettingTopics', JSON.stringify(typeof DEFAULT_VETTING_TOPICS !== 'undefined' ? DEFAULT_VETTING_TOPICS : []));
         defaultsChanged = true;
     }
     
@@ -1704,6 +1704,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.30": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Upgraded architecture to support running and monitoring multiple live vetting sessions concurrently.</li>
+                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added multi-tab interface for managing parallel test groups securely.</li>
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Hardened Kiosk Mode lock/unlock logic to prevent state desynchronization.</li>
+            </ul>`,
         "2.4.29": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Team Leader Hub:</strong> Major upgrade to Operations Timeline. Added mandatory comment enforcement for Attendance, Support, and Coaching tasks.</li>
