@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.35**: **Critical Fixes**: Fixed Vetting Arena UI refreshing bug and Assessment Timer/Answer disappearing glitches.
  - **v2.4.34**: **Hotfixes**: Resolved authentication initialization and Vetting Arena view mode errors.
  - **v2.4.31**: **Admin Split View**: Added multi-monitor Grid UI for managing parallel Vetting Sessions simultaneously.
  - **v2.4.30**: **Multi-Session Vetting**: Upgraded Vetting Arena to support concurrent live sessions with a multi-tab admin interface.

@@ -54,18 +54,33 @@ function renderAdminArena() {
     }
 
     const container = document.getElementById('vetting-arena-content');
-    const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
     
-    let html = '';
+    // 1. SPLIT DOM SHELLS (Fixes Dropdown Disappearing)
+    if (!document.getElementById('va-static-form')) {
+        container.innerHTML = `
+            <div id="va-static-form"></div>
+            <div id="va-dynamic-views"></div>
+        `;
+    }
 
-    // 1. Render New Session Form (Compact if sessions are already running)
-    html += renderIdleAdminShell(activeSessions.length > 0);
+    const staticForm = document.getElementById('va-static-form');
+    const dynamicViews = document.getElementById('va-dynamic-views');
+    const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    const isCompact = activeSessions.length > 0;
+    
+    // 2. Render Form ONLY if layout changed (Prevents losing dropdown focus)
+    if (staticForm.dataset.compact !== String(isCompact)) {
+        staticForm.innerHTML = renderIdleAdminShell(isCompact);
+        staticForm.dataset.compact = String(isCompact);
+        populateVettingDropdowns(); 
+    }
 
-    // 2. Render Active Sessions with Tabs
+    // 3. Build Dynamic Views
+    let dynHtml = '';
     if (activeSessions.length > 0) {
         // Toggle view controls
         if (activeSessions.length > 1) {
-            html += `
+            dynHtml += `
             <div style="display:flex; justify-content:flex-end; margin-top:15px; margin-bottom:5px; gap:10px;">
                 <button class="btn-secondary btn-sm ${ADMIN_VETTING_VIEW_MODE === 'tabbed' ? 'active' : ''}" onclick="setVettingViewMode('tabbed')"><i class="fas fa-folder"></i> Tabbed View</button>
                 <button class="btn-secondary btn-sm ${ADMIN_VETTING_VIEW_MODE === 'split' ? 'active' : ''}" onclick="setVettingViewMode('split')"><i class="fas fa-columns"></i> Split View</button>
@@ -75,13 +90,13 @@ function renderAdminArena() {
 
         if (ADMIN_VETTING_VIEW_MODE === 'split' && activeSessions.length > 1) {
             // SPLIT VIEW
-            html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap:20px; margin-top:10px;">`;
+            dynHtml += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap:20px; margin-top:10px;">`;
             activeSessions.forEach((s, idx) => {
-                html += `<div style="display:flex; flex-direction:column; gap:15px; background:var(--bg-app); border:2px dashed var(--border-color); padding:15px; border-radius:12px;">`;
-                html += renderActiveAdminShell(s, idx + 1);
-                html += `</div>`;
+                dynHtml += `<div style="display:flex; flex-direction:column; gap:15px; background:var(--bg-app); border:2px dashed var(--border-color); padding:15px; border-radius:12px;">`;
+                dynHtml += renderActiveAdminShell(s, idx + 1);
+                dynHtml += `</div>`;
             });
-            html += `</div>`;
+            dynHtml += `</div>`;
         } else {
             // TABBED VIEW
             // Ensure a tab is selected
@@ -96,41 +111,49 @@ function renderAdminArena() {
             }
 
             // Tabs UI
-            html += `<div style="display:flex; gap:10px; margin-top:20px; margin-bottom:15px; overflow-x:auto; padding-bottom:5px;">`;
+            dynHtml += `<div style="display:flex; gap:10px; margin-top:20px; margin-bottom:15px; overflow-x:auto; padding-bottom:5px;">`;
             activeSessions.forEach((s, idx) => {
                 const isActive = ACTIVE_VETTING_TAB === s.sessionId ? 'background:var(--primary); color:white; box-shadow:0 4px 10px rgba(243, 112, 33, 0.3);' : 'background:var(--bg-card); color:var(--text-muted); border:1px solid var(--border-color);';
                 const groupName = s.targetGroup === 'all' ? 'All Groups' : ((typeof getGroupLabel === 'function') ? getGroupLabel(s.targetGroup).split('[')[0] : s.targetGroup);
                 const activeCount = Object.values(s.trainees || {}).filter(t => t.status === 'started').length;
 
-                html += `
+                dynHtml += `
                 <button onclick="switchVettingTab('${s.sessionId}')" style="padding:10px 20px; border-radius:8px; cursor:pointer; min-width:150px; text-align:left; transition:0.3s; ${isActive}">
                     <div style="font-size:0.8rem; text-transform:uppercase; opacity:0.8;">Session ${idx+1}</div>
                     <div style="font-weight:bold; font-size:1.1rem; margin:5px 0;">${groupName}</div>
-                    <div style="font-size:0.8rem;"><i class="fas fa-users"></i> ${activeCount} Active</div>
+                    <div style="font-size:0.8rem;"><i class="fas fa-users"></i> <span id="tab_active_${s.sessionId}">${activeCount}</span> Active</div>
                 </button>`;
             });
-            html += `</div>`;
+            dynHtml += `</div>`;
 
             // Active Session Monitor UI
             if (currentSession) {
-                html += renderActiveAdminShell(currentSession);
+                dynHtml += renderActiveAdminShell(currentSession);
             }
         }
     }
 
-    // Apply HTML to DOM
-    if (container.innerHTML !== html) {
-        container.innerHTML = html;
+    // 4. Update Shell ONLY if signature changes
+    const layoutSignature = `${ADMIN_VETTING_VIEW_MODE}_${ACTIVE_VETTING_TAB}_${activeSessions.map(s => s.sessionId + s.targetGroup).join('-')}`;
+    
+    if (dynamicViews.dataset.signature !== layoutSignature) {
+        dynamicViews.innerHTML = dynHtml;
+        dynamicViews.dataset.signature = layoutSignature;
     }
 
-    populateVettingDropdowns();
-
+    // 5. Soft Update Data (No DOM Wipe)
     if (activeSessions.length > 0) {
         if (ADMIN_VETTING_VIEW_MODE === 'split' && activeSessions.length > 1) {
-            activeSessions.forEach(s => updateVettingTableRows(s));
+            activeSessions.forEach(s => {
+                updateVettingTableRows(s);
+                updateVettingStatsUI(s);
+            });
         } else {
             const currentSession = activeSessions.find(s => s.sessionId === ACTIVE_VETTING_TAB);
-            if (currentSession) updateVettingTableRows(currentSession);
+            if (currentSession) {
+                updateVettingTableRows(currentSession);
+                updateVettingStatsUI(currentSession);
+            }
         }
     }
 
@@ -243,7 +266,10 @@ function renderActiveAdminShell(session, indexLabel = '') {
     
     // Calculate Stats
     const trainees = session.trainees || {};
-    const total = Object.keys(trainees).length;
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const total = (session.targetGroup && session.targetGroup !== 'all' && rosters[session.targetGroup]) 
+        ? rosters[session.targetGroup].length 
+        : Object.keys(trainees).length;
     const activeCount = Object.values(trainees).filter(t => t.status === 'started').length;
     const blockedCount = Object.values(trainees).filter(t => t.status === 'blocked').length;
     const completedCount = Object.values(trainees).filter(t => t.status === 'completed').length;
@@ -264,10 +290,10 @@ function renderActiveAdminShell(session, indexLabel = '') {
             </div>
             
             <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px;">
-                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold;">${total}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Connected</div></div>
-                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#2ecc71;">${activeCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">In Progress</div></div>
-                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#ff5252;">${blockedCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Blocked</div></div>
-                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#3498db;">${completedCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Completed</div></div>
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold;" id="stat_expected_${session.sessionId}">${total}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Expected</div></div>
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#2ecc71;" id="stat_active_${session.sessionId}">${activeCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">In Progress</div></div>
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#ff5252;" id="stat_blocked_${session.sessionId}">${blockedCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Blocked</div></div>
+                <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#3498db;" id="stat_completed_${session.sessionId}">${completedCount}</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Completed</div></div>
             </div>
         </div>
         
@@ -302,20 +328,25 @@ function updateVettingTableRows(session) {
     const targetGroup = session.targetGroup;
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
 
-    // FILTER: Only show trainees in the target group
-    let filteredEntries = Object.entries(trainees);
+    // PRE-POPULATE: Show all expected trainees if a specific group is targeted
+    let displayEntries = [];
     
     if (targetGroup && targetGroup !== 'all') {
         const allowedMembers = rosters[targetGroup] || [];
-        filteredEntries = filteredEntries.filter(([user, data]) => allowedMembers.includes(user));
+        displayEntries = allowedMembers.map(user => {
+            // Include existing data or default to 'waiting' state
+            return [user, trainees[user] || { status: 'waiting' }];
+        });
+    } else {
+        displayEntries = Object.entries(trainees);
     }
 
-    if (filteredEntries.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center">No trainees active yet.</td></tr>';
+    if (displayEntries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="color:var(--text-muted); font-style:italic;">No trainees found in this group.</td></tr>';
         return;
     }
 
-    const html = filteredEntries.map(([user, data]) => {
+    const html = displayEntries.map(([user, data]) => {
         let statusBadge = '<span class="status-badge status-improve"><i class="fas fa-hourglass-half"></i> Waiting</span>';
         let rowClass = '';
 
@@ -331,7 +362,9 @@ function updateVettingTableRows(session) {
         
         // Consolidated Security Column
         let securityHtml = '<span style="color:#2ecc71;"><i class="fas fa-shield-alt"></i> Secure</span>';
-        if (data.security) {
+        if (data.status === 'waiting') {
+            securityHtml = '<span style="color:var(--text-muted);"><i class="fas fa-minus"></i> Pending Connection</span>';
+        } else if (data.security) {
             const issues = [];
             if (data.security.screens > 1) issues.push(`${data.security.screens} Screens`);
             if (data.security.apps && data.security.apps.length > 0) issues.push(`${data.security.apps.length} Apps`);
@@ -385,6 +418,28 @@ function updateVettingTableRows(session) {
     if (tbody.innerHTML !== html) {
         tbody.innerHTML = html;
     }
+}
+
+// --- NEW: HELPER TO UPDATE STATS WITHOUT DOM REFRESH ---
+function updateVettingStatsUI(session) {
+    const trainees = session.trainees || {};
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const total = (session.targetGroup && session.targetGroup !== 'all' && rosters[session.targetGroup]) ? rosters[session.targetGroup].length : Object.keys(trainees).length;
+    const activeCount = Object.values(trainees).filter(t => t.status === 'started').length;
+    const blockedCount = Object.values(trainees).filter(t => t.status === 'blocked').length;
+    const completedCount = Object.values(trainees).filter(t => t.status === 'completed').length;
+
+    const ex = document.getElementById(`stat_expected_${session.sessionId}`);
+    const ac = document.getElementById(`stat_active_${session.sessionId}`);
+    const bl = document.getElementById(`stat_blocked_${session.sessionId}`);
+    const co = document.getElementById(`stat_completed_${session.sessionId}`);
+    const tabAc = document.getElementById(`tab_active_${session.sessionId}`);
+
+    if(ex) ex.innerText = total;
+    if(ac) ac.innerText = activeCount;
+    if(bl) bl.innerText = blockedCount;
+    if(co) co.innerText = completedCount;
+    if(tabAc) tabAc.innerText = activeCount;
 }
 
 // --- NEW: STATE RESTORATION (Fixes Server Switch Gap) ---
@@ -843,118 +898,126 @@ async function pollVettingSession() {
 }
 
 let LAST_REPORTED_STATUS = null;
+let IS_CHECKING_COMPLIANCE = false;
 
 async function checkSystemCompliance() {
-    const logBox = document.getElementById('securityCheckLog');
-    const btn = document.getElementById('btnEnterArena');
-    if (!logBox || !btn) return;
+    if (IS_CHECKING_COMPLIANCE) return;
+    IS_CHECKING_COMPLIANCE = true;
 
-    // 1. Check Override
-    const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-    const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
-    const isOverridden = myData && myData.override;
-    const isRelaxed = myData && myData.relaxed;
-    
-    // GLOBAL KIOSK ENFORCEMENT
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-    if (config.security && config.security.force_kiosk_global) {
-        // Force strict mode regardless of relaxed setting
-        if (isRelaxed) return; // Wait, we need to force checks. Actually, we should treat isRelaxed as false.
-    }
+    try {
+        const logBox = document.getElementById('securityCheckLog');
+        const btn = document.getElementById('btnEnterArena');
+        if (!logBox || !btn) return;
 
-    let errors = [];
-    
-    if (!isRelaxed && typeof require !== 'undefined') {
-        const { ipcRenderer } = require('electron');
+        // 1. Check Override
+        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        const myData = session.trainees ? session.trainees[CURRENT_USER.user] : null;
+        const isOverridden = myData && myData.override;
+        const isRelaxed = myData && myData.relaxed;
         
-        // Check Screens
-        const screenCount = await ipcRenderer.invoke('get-screen-count');
-        if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
-        
-        // Check Apps
-        // Load dynamic list or default
-        let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
-        if (forbidden.length === 0 && typeof DEFAULT_FORBIDDEN_APPS !== 'undefined') {
-            forbidden = DEFAULT_FORBIDDEN_APPS;
+        // GLOBAL KIOSK ENFORCEMENT
+        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        if (config.security && config.security.force_kiosk_global) {
+            // Force strict mode regardless of relaxed setting
+            if (isRelaxed) return; // Wait, we need to force checks. Actually, we should treat isRelaxed as false.
         }
 
-        const apps = await ipcRenderer.invoke('get-process-list', forbidden);
-        if (apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
-    }
+        let errors = [];
+        
+        if (!isRelaxed && typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            
+            // Check Screens
+            const screenCount = await ipcRenderer.invoke('get-screen-count');
+            if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
+            
+            // Check Apps
+            // Load dynamic list or default
+            let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+            if (forbidden.length === 0 && typeof DEFAULT_FORBIDDEN_APPS !== 'undefined') {
+                forbidden = DEFAULT_FORBIDDEN_APPS;
+            }
 
-    // Determine Status
-    let currentStatus = 'ready';
-    if (errors.length > 0 && !isOverridden && !isRelaxed) {
-        currentStatus = 'blocked';
-    }
+            const apps = await ipcRenderer.invoke('get-process-list', forbidden);
+            if (apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
+        }
 
-    // Update UI
-    if (errors.length === 0) {
-        if (isRelaxed) {
+        // Determine Status
+        let currentStatus = 'ready';
+        if (errors.length > 0 && !isOverridden && !isRelaxed) {
+            currentStatus = 'blocked';
+        }
+
+        // Update UI
+        if (errors.length === 0) {
+            if (isRelaxed) {
+                logBox.innerHTML = `
+                    <div class="sec-pass" style="color:#e67e22; background:rgba(230, 126, 34, 0.1); padding:15px; border-radius:6px; border:1px solid #e67e22;">
+                        <div style="display:flex; align-items:center; gap:15px;">
+                            <i class="fas fa-unlock" style="font-size:1.8rem;"></i>
+                            <div>
+                                <strong style="font-size:1.1rem;">Security Relaxed</strong>
+                                <div style="font-size:0.9rem; opacity:0.9;">Strict rules disabled by Admin.</div>
+                            </div>
+                        </div>
+                    </div>`;
+            } else {
+                logBox.innerHTML = `
+                    <div class="sec-pass" style="color:#2ecc71; background:rgba(46, 204, 113, 0.1); padding:15px; border-radius:6px; border:1px solid #2ecc71;">
+                        <div style="display:flex; align-items:center; gap:15px;">
+                            <i class="fas fa-check-circle" style="font-size:1.8rem;"></i>
+                            <div>
+                                <strong style="font-size:1.1rem;">System Secure</strong>
+                                <div style="font-size:0.9rem; opacity:0.9;">All checks passed. Ready to start.</div>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.style.animation = 'pulse 2s infinite'; // Visual cue
+        } else if (isOverridden) {
             logBox.innerHTML = `
-                <div class="sec-pass" style="color:#e67e22; background:rgba(230, 126, 34, 0.1); padding:15px; border-radius:6px; border:1px solid #e67e22;">
+                <div class="sec-warn" style="color:#f1c40f; background:rgba(241, 196, 15, 0.1); padding:15px; border-radius:6px; border:1px solid #f1c40f; margin-bottom:10px;">
                     <div style="display:flex; align-items:center; gap:15px;">
-                        <i class="fas fa-unlock" style="font-size:1.8rem;"></i>
+                        <i class="fas fa-exclamation-triangle" style="font-size:1.8rem;"></i>
                         <div>
-                            <strong style="font-size:1.1rem;">Security Relaxed</strong>
-                            <div style="font-size:0.9rem; opacity:0.9;">Strict rules disabled by Admin.</div>
+                            <strong style="font-size:1.1rem;">Admin Override Active</strong>
+                            <div style="font-size:0.9rem; opacity:0.9;">Security checks bypassed.</div>
                         </div>
                     </div>
-                </div>`;
+                </div>` + 
+                errors.map(e => `
+                    <div class="sec-fail" style="opacity:0.7; padding:8px 10px; border-bottom:1px solid var(--border-color); color:var(--text-muted); display:flex; align-items:center; gap:10px;">
+                        <i class="fas fa-times" style="color:#ff5252;"></i> <span>${e} (Ignored)</span>
+                    </div>`).join('');
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.style.animation = 'none';
         } else {
-            logBox.innerHTML = `
-                <div class="sec-pass" style="color:#2ecc71; background:rgba(46, 204, 113, 0.1); padding:15px; border-radius:6px; border:1px solid #2ecc71;">
-                    <div style="display:flex; align-items:center; gap:15px;">
-                        <i class="fas fa-check-circle" style="font-size:1.8rem;"></i>
-                        <div>
-                            <strong style="font-size:1.1rem;">System Secure</strong>
-                            <div style="font-size:0.9rem; opacity:0.9;">All checks passed. Ready to start.</div>
-                        </div>
-                    </div>
-                </div>`;
-        }
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
-        btn.style.animation = 'pulse 2s infinite'; // Visual cue
-    } else if (isOverridden) {
-        logBox.innerHTML = `
-            <div class="sec-warn" style="color:#f1c40f; background:rgba(241, 196, 15, 0.1); padding:15px; border-radius:6px; border:1px solid #f1c40f; margin-bottom:10px;">
-                <div style="display:flex; align-items:center; gap:15px;">
-                    <i class="fas fa-exclamation-triangle" style="font-size:1.8rem;"></i>
+            logBox.innerHTML = errors.map(e => `
+                <div class="sec-fail" style="background:rgba(255, 82, 82, 0.1); color:#ff5252; padding:15px; border-radius:6px; border:1px solid #ff5252; margin-bottom:10px; display:flex; align-items:center; gap:15px;">
+                    <i class="fas fa-ban" style="font-size:1.5rem;"></i>
                     <div>
-                        <strong style="font-size:1.1rem;">Admin Override Active</strong>
-                        <div style="font-size:0.9rem; opacity:0.9;">Security checks bypassed.</div>
+                        <strong style="font-size:1.1rem;">Security Violation</strong>
+                        <div style="font-size:0.9rem; opacity:0.9;">${e}</div>
                     </div>
-                </div>
-            </div>` + 
-            errors.map(e => `
-                <div class="sec-fail" style="opacity:0.7; padding:8px 10px; border-bottom:1px solid var(--border-color); color:var(--text-muted); display:flex; align-items:center; gap:10px;">
-                    <i class="fas fa-times" style="color:#ff5252;"></i> <span>${e} (Ignored)</span>
                 </div>`).join('');
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
-        btn.style.animation = 'none';
-    } else {
-        logBox.innerHTML = errors.map(e => `
-            <div class="sec-fail" style="background:rgba(255, 82, 82, 0.1); color:#ff5252; padding:15px; border-radius:6px; border:1px solid #ff5252; margin-bottom:10px; display:flex; align-items:center; gap:15px;">
-                <i class="fas fa-ban" style="font-size:1.5rem;"></i>
-                <div>
-                    <strong style="font-size:1.1rem;">Security Violation</strong>
-                    <div style="font-size:0.9rem; opacity:0.9;">${e}</div>
-                </div>
-            </div>`).join('');
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-        btn.style.cursor = 'not-allowed';
-        btn.style.animation = 'none';
-    }
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+            btn.style.animation = 'none';
+        }
 
-    // Report to Server if Status Changed (e.g. Waiting -> Blocked or Waiting -> Ready)
-    if (currentStatus !== LAST_REPORTED_STATUS) {
-        LAST_REPORTED_STATUS = currentStatus;
-        await updateTraineeStatus(currentStatus);
+        // Report to Server if Status Changed (e.g. Waiting -> Blocked or Waiting -> Ready)
+        if (currentStatus !== LAST_REPORTED_STATUS) {
+            LAST_REPORTED_STATUS = currentStatus;
+            await updateTraineeStatus(currentStatus);
+        }
+    } finally {
+        IS_CHECKING_COMPLIANCE = false;
     }
 }
 

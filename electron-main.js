@@ -257,8 +257,10 @@ ipcMain.handle('set-content-protection', (event, enable) => {
 ipcMain.handle('get-process-list', async (event, customTargets) => {
     return new Promise((resolve) => {
         // Windows command to list running apps
+        // OPTIMIZATION: tasklist /v is extremely slow (2-10s).
+        // Using PowerShell Get-Process with MainWindowHandle natively filters out background tasks in ~100ms.
         const cmd = process.platform === 'win32' 
-            ? 'tasklist /v /fi "STATUS eq RUNNING" /fo csv /nh' 
+            ? 'powershell -NoProfile -Command "Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -ExpandProperty Name"' 
             : 'ps -e -o comm='; // Linux/Mac fallback
 
         exec(cmd, (err, stdout, stderr) => {
@@ -276,31 +278,13 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
             ];
             const counts = {};
             
-            const lines = stdout.split('\r\n')
-                .map(l => {
-                    // CSV Parse: Handle quotes properly
-                    const parts = l.split('","');
-                    if (parts.length < 1) return null;
-                    // Clean first and last quotes if present
-                    const name = parts[0].replace(/^"/, '');
-                    // Window Title is usually the last column (Index 8 in /v)
-                    // But splitting by "," might be fragile if title has commas.
-                    // Robust approach: tasklist /v CSV usually has 9 columns.
-                    const title = parts.length >= 9 ? parts[8].replace(/"$/, '') : "N/A";
-                    return { name, title };
-                })
-                .filter(l => l);
+            const lines = stdout.split('\n').map(l => l.trim()).filter(l => l);
             
-            lines.forEach(proc => {
-                const lowerName = proc.name.toLowerCase();
-                const lowerTitle = proc.title ? proc.title.toLowerCase() : "n/a";
+            lines.forEach(name => {
+                const lowerName = name.toLowerCase();
                 
                 // EXCEPTION: Allow WebView2 (Teams) and Updaters
                 if (lowerName.includes('webview') || lowerName.includes('update') || lowerName.includes('teams') || lowerName.includes('msteams')) return;
-
-                // EXCEPTION: Ignore Background Processes (No Window Title)
-                // "N/A" is the standard tasklist output for processes without a window
-                if (lowerTitle === 'n/a' || lowerTitle === '') return;
 
                 targets.forEach(t => {
                     if (lowerName.includes(t)) {

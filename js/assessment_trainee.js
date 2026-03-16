@@ -110,6 +110,25 @@ function openTestTaker(testId, isArenaMode = false) {
         return;
     }
 
+    // --- CRITICAL BUG FIX: Restore Draft Before Wiping Answers ---
+    // If a draft exists for THIS test in Arena Mode, restore it instead of resetting.
+    const draftStr = localStorage.getItem('draft_assessment');
+    if (draftStr && isArenaMode) {
+        try {
+            const draft = JSON.parse(draftStr);
+            if (draft.test && draft.test.id == testId) {
+                window.CURRENT_TEST = draft.test;
+                window.USER_ANSWERS = draft.answers || {};
+                window.IS_LIVE_ARENA = isArenaMode;
+                
+                renderTestPaper('arenaTestContainer');
+                
+                return; // Prevent overwrite
+            }
+        } catch(e) { console.error("Draft restore failed", e); }
+    }
+    // -------------------------------------------------------------
+
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     
     if (typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee' && !isArenaMode) {
@@ -512,6 +531,9 @@ async function submitTest(forceSubmit = false) {
 }
 
 function startTestTimer(mins) {
+    // CRITICAL BUG FIX: Clear existing timer to prevent overlapping intervals (Crazy Timer)
+    if (window.TEST_TIMER) clearInterval(window.TEST_TIMER);
+
     let secs = mins * 60;
     let timerBar = document.getElementById('test-timer-bar');
     if(!timerBar) {

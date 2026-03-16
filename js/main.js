@@ -1704,6 +1704,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.35": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed an issue where the Admin dropdowns for 'Select Test' and 'Select Group' would disappear or become unclickable during real-time background syncing.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Fixed a critical bug causing test timers to accelerate ("Crazy Timer") and trainee answers to clear unexpectedly during Live/Vetting exams.</li>
+            </ul>`,
         "2.4.34": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved an initialization error with the Vetting Arena Split View.</li>
