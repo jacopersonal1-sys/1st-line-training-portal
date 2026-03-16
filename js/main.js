@@ -1704,6 +1704,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.34": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved an initialization error with the Vetting Arena Split View.</li>
+            </ul>`,
         "2.4.33": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved authentication initialization crash.</li>

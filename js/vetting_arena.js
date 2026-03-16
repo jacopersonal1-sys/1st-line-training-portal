@@ -12,6 +12,7 @@ let VETTING_SAVE_TIMEOUT = null; // OPTIMIZATION: Debounce saves
 let SECURITY_VIOLATION_INTERVAL = null; // Track the fast security poll
 let IS_SUBMITTING_VIOLATION = false; // Prevent alert loops
 let ACTIVE_VETTING_TAB = null; // Track which session the Admin is currently viewing
+let ADMIN_VETTING_VIEW_MODE = 'split'; // Default to Split Screen
 
 function loadVettingArena() {
     // FEATURE FLAG CHECK
