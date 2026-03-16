@@ -1068,10 +1068,16 @@ function updateSidebarVisibility() {
             return;
         }
 
+        // Hide Vetting Rework from everyone except Super Admin
+        if (targetTab === 'vetting-rework' && role !== 'super_admin') {
+            btn.classList.add('hidden');
+            return;
+        }
+
         // Rules
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
-            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment'];
+            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework'];
             const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly', 'test-records'];
             
             // Special Check for Arena
@@ -1086,7 +1092,7 @@ function updateSidebarVisibility() {
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub', 'vetting-rework'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -1117,10 +1123,16 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture'];
+      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
+  }
+  
+  // --- ROGUE TIMER PREVENTION ---
+  // If we are leaving the test view, kill the active timer to prevent background auto-submits
+  if (id !== 'test-take-view' && id !== 'vetting-arena' && window.TEST_TIMER) {
+      clearInterval(window.TEST_TIMER);
   }
 
   if (TAB_SWITCH_TIMEOUT) clearTimeout(TAB_SWITCH_TIMEOUT);
@@ -1301,6 +1313,16 @@ function showTab(id, btn) {
       
       if(id === 'vetting-arena') {
           if(typeof loadVettingArena === 'function') loadVettingArena();
+      }
+
+      if(id === 'vetting-rework') {
+          console.log("[Router] Vetting Rework tab clicked.");
+          if(typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
+              console.log("[Router] Executing Loader...");
+              VettingReworkLoader.renderUI();
+          } else {
+              console.error("VettingReworkLoader module not loaded.");
+          }
       }
   };
 
@@ -1704,6 +1726,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.37": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System Stability:</strong> Resolved a race condition where assessment submissions could get stuck in "Processing" during forced timeouts.</li>
+                <li style="margin-bottom: 8px;"><strong>Security Hardening:</strong> Improved the Vetting Arena's background scanner to prevent false positive immediate-kicks. Re-engages kiosk shields automatically when toggled.</li>
+            </ul>`,
         "2.4.35": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed an issue where the Admin dropdowns for 'Select Test' and 'Select Group' would disappear or become unclickable during real-time background syncing.</li>

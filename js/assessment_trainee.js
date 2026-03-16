@@ -116,7 +116,7 @@ function openTestTaker(testId, isArenaMode = false) {
     if (draftStr && isArenaMode) {
         try {
             const draft = JSON.parse(draftStr);
-            if (draft.test && draft.test.id == testId) {
+            if (draft.test && draft.test.id == testId && draft.user === CURRENT_USER.user) {
                 window.CURRENT_TEST = draft.test;
                 window.USER_ANSWERS = draft.answers || {};
                 window.IS_LIVE_ARENA = isArenaMode;
@@ -316,6 +316,7 @@ function renderTestPaper(containerId = 'takingQuestions') {
 function saveAssessmentDraft() {
     if (!window.CURRENT_TEST) return;
     const draft = {
+        user: CURRENT_USER.user,
         test: window.CURRENT_TEST,
         answers: window.USER_ANSWERS,
         // Timer state is saved inside window.CURRENT_TEST.remainingSeconds by startTestTimer
@@ -330,6 +331,10 @@ function restoreAssessmentDraft() {
     if (!draftStr) return;
     
     const draft = JSON.parse(draftStr);
+    
+    // CRITICAL: Ensure the draft belongs to the currently logged in user
+    if (draft.user !== CURRENT_USER.user) return;
+
     window.CURRENT_TEST = draft.test;
     window.USER_ANSWERS = draft.answers || {};
     
@@ -342,10 +347,16 @@ function restoreAssessmentDraft() {
 
 // UPDATED: Async Submit
 async function submitTest(forceSubmit = false) {
+    // CONCURRENCY LOCK: Prevent double-execution if Timer and User click at the same time
+    if (window.IS_SUBMITTING) return;
+    window.IS_SUBMITTING = true;
+
     const btn = document.querySelector('button[onclick="submitTest()"]');
     if(btn) { btn.disabled = true; btn.innerText = "Processing..."; }
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    
+    try {
     // FIX: Strict check to prevent false positives ("Already Submitted" error)
     const existing = subs.find(s => 
         s.testId && window.CURRENT_TEST.id && 
@@ -354,8 +365,19 @@ async function submitTest(forceSubmit = false) {
         !s.archived
     );
     if (existing) {
+        // If the test was already successfully completed, DO NOT archive it on a forced timeout/kick
+        // This prevents the system from overwriting a good test with a blank/partial one.
+        if (forceSubmit && existing.status === 'completed') {
+            if (window.TEST_TIMER) clearInterval(window.TEST_TIMER);
+            return; // Silently exit, their data is already safe.
+        }
+
         // If forcing (e.g. timeout), we proceed to archive/overwrite instead of blocking
-        if (!forceSubmit) { alert("Error: Active submission already exists."); return; }
+        if (!forceSubmit) { 
+            alert("Error: Active submission already exists. Ask your Admin to click 'Allow Retake' on your previous attempt."); 
+            if(btn) { btn.disabled = false; btn.innerText = "Finalize & Submit"; }
+            return; 
+        }
         
         // If forcing, archive the existing one so we can save the new final state
         existing.archived = true;
@@ -528,6 +550,15 @@ async function submitTest(forceSubmit = false) {
     
     if(typeof showTab === 'function') showTab('my-tests');
     loadTraineeTests();
+    
+    } catch (error) {
+        console.error("Submission UI Error:", error);
+        alert("Your assessment was saved locally, but the screen encountered an error. Returning to dashboard.");
+        if(typeof showTab === 'function') showTab('my-tests');
+    } finally {
+        if(btn) { btn.disabled = false; btn.innerText = "Finalize & Submit"; }
+        window.IS_SUBMITTING = false; // Release lock
+    }
 }
 
 function startTestTimer(mins) {

@@ -4,6 +4,7 @@
 // --- ADMIN CONTROLS ---
 
 let ADMIN_MONITOR_INTERVAL = null;
+let ADMIN_VETTING_TIMER_TICK = null;
 let TRAINEE_NET_POLLER = null;
 let TRAINEE_LOCAL_POLLER = null;
 let VETTING_REALTIME_UNSUB = null;
@@ -21,6 +22,21 @@ function loadVettingArena() {
         const container = document.getElementById('vetting-arena-content');
         if(container) container.innerHTML = `<div style="text-align:center; padding:50px; color:var(--text-muted);"><i class="fas fa-ban" style="font-size:3rem; margin-bottom:15px;"></i><h3>Feature Disabled</h3><p>The Vetting Arena is currently disabled by the System Administrator.</p></div>`;
         return;
+    }
+
+    // LOCAL TICKER: Smooth timer updates without database lag
+    if (!ADMIN_VETTING_TIMER_TICK) {
+        ADMIN_VETTING_TIMER_TICK = setInterval(() => {
+            document.querySelectorAll('.vt-live-timer').forEach(el => {
+                const start = parseInt(el.getAttribute('data-start'));
+                if (start) {
+                    const elapsed = Math.floor((Date.now() - start) / 1000);
+                    const m = Math.floor(elapsed / 60);
+                    const s = elapsed % 60;
+                    el.innerText = `${m}m ${s < 10 ? '0' : ''}${s}s`;
+                }
+            });
+        }, 1000);
     }
 
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
@@ -342,11 +358,29 @@ function updateVettingTableRows(session) {
     }
 
     if (displayEntries.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="color:var(--text-muted); font-style:italic;">No trainees found in this group.</td></tr>';
+        if (!document.getElementById('empty-row-' + session.sessionId)) {
+            tbody.innerHTML = `<tr id="empty-row-${session.sessionId}"><td colspan="5" class="text-center" style="color:var(--text-muted); font-style:italic;">No trainees found in this group.</td></tr>`;
+        }
         return;
     }
 
-    const html = displayEntries.map(([user, data]) => {
+    // SORTING LOGIC: Bring Blocked users to the top dynamically
+    const statusPriority = { 'blocked': 1, 'waiting': 2, 'ready': 2, 'started': 3, 'completed': 4 };
+    displayEntries.sort((a, b) => {
+        const pA = statusPriority[a[1].status] || 99;
+        const pB = statusPriority[b[1].status] || 99;
+        if (pA !== pB) return pA - pB;
+        return a[0].localeCompare(b[0]);
+    });
+
+    const emptyRow = document.getElementById('empty-row-' + session.sessionId);
+    if (emptyRow) emptyRow.remove();
+
+    const currentUsers = new Set();
+
+    // PRECISION DOM PATCHING (Eliminates Screen Flashing)
+    displayEntries.forEach(([user, data]) => {
+        currentUsers.add(user);
         let statusBadge = '<span class="status-badge status-improve"><i class="fas fa-hourglass-half"></i> Waiting</span>';
         let rowClass = '';
 
@@ -379,9 +413,9 @@ function updateVettingTableRows(session) {
 
         let mainAction = '';
         if (data.status === 'started') {
-            if (CURRENT_USER.role !== 'special_viewer') mainAction = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${session.sessionId}', '${user}')" title="Force Stop"><i class="fas fa-stop"></i></button>`;
+            if (CURRENT_USER.role !== 'special_viewer') mainAction = `<button class="btn-danger btn-sm" onclick="forceSubmitTrainee('${session.sessionId}', '${user.replace(/'/g, "\\'")}')" title="Force Stop"><i class="fas fa-stop"></i></button>`;
         } else if (data.status === 'blocked' && !data.override && CURRENT_USER.role !== 'special_viewer') {
-            mainAction = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${session.sessionId}', '${user}')" title="Override"><i class="fas fa-key"></i></button>`;
+            mainAction = `<button class="btn-warning btn-sm" onclick="overrideSecurity('${session.sessionId}', '${user.replace(/'/g, "\\'")}')" title="Override"><i class="fas fa-key"></i></button>`;
         }
 
         // NEW: Security Switch (Replaces Lock Button)
@@ -391,33 +425,69 @@ function updateVettingTableRows(session) {
         
         const switchHtml = `
             <label class="switch" style="margin-bottom:0;" title="Toggle Security Rules">
-                    <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="toggleSecurity('${session.sessionId}', '${user}', !this.checked)">
+                    <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="toggleSecurity('${session.sessionId}', '${user.replace(/'/g, "\\'")}', !this.checked)">
                     <span class="slider round"></span>
             </label>
         `;
 
-        const timerDisplay = data.timer ? `<span style="font-family:monospace; font-weight:bold; font-size:1.1rem;">${data.timer}</span>` : '--:--';
+        // OPTIMIZED TIMER: Extrapolate locally for 0 database load
+        let timerDisplay = '--:--';
+        if (data.status === 'started' && data.startedAt) {
+            const elapsed = Math.floor((Date.now() - data.startedAt) / 1000);
+            const m = Math.floor(elapsed / 60);
+            const s = elapsed % 60;
+            timerDisplay = `<span class="vt-live-timer" data-start="${data.startedAt}" style="font-family:monospace; font-weight:bold; font-size:1.1rem; color:var(--primary);">${m}m ${s < 10 ? '0' : ''}${s}s</span>`;
+        } else if (data.status === 'completed') {
+            timerDisplay = `<span style="font-family:monospace; font-weight:bold; font-size:1.1rem; color:#2ecc71;">Done</span>`;
+        } else if (data.timer) {
+            timerDisplay = `<span style="font-family:monospace; font-weight:bold; font-size:1.1rem;">${data.timer}</span>`;
+        }
 
-        return `
-            <tr class="${rowClass}">
-                <td><div style="display:flex; align-items:center;">${getAvatarHTML(user)} <strong>${user}</strong></div></td>
-                <td>${statusBadge}</td>
-                <td>${timerDisplay}</td>
-                <td>${securityHtml}</td>
-                <td>
-                    <div style="display:flex; align-items:center; gap:10px;">
-                        ${switchHtml}
-                        ${mainAction}
-                    </div>
-                </td>
-            </tr>
-        `;
-    }).join('');
+        const safeUser = user.replace(/[^a-zA-Z0-9]/g, '_');
+        const rowId = `vt-row-${session.sessionId}-${safeUser}`;
+        let tr = document.getElementById(rowId);
+        
+        if (!tr) {
+            tr = document.createElement('tr');
+            tr.id = rowId;
+            tr.setAttribute('data-user', user);
+            tr.innerHTML = `
+                <td class="col-user"></td>
+                <td class="col-status"></td>
+                <td class="col-timer"></td>
+                <td class="col-sec"></td>
+                <td class="col-ctrl"></td>
+            `;
+        }
 
-    // Only update DOM if content changed (prevents selection loss)
-    if (tbody.innerHTML !== html) {
-        tbody.innerHTML = html;
-    }
+        tbody.appendChild(tr); // This safely adds/reorders the row in the DOM
+
+        if (tr.className !== rowClass) tr.className = rowClass;
+
+        const htmlUser = `<div style="display:flex; align-items:center;">${getAvatarHTML(user)} <strong>${user}</strong></div>`;
+        const colUser = tr.querySelector('.col-user');
+        if (colUser.innerHTML !== htmlUser) colUser.innerHTML = htmlUser;
+
+        const colStatus = tr.querySelector('.col-status');
+        if (colStatus.innerHTML !== statusBadge) colStatus.innerHTML = statusBadge;
+
+        const colTimer = tr.querySelector('.col-timer');
+        if (colTimer.innerHTML !== timerDisplay) colTimer.innerHTML = timerDisplay;
+
+        const colSec = tr.querySelector('.col-sec');
+        if (colSec.innerHTML !== securityHtml) colSec.innerHTML = securityHtml;
+
+        const htmlCtrl = `<div style="display:flex; align-items:center; gap:10px;">${switchHtml}${mainAction}</div>`;
+        const colCtrl = tr.querySelector('.col-ctrl');
+        if (colCtrl.innerHTML !== htmlCtrl) colCtrl.innerHTML = htmlCtrl;
+    });
+
+    // Cleanup removed trainees
+    Array.from(tbody.querySelectorAll('tr[data-user]')).forEach(tr => {
+        if (!currentUsers.has(tr.getAttribute('data-user'))) {
+            tr.remove();
+        }
+    });
 }
 
 // --- NEW: HELPER TO UPDATE STATS WITHOUT DOM REFRESH ---
@@ -1062,6 +1132,28 @@ async function enterArena(testId) {
     renderTraineeArena();
 }
 
+// --- NEW: NON-BLOCKING SECURITY OVERLAY ---
+function showSecurityViolationOverlay(msg, isFatal) {
+    let overlay = document.getElementById('security-violation-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'security-violation-overlay';
+        overlay.className = 'modal-overlay';
+        overlay.style.zIndex = '15000';
+        overlay.style.background = 'rgba(255, 0, 0, 0.85)';
+        document.body.appendChild(overlay);
+    }
+    overlay.dataset.fatal = isFatal ? 'true' : '';
+    overlay.innerHTML = `
+        <div class="modal-box" style="border: 2px solid #ff5252; max-width: 600px; text-align: center; box-shadow: 0 0 50px rgba(255,0,0,0.5);">
+            <i class="fas fa-exclamation-triangle" style="font-size: 4rem; color: #ff5252; margin-bottom: 20px; animation: shake 0.5s infinite;"></i>
+            <h2 style="color: #ff5252; text-transform: uppercase;">Security Alert</h2>
+            <div style="font-size: 1.2rem; line-height: 1.5; color: white; margin-bottom: 20px;">${msg}</div>
+            ${!isFatal ? '<div style="font-weight:bold; font-size:1.1rem; color:#f1c40f;">Close the forbidden application to automatically dismiss this warning.</div>' : '<div style="font-weight:bold; font-size:1.5rem; color:white;">Processing Submission... Please wait.</div>'}
+        </div>
+    `;
+}
+
 async function updateTraineeStatus(status, timerStr = "") {
     // We avoid full-schema loadFromServer(true) here to reduce reads.
     // saveToServer(['vettingSession'], false) already performs a merge and our merge logic
@@ -1081,6 +1173,10 @@ async function updateTraineeStatus(status, timerStr = "") {
     const isRelaxed = session.trainees[CURRENT_USER.user].relaxed === true;
 
     session.trainees[CURRENT_USER.user].status = status;
+    // NEW: Record start time for Admin UI extrapolation
+    if (status === 'started' && !session.trainees[CURRENT_USER.user].startedAt) {
+        session.trainees[CURRENT_USER.user].startedAt = Date.now();
+    }
     if (timerStr) session.trainees[CURRENT_USER.user].timer = timerStr;
     
     // Add Security Snapshot
@@ -1104,7 +1200,8 @@ async function updateTraineeStatus(status, timerStr = "") {
         if (!isRelaxed && apps.length > 0 && status === 'started') {
             if (IS_SUBMITTING_VIOLATION) return; // Already handling it
             IS_SUBMITTING_VIOLATION = true;
-            alert("Security Violation: Forbidden apps detected (" + apps.join(', ') + "). Test ending.");
+            
+            showSecurityViolationOverlay("Security Violation: Forbidden apps detected (" + apps.join(', ') + "). Test ending.", true);
             if (typeof submitTest === 'function') await submitTest(true);
             IS_SUBMITTING_VIOLATION = false;
             return; // Stop here, submitTest will handle the rest
@@ -1128,19 +1225,19 @@ async function updateTraineeStatus(status, timerStr = "") {
         if (currentLocal && currentLocal.trainees && currentLocal.trainees[CURRENT_USER.user]) {
              patchTraineeStatus(CURRENT_USER.user, currentLocal.trainees[CURRENT_USER.user]);
         }
-    }, 1500);
+    }, 1500 + Math.random() * 2000); // 1.5s to 3.5s jitter prevents Postgres JSONB lock contention
 }
+
+let SECURITY_WARNING_COUNT = 0;
+let IS_POLLING_SECURITY = false; // Prevent IPC pileup
 
 function startActiveTestMonitoring() {
     if (SECURITY_MONITOR_INTERVAL) clearInterval(SECURITY_MONITOR_INTERVAL);
     if (SECURITY_VIOLATION_INTERVAL) clearInterval(SECURITY_VIOLATION_INTERVAL);
     
-    // Update status every 10 seconds (Faster updates for Admin Timer)
-    SECURITY_MONITOR_INTERVAL = setInterval(() => {
-        const timerEl = document.getElementById('test-timer-bar');
-        const timeStr = timerEl ? timerEl.innerText.replace('TIME: ', '') : '';
-        updateTraineeStatus('started', timeStr);
-    }, 10000);
+    // REMOVED 10-second SECURITY_MONITOR_INTERVAL here. 
+    // Hammering the database with timer updates caused massive read/write race conditions ("falling behind").
+    // Timer is now calculated locally on the Admin UI using the 'startedAt' timestamp.
 
     // FAST SECURITY POLL (3s) - Detect violations quickly
     // We don't send full status to server every 3s to save bandwidth, 
@@ -1160,9 +1257,18 @@ function startActiveTestMonitoring() {
             return; // Skip checks
         }
 
+        if (IS_POLLING_SECURITY) return;
+        IS_POLLING_SECURITY = true;
+
         if (typeof require !== 'undefined') {
+            try {
             const { ipcRenderer } = require('electron');
             
+            // --- KIOSK SHIELD RE-ENGAGEMENT ---
+            // If the shield was dropped (relaxed) but is now active again, force it back on.
+            ipcRenderer.invoke('set-kiosk-mode', true).catch(()=>{});
+            ipcRenderer.invoke('set-content-protection', true).catch(()=>{});
+
             let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
             if (forbidden.length === 0 && typeof DEFAULT_FORBIDDEN_APPS !== 'undefined') {
                 forbidden = DEFAULT_FORBIDDEN_APPS;
@@ -1170,7 +1276,24 @@ function startActiveTestMonitoring() {
 
             const apps = await ipcRenderer.invoke('get-process-list', forbidden);
             const screens = await ipcRenderer.invoke('get-screen-count');
-            if (apps.length > 0 || screens > 1) updateTraineeStatus('started'); // Trigger the kick logic
+            
+            if (apps.length > 0 || screens > 1) {
+                SECURITY_WARNING_COUNT++;
+                if (SECURITY_WARNING_COUNT === 1) {
+                        showSecurityViolationOverlay(`A forbidden app was detected running in the background:<br><strong style="color:#f1c40f;">${apps.join(', ')}</strong><br><br>You have 10 seconds to close it before your test is automatically terminated.`, false);
+                } else if (SECURITY_WARNING_COUNT >= 4) {
+                    // 4 strikes * 3 seconds = ~12 seconds grace period
+                    updateTraineeStatus('started'); // Trigger the actual kick logic
+                }
+            } else {
+                // If they close the app, forgive them and reset
+                SECURITY_WARNING_COUNT = 0; 
+                    const overlay = document.getElementById('security-violation-overlay');
+                    if (overlay && !overlay.dataset.fatal) overlay.remove(); // Clear warning if they fixed it
+            }
+            } finally {
+                IS_POLLING_SECURITY = false;
+            }
         }
     }, 3000);
 }

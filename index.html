@@ -443,6 +443,9 @@
         <button class="nav-item admin-only" onclick="showTab('vetting-arena')" title="Vetting Test Arena">
             <i class="fas fa-dungeon"></i><span class="nav-text">Vetting Test Arena</span>
         </button>
+        <button class="nav-item admin-only" onclick="showTab('vetting-rework')" title="Vetting Test (Rework)">
+            <i class="fas fa-hammer"></i><span class="nav-text">Vetting (Rework)</span>
+        </button>
         <button class="nav-item" id="nav-my-tests" onclick="showTab('my-tests')" title="My Assessments">
             <i class="fas fa-pen-fancy"></i><span class="nav-text">My Assessments</span>
         </button>
@@ -728,6 +731,13 @@
                 <h2>Vetting Test Arena</h2>
             </div>
             <div id="vetting-arena-content"></div>
+        </section>
+        
+        <section id="vetting-rework" class="admin-only-section">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2><i class="fas fa-hammer" style="color:var(--primary);"></i> Vetting Arena 2.0 (Development Sandbox)</h2>
+            </div>
+            <div id="vetting-rework-content"></div>
         </section>
 
         <section id="my-tests">
@@ -1189,6 +1199,7 @@
 <script src="js/analyticsDashboard.js"></script>
 <script src="js/nps_system.js"></script>
 <script src="js/network_diag.js"></script>
+<script src="js/vetting_rework_loader.js"></script>
 <script src="js/ai_core.js"></script>
 
 <script src="js/main.js"></script>

@@ -1584,6 +1584,10 @@ async function sendHeartbeat() {
             const { error } = await window.supabaseClient.from('sessions').upsert(fullPayload);
             if (!error) return; // Success
             
+            // NETWORK ERROR CHECK: Do not downgrade if it's just a timeout or server overload
+            const msg = error.message || '';
+            if (msg.includes('fetch') || error.code === '503' || msg.includes('timeout') || error.code === 'PGRST002') return;
+
             console.warn("Heartbeat Full failed (Schema mismatch?). Downgrading to Safe Mode.");
             HEARTBEAT_SAFE_MODE = 'safe';
         }
@@ -1598,6 +1602,10 @@ async function sendHeartbeat() {
             });
             if (!error) return;
             
+            // NETWORK ERROR CHECK
+            const msg = error.message || '';
+            if (msg.includes('fetch') || error.code === '503' || msg.includes('timeout') || error.code === 'PGRST002') return;
+
             console.warn("Heartbeat Safe failed. Downgrading to Minimal.");
             HEARTBEAT_SAFE_MODE = 'minimal';
         }
@@ -1636,6 +1644,15 @@ async function sendHeartbeat() {
             } else if (sessionData.pending_action.startsWith('msg:')) {
                 const msg = sessionData.pending_action.replace('msg:', '');
                 alert("💬 ADMIN MESSAGE:\n\n" + msg);
+            } else if (sessionData.pending_action === 'fix_submission') {
+                // Silently clear blockages and force submit current draft
+                let s = JSON.parse(localStorage.getItem('submissions') || '[]');
+                s.forEach(x => x.archived = true);
+                localStorage.setItem('submissions', JSON.stringify(s));
+                
+                if(typeof restoreAssessmentDraft === 'function') restoreAssessmentDraft();
+                setTimeout(() => { if(typeof submitTest === 'function') submitTest(true); }, 1000);
+                if(typeof showToast === 'function') showToast("System Auto-Recovery: Draft submitted.", "success");
             }
         }
     } catch (e) { /* Silent fail */ }

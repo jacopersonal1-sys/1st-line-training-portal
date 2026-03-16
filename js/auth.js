@@ -123,7 +123,7 @@ async function attemptLogin() {
       if (config.security.min_version) {
           // Default to 0.0.0 if APP_VERSION is missing (e.g. dev mode or load error) to force check
           const appVer = window.APP_VERSION || '0.0.0';
-          const currentParts = window.APP_VERSION.split('.').map(Number);
+          const currentParts = appVer.split('.').map(Number);
           const minParts = config.security.min_version.split('.').map(Number);
           
           let isOutdated = false;
