@@ -1,7 +1,7 @@
 /* ================= AUTHENTICATION ================= */
 
 // Global State
-let LOGIN_MODE = 'admin';
+window.LOGIN_MODE = window.LOGIN_MODE || 'admin';
 
 // --- HELPER: ASYNC SAVE ---
 // Ensures critical user profile updates are saved before proceeding.
@@ -58,7 +58,7 @@ function toggleLoginMode(mode) {
   }
   // -----------------------------------------------------
 
-  LOGIN_MODE = mode;
+  window.LOGIN_MODE = mode;
   document.getElementById('loginError').innerText = "";
   const inpAdmin = document.getElementById('adminUsername');
   const inpTrainee = document.getElementById('traineeUsername');
@@ -97,7 +97,7 @@ function toggleLoginMode(mode) {
 }
 
 async function attemptLogin() {
-  let u = (LOGIN_MODE === 'admin') ? document.getElementById('adminUsername').value : document.getElementById('traineeUsername').value;
+  let u = (window.LOGIN_MODE === 'admin') ? document.getElementById('adminUsername').value : document.getElementById('traineeUsername').value;
   const p = document.getElementById('password').value;
   
   if(!u) { document.getElementById('loginError').innerText = "Enter username."; return; }
@@ -228,7 +228,7 @@ async function attemptLogin() {
     // ----------------------------------------------------
 
     const userRole = validUser.role ? validUser.role.toLowerCase().trim() : '';
-    if(LOGIN_MODE === 'admin' && (userRole === 'trainee' && userRole !== 'super_admin')) {
+    if(window.LOGIN_MODE === 'admin' && (userRole === 'trainee' && userRole !== 'super_admin')) {
       document.getElementById('loginError').innerText = "Trainees must use Trainee tab."; return;
     }
     

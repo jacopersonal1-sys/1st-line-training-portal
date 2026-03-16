@@ -1704,6 +1704,14 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.33": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved authentication initialization crash.</li>
+            </ul>`,
+        "2.4.32": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Restored core database synchronization engine.</li>
+            </ul>`,
         "2.4.31": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added "Split View" to seamlessly monitor multiple active testing groups side-by-side.</li>
