@@ -7,6 +7,7 @@ let VIEW_MODE = 'list'; // 'list' or 'calendar'
 let LIVE_SCHEDULE_REALTIME_UNSUB = null; // Realtime subscription handler
 let DRAG_SRC_INDEX = null; // Track item being dragged
 let CALENDAR_MONTH = new Date();
+window.IS_DRAGGING_LIVE = false; // Global lock for drag operations
 
 // --- SA PUBLIC HOLIDAYS (2026 Reference) ---
 // Used to skip these dates in the Live Assessment Schedule
@@ -395,11 +396,16 @@ async function renderLiveTable() {
     const tbody = document.getElementById('liveBookingBody');
     if(!tbody) return;
 
+    // --- FOCUS & INTERACTION PROTECTION (TIMEBOMB 2 FIX) ---
+    if (window.IS_DRAGGING_LIVE) return; // Prevent DOM wipe during drag
+    if (!document.getElementById('bookingModal').classList.contains('hidden')) return;
+
     // --- AUTHORITATIVE SYNC ON LOAD ---
     // On first load of this tab, perform a full sync of bookings to get the source of truth.
     // Subsequent updates will be handled by the lightweight real-time listener.
     if (!window._liveSyncDone) {
         window._liveSyncDone = true; // Prevent loops
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin fa-2x"></i><br><br>Synchronizing Live Bookings...</td></tr>';
         if (typeof forceFullSync === 'function') {
             await forceFullSync('liveBookings');
         }
@@ -412,9 +418,6 @@ async function renderLiveTable() {
             renderLiveTable();
         });
     }
-    
-    // --- FOCUS PROTECTION ---
-    if (!document.getElementById('bookingModal').classList.contains('hidden')) return;
 
     // 1. MIGRATION & INIT
     let liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || 'null');
@@ -679,6 +682,7 @@ window.editDailyTrainers = async function(dateKey) {
 
 // --- DRAG AND DROP HANDLERS (LIVE) ---
 window.liveDragStart = function(e, id) {
+    window.IS_DRAGGING_LIVE = true;
     e.dataTransfer.setData("text/plain", id);
     e.dataTransfer.effectAllowed = "move";
     e.target.style.opacity = '0.5';
@@ -702,6 +706,7 @@ window.liveDragLeave = function(e) {
 
 window.liveDrop = async function(e) {
     e.preventDefault();
+    window.IS_DRAGGING_LIVE = false;
     const zone = e.target.closest('.live-drop-zone');
     if (!zone) return;
     
@@ -716,8 +721,17 @@ window.liveDrop = async function(e) {
 
     if (!bookingId || !targetDate || !targetTime || !targetTrainer) return;
     
+    // UI Lock during transaction (TIMEBOMB 4 FIX)
+    const tbody = document.getElementById('liveBookingBody');
+    if(tbody) { tbody.style.opacity = '0.5'; tbody.style.pointerEvents = 'none'; }
+
     await moveLiveBooking(bookingId, targetDate, targetTime, targetTrainer);
+
+    if(tbody) { tbody.style.opacity = '1'; tbody.style.pointerEvents = 'auto'; }
 };
+
+// Global failsafe for drag release outside targets
+document.addEventListener('dragend', () => { window.IS_DRAGGING_LIVE = false; });
 
 async function moveLiveBooking(id, date, time, trainer) {
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
@@ -1281,31 +1295,28 @@ async function confirmBooking() {
     if(btn) { btn.innerText = "Checking Availability..."; btn.disabled = true; }
 
     try {
-        // 1. CRITICAL: Force Sync before validating to prevent double-booking
-        // This pulls the very latest bookings from the cloud (Smart Merge).
-        if(typeof loadFromServer === 'function') {
-            const success = await loadFromServer(true); 
-            if (!success) {
-                alert("Network Error: Unable to sync with schedule server. Please check your connection and try again.");
+        // 1. ATOMIC COLLISION CHECK (TIMEBOMB 3 FIX)
+        // Bypass slow queue and query Supabase directly for this exact slot
+        if (window.supabaseClient) {
+            const { data: conflict, error } = await window.supabaseClient.from('live_bookings')
+                .select('id')
+                .eq('data->>date', PENDING_BOOKING.date)
+                .eq('data->>time', PENDING_BOOKING.time)
+                .eq('data->>trainer', PENDING_BOOKING.trainer)
+                .neq('data->>status', 'Cancelled');
+                
+            if (conflict && conflict.length > 0) {
+                alert("This slot was just taken by another user. Please choose another time.");
+                closeBookingModal();
+                if(typeof loadFromServer === 'function') await loadFromServer(true); // Heal local state
+                renderLiveTable(); 
                 return;
             }
         }
 
-        // 2. Re-Read Data (It might have changed after the sync)
+        // 2. Read Data
         const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
         
-        // VALIDATION 1: Slot Taken? (Specific Trainer Slot)
-        const isSlotTaken = bookings.some(b => 
-            b.date === PENDING_BOOKING.date && 
-            b.time === PENDING_BOOKING.time && 
-            b.trainer === PENDING_BOOKING.trainer &&
-            b.status !== 'Cancelled'
-        );
-        if(isSlotTaken) {
-            alert("This slot was just taken by another user. Please choose another time.");
-            closeBookingModal(); renderLiveTable(); return;
-        }
-
         // VALIDATION 2: User booking > 1 session per hour?
         const isUserBookedThisHour = bookings.some(b => 
             b.date === PENDING_BOOKING.date && 

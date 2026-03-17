@@ -30,7 +30,7 @@
 | `rosters` | Object | Blob | Group definitions `{ "GroupA": ["User1", "User2"] }`. |
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
-| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_task_submissions`, `tl_personal_lists`, `tl_backend_data`. |
+| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`. |
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
@@ -48,6 +48,7 @@
 | `graduated_agents` | Array | Row (`archived_users`) | Archived data for former trainees. |
 | `linkRequests` | Array | Row (`link_requests`) | TL requests for assessment links. |
 | `calendarEvents` | Array | Row (`calendar_events`) | Custom calendar items. |
+
 
 ### Row-Level Map (`ROW_MAP`)
 Maps local `localStorage` keys to Supabase tables.
@@ -67,6 +68,7 @@ Maps local `localStorage` keys to Supabase tables.
 - `graduated_agents` -> `public.archived_users`
 - `linkRequests` -> `public.link_requests`
 - `calendarEvents` -> `public.calendar_events`
+- `tl_task_submissions` -> `public.tl_task_submissions`
 - `network_diagnostics` -> `public.network_diagnostics`
 
 ---
@@ -78,7 +80,7 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/main.js` (Bootloader)
 - **Responsibility:** App initialization, version checks, failover recovery, and global event listeners.
 - **Key Functions:**
-    - `window.onload`: Main entry point. Checks `last_connected_server` for migration. Calls `loadFromServer`.
+    - `window.onload`: Main entry point. Checks `last_connected_server` for server migration logic. Calls `loadFromServer`.
     - `loadFromServer()`: **CRITICAL**. Orchestrates the sync process. Returns `true` on partial/full success.
     - `startRealtimeSync()`: Starts the background polling loops for Data Sync and Heartbeat.
     - `applySystemConfig()`: Applies hot-reload settings (Announcements, Sync Rates).
@@ -89,20 +91,18 @@ Maps local `localStorage` keys to Supabase tables.
  - **Responsibility:** Data synchronization logic (Pull/Push/Merge) and **Realtime Subscriptions**.
 - **Key Functions:**
     - `loadFromServer(silent)`: Pulls data.
-        - **Phase A (Blobs):** Checks `updated_at` timestamps in `app_documents`.
-        - **Phase B (Rows):** Queries tables for rows newer than local `row_sync_ts`.
-        - **Phase B (Authoritative):** For critical tables (`live_bookings`), fetches ALL rows and overwrites local cache.
-        - **Phase C (Monitor):** Merges `monitor_state` table.
+        - **Blobs:** Checks `updated_at` timestamps in `app_documents`.
+        - **Rows:** Queries tables for rows newer than local `row_sync_ts`.
+        - **Ghost Slayer:** Actively purges local cache of items deleted on other clients (Tombstones & Revoked Users).
+        - **Local Edits Shield:** Rejects incoming server data if a local, unsynced edit exists for the same item, preventing overwrites.
     - `saveToServer(keys, force)`: Pushes data.
-        - **Strategy A (Rows):** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue or Authoritative Call.
-        - **Strategy B (Monitor):** Upserts to `monitor_state`.
-        - **Strategy C (Blobs):** Upserts to `app_documents`. **Guarded:** `system_config` requires Super Admin.
+        - **Rows:** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue.
+        - **Blobs:** Upserts to `app_documents`. **Guarded:** `system_config` requires Super Admin.
+        - **Debounced Queue:** Non-forced saves are queued and processed after a 3-second delay to prevent UI freezing.
     - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name/Composite Key.
-    - `setupRealtimeListeners()`: **NEW**. Subscribes to Supabase `postgres_changes` for `monitor_state`, `attendance`, `sessions`, `live_bookings`, and `live_sessions`.
-    - `handleMonitorRealtime(payload)`: Updates local `monitor_data` and triggers `StudyMonitor.updateWidget`.
-    - `handleAttendanceRealtime(payload)`: Updates local `attendance_records` and triggers `updateAttendanceUI`.
-    - `handleLiveBookingRealtime(payload)`: Updates bookings and triggers `renderLiveTable`.
-    - `handleLiveSessionRealtime(payload)`: Updates local `liveSessions` and triggers `renderDashboard` to show/hide "Join Now" banner.
+    - `setupRealtimeListeners()`: Subscribes to Supabase `postgres_changes` for live updates.
+    - `handle...Realtime(payload)`: Pushes incoming realtime events into a temporary `INCOMING_DATA_QUEUE`.
+    - `processIncomingDataQueue()`: Processes the queue when the user is not interacting with the UI. This prevents focus-stealing and UI thrashing by batching updates.
 
 #### `js/auth.js` (Authentication)
 - **Responsibility:** Login, Session Management, Security Checks.
@@ -137,7 +137,7 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/assessment_admin.js` (Grading)
 - **Responsibility:** Marking queue and manual grading.
 - **Key Functions:**
-    - `loadMarkingQueue()`: Lists pending submissions.
+    - `loadMarkingQueue()`: Lists pending submissions. Includes "Ghost Data" cleanup to hide invalid retakes and "Auto-Repair" to recover falsely archived tests.
     - `openAdminMarking(id)`: Opens the grading modal.
     - `finalizeAdminMarking(id)`: Saves final scores and creates a permanent `record`.
 
@@ -153,9 +153,10 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/vetting_arena.js` (Security)
 - **Responsibility:** Secure testing environment (Kiosk Mode).
 - **Key Functions:**
-    - `enterArena()`: Locks the terminal (Kiosk Mode).
+    - `enterArena()`: Locks the terminal (Kiosk Mode) and hides the sidebar.
     - `checkSystemCompliance()`: Checks for 2nd monitors or forbidden apps via IPC.
-    - `renderAdminArena()`: Shows live status of all trainees in the session.
+    - `renderAdminArena()`: Renders the multi-session Admin UI, supporting **Split View** and **Tabbed View** for monitoring concurrent groups.
+    - `patchTraineeStatus()`: Safely updates a single trainee's status on the server without overwriting other data, preventing race conditions.
     - `updateTraineeStatus()`: Pushes status (Started/Blocked/Completed) to `vetting_sessions`.
 
 ### Admin Modules
@@ -185,9 +186,10 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/ai_core.js` (AI System Analyst)
 - **Responsibility:** Gemini Integration (`gemini-1.5-flash`). Handles natural language commands, system diagnostics, and error analysis.
 - **Key Functions:**
-    - `processRequest(text)`: Sends prompts to Gemini API.
+    - `processRequest(text)`: Sends prompts to Gemini API, checking a local `tools` registry first for direct execution (e.g., `system_status`, `read_errors`, `repair_database`).
     - `analyzeError(msg)`: Auto-diagnoses system errors.
     - `runSelfRepair()`: Fixes data integrity issues.
+    - `analyzeForImprovements()`: Background task that analyzes logs and suggests system improvements.
 
 #### `js/schedule.js` (Calendar)
 - **Responsibility:** Scheduling and Live Bookings.
@@ -196,8 +198,8 @@ Maps local `localStorage` keys to Supabase tables.
     - `renderLiveTable()`: Renders the Live Assessment booking grid.
     - `confirmBooking()`: Validates and saves a new booking.
     - `editDailyTrainers(date)`: Configures specific trainers for a single day.
-    - `openLiveStatsModal()`: Shows booking stats breakdown per trainee.
-    - `liveDrop(event)`: Handles Drag & Drop re-scheduling for live bookings.
+    - `openAdminBookingModal()`: Allows Admins to manually assign a trainee to any empty slot.
+    - `liveDrop(event)`: Handles Drag & Drop re-scheduling. Uses `force=true` save to prevent appointments from "bouncing" back.
 
 #### `js/network_diag.js` (Network Diagnostics)
 - **Responsibility:** Real-time network health check (Ping Gateway/Internet/Server) and System Stats (CPU/RAM/Disk).
@@ -313,12 +315,8 @@ Maps local `localStorage` keys to Supabase tables.
 
 ### E. Global Realtime Sync (Push Architecture)
 1.  **Initialization:** `data.js` -> `setupRealtimeListeners()` connects to Supabase channels.
-2.  **Events:**
-    *   `monitor_state`: Updates Agent Activity Monitor instantly.
-    *   `attendance`: Updates Attendance Register instantly.
-    *   `sessions`: Updates Active Users dashboard widget instantly.
-    *   `live_sessions`: Updates Trainee dashboard instantly with "Join Now" banner.
-3.  **Handling:** Incoming payloads update `localStorage` directly and trigger specific UI refresh functions (`updateWidget`, `updateAttendanceUI`, `updateDashboardHealth`).
+2.  **Queueing:** Incoming `postgres_changes` events for `monitor_state`, `attendance`, `live_bookings`, and `live_sessions` are pushed into a temporary `INCOMING_DATA_QUEUE`. This prevents the UI from refreshing while the user is typing or interacting.
+3.  **Processing:** `processIncomingDataQueue()` runs on an interval. If the user is idle, it processes the entire queue, batching updates by type. It then updates the relevant `localStorage` keys and triggers a single UI refresh for each module (`StudyMonitor.updateWidget`, `updateAttendanceUI`, etc.). This architecture ensures a smooth, non-disruptive user experience.
 
 ---
 
@@ -327,6 +325,7 @@ Maps local `localStorage` keys to Supabase tables.
 - `manual-update-check`: Triggers auto-updater.
 - `set-kiosk-mode`: Toggles Kiosk mode.
 - `get-process-list`: Returns running processes (for Vetting).
+- `get-screen-count`: Returns the number of connected displays.
 - `get-active-window`: Returns title of foreground window (for Study Monitor).
 - `set-update-channel`: Switches between 'prod' and 'staging' (beta) update channels.
 - `perform-network-test`: Pings a target IP/Host and returns latency in ms.
@@ -334,6 +333,7 @@ Maps local `localStorage` keys to Supabase tables.
 - `open-devtools`: Opens the Chromium Developer Tools.
 
 ---
+
 
 ## 6. Release & Update Protocol (AI Instructions)
 
