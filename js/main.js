@@ -1726,6 +1726,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.42": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Live Assessment Scheduling:</strong> Resolved race conditions causing drag-and-drop appointment moves to fail or revert.</li>
+                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Admins can now manually assign trainees to empty slots directly from the booking grid to recover lost bookings.</li>
+            </ul>`,
         "2.4.41": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Grading Queue:</strong> Fixed a critical bug where legitimate retakes were mistakenly flagged as 'Ghost Data' and hidden from the Marking Queue.</li>

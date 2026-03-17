@@ -47,9 +47,9 @@ async function secureScheduleSave() {
         }
 
         try {
-            // PARAMETER 'false' = SAFE MERGE (Prevents booking conflicts)
-            // ADDED: liveSchedules
-            await saveToServer(['schedules', 'liveBookings', 'cancellationCounts', 'liveSchedules'], false); 
+            // CRITICAL FIX: Changed to force=true to make saving INSTANT and authoritative.
+            // This completely eliminates the "3 attempts to drag and drop" bug.
+            await saveToServer(['schedules', 'liveBookings', 'cancellationCounts', 'liveSchedules'], true); 
         } catch(e) {
             console.error("Schedule Cloud Sync Error:", e);
         } finally {
@@ -638,8 +638,8 @@ async function renderLiveTable() {
                             html += `<button class="btn-slot btn-book" style="margin-bottom:8px;" onclick="openBookingModal('${dateKey}', '${time}', '${trainer}')">+ Book</button>`;
                         }
                     } else {
-                         // Admin sees empty
-                         html += `<div style="padding:10px; border:1px dashed var(--border-color); border-radius:4px; margin-bottom:8px; text-align:center; color:var(--text-muted); font-size:0.7rem;">Available</div>`;
+                         // Admin can manually assign a trainee
+                         html += `<button class="btn-slot" style="margin-bottom:8px; border:1px dashed var(--border-color); color:var(--text-muted); background:transparent;" onclick="openAdminBookingModal('${dateKey}', '${time}', '${trainer}')" title="Manually add a trainee to this slot">+ Assign Trainee</button>`;
                     }
                 }
 
@@ -1170,8 +1170,105 @@ function openBookingModal(date, time, trainer) {
 function closeBookingModal() {
     document.getElementById('bookingModal').classList.add('hidden');
     PENDING_BOOKING = null;
+    
+    const extraDiv = document.getElementById('adminBookingExtra');
+    if (extraDiv) extraDiv.innerHTML = '';
+    
+    const confirmBtn = document.querySelector('#bookingModal .btn-primary');
+    if (confirmBtn) confirmBtn.setAttribute('onclick', 'confirmBooking()');
 }
 
+// --- NEW: ADMIN MANUAL ASSIGNMENT ---
+window.openAdminBookingModal = function(date, time, trainer) {
+    PENDING_BOOKING = { date, time, trainer };
+    const modal = document.getElementById('bookingModal');
+    
+    document.getElementById('bookingDetailsText').innerHTML = `
+        Assigning to <strong style="color:var(--primary);">${trainer}</strong><br>
+        ${date} @ ${time}`;
+    
+    const assessSelect = document.getElementById('bookingAssessment');
+    assessSelect.innerHTML = '';
+    
+    let traineeSelectHtml = `<label style="font-weight:bold; display:block; margin-top:10px; margin-bottom:5px;">Select Trainee:</label>
+                             <select id="adminBookingTrainee" style="width:100%; padding:10px; margin-bottom:15px;">`;
+                             
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+    const currentSched = liveSchedules[ACTIVE_LIVE_SCHED_ID];
+    
+    let trainees = [];
+    if (currentSched && currentSched.assigned && rosters[currentSched.assigned]) {
+        trainees = rosters[currentSched.assigned];
+    } else {
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        trainees = users.filter(u => u.role === 'trainee').map(u => u.user);
+    }
+    
+    trainees.sort().forEach(t => { traineeSelectHtml += `<option value="${t}">${t}</option>`; });
+    traineeSelectHtml += `</select>`;
+    
+    let extraDiv = document.getElementById('adminBookingExtra');
+    if (!extraDiv) {
+        extraDiv = document.createElement('div');
+        extraDiv.id = 'adminBookingExtra';
+        assessSelect.parentNode.insertBefore(extraDiv, assessSelect);
+    }
+    extraDiv.innerHTML = traineeSelectHtml;
+
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const liveNames = new Set();
+    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
+    
+    Array.from(liveNames).sort().forEach(name => {
+        assessSelect.add(new Option(name, name));
+    });
+
+    const confirmBtn = document.querySelector('#bookingModal .btn-primary');
+    confirmBtn.setAttribute('onclick', 'confirmAdminBooking()');
+
+    modal.classList.remove('hidden');
+};
+
+window.confirmAdminBooking = async function() {
+    if(!PENDING_BOOKING) return;
+    
+    const trainee = document.getElementById('adminBookingTrainee').value;
+    const assess = document.getElementById('bookingAssessment').value;
+    
+    if(!trainee) return alert("Select a trainee.");
+    if(!assess) return alert("Select an assessment.");
+
+    const btn = document.querySelector('#bookingModal .btn-primary');
+    if(btn) { btn.innerText = "Assigning..."; btn.disabled = true; }
+
+    try {
+        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        
+        const newBooking = {
+            id: Date.now().toString(),
+            date: PENDING_BOOKING.date,
+            time: PENDING_BOOKING.time,
+            trainer: PENDING_BOOKING.trainer,
+            trainee: trainee,
+            assessment: assess,
+            status: 'Booked'
+        };
+
+        bookings.push(newBooking);
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+        
+        await secureScheduleSave();
+        
+        closeBookingModal();
+        renderLiveTable();
+    } catch(e) {
+        console.error(e);
+        alert("Failed to assign trainee.");
+    } finally {
+        if(btn) { btn.innerText = "Confirm"; btn.disabled = false; }
+    }
+};
 // UPDATED: CONFIRM BOOKING WITH CONFLICT DETECTION
 async function confirmBooking() {
     if(!PENDING_BOOKING) return;
