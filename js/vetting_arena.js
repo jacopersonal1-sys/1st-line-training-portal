@@ -3,13 +3,8 @@
 
 // --- ADMIN CONTROLS ---
 
-let ADMIN_MONITOR_INTERVAL = null;
 let ADMIN_VETTING_TIMER_TICK = null;
-let TRAINEE_NET_POLLER = null;
 let TRAINEE_LOCAL_POLLER = null;
-let VETTING_REALTIME_UNSUB = null;
-let ADMIN_VETTING_REALTIME_UNSUB = null;
-let VETTING_SAVE_TIMEOUT = null; // OPTIMIZATION: Debounce saves
 let SECURITY_VIOLATION_INTERVAL = null; // Track the fast security poll
 let IS_SUBMITTING_VIOLATION = false; // Prevent alert loops
 let ACTIVE_VETTING_TAB = null; // Track which session the Admin is currently viewing
@@ -50,8 +45,6 @@ function loadVettingArena() {
 }
 
 function renderAdminArena() {
-    if (ADMIN_MONITOR_INTERVAL) clearTimeout(ADMIN_MONITOR_INTERVAL);
-    if (ADMIN_VETTING_REALTIME_UNSUB) { try { ADMIN_VETTING_REALTIME_UNSUB(); } catch (e) {} ADMIN_VETTING_REALTIME_UNSUB = null; }
 
     // INJECT STYLES FOR VISUALS
     if (!document.getElementById('vetting-visuals')) {
@@ -171,42 +164,6 @@ function renderAdminArena() {
                 updateVettingStatsUI(currentSession);
             }
         }
-    }
-
-    // Realtime Subscription
-    if (window.supabaseClient) {
-        const channel = window.supabaseClient.channel('vetting_room')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
-                let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
-                if (payload.eventType === 'DELETE') {
-                    sessions = sessions.filter(s => s.sessionId !== payload.old.id);
-                } else if (payload.new && payload.new.data !== undefined) {
-                    const newData = payload.new.data;
-                    if (!newData) return; // Safety check
-                    const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
-                    if (newData.active) {
-                        if (idx > -1) sessions[idx] = newData;
-                        else sessions.push(newData);
-                    } else {
-                        sessions = sessions.filter(s => s.sessionId !== newData.sessionId);
-                    }
-                }
-                localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
-                renderAdminArena();
-            })
-            .subscribe();
-        ADMIN_VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
-    }
-
-    // Auto-Refresh Monitor every 5 seconds if active
-    if (activeSessions.length > 0) {
-        ADMIN_MONITOR_INTERVAL = setTimeout(async () => {
-            try {
-                await ensureVettingServerState();
-                await adminPollVettingSession();
-            } catch(e) { console.error("Vetting Poll Error:", e); }
-            renderAdminArena();
-        }, 5000);
     }
 }
 
@@ -735,9 +692,6 @@ function renderTraineeArena() {
                 <h3>Arena Closed</h3>
                 <p style="color:var(--text-muted);">There is no active vetting session at this moment.</p>
             </div>`;
-            
-        // Start Polling for Session Start (5s)
-        TRAINEE_NET_POLLER = setInterval(pollVettingSession, 5000);
         return;
     }
 
@@ -851,35 +805,10 @@ function renderTraineeArena() {
 }
 
 function stopTraineePollers() {
-    if (TRAINEE_NET_POLLER) clearInterval(TRAINEE_NET_POLLER);
     if (TRAINEE_LOCAL_POLLER) clearInterval(TRAINEE_LOCAL_POLLER);
-    if (VETTING_REALTIME_UNSUB) { try { VETTING_REALTIME_UNSUB(); } catch (e) {} VETTING_REALTIME_UNSUB = null; }
 }
 
 function startTraineePreFlight() {
-    // Prefer Realtime for session updates. Fallback to polling if unavailable.
-    let usingRealtime = false;
-    if (window.supabaseClient) {
-        // Listen to ALL changes, filter in handler
-        const channel = window.supabaseClient.channel('vetting_room_trainee')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
-                if (payload.eventType === 'DELETE') {
-                    checkAndHandleSession(null, 'DELETE', payload.old.id);
-                } else {
-                    if (payload.new && payload.new.data === undefined) return;
-                    const serverSession = payload.new ? payload.new.data : { active: false };
-                    checkAndHandleSession(serverSession);
-                }
-            })
-            .subscribe();
-        VETTING_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
-        usingRealtime = true;
-    }
-
-    // Fallback network poll (5s)
-    if (!usingRealtime) {
-        TRAINEE_NET_POLLER = setInterval(pollVettingSession, 5000);
-    }
 
     // 2. Local Security Poll (2s) - Check Screens/Apps
     // This prevents the "Stuck" issue by constantly re-evaluating
@@ -1212,22 +1141,14 @@ async function updateTraineeStatus(status, timerStr = "") {
 
     localStorage.setItem('vettingSession', JSON.stringify(session));
     
-    // OPTIMIZATION: Debounce Cloud Save (1.5s)
-    // Prevents database throttling if status flickers (e.g. app opened/closed quickly)
-    if (VETTING_SAVE_TIMEOUT) clearTimeout(VETTING_SAVE_TIMEOUT);
-    
-    VETTING_SAVE_TIMEOUT = setTimeout(() => {
-        // FIX: Use Patch instead of Overwrite to prevent wiping other trainees
-        let currentLocal = null;
-        try {
-            currentLocal = JSON.parse(localStorage.getItem('vettingSession'));
-        } catch(e) {
-            console.error("Vetting Session Parse Error", e);
-        }
-        if (currentLocal && currentLocal.trainees && currentLocal.trainees[CURRENT_USER.user]) {
-             patchTraineeStatus(CURRENT_USER.user, currentLocal.trainees[CURRENT_USER.user]);
-        }
-    }, 1500 + Math.random() * 2000); // 1.5s to 3.5s jitter prevents Postgres JSONB lock contention
+    // INSTANT PATCH: Replaced debounce with immediate patch to prevent data loss.
+    let currentLocal = null;
+    try {
+        currentLocal = JSON.parse(localStorage.getItem('vettingSession'));
+    } catch(e) {}
+    if (currentLocal && currentLocal.trainees && currentLocal.trainees[CURRENT_USER.user]) {
+         patchTraineeStatus(CURRENT_USER.user, currentLocal.trainees[CURRENT_USER.user]);
+    }
 }
 
 let SECURITY_WARNING_COUNT = 0;

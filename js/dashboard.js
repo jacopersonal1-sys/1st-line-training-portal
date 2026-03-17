@@ -1797,6 +1797,39 @@ function buildTraineeWidgets(container) {
     else setTimeout(initCalendar, 500);
 }
 
+// --- NEW: SOFT BANNER UPDATE (Prevents DOM Wiping) ---
+window.updateLiveBannerUI = function() {
+    if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
+    
+    const container = document.getElementById('dashboard-view');
+    if (!container) return;
+
+    const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const now = Date.now();
+    const myLive = liveSessions.find(s => {
+        if (s.trainee !== CURRENT_USER.user || !s.active) return false;
+        const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
+        return (now - start < 43200000);
+    });
+
+    let existingBanner = document.getElementById('dash-live-banner');
+    
+    if (myLive && !existingBanner) {
+        // Inject banner safely at the top
+        const bannerHtml = `
+        <div id="dash-live-banner" class="dash-panel full-width" style="background:rgba(39, 174, 96, 0.1); border:1px solid #2ecc71; animation: pulse 2s infinite; margin-bottom:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div><h3 style="color:#2ecc71; margin:0;"><i class="fas fa-satellite-dish"></i> Live Session Started!</h3><p style="margin:5px 0 0 0;">Your trainer is waiting in the arena.</p></div>
+                <button class="btn-success" onclick="showTab('live-execution')">Join Now</button>
+            </div>
+        </div>`;
+        container.insertAdjacentHTML('afterbegin', bannerHtml);
+    } else if (!myLive && existingBanner) {
+        // Remove banner if session ended
+        existingBanner.remove();
+    }
+};
+
 // --- DAILY TIP MANAGEMENT (ADMIN) ---
 
 function buildTipManagerHtml() {

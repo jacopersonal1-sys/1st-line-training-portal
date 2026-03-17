@@ -336,10 +336,11 @@ async function loadFromServer(silent = false) {
             let query = window.supabaseClient.from(tableName).select('data, updated_at');
             
             const isAuthoritative = AUTHORITATIVE_TABLES.includes(tableName);
+            const isFullAuthoritativePull = isAuthoritative && !silent;
             
             // If it's a silent background sync, ALWAYS treat it as a normal delta sync.
             // Authoritative full syncs should only be triggered by explicit UI actions (e.g., opening a tab via forceFullSync).
-            if (isAuthoritative && !silent) {
+            if (isFullAuthoritativePull) {
                 // This block will now rarely be hit by the main sync loop, only by direct calls.
                 if (tableName === 'live_sessions') {
                     const yesterday = new Date(Date.now() - 86400000).toISOString();
@@ -376,9 +377,9 @@ async function loadFromServer(silent = false) {
             }
             
             if (newRows && newRows.length > 0) {
-                if(!silent) console.log(`Downloaded ${newRows.length} rows for ${localKey} (${isAuthoritative ? 'Full' : 'Delta'})`);
+                if(!silent) console.log(`Downloaded ${newRows.length} rows for ${localKey} (${isFullAuthoritativePull ? 'Full' : 'Delta'})`);
                 
-                if (isAuthoritative) {
+                if (isFullAuthoritativePull) {
                     // AUTHORITATIVE SYNC: Server is Truth. Overwrite local.
                     const serverItems = newRows.map(r => r.data);
                     localStorage.setItem(localKey, JSON.stringify(serverItems));
@@ -494,7 +495,7 @@ async function loadFromServer(silent = false) {
                     localStorage.setItem(hashMapKey, JSON.stringify(hashMap));
                 }
                 }
-            } else if (isAuthoritative && !rowErr) {
+            } else if (isFullAuthoritativePull && !rowErr) {
                 // If authoritative and 0 rows returned, it means table is empty. Clear local.
                 if(!silent) console.log(`Clearing ${localKey} (Server Empty)`);
                 localStorage.setItem(localKey, '[]');
@@ -2014,9 +2015,17 @@ function setupRealtimeListeners() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'live_bookings' }, (payload) => {
             handleLiveBookingRealtime(payload);
         })
+        // 4. LIVE BOOKINGS (Schedule Updates)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'live_bookings' }, (payload) => {
+            handleLiveBookingRealtime(payload);
+        })
         // 5. LIVE SESSIONS (Instant Dashboard Alert)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, (payload) => {
             handleLiveSessionRealtime(payload);
+        })
+        // 6. VETTING SESSIONS
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
+            handleVettingRealtime(payload);
         })
         .subscribe();
 }
@@ -2055,8 +2064,12 @@ function processIncomingDataQueue() {
 
     // PROTECTION: Don't update if user is actively interacting/typing.
     // OVERRIDE: If user hasn't interacted for 30s, assume they left focus by accident and process anyway.
+    // HIGH-PRIORITY OVERRIDE: If the user is in the Vetting or Live Arena, process immediately to prevent interaction lag.
+    const isLiveArenaActive = document.getElementById('live-execution')?.classList.contains('active');
+    const isVettingArenaActive = document.getElementById('vetting-arena')?.classList.contains('active');
+
     const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
-    if (isUserTyping() && timeSinceInteraction < 30000) {
+    if (isUserTyping() && timeSinceInteraction < 30000 && !isLiveArenaActive && !isVettingArenaActive) {
         return;
     }
 
@@ -2075,7 +2088,8 @@ function processIncomingDataQueue() {
         monitor: [],
         attendance: [],
         bookings: [],
-        sessions: []
+        sessions: [],
+        vetting: []
     };
 
     queue.forEach(item => {
@@ -2106,9 +2120,9 @@ function processIncomingDataQueue() {
                 records = records.filter(r => r.id !== p.old.id);
             } else {
                 const newRow = p.new;
-                if (newRow.data === undefined) return; // Ignore Postgres WAL partial updates
+                if (!newRow.data) return; // Ignore Postgres WAL partial updates
 
-                const item = newRow.data || {};
+                const item = newRow.data;
                 item.id = newRow.id;
                 item.user = newRow.user_id;
                 const idx = records.findIndex(r => r.id === item.id);
@@ -2128,9 +2142,9 @@ function processIncomingDataQueue() {
                 bookings = bookings.filter(b => b.id !== p.old.id);
             } else {
                 const newRow = p.new;
-                if (newRow.data === undefined) return; // Ignore Postgres WAL partial updates
+                if (!newRow.data) return; // Ignore Postgres WAL partial updates
 
-                const item = newRow.data || {};
+                const item = newRow.data;
                 item.id = newRow.id;
                 const idx = bookings.findIndex(b => b.id === item.id);
                 if (idx > -1) bookings[idx] = item;
@@ -2149,7 +2163,7 @@ function processIncomingDataQueue() {
             if (p.eventType === 'DELETE') {
                 allSessions = allSessions.filter(s => s.sessionId !== p.old.id);
             } else {
-                if (p.new.data === undefined) return; // Ignore Postgres WAL partial updates
+                if (!p.new.data) return; // Ignore Postgres WAL partial updates
                 const newData = p.new.data;
                 if (newData) {
                     if (!newData.sessionId) newData.sessionId = p.new.id;
@@ -2159,9 +2173,45 @@ function processIncomingDataQueue() {
             }
         });
         localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+        
+        // Update Live Execution UI instantly if open
+        if (typeof processLiveSessionState === 'function') processLiveSessionState(allSessions);
+
+        // SOFT UPDATE: Only update the banner, do NOT re-render the whole dashboard
         const dashView = document.getElementById('dashboard-view');
-        if (dashView && dashView.classList.contains('active') && typeof renderDashboard === 'function') {
-            renderDashboard();
+        if (dashView && dashView.classList.contains('active') && typeof updateLiveBannerUI === 'function') {
+            updateLiveBannerUI();
+        }
+    }
+
+    // 5. Process Vetting
+    if (batches.vetting.length > 0) {
+        let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        batches.vetting.forEach(p => {
+            if (p.eventType === 'DELETE') {
+                sessions = sessions.filter(s => s.sessionId !== p.old.id);
+                const local = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+                if (local.sessionId === p.old.id && typeof handleVettingUpdate === 'function') {
+                    handleVettingUpdate({ active: false });
+                }
+            } else {
+                const newData = p.new.data;
+                if (!newData) return;
+                const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
+                if (newData.active) {
+                    if (idx > -1) sessions[idx] = newData;
+                    else sessions.push(newData);
+                } else {
+                    sessions = sessions.filter(s => s.sessionId !== newData.sessionId);
+                }
+                if (typeof checkAndHandleSession === 'function') checkAndHandleSession(newData);
+            }
+        });
+        localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+        
+        const activeTab = document.querySelector('section.active');
+        if (activeTab && activeTab.id === 'vetting-arena' && typeof renderAdminArena === 'function') {
+            renderAdminArena(); // Refresh Admin UI
         }
     }
 
@@ -2185,8 +2235,18 @@ function handleLiveBookingRealtime(payload) {
     updateQueueIndicator();
 }
 
+function handleLiveBookingRealtime(payload) {
+    INCOMING_DATA_QUEUE.push({ type: 'bookings', payload });
+    updateQueueIndicator();
+}
+
 function handleLiveSessionRealtime(payload) {
     INCOMING_DATA_QUEUE.push({ type: 'sessions', payload });
+    updateQueueIndicator();
+}
+
+function handleVettingRealtime(payload) {
+    INCOMING_DATA_QUEUE.push({ type: 'vetting', payload });
     updateQueueIndicator();
 }
 

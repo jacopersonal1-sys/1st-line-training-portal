@@ -1726,6 +1726,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.44": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Live Assessment Stability:</strong> Completely overhauled the Live Assessment grid to prevent race conditions, double-bookings, and mid-interaction UI resets.</li>
+                <li style="margin-bottom: 8px;"><strong>Drag & Drop Locks:</strong> Added transactional safety locks to prevent ghost data when scheduling trainers.</li>
+            </ul>`,
         "2.4.43": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Critical Stability Fix:</strong> Resolved "Disappearing Data" bug in Live Bookings, Attendance, and Activity Monitor caused by PostgreSQL WAL optimization dropping payload data during bulk syncs.</li>

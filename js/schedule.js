@@ -411,14 +411,6 @@ async function renderLiveTable() {
         }
     }
 
-    // 2. Realtime Subscription for Admins/Trainees
-    if (typeof subscribeToDocKey === 'function' && !LIVE_SCHEDULE_REALTIME_UNSUB) {
-        LIVE_SCHEDULE_REALTIME_UNSUB = subscribeToDocKey('liveSchedules', (content) => {
-            localStorage.setItem('liveSchedules', JSON.stringify(content));
-            renderLiveTable();
-        });
-    }
-
     // 1. MIGRATION & INIT
     let liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || 'null');
     if (!liveSchedules) {
@@ -704,7 +696,7 @@ window.liveDragLeave = function(e) {
     }
 };
 
-window.liveDrop = async function(e) {
+window.liveDrop = function(e) { // No longer async
     e.preventDefault();
     window.IS_DRAGGING_LIVE = false;
     const zone = e.target.closest('.live-drop-zone');
@@ -721,35 +713,51 @@ window.liveDrop = async function(e) {
 
     if (!bookingId || !targetDate || !targetTime || !targetTrainer) return;
     
-    // UI Lock during transaction (TIMEBOMB 4 FIX)
-    const tbody = document.getElementById('liveBookingBody');
-    if(tbody) { tbody.style.opacity = '0.5'; tbody.style.pointerEvents = 'none'; }
-
-    await moveLiveBooking(bookingId, targetDate, targetTime, targetTrainer);
-
-    if(tbody) { tbody.style.opacity = '1'; tbody.style.pointerEvents = 'auto'; }
+    // No UI lock needed, moveLiveBooking is now optimistic
+    moveLiveBooking(bookingId, targetDate, targetTime, targetTrainer);
 };
 
 // Global failsafe for drag release outside targets
 document.addEventListener('dragend', () => { window.IS_DRAGGING_LIVE = false; });
 
 async function moveLiveBooking(id, date, time, trainer) {
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const originalBookingsJSON = localStorage.getItem('liveBookings') || '[]';
+    const bookings = JSON.parse(originalBookingsJSON);
     const targetBooking = bookings.find(b => b.id === id);
     
     if (!targetBooking) return;
 
     // Check Target Availability
     const conflict = bookings.find(b => b.date === date && b.time === time && b.trainer === trainer && b.status !== 'Cancelled' && b.id !== id);
-    if (conflict) return alert("Target slot is already occupied.");
+    if (conflict) {
+        if(typeof showToast === 'function') showToast("Target slot is already occupied.", "error");
+        return;
+    }
 
     targetBooking.date = date;
     targetBooking.time = time;
     targetBooking.trainer = trainer;
     
+    // Optimistic UI Update
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
-    await secureScheduleSave();
     renderLiveTable();
+
+    try {
+        if (window.supabaseClient) {
+            const { error } = await window.supabaseClient
+                .from('live_bookings')
+                .update({ data: targetBooking })
+                .eq('id', id);
+            if (error) throw error; // Throw to be caught by catch block
+        }
+    } catch (e) {
+        // REVERT UI on failure
+        console.error("Failed to move booking, reverting UI.", e);
+        if (typeof showToast === 'function') showToast("Move failed. Reverting.", "error");
+        
+        localStorage.setItem('liveBookings', originalBookingsJSON); // Restore snapshot
+        renderLiveTable(); // Re-render to snap back
+    }
 }
 
 // --- NEW: LIVE ASSESSMENT STATS MODAL ---
@@ -1250,14 +1258,16 @@ window.confirmAdminBooking = async function() {
     const trainee = document.getElementById('adminBookingTrainee').value;
     const assess = document.getElementById('bookingAssessment').value;
     
-    if(!trainee) return alert("Select a trainee.");
-    if(!assess) return alert("Select an assessment.");
+    if (!trainee) return alert("Select a trainee.");
+    if (!assess) return alert("Select an assessment.");
 
     const btn = document.querySelector('#bookingModal .btn-primary');
     if(btn) { btn.innerText = "Assigning..."; btn.disabled = true; }
 
     try {
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        // Check for conflicts directly on the server
+        const { data: conflict } = await window.supabaseClient.from('live_bookings').select('id').eq('data->>date', PENDING_BOOKING.date).eq('data->>time', PENDING_BOOKING.time).eq('data->>trainer', PENDING_BOOKING.trainer).neq('data->>status', 'Cancelled');
+        if (conflict && conflict.length > 0) return alert("This slot is already taken.");
         
         const newBooking = {
             id: Date.now().toString(),
@@ -1268,14 +1278,16 @@ window.confirmAdminBooking = async function() {
             assessment: assess,
             status: 'Booked'
         };
-
-        bookings.push(newBooking);
-        localStorage.setItem('liveBookings', JSON.stringify(bookings));
         
-        await secureScheduleSave();
+        // Direct Supabase call
+        if (window.supabaseClient) {
+            const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee });
+            if (error) throw error;
+        }
         
         closeBookingModal();
-        renderLiveTable();
+        // No render call needed, Realtime listener will handle it.
+
     } catch(e) {
         console.error(e);
         alert("Failed to assign trainee.");
@@ -1352,14 +1364,13 @@ async function confirmBooking() {
             status: 'Booked'
         };
 
-        bookings.push(newBooking);
-        localStorage.setItem('liveBookings', JSON.stringify(bookings));
-        
-        // --- CLOUD SYNC (AUTHORITATIVE) ---
-        if (typeof saveToServer === 'function') await saveToServer(['liveBookings'], true);
-        
+        // Direct Supabase call
+        if (window.supabaseClient) {
+            const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee });
+            if (error) throw error;
+        }
+
         closeBookingModal();
-        renderLiveTable();
         if(typeof updateNotifications === 'function') updateNotifications();
 
     } catch (e) {
@@ -1393,14 +1404,18 @@ async function cancelBooking(id) {
         target.status = 'Cancelled';
         target.cancelledBy = CURRENT_USER.user;
         target.cancelledAt = new Date().toISOString();
+
+        // Direct Supabase call
+        if (window.supabaseClient) {
+            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target }).eq('id', id);
+            if (error) { alert("Failed to cancel booking."); console.error(error); return; }
+        }
+        
+        // Also save cancellation counts authoritatively
+        if(typeof saveToServer === 'function') {
+            await saveToServer(['cancellationCounts'], true);
+        }
     }
-    
-    localStorage.setItem('liveBookings', JSON.stringify(bookings));
-    // Also save cancellation counts authoritatively
-    if(typeof saveToServer === 'function') {
-        await saveToServer(['liveBookings', 'cancellationCounts'], true);
-    }
-    renderLiveTable();
 }
 
 async function markBookingComplete(id) {
@@ -1408,10 +1423,12 @@ async function markBookingComplete(id) {
     const target = bookings.find(b => b.id === id);
     if(target) {
         target.status = 'Completed';
+        // Direct Supabase call
+        if (window.supabaseClient) {
+            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target }).eq('id', id);
+            if (error) { alert("Failed to update booking."); console.error(error); return; }
+        }
     }
-    localStorage.setItem('liveBookings', JSON.stringify(bookings));
-    if(typeof saveToServer === 'function') await saveToServer(['liveBookings'], true);
-    renderLiveTable();
 }
 
 // --- ADMIN SETTINGS ---

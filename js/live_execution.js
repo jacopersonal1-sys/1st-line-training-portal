@@ -3,16 +3,11 @@
 
 let LIVE_POLLER = null;
 let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
-let LIVE_REALTIME_UNSUB = null;
-let LIVE_FALLBACK_POLLER = null;
 let LIVE_CONN_INTERVAL = null;
 let LIVE_TIMER_INTERVAL = null;
-let CURRENT_SOCKET_STATUS = 'CONNECTING';
 
 function loadLiveExecution() {
     if (LIVE_POLLER) clearInterval(LIVE_POLLER);
-    if (LIVE_FALLBACK_POLLER) clearInterval(LIVE_FALLBACK_POLLER);
-    if (LIVE_REALTIME_UNSUB) { try { LIVE_REALTIME_UNSUB(); } catch (e) {} LIVE_REALTIME_UNSUB = null; }
     if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
     
     if (LIVE_TIMER_INTERVAL) clearInterval(LIVE_TIMER_INTERVAL);
@@ -28,108 +23,9 @@ function loadLiveExecution() {
         renderTraineeLivePanel(container);
     }
 
-    // Prefer Realtime (push) to reduce reads on free tier.
-    // Fallback to polling if Realtime isn't available/configured.
-    let usingRealtime = false;
-    if (window.supabaseClient) {
-        // NEW: Subscribe to TABLE changes (Row-Level)
-        const channel = window.supabaseClient.channel('live_sessions_room')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, (payload) => {
-                // Use payload directly (Push) instead of re-fetching (Pull)
-                handleRealtimeLiveUpdate(payload);
-            })
-            .subscribe((status) => {
-                CURRENT_SOCKET_STATUS = status;
-                updateSocketStatusUI();
-            });
-
-        LIVE_REALTIME_UNSUB = () => { try { channel.unsubscribe(); } catch(e){} };
-        usingRealtime = true;
-
-        // Initial Sync
-        syncLiveSessionState();
-    }
-
-    /* REMOVED OLD BLOB SUBSCRIPTION LOGIC
-    if (typeof subscribeToDocKey === 'function') {
-        LIVE_REALTIME_UNSUB = subscribeToDocKey('liveSessions', (content) => {
-            // Keep local cache updated
-            const allSessions = content || [];
-            localStorage.setItem('liveSessions', JSON.stringify(allSessions));
-
-            // Update my local "liveSession" proxy and UI using existing logic
-            // (We reuse the same selector logic as the poller).
-            let myServerSession = null;
-            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
-                const viewingId = localStorage.getItem('currentLiveSessionId');
-                if (viewingId) {
-                    myServerSession = allSessions.find(s => s.sessionId === viewingId) || null;
-                }
-                // REJOIN LOGIC: if no explicit viewingId or not found, attach to first session
-                // where this user is the trainer
-                if (!myServerSession) {
-                    myServerSession = allSessions.find(s => s.trainer === CURRENT_USER.user && s.active) || { active: false };
-                    if (myServerSession && myServerSession.sessionId) {
-                        localStorage.setItem('currentLiveSessionId', myServerSession.sessionId);
-                    }
-                }
-            } else {
-                myServerSession = allSessions.find(s => s.trainee === CURRENT_USER.user && s.active) || { active: false };
-            }
-
-            const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
-            if (JSON.stringify(myServerSession) !== JSON.stringify(localSession)) {
-                localStorage.setItem('liveSession', JSON.stringify(myServerSession));
-                const c = document.getElementById('live-execution-content');
-                if (c) {
-                    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
-                        if (!document.querySelector('.admin-interaction-active') || myServerSession.currentQ !== localSession.currentQ) {
-                            renderAdminLivePanel(c);
-                        } else {
-                            updateAdminLiveView();
-                        }
-                    } else {
-                        if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
-                            renderTraineeLivePanel(c);
-                            LAST_RENDERED_Q = myServerSession.currentQ;
-                        }
-                    }
-                }
-            }
-        });
-        usingRealtime = !!LIVE_REALTIME_UNSUB;
-    } */
-
-    if (!usingRealtime) {
-        // Start Polling for updates (1s) for immediate updates
-        LIVE_POLLER = setInterval(syncLiveSessionState, 1000);
-    } else {
-        // Safety net: periodic poll (slow) to self-heal if events are missed
-        LIVE_FALLBACK_POLLER = setInterval(syncLiveSessionState, 15000);
-    }
-}
-
-// --- NEW: REALTIME PAYLOAD HANDLER (PUSH) ---
-function handleRealtimeLiveUpdate(payload) {
-    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    
-    if (payload.eventType === 'DELETE') {
-        allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
-    } else {
-        if (payload.new.data === undefined) return; // Ignore Postgres WAL partial updates
-
-        const newData = payload.new.data;
-        // Ensure ID matches row ID
-        if (newData) {
-            if (!newData.sessionId) newData.sessionId = payload.new.id;
-            allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
-            allSessions.push(newData);
-        }
-    }
-    localStorage.setItem('liveSessions', JSON.stringify(allSessions));
-    
-    // Update UI from local cache
-    processLiveSessionState(allSessions);
+    // Realtime is now fully managed by data.js INCOMING_DATA_QUEUE
+    syncLiveSessionState();
+    updateSocketStatusUI();
 }
 
 async function syncLiveSessionState() {
@@ -232,21 +128,18 @@ function processLiveSessionState(allSessions) {
 // --- SOCKET STATUS UI HELPER ---
 function updateSocketStatusUI() {
     const els = [document.getElementById('socket-status'), document.getElementById('socket-status-trainee')];
-    const status = CURRENT_SOCKET_STATUS;
     
-    let color = '#95a5a6'; // Grey
-    let text = 'Connecting...';
+    let color = '#2ecc71';
+    let text = 'Realtime Active';
     let icon = 'fa-bolt';
-    
-    if (status === 'SUBSCRIBED') { color = '#2ecc71'; text = 'Realtime Active'; }
-    else if (status === 'TIMED_OUT') { color = '#f1c40f'; text = 'Reconnecting...'; }
-    else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') { color = '#ff5252'; text = 'Socket Offline'; icon = 'fa-exclamation-triangle'; }
+
+    if (!window.supabaseClient) { color = '#ff5252'; text = 'Offline'; icon = 'fa-exclamation-triangle'; }
     
     els.forEach(el => {
         if (el) {
             el.innerHTML = `<i class="fas ${icon}" style="color:${color}; margin-right:5px;"></i> ${text}`;
             el.style.borderColor = color;
-            el.title = `Socket Status: ${status}`;
+                el.title = `Socket Status: ${window.supabaseClient ? 'CONNECTED' : 'OFFLINE'}`;
         }
     });
 }

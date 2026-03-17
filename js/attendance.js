@@ -173,12 +173,20 @@ async function submitClockIn() {
         lateData: lateData
     };
 
+    // 1. Attempt Direct Atomic Write to Supabase
+    let directSuccess = false;
+    if (window.supabaseClient) {
+        const { error } = await window.supabaseClient.from('attendance').insert({ id: newRecord.id, user_id: newRecord.user, data: newRecord, updated_at: new Date().toISOString() });
+        if (!error) directSuccess = true;
+        else console.warn("Direct clock-in failed, falling back to queue.");
+    }
+
     const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     records.push(newRecord);
     localStorage.setItem('attendance_records', JSON.stringify(records));
 
-    // Force Sync
-    if (typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
+    // If direct write failed (offline), force the background engine to queue it
+    if (!directSuccess && typeof saveToServer === 'function') saveToServer(['attendance_records'], false);
 
     document.getElementById('attendanceModal').classList.add('hidden');
     if (typeof showToast === 'function') showToast("Clocked In Successfully", "success");
@@ -193,11 +201,20 @@ async function submitClockOut() {
 
     if (idx > -1) {
         records[idx].clockOut = new Date().toLocaleTimeString();
+        
+        // Attempt Direct Atomic Write
+        let directSuccess = false;
+        if (window.supabaseClient) {
+            const { error } = await window.supabaseClient.from('attendance').update({ data: records[idx], updated_at: new Date().toISOString() }).eq('id', records[idx].id);
+            if (!error) directSuccess = true;
+        }
+
         localStorage.setItem('attendance_records', JSON.stringify(records));
-        if (typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
+        
+        // Fallback queue if offline
+        if (!directSuccess && typeof saveToServer === 'function') saveToServer(['attendance_records'], false);
+        
         if (typeof showToast === 'function') showToast("Clocked Out Successfully", "success");
-        // Redirect to login or just show status? Usually logout implies clockout, but this is explicit.
-        // For now, just update state.
     } else {
         alert("No Clock In record found for today.");
     }
@@ -330,22 +347,16 @@ async function confirmLate(recordId) {
         tempRecords[recIndex].lateConfirmed = true;
         tempRecords[recIndex].adminComment = comment;
 
-        // 2. Temporarily update localStorage for saveToServer to read
+        // 2. Direct DB Write (Atomic)
+        if (window.supabaseClient) {
+            const { error } = await window.supabaseClient.from('attendance').update({ data: tempRecords[recIndex], updated_at: new Date().toISOString() }).eq('id', recordId);
+            if (error) {
+                return alert("Failed to save review to the server. Please check your connection.");
+            }
+        }
+
+        // 3. Apply Local Changes
         localStorage.setItem('attendance_records', JSON.stringify(tempRecords));
-
-        // 3. Attempt to save to server first
-        let success = false;
-        if (typeof saveToServer === 'function') {
-            success = await saveToServer(['attendance_records'], true);
-        }
-
-        // 4. If save fails, revert local state to prevent UI mismatch
-        if (!success) {
-            localStorage.setItem('attendance_records', originalRecordsJSON);
-            alert("Failed to save review to the server. Please check your connection and try again.");
-        }
-
-        // 5. Re-render UI from the final, correct state in localStorage
         renderAttendanceRegister();
         if (typeof checkMissingClockIns === 'function') checkMissingClockIns();
     }
@@ -540,6 +551,12 @@ window.saveAttendanceEdit = async function(id, username) {
         rec.isAbsent = false; // Ensure it's no longer marked absent
     }
 
+    // Direct DB Write (Atomic)
+    if (window.supabaseClient) {
+        const { error } = await window.supabaseClient.from('attendance').upsert({ id: rec.id, user_id: username, data: rec, updated_at: new Date().toISOString() });
+        if (error) return alert("Failed to save edit to server.");
+    }
+
     localStorage.setItem('attendance_records', JSON.stringify(records));
     
     // Close modal FIRST to ensure UI responsiveness
@@ -547,9 +564,6 @@ window.saveAttendanceEdit = async function(id, username) {
     if(modal) modal.remove();
     
     manageAgentAttendance(username);
-
-    // Sync in background
-    if(typeof saveToServer === 'function') await saveToServer(['attendance_records'], true);
 }
 
 async function deleteAttendanceRecord(id, username) {
