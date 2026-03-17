@@ -1726,6 +1726,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.40": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Sync Engine:</strong> Implemented a 'Local Edits Shield' to completely eliminate data overwriting race conditions during rapid grading.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Fixed a query issue that was causing the app to repeatedly download the entire database history in the background, significantly reducing bandwidth usage and UI freezing.</li>
+            </ul>`,
         "2.4.39": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Critical Fix (Grading):</strong> Resolved a race condition where grading one test could overwrite the score of another.</li>

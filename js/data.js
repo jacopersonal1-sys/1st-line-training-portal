@@ -349,6 +349,9 @@ async function loadFromServer(silent = false) {
                     cutoff.setDate(cutoff.getDate() - 30);
                     query = query.gt('data->>date', cutoff.toISOString().split('T')[0]);
                 }
+            } else {
+                // DELTA SYNC: Only fetch rows updated since our safe clock-skew timestamp
+                query = query.gt('updated_at', safeSyncTime);
             }
             
             // Limit batch size (Authoritative tables shouldn't be massive, but safety first)
@@ -407,6 +410,9 @@ async function loadFromServer(silent = false) {
 
                 let localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
                 
+                const hashMapKey = `hash_map_${localKey}`;
+                const hashMap = JSON.parse(localStorage.getItem(hashMapKey) || '{}');
+                
                 // --- THE GHOST SLAYER (LOCAL PURGE) ---
                 // Actively destroy items in the local cache that have been deleted globally,
                 // preventing this device from resurrecting them during the next push.
@@ -426,8 +432,24 @@ async function loadFromServer(silent = false) {
                     return true;
                 });
                 
+                // --- THE LOCAL EDITS SHIELD ---
+                // If an item has been edited locally but not yet pushed (hash mismatch),
+                // we reject the server's version to prevent loadFromServer from reverting our active work.
+                const safeServerItems = serverItems.filter(sItem => {
+                    if (!sItem.id) return true;
+                    const localMatch = localItems.find(l => l.id === sItem.id);
+                    if (localMatch) {
+                        const currentLocalHash = generateChecksum(JSON.stringify(localMatch));
+                        const syncedHash = hashMap[localMatch.id];
+                        if (syncedHash && currentLocalHash !== syncedHash) {
+                            return false; // Reject server version, preserve local edits
+                        }
+                    }
+                    return true;
+                });
+
                 // Merge using existing logic (Server Wins)
-                const serverObj = { [localKey]: serverItems };
+                const serverObj = { [localKey]: safeServerItems };
                 const localObj = { [localKey]: localItems };
                 const merged = performSmartMerge(serverObj, localObj, 'server_wins');
                 
@@ -461,17 +483,15 @@ async function loadFromServer(silent = false) {
                 localStorage.setItem(`row_sync_ts_${localKey}`, newest);
                 
                 // Update Hash Map for these items to prevent re-uploading what we just downloaded
-                const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
-                
                 // For heavy logs, we skip the hash map entirely to save space.
                 if (['monitor_history', 'accessLogs', 'error_reports'].includes(localKey)) {
-                    localStorage.removeItem(`hash_map_${localKey}`);
+                    localStorage.removeItem(hashMapKey);
                 } else {
                     // Update Hash Map for all other tables
-                    serverItems.forEach(item => {
+                    safeServerItems.forEach(item => {
                         if(item.id) hashMap[item.id] = generateChecksum(JSON.stringify(item));
                     });
-                    localStorage.setItem(`hash_map_${localKey}`, JSON.stringify(hashMap));
+                    localStorage.setItem(hashMapKey, JSON.stringify(hashMap));
                 }
                 }
             } else if (isAuthoritative && !rowErr) {
