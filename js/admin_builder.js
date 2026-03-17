@@ -374,8 +374,11 @@ function restoreBuilderDraft() {
     document.getElementById('builderDuration').value = draft.duration;
     
     // Trigger type change to show/hide duration
-    document.getElementById('builderTestType').onchange();
-
+    const typeSelect = document.getElementById('builderTestType');
+    if (typeSelect && typeof typeSelect.onchange === 'function') {
+        typeSelect.onchange();
+    }
+    
     renderBuilder();
 }
 

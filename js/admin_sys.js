@@ -17,7 +17,8 @@ async function secureSysSave() {
 
         try {
             // PARAMETER 'true' = FORCE OVERWRITE (Instant / No Pull)
-            await saveToServer(['assessments', 'vettingTopics', 'accessControl', 'records'], true); 
+            await saveToServer(['assessments', 'vettingTopics', 'accessControl'], true); 
+            await saveToServer(['records'], false); 
         } catch(e) {
             console.error("System Save Error:", e);
         } finally {
@@ -404,7 +405,7 @@ async function archiveOldSubmissions() {
     localStorage.setItem('submissions', JSON.stringify(keep));
     localStorage.setItem('archive_submissions', JSON.stringify(newArchives));
     
-    if(typeof saveToServer === 'function') await saveToServer(['submissions', 'archive_submissions'], true);
+    if(typeof saveToServer === 'function') await saveToServer(['submissions', 'archive_submissions'], false);
     
     if(typeof showToast === 'function') showToast(`Archived ${move.length} submissions successfully.`, "success");
     loadAdminDatabase();
@@ -463,7 +464,7 @@ async function cleanupDuplicateRecords() {
     if (typeof saveToServer === 'function') {
         const btn = document.getElementById('btnCleanupDupes');
         if(btn) { btn.innerText = "Syncing..."; btn.disabled = true; }
-        await saveToServer(['records'], true);
+        await saveToServer(['records'], false);
         if(btn) { btn.innerHTML = '<i class="fas fa-broom"></i> Cleanup Duplicates'; btn.disabled = false; }
     }
     

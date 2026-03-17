@@ -58,13 +58,16 @@ function loadCompletedHistory() {
     });
     if (needsRepair) {
         localStorage.setItem('submissions', JSON.stringify(subs));
-        if (typeof saveToServer === 'function') saveToServer(['submissions'], true);
+        // REMOVED: This background save was causing a race condition with manual grading,
+        // leading to score overwrites. The 'archived' flag changes will now be synced
+        // safely during the next legitimate save operation.
     }
     // ---------------------------------------------------
 
     const search = document.getElementById('historySearch') ? document.getElementById('historySearch').value.toLowerCase() : '';
     const groupFilter = document.getElementById('historyGroupFilter') ? document.getElementById('historyGroupFilter').value : '';
     const testFilter = document.getElementById('historyTestFilter') ? document.getElementById('historyTestFilter').value : '';
+    const phaseFilter = document.getElementById('historyPhaseFilter') ? document.getElementById('historyPhaseFilter').value : '';
 
     // Filter for Completed items
     let completed = subs.filter(s => s.status === 'completed' && !s.archived);
@@ -75,6 +78,15 @@ function loadCompletedHistory() {
         const members = rosters[groupFilter] || [];
         // Check if trainee is in the selected group (Case Insensitive)
         completed = completed.filter(s => members.some(m => m.toLowerCase() === s.trainee.toLowerCase()));
+    }
+
+    // Apply Phase Filter
+    if (phaseFilter) {
+        if (phaseFilter === 'standard') {
+            completed = completed.filter(s => !s.testTitle.toLowerCase().includes('vetting'));
+        } else {
+            completed = completed.filter(s => s.testTitle.toLowerCase().includes(phaseFilter));
+        }
     }
 
     // Apply Test Filter
@@ -144,6 +156,21 @@ function populateHistoryFilters() {
     const groupSel = document.getElementById('historyGroupFilter');
     const testSel = document.getElementById('historyTestFilter');
     if (!groupSel || !testSel) return;
+
+    // --- INJECT PHASE FILTER IF MISSING ---
+    if (!document.getElementById('historyPhaseFilter')) {
+        const phaseSel = document.createElement('select');
+        phaseSel.id = 'historyPhaseFilter';
+        phaseSel.style.cssText = "padding: 5px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-main); margin-left: 10px; max-width: 150px;";
+        phaseSel.innerHTML = `
+            <option value="">All Phases</option>
+            <option value="standard">Standard</option>
+            <option value="1st vetting">1st Vetting</option>
+            <option value="final vetting">Final Vetting</option>
+        `;
+        phaseSel.onchange = loadCompletedHistory;
+        testSel.parentNode.insertBefore(phaseSel, testSel.nextSibling);
+    }
 
     // Preserve selection if re-populating
     const selGroup = groupSel.value;
@@ -245,7 +272,7 @@ async function processHistoryRetake(subId) {
             }
         }
 
-        if(typeof saveToServer === 'function') await saveToServer(['submissions', 'vettingSession'], true);
+        if(typeof saveToServer === 'function') await saveToServer(['submissions', 'vettingSession'], false);
         
         alert("Retake granted.");
         loadCompletedHistory(); // Refresh THIS view

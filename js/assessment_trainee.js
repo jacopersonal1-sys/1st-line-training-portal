@@ -526,7 +526,9 @@ async function submitTest(forceSubmit = false) {
         localStorage.setItem('records', JSON.stringify(records));
     }
 
-    await secureAssessmentSave(); 
+    localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
+    localStorage.setItem('row_sync_ts_records', new Date().toISOString());
+    if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
 
     if (typeof exitArena === 'function') {
         try {

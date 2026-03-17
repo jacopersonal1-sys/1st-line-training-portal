@@ -191,7 +191,7 @@ async function approveSubmission(subId) {
     localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
     localStorage.setItem('row_sync_ts_records', new Date().toISOString());
 
-    await secureAssessmentSave(); 
+    if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
     
     alert("Approved & Recorded.");
     loadMarkingQueue();
@@ -574,7 +574,7 @@ async function finalizeAdminMarking(subId) {
     localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
     localStorage.setItem('row_sync_ts_records', new Date().toISOString());
 
-    await secureAssessmentSave(); 
+    if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
 
     if(typeof showToast === 'function') showToast(`Marking Finalized! Trainee scored ${percentage}%`, "success");
     document.getElementById('markingModal').classList.add('hidden');

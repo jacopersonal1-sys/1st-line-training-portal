@@ -1726,6 +1726,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.38": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Sync:</strong> Implemented 'Ghost Slayer' to actively purge local cache of globally deleted items (Tombstones & Revoked Users).</li>
+                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Fixed an issue where graded duplicate tests were invisible in the History tab. Live Assessment booking dropdowns now dynamically sync with the Test Engine.</li>
+            </ul>`,
         "2.4.37": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>System Stability:</strong> Resolved a race condition where assessment submissions could get stuck in "Processing" during forced timeouts.</li>
