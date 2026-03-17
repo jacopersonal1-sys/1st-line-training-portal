@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.43**: **Sync Engine**: Fixed "Disappearing Data" glitch caused by PostgreSQL WAL partial updates during bulk saves.
  - **v2.4.42**: **Live Assessments**: Fixed drag-and-drop reverting bug. Added manual admin assignment capability to slots.
  - **v2.4.41**: **Grading Visibility**: Fixed aggressive Ghost Data cleanup hiding legitimate retakes from the Marking Queue.
  - **v2.4.40**: **Sync Engine Reforge**: Fixed severe background data loop and Local Edits Shield to protect rapid grading.

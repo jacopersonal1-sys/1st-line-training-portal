@@ -116,6 +116,8 @@ function handleRealtimeLiveUpdate(payload) {
     if (payload.eventType === 'DELETE') {
         allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
     } else {
+        if (payload.new.data === undefined) return; // Ignore Postgres WAL partial updates
+
         const newData = payload.new.data;
         // Ensure ID matches row ID
         if (newData) {

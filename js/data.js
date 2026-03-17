@@ -2089,7 +2089,7 @@ function processIncomingDataQueue() {
             if (p.eventType === 'DELETE') {
                 if (p.old && p.old.user_id) delete data[p.old.user_id];
             } else {
-                if (p.new && p.new.user_id) data[p.new.user_id] = p.new.data;
+                if (p.new && p.new.data !== undefined && p.new.user_id) data[p.new.user_id] = p.new.data;
             }
         });
         localStorage.setItem('monitor_data', JSON.stringify(data));
@@ -2106,6 +2106,8 @@ function processIncomingDataQueue() {
                 records = records.filter(r => r.id !== p.old.id);
             } else {
                 const newRow = p.new;
+                if (newRow.data === undefined) return; // Ignore Postgres WAL partial updates
+
                 const item = newRow.data || {};
                 item.id = newRow.id;
                 item.user = newRow.user_id;
@@ -2126,6 +2128,8 @@ function processIncomingDataQueue() {
                 bookings = bookings.filter(b => b.id !== p.old.id);
             } else {
                 const newRow = p.new;
+                if (newRow.data === undefined) return; // Ignore Postgres WAL partial updates
+
                 const item = newRow.data || {};
                 item.id = newRow.id;
                 const idx = bookings.findIndex(b => b.id === item.id);
@@ -2145,6 +2149,7 @@ function processIncomingDataQueue() {
             if (p.eventType === 'DELETE') {
                 allSessions = allSessions.filter(s => s.sessionId !== p.old.id);
             } else {
+                if (p.new.data === undefined) return; // Ignore Postgres WAL partial updates
                 const newData = p.new.data;
                 if (newData) {
                     if (!newData.sessionId) newData.sessionId = p.new.id;

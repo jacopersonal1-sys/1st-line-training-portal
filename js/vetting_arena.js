@@ -180,8 +180,9 @@ function renderAdminArena() {
                 let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
                 if (payload.eventType === 'DELETE') {
                     sessions = sessions.filter(s => s.sessionId !== payload.old.id);
-                } else if (payload.new && payload.new.data) {
+                } else if (payload.new && payload.new.data !== undefined) {
                     const newData = payload.new.data;
+                    if (!newData) return; // Safety check
                     const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
                     if (newData.active) {
                         if (idx > -1) sessions[idx] = newData;
@@ -865,6 +866,7 @@ function startTraineePreFlight() {
                 if (payload.eventType === 'DELETE') {
                     checkAndHandleSession(null, 'DELETE', payload.old.id);
                 } else {
+                    if (payload.new && payload.new.data === undefined) return;
                     const serverSession = payload.new ? payload.new.data : { active: false };
                     checkAndHandleSession(serverSession);
                 }
