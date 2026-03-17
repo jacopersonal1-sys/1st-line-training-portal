@@ -1726,6 +1726,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.41": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Grading Queue:</strong> Fixed a critical bug where legitimate retakes were mistakenly flagged as 'Ghost Data' and hidden from the Marking Queue.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessment Stats:</strong> Corrected the Test Engine overview to accurately match the number of tests waiting in the Marking Queue.</li>
+            </ul>`,
         "2.4.40": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Sync Engine:</strong> Implemented a 'Local Edits Shield' to completely eliminate data overwriting race conditions during rapid grading.</li>

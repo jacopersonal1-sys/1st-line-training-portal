@@ -579,16 +579,13 @@ function loadManageTests() {
     `;
 
     filtered.forEach(t => {
-        const testSubs = subs.filter(s => s.testId == t.id);
+        const testSubs = subs.filter(s => s.testId == t.id && !s.archived);
         
         // GHOST DATA FIX: Filter out pending submissions that already have a final record.
         const pendingSubs = testSubs.filter(s => s.status === 'pending');
         const validPending = pendingSubs.filter(s => {
-            const hasRecord = records.some(r => 
-                r.trainee && s.trainee && r.trainee.toLowerCase() === s.trainee.toLowerCase() && 
-                r.assessment && s.testTitle && r.assessment.toLowerCase() === s.testTitle.toLowerCase()
-            );
-            return !hasRecord;
+            const isLinkedToRecord = records.some(r => r.submissionId === s.id);
+            return !isLinkedToRecord;
         });
         const pending = validPending.length;
         const completed = testSubs.filter(s => s.status === 'completed').length;

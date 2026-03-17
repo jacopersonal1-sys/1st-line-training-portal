@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.41**: **Grading Visibility**: Fixed aggressive Ghost Data cleanup hiding legitimate retakes from the Marking Queue.
  - **v2.4.40**: **Sync Engine Reforge**: Fixed severe background data loop and Local Edits Shield to protect rapid grading.
  - **v2.4.39**: **Grading Stability**: Fixed score overwrite race condition. Added Phase Filter to history.
  - **v2.4.38**: **Data Integrity & Fixes**: Added Ghost Slayer local purge. Fixed invisible history tests and orphaned Live Bookings.

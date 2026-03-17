@@ -20,8 +20,8 @@ function loadAssessmentDashboard() {
 
     // Calculate Global Stats
     const totalTests = tests.length;
-    const totalPending = subs.filter(s => s.status === 'pending').length;
-    const totalCompleted = subs.filter(s => s.status === 'completed').length;
+    const totalPending = subs.filter(s => s.status === 'pending' && !s.archived).length;
+    const totalCompleted = subs.filter(s => s.status === 'completed' && !s.archived).length;
 
     let html = `
         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:20px;">
@@ -64,18 +64,32 @@ function loadMarkingQueue() {
     // Filter pending
     let pending = subs.filter(s => s.status === 'pending' && !s.archived);
 
+    // --- AUTO-REPAIR: RECOVER ACCIDENTALLY ARCHIVED PENDING TESTS ---
+    // If a test was archived due to a glitch but is still pending, and no valid test exists, restore it.
+    let needsRepair = false;
+    subs.filter(s => s.status === 'pending' && s.archived).forEach(pa => {
+        const hasValid = subs.some(s => s.trainee === pa.trainee && s.testId === pa.testId && !s.archived && (s.status === 'pending' || s.status === 'completed'));
+        if (!hasValid) {
+            pa.archived = false;
+            pending.push(pa);
+            needsRepair = true;
+        }
+    });
+    if (needsRepair) {
+        localStorage.setItem('submissions', JSON.stringify(subs));
+        // Save silently in background
+        if (typeof saveToServer === 'function') saveToServer(['submissions'], false, true);
+    }
+
     // GHOST DATA CLEANUP:
-    // If a Record exists for this test, the pending submission is invalid/stale.
-    // We auto-archive these to clean up the queue.
     const ghosts = [];
     const validPending = [];
 
     pending.forEach(s => {
-        const hasRecord = records.some(r => 
-            r.trainee && s.trainee && r.trainee.toLowerCase() === s.trainee.toLowerCase() && 
-            r.assessment && s.testTitle && r.assessment.toLowerCase() === s.testTitle.toLowerCase()
-        );
-        if (hasRecord) ghosts.push(s);
+        // Only consider it a ghost if a record is EXPLICITLY linked to this specific submission ID
+        // This allows legitimate retakes to appear in the marking queue even if a prior record exists.
+        const isLinkedToRecord = records.some(r => r.submissionId === s.id);
+        if (isLinkedToRecord) ghosts.push(s);
         else validPending.push(s);
     });
 
