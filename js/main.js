@@ -1726,6 +1726,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.39": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Critical Fix (Grading):</strong> Resolved a race condition where grading one test could overwrite the score of another.</li>
+                <li style="margin-bottom: 8px;"><strong>Test History:</strong> Added a 'Phase Filter' to the Completed Assessments view to easily find Vetting vs. Standard tests.</li>
+            </ul>`,
         "2.4.38": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Sync:</strong> Implemented 'Ghost Slayer' to actively purge local cache of globally deleted items (Tombstones & Revoked Users).</li>
