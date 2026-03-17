@@ -62,7 +62,7 @@ function loadMarkingQueue() {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
 
     // Filter pending
-    let pending = subs.filter(s => s.status === 'pending');
+    let pending = subs.filter(s => s.status === 'pending' && !s.archived);
 
     // GHOST DATA CLEANUP:
     // If a Record exists for this test, the pending submission is invalid/stale.
@@ -130,6 +130,7 @@ async function approveSubmission(subId) {
 
     // 1. Mark as Completed
     sub.status = 'completed';
+    sub.archived = false; // Ensure it appears in History
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     // 2. Create Permanent Record
@@ -512,6 +513,7 @@ async function finalizeAdminMarking(subId) {
 
     sub.score = percentage;
     sub.status = 'completed';
+    sub.archived = false; // UN-ARCHIVE when explicitly graded so it appears in History
     sub.scores = specificScores; 
     sub.comments = specificComments;
     

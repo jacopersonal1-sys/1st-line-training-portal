@@ -31,7 +31,37 @@ function loadCompletedHistory() {
     const container = document.getElementById('completedHistoryList');
     if (!container) return;
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    
+    // --- AUTO-REPAIR: RECOVER INVISIBLE GRADED TESTS ---
+    let needsRepair = false;
+    const completedMap = {};
+    subs.filter(s => s.status === 'completed').forEach(s => {
+        const key = `${s.trainee}_${s.testTitle}`;
+        if (!completedMap[key]) completedMap[key] = [];
+        completedMap[key].push(s);
+    });
+
+    Object.values(completedMap).forEach(attempts => {
+        // Sort by score descending to find the best (most recently graded) attempt
+        attempts.sort((a,b) => b.score - a.score || new Date(b.date) - new Date(a.date));
+        if (attempts[0].archived) {
+            attempts[0].archived = false; // Un-archive the best attempt
+            needsRepair = true;
+        }
+        for (let i = 1; i < attempts.length; i++) {
+            if (!attempts[i].archived) {
+                attempts[i].archived = true; // Ensure older duplicates stay hidden
+                needsRepair = true;
+            }
+        }
+    });
+    if (needsRepair) {
+        localStorage.setItem('submissions', JSON.stringify(subs));
+        if (typeof saveToServer === 'function') saveToServer(['submissions'], true);
+    }
+    // ---------------------------------------------------
+
     const search = document.getElementById('historySearch') ? document.getElementById('historySearch').value.toLowerCase() : '';
     const groupFilter = document.getElementById('historyGroupFilter') ? document.getElementById('historyGroupFilter').value : '';
     const testFilter = document.getElementById('historyTestFilter') ? document.getElementById('historyTestFilter').value : '';

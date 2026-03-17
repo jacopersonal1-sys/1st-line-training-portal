@@ -405,7 +405,26 @@ async function loadFromServer(silent = false) {
                     return true;
                 }).map(r => r.data);
 
-                const localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
+                let localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
+                
+                // --- THE GHOST SLAYER (LOCAL PURGE) ---
+                // Actively destroy items in the local cache that have been deleted globally,
+                // preventing this device from resurrecting them during the next push.
+                const revokedUsers = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+                const revokedSet = new Set(revokedUsers.map(u => u.toLowerCase()));
+
+                localItems = localItems.filter(item => {
+                    const id = item.id;
+                    // 1. Slain by Tombstone (Direct ID Match)
+                    if (id && tombstoneIds.has(id.toString())) return false;
+                    
+                    // 2. Slain by Blacklist (Revoked Users Data Purge)
+                    // Obliterates all records, attendance, and logs belonging to deleted users
+                    const itemUser = item.trainee || item.user || item.user_id;
+                    if (itemUser && revokedSet.has(itemUser.toLowerCase())) return false;
+
+                    return true;
+                });
                 
                 // Merge using existing logic (Server Wins)
                 const serverObj = { [localKey]: serverItems };
@@ -1135,8 +1154,8 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                         return localItem.name.trim().toLowerCase() === serverItem.name.trim().toLowerCase();
                     }
 
-                    // 4. Vetting Topics, Whitelist & Reviewed (Strings) - FIXES DUPLICATION
-                    if ((key === 'vettingTopics' || key === 'monitor_whitelist' || key === 'monitor_reviewed') && typeof localItem === 'string' && typeof serverItem === 'string') {
+                    // 4. Strings & Tombstones - FIXES DUPLICATION
+                    if ((key === 'vettingTopics' || key === 'monitor_whitelist' || key === 'monitor_reviewed' || key === 'system_tombstones') && typeof localItem === 'string' && typeof serverItem === 'string') {
                         return localItem.trim().toLowerCase() === serverItem.trim().toLowerCase();
                     }
 
@@ -1197,7 +1216,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                         if (localItem.id && i.id) return localItem.id.toString() === i.id.toString();
                         if (key === 'users' && localItem.user && i.user) return localItem.user.toLowerCase() === i.user.toLowerCase();
                         if (key === 'assessments' && localItem.name && i.name) return localItem.name.toLowerCase() === i.name.toLowerCase();
-                        if (key === 'vettingTopics' && typeof localItem === 'string' && typeof i === 'string') return localItem.toLowerCase() === i.toLowerCase();
+                        if ((key === 'vettingTopics' || key === 'system_tombstones' || key === 'monitor_whitelist' || key === 'monitor_reviewed') && typeof localItem === 'string' && typeof i === 'string') return localItem.toLowerCase() === i.toLowerCase();
                         if (key === 'records') {
                             return (
                                 localItem.trainee === i.trainee &&

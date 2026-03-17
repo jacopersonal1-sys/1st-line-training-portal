@@ -754,11 +754,12 @@ window.openLiveStatsModal = function() {
     
     // Get Data
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     
     // Calculate Total Available Live Assessments
-    const liveTestsDef = assessments.filter(a => a.live);
-    const totalAvailable = liveTestsDef.length;
+    const liveNames = new Set();
+    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
+    const totalAvailable = liveNames.size;
 
     let rows = '';
     
@@ -823,8 +824,10 @@ window.openLiveStatsModal = function() {
 
 window.viewTraineeLiveDetails = function(trainee) {
     // Get Definitions
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
-    const liveTests = assessments.filter(a => a.live);
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const liveNames = new Set();
+    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
+    const uniqueLiveTests = Array.from(liveNames).sort();
     
     // Get Data
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
@@ -832,11 +835,10 @@ window.viewTraineeLiveDetails = function(trainee) {
     
     let rows = '';
     
-    liveTests.forEach(test => {
-        const booking = myBookings.find(b => b.assessment === test.name);
+    uniqueLiveTests.forEach(testName => {
+        const booking = myBookings.find(b => b.assessment === testName);
         let statusHtml = '<span class="status-badge" style="background:var(--bg-input); color:var(--text-muted);">Not Started</span>';
         let details = '-';
-        let action = '';
         
         if (booking) {
             if (booking.status === 'Completed') {
@@ -845,13 +847,12 @@ window.viewTraineeLiveDetails = function(trainee) {
             } else {
                 statusHtml = `<span class="status-badge status-improve">Booked</span>`;
                 details = `<div style="font-size:0.8rem;">${booking.date} @ ${booking.time}</div><div style="font-size:0.75rem; color:var(--text-muted);">Trainer: ${booking.trainer}</div>`;
-                // Allow quick cancel or move from here? Maybe keep it simple for now.
             }
         }
         
         rows += `
             <tr>
-                <td>${test.name}</td>
+                <td>${testName}</td>
                 <td>${statusHtml}</td>
                 <td>${details}</td>
             </tr>
@@ -1135,16 +1136,14 @@ function openBookingModal(date, time, trainer) {
         ${date} @ ${time}`;
     
     // Populate Assessments
-    // PULLS DYNAMICALLY FROM ADMIN-EDITABLE LIST
+    // PULLS DYNAMICALLY FROM TEST ENGINE (Only tests with type 'live')
     const assessSelect = document.getElementById('bookingAssessment');
     assessSelect.innerHTML = '';
     
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     
-    // 1. Gather all potential Live Assessments (From Definitions ONLY)
-    // Source: Admin Tools > Assessments > Live Flag
     const liveNames = new Set();
-    assessments.forEach(a => { if(a.live) liveNames.add(a.name); });
+    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
     
     let availableList = Array.from(liveNames);
     
