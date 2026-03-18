@@ -1726,6 +1726,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.47": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Added global popup alerts for trainees when a session starts. Implemented strict duplicate booking prevention.</li>
+                <li style="margin-bottom: 8px;"><strong>UI/UX:</strong> Added a dedicated 'Refresh Bookings' button to the Live Schedule. Fixed trainee view sync delays after closing modals.</li>
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Real-time updates for critical events (Live/Vetting) now instantly bypass anti-typing protections to ensure immediate delivery.</li>
+            </ul>`,
         "2.4.46": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Architecture:</strong> Refactored Attendance, Vetting Arena, and Live Execution to use a "Realtime-First" model, eliminating data loss and race conditions.</li>

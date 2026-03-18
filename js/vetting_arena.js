@@ -381,6 +381,11 @@ function updateVettingTableRows(session) {
         const isSecurityOn = !isRelaxed;
         const disabledAttr = CURRENT_USER.role === 'special_viewer' ? 'disabled' : '';
         
+        let extraTools = '';
+        if (CURRENT_USER.role !== 'special_viewer') {
+            extraTools = `<button class="btn-secondary btn-sm" style="padding:2px 6px;" onclick="if(typeof sendRemoteCommand === 'function') sendRemoteCommand('${user.replace(/'/g, "\\'")}', 'restart')" title="Force Trainee App to Refresh"><i class="fas fa-sync"></i></button>`;
+        }
+
         const switchHtml = `
             <label class="switch" style="margin-bottom:0;" title="Toggle Security Rules">
                     <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="toggleSecurity('${session.sessionId}', '${user.replace(/'/g, "\\'")}', !this.checked)">
@@ -435,7 +440,7 @@ function updateVettingTableRows(session) {
         const colSec = tr.querySelector('.col-sec');
         if (colSec.innerHTML !== securityHtml) colSec.innerHTML = securityHtml;
 
-        const htmlCtrl = `<div style="display:flex; align-items:center; gap:10px;">${switchHtml}${mainAction}</div>`;
+        const htmlCtrl = `<div style="display:flex; align-items:center; gap:10px;">${switchHtml}${extraTools}${mainAction}</div>`;
         const colCtrl = tr.querySelector('.col-ctrl');
         if (colCtrl.innerHTML !== htmlCtrl) colCtrl.innerHTML = htmlCtrl;
     });

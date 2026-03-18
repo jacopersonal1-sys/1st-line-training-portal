@@ -475,6 +475,11 @@ async function loadFromServer(silent = false) {
                         const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
                         return start > cutoff.getTime();
                     });
+                    
+                    // FALLBACK RECOVERY: Update UI in case Realtime websocket dropped due to network errors
+                    if (typeof processLiveSessionState === 'function') {
+                        setTimeout(() => processLiveSessionState(merged[localKey]), 100);
+                    }
                 }
 
                 localStorage.setItem(localKey, JSON.stringify(merged[localKey]));

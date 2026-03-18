@@ -111,6 +111,28 @@ function processLiveSessionState(allSessions) {
         }
     }
 
+    // --- NEW: DIAGNOSTIC INTERCEPTS ---
+    if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
+        // Trainee: Detect Ping Request
+        if (myServerSession.diagnosticReq && myServerSession.diagnosticReq !== localSession.diagnosticReq) {
+            const netLogs = JSON.parse(localStorage.getItem('network_diagnostics') || '[]');
+            myServerSession.diagnosticRes = {
+                timestamp: Date.now(),
+                network: netLogs.length > 0 ? netLogs[netLogs.length-1] : null
+            };
+            // Fire & Forget Response back to Admin
+            localStorage.setItem('liveSession', JSON.stringify(myServerSession));
+            if (typeof updateGlobalSessionArray === 'function') updateGlobalSessionArray(myServerSession, true).catch(()=>{});
+        }
+    } else if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && myServerSession.active) {
+        // Admin: Detect Ping Response
+        if (myServerSession.diagnosticRes && (!localSession.diagnosticRes || localSession.diagnosticReq !== myServerSession.diagnosticReq)) {
+            const rtt = Date.now() - myServerSession.diagnosticReq;
+            if (typeof showDiagnosticReport === 'function') showDiagnosticReport(rtt, myServerSession.diagnosticRes.network);
+        }
+    }
+    // ----------------------------------
+
     // Update the local "Active Session" proxy for UI rendering
     
     // Only update if state actually changed
@@ -129,8 +151,9 @@ function processLiveSessionState(allSessions) {
             } else {
                 // Trainee: ONLY re-render if the question changed or session status changed
                 if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
-                    renderTraineeLivePanel(container);
-                    LAST_RENDERED_Q = myServerSession.currentQ;
+                    const success = renderTraineeLivePanel(container);
+                    if (success !== false) LAST_RENDERED_Q = myServerSession.currentQ;
+                    else LAST_RENDERED_Q = -2; // Force retry on next tick
                 }
             }
         }
@@ -343,6 +366,12 @@ function renderAdminLivePanel(container) {
                             </div>
                             <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
                                 Checking connection...
+                            <div style="display:flex; align-items:center; gap:10px; margin-top:3px;">
+                                <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted);">
+                                    Checking connection...
+                                </div>
+                                <button class="btn-secondary btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="runLiveDiagnostics()" title="Send test packet to trainee"><i class="fas fa-satellite-dish"></i> Test Connection</button>
+                                <button class="btn-warning btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="if(typeof sendRemoteCommand === 'function') sendRemoteCommand('${session.trainee}', 'restart')" title="Force Trainee App to Refresh"><i class="fas fa-sync"></i> Force Refresh</button>
                             </div>
                         </div>
                     </div>
@@ -504,10 +533,29 @@ function renderTraineeLivePanel(container) {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == session.testId);
     
+    // SAFETY GUARD: If test hasn't synced to this device yet (Prevents fatal UI crash)
+    if (!test) {
+        container.innerHTML = `
+            <div style="text-align:center; padding:100px; color:var(--text-muted);">
+                <i class="fas fa-cloud-download-alt fa-bounce" style="font-size:4rem; margin-bottom:20px; color:var(--primary);"></i>
+                <h2>Syncing Assessment Data...</h2>
+                <p>Downloading test materials from the server.</p>
+            </div>`;
+        
+        if (typeof loadFromServer === 'function' && !window._fetchingLiveTest) {
+            window._fetchingLiveTest = true;
+            loadFromServer(true).then(() => {
+                window._fetchingLiveTest = false;
+                renderTraineeLivePanel(container);
+            });
+        }
+        return false; // Tell caller to not update LAST_RENDERED_Q
+    }
+
     if (session.currentQ === -1) {
         container.innerHTML = `
             <div style="text-align:center; padding:50px; max-width: 800px; margin: 0 auto;">
-                <h1>${test ? test.title : 'Live Assessment'}</h1>
+                <h1>${test.title}</h1>
                 <h3>Get Ready!</h3>
                 <p>The trainer is about to begin the assessment.</p>
                 
@@ -614,6 +662,7 @@ function renderTraineeLivePanel(container) {
         }, 10000);
     }
     updateSocketStatusUI();
+    return true;
 }
 
 // --- REAL-TIME SYNC ENGINE ---
@@ -1170,3 +1219,81 @@ function updateTimerDisplays() {
         }
     }
 }
+
+// --- NEW: LIVE DIAGNOSTICS ENGINE ---
+
+window.runLiveDiagnostics = async function() {
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    if (!session || !session.active) return;
+    
+    session.diagnosticReq = Date.now();
+    session.diagnosticRes = null;
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    
+    const el = document.getElementById('live-conn-status');
+    if(el) el.innerHTML = '<i class="fas fa-spinner fa-spin" style="color:var(--primary);"></i> Pinging Trainee...';
+    
+    await updateGlobalSessionArray(session, true);
+    
+    // Timeout fallback (10 seconds)
+    setTimeout(() => {
+        const check = JSON.parse(localStorage.getItem('liveSession'));
+        if (check.diagnosticReq === session.diagnosticReq && !check.diagnosticRes) {
+            if(el) el.innerHTML = '<i class="fas fa-times-circle" style="color:#ff5252;"></i> Ping Timeout (Trainee unreachable)';
+        }
+    }, 10000);
+};
+
+window.showDiagnosticReport = function(rtt, net) {
+    // Reset connection status text so it resumes normal polling display
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    if(typeof updateLiveConnectionStatus === 'function') updateLiveConnectionStatus(session.trainee);
+
+    const modal = document.getElementById('diagnosticReportModal');
+    if (modal) modal.remove();
+
+    let netDetails = '<div style="color:var(--text-muted); font-style:italic;">No detailed network logs found on trainee machine.</div>';
+    if (net && net.pings) {
+        netDetails = `
+            <table class="admin-table compressed-table" style="margin-top:10px;">
+                <tr><td>Local Gateway (Router)</td><td style="font-family:monospace; color:${net.pings.gateway > 50 || net.pings.gateway === -1 ? '#ff5252' : '#2ecc71'}">${net.pings.gateway === -1 ? 'LOSS' : net.pings.gateway + ' ms'}</td></tr>
+                <tr><td>Internet Connectivity</td><td style="font-family:monospace; color:${net.pings.internet > 150 || net.pings.internet === -1 ? '#ff5252' : '#2ecc71'}">${net.pings.internet === -1 ? 'LOSS' : net.pings.internet + ' ms'}</td></tr>
+                <tr><td>Cloud DB (Supabase)</td><td style="font-family:monospace; color:${net.pings.server > 300 || net.pings.server === -1 ? '#ff5252' : '#2ecc71'}">${net.pings.server === -1 ? 'LOSS' : net.pings.server + ' ms'}</td></tr>
+                <tr><td>Network Type</td><td>${net.stats?.connType || 'Unknown'}</td></tr>
+                <tr><td>CPU / RAM Usage</td><td>${net.stats?.cpu}% / ${net.stats?.ram}GB</td></tr>
+            </table>
+        `;
+    }
+
+    const html = `
+        <div id="diagnosticReportModal" class="modal-overlay" style="z-index: 15000;">
+            <div class="modal-box" style="width: 500px; max-width: 95%;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                    <h3 style="margin:0;"><i class="fas fa-network-wired" style="color:var(--primary);"></i> Trainee Connection Report</h3>
+                    <button class="btn-secondary" onclick="document.getElementById('diagnosticReportModal').remove()">&times;</button>
+                </div>
+                
+                <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color);">
+                    <div>
+                        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Round Trip Time (RTT)</div>
+                        <div style="font-size:0.9rem;">App-layer ping to trainee & back</div>
+                    </div>
+                    <div style="font-size:2rem; font-weight:bold; color:${rtt > 1000 ? '#ff5252' : (rtt > 500 ? '#f1c40f' : '#2ecc71')}; font-family:monospace;">
+                        ${rtt}ms
+                    </div>
+                </div>
+                
+                <div style="margin-top:15px;">
+                    <strong style="font-size:0.9rem;">Trainee Internal Diagnostics (Last Snapshot):</strong>
+                    ${netDetails}
+                </div>
+
+                <div style="display:flex; justify-content:space-between; margin-top:20px;">
+                    <button class="btn-warning" onclick="if(typeof sendRemoteCommand === 'function') { sendRemoteCommand('${session.trainee}', 'restart'); document.getElementById('diagnosticReportModal').remove(); }"><i class="fas fa-sync"></i> Force Refresh App</button>
+                    <button class="btn-primary" onclick="document.getElementById('diagnosticReportModal').remove()">Acknowledge</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
