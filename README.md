@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.46**: **Realtime-First Refactor**: Migrated Attendance, Vetting, and Live Execution to a direct-to-database model for instant updates. Patched critical edge cases related to offline use and UI stability.
  - **v2.4.44**: **Live Assessment Fixes**: Eliminated race conditions causing Double-Bookings, Ghost Renders, and UI-Wipes during drag-and-drop. Implemented atomic collision checks directly to Supabase.
  - **v2.4.43**: **Sync Engine**: Fixed "Disappearing Data" glitch caused by PostgreSQL WAL partial updates during bulk saves.
  - **v2.4.42**: **Live Assessments**: Fixed drag-and-drop reverting bug. Added manual admin assignment capability to slots.

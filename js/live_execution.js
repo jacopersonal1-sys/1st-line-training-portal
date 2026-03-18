@@ -39,8 +39,20 @@ async function syncLiveSessionState() {
         .select('data');
 
     if (rows) {
-        // Map rows back to array format
-        const allSessions = rows.map(r => r.data);
+        let allSessions = rows.map(r => r.data);
+        
+        // OPTIMISTIC FIX: Preserve recently started sessions that haven't hit the DB read-replica yet.
+        // Prevents the Admin screen from flashing "No Active Session" immediately after starting.
+        const localLiveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        localLiveSessions.forEach(localS => {
+            if (localS.active && !allSessions.some(s => s.sessionId === localS.sessionId)) {
+                const age = Date.now() - (localS.startTime || 0);
+                if (age < 10000) {
+                    allSessions.push(localS);
+                }
+            }
+        });
+
         localStorage.setItem('liveSessions', JSON.stringify(allSessions));
 
         processLiveSessionState(allSessions);
@@ -123,6 +135,13 @@ function processLiveSessionState(allSessions) {
             }
         }
     }
+    
+    // ALWAYS CHECK FOR GLOBAL LIVE ALERT (Trainee POV)
+    if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer') {
+        if (typeof updateGlobalLiveAlert === 'function') {
+            updateGlobalLiveAlert(myServerSession);
+        }
+    }
 }
 
 // --- SOCKET STATUS UI HELPER ---
@@ -142,6 +161,42 @@ function updateSocketStatusUI() {
                 el.title = `Socket Status: ${window.supabaseClient ? 'CONNECTED' : 'OFFLINE'}`;
         }
     });
+}
+
+// --- NEW: GLOBAL LIVE ALERT (Pops up regardless of current tab) ---
+window.updateGlobalLiveAlert = function(session) {
+    let el = document.getElementById('global-live-alert');
+    
+    if (!session || !session.active) {
+        if (el) el.remove();
+        return;
+    }
+
+    // Don't show if they are already inside the Live Execution tab looking at the test
+    const isLiveTab = document.getElementById('live-execution')?.classList.contains('active');
+    if (isLiveTab) {
+        if (el) el.remove();
+        return;
+    }
+
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'global-live-alert';
+        el.style.cssText = "position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:15000; background:linear-gradient(135deg, #2ecc71, #27ae60); color:white; padding:15px 30px; border-radius:30px; box-shadow:0 10px 25px rgba(46, 204, 113, 0.4); display:flex; align-items:center; gap:20px; cursor:pointer; animation: slideInDown 0.5s ease-out, pulse 2s infinite;";
+        el.innerHTML = `
+            <div style="font-weight:bold; font-size:1.1rem; white-space:nowrap;"><i class="fas fa-satellite-dish"></i> Live Assessment Started!</div>
+            <div style="font-size:0.9rem; opacity:0.9; white-space:nowrap;">Your trainer is waiting in the arena.</div>
+            <button class="btn-success" style="background:white; color:#2ecc71; border:none; padding:6px 15px; border-radius:15px; font-weight:bold; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1);">Join Now</button>
+        `;
+        
+        // Anywhere they click on the banner teleports them directly to the Arena
+        el.onclick = function() {
+            showTab('live-execution');
+            el.remove();
+        };
+        
+        document.body.appendChild(el);
+    }
 }
 
 // --- ADMIN VIEW ---

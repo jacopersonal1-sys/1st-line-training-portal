@@ -392,6 +392,25 @@ function getNextBusinessDays(startDateStr, count) {
     return days;
 }
 
+// --- FORCE LIVE SYNC ---
+window.forceLiveSync = async function(btn) {
+    if (btn) {
+        btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Refreshing...';
+        btn.disabled = true;
+    }
+    if (typeof loadFromServer === 'function') {
+        await loadFromServer(true); // Pull fresh layout settings (liveSchedules)
+    }
+    if (typeof forceFullSync === 'function') {
+        await forceFullSync('liveBookings');
+    }
+    await renderLiveTable();
+    if (btn) {
+        btn.innerHTML = '<i class="fas fa-sync"></i> Refresh Bookings';
+        btn.disabled = false;
+    }
+};
+
 async function renderLiveTable() {
     const tbody = document.getElementById('liveBookingBody');
     if(!tbody) return;
@@ -400,12 +419,28 @@ async function renderLiveTable() {
     if (window.IS_DRAGGING_LIVE) return; // Prevent DOM wipe during drag
     if (!document.getElementById('bookingModal').classList.contains('hidden')) return;
 
+    // Inject global refresh button for the table if missing
+    let refreshContainer = document.getElementById('liveRefreshContainer');
+    if (!refreshContainer) {
+        refreshContainer = document.createElement('div');
+        refreshContainer.id = 'liveRefreshContainer';
+        refreshContainer.style.cssText = 'display:flex; justify-content:flex-end; margin-bottom:10px;';
+        refreshContainer.innerHTML = `<button class="btn-secondary btn-sm" onclick="forceLiveSync(this)"><i class="fas fa-sync"></i> Refresh Bookings</button>`;
+        const table = tbody.closest('table');
+        if (table && table.parentNode) {
+            table.parentNode.insertBefore(refreshContainer, table);
+        }
+    }
+
     // --- AUTHORITATIVE SYNC ON LOAD ---
     // On first load of this tab, perform a full sync of bookings to get the source of truth.
     // Subsequent updates will be handled by the lightweight real-time listener.
     if (!window._liveSyncDone) {
         window._liveSyncDone = true; // Prevent loops
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin fa-2x"></i><br><br>Synchronizing Live Bookings...</td></tr>';
+        if (typeof loadFromServer === 'function') {
+            await loadFromServer(true); // Ensure schedules layout is fresh
+        }
         if (typeof forceFullSync === 'function') {
             await forceFullSync('liveBookings');
         }
@@ -718,7 +753,10 @@ window.liveDrop = function(e) { // No longer async
 };
 
 // Global failsafe for drag release outside targets
-document.addEventListener('dragend', () => { window.IS_DRAGGING_LIVE = false; });
+document.addEventListener('dragend', (e) => { 
+    window.IS_DRAGGING_LIVE = false; 
+    if (e.target && e.target.style) e.target.style.opacity = '1';
+});
 
 async function moveLiveBooking(id, date, time, trainer) {
     const originalBookingsJSON = localStorage.getItem('liveBookings') || '[]';
@@ -782,6 +820,7 @@ window.openLiveStatsModal = function() {
     const liveNames = new Set();
     tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
     const totalAvailable = liveNames.size;
+    const uniqueLiveTests = Array.from(liveNames);
 
     let rows = '';
     
@@ -791,8 +830,20 @@ window.openLiveStatsModal = function() {
         // Note: We don't filter by date here, we look at ALL history for completion status
         const myBookings = bookings.filter(b => b.trainee === t && b.status !== 'Cancelled');
         
-        const completedCount = myBookings.filter(b => b.status === 'Completed').length;
-        const bookedCount = myBookings.filter(b => b.status === 'Booked').length;
+        let completedCount = 0;
+        let bookedCount = 0;
+
+        uniqueLiveTests.forEach(testName => {
+            const relatedBookings = myBookings.filter(b => b.assessment === testName);
+            if (relatedBookings.length > 0) {
+                if (relatedBookings.some(b => b.status === 'Completed')) {
+                    completedCount++;
+                } else if (relatedBookings.some(b => b.status === 'Booked')) {
+                    bookedCount++;
+                }
+            }
+        });
+
         const remaining = Math.max(0, totalAvailable - completedCount);
         
         // Calculate progress percentage
@@ -858,7 +909,12 @@ window.viewTraineeLiveDetails = function(trainee) {
     let rows = '';
     
     uniqueLiveTests.forEach(testName => {
-        const booking = myBookings.find(b => b.assessment === testName);
+        const relatedBookings = myBookings.filter(b => b.assessment === testName);
+        let booking = null;
+        if (relatedBookings.length > 0) {
+            booking = relatedBookings.find(b => b.status === 'Completed') || relatedBookings.find(b => b.status === 'Booked') || relatedBookings[0];
+        }
+        
         let statusHtml = '<span class="status-badge" style="background:var(--bg-input); color:var(--text-muted);">Not Started</span>';
         let details = '-';
         
@@ -1015,7 +1071,7 @@ function getTraineeLiveScheduleId(username, liveSchedules) {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     let myGroupId = null;
     for (const [gid, members] of Object.entries(rosters)) {
-        if (members.includes(username)) { myGroupId = gid; break; }
+        if (members.some(m => m.toLowerCase() === username.toLowerCase())) { myGroupId = gid; break; }
     }
     if (!myGroupId) return null;
     return Object.keys(liveSchedules).find(key => liveSchedules[key].assigned === myGroupId) || null;
@@ -1176,6 +1232,14 @@ function openBookingModal(date, time, trainer) {
         const schedId = getTraineeLiveScheduleId(CURRENT_USER.user, liveSchedules);
         
         if (!schedId) availableList = [];
+        if (!schedId) {
+            availableList = [];
+        } else {
+            // FILTER OUT ALREADY BOOKED/COMPLETED ASSESSMENTS
+            const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+            const myTaken = bookings.filter(b => b.trainee === CURRENT_USER.user && b.status !== 'Cancelled').map(b => b.assessment);
+            availableList = availableList.filter(name => !myTaken.includes(name));
+        }
     }
     
     if(availableList.length === 0) {
@@ -1198,6 +1262,9 @@ function closeBookingModal() {
     
     const confirmBtn = document.querySelector('#bookingModal .btn-primary');
     if (confirmBtn) confirmBtn.setAttribute('onclick', 'confirmBooking()');
+    
+    // Catch up on any background updates that arrived while modal was open
+    renderLiveTable();
 }
 
 // --- NEW: ADMIN MANUAL ASSIGNMENT ---
@@ -1269,6 +1336,15 @@ window.confirmAdminBooking = async function() {
         const { data: conflict } = await window.supabaseClient.from('live_bookings').select('id').eq('data->>date', PENDING_BOOKING.date).eq('data->>time', PENDING_BOOKING.time).eq('data->>trainer', PENDING_BOOKING.trainer).neq('data->>status', 'Cancelled');
         if (conflict && conflict.length > 0) return alert("This slot is already taken.");
         
+        // Check for duplicate assessment for this trainee directly on the server
+        const { data: dupAssess } = await window.supabaseClient.from('live_bookings')
+            .select('id')
+            .eq('data->>trainee', trainee)
+            .eq('data->>assessment', assess)
+            .neq('data->>status', 'Cancelled');
+            
+        if (dupAssess && dupAssess.length > 0) return alert(`Agent ${trainee} already has a booking for '${assess}'.`);
+
         const newBooking = {
             id: Date.now().toString(),
             date: PENDING_BOOKING.date,
@@ -1279,14 +1355,19 @@ window.confirmAdminBooking = async function() {
             status: 'Booked'
         };
         
+        // Optimistic UI Update
+        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        bookings.push(newBooking);
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+        closeBookingModal();
+        renderLiveTable();
+
         // Direct Supabase call
         if (window.supabaseClient) {
             const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee });
             if (error) throw error;
         }
         
-        closeBookingModal();
-        // No render call needed, Realtime listener will handle it.
 
     } catch(e) {
         console.error(e);
@@ -1322,6 +1403,19 @@ async function confirmBooking() {
                 closeBookingModal();
                 if(typeof loadFromServer === 'function') await loadFromServer(true); // Heal local state
                 renderLiveTable(); 
+                return;
+            }
+            
+            // ATOMIC DUPLICATE ASSESSMENT CHECK
+            const { data: dupAssess } = await window.supabaseClient.from('live_bookings')
+                .select('id')
+                .eq('data->>trainee', CURRENT_USER.user)
+                .eq('data->>assessment', assess)
+                .neq('data->>status', 'Cancelled');
+                
+            if (dupAssess && dupAssess.length > 0) {
+                alert(`You already have an active or completed booking for '${assess}'.`);
+                closeBookingModal();
                 return;
             }
         }
@@ -1364,13 +1458,18 @@ async function confirmBooking() {
             status: 'Booked'
         };
 
+        // Optimistic UI Update
+        bookings.push(newBooking);
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+        closeBookingModal();
+        renderLiveTable();
+
         // Direct Supabase call
         if (window.supabaseClient) {
             const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee });
             if (error) throw error;
         }
 
-        closeBookingModal();
         if(typeof updateNotifications === 'function') updateNotifications();
 
     } catch (e) {
@@ -1405,10 +1504,20 @@ async function cancelBooking(id) {
         target.cancelledBy = CURRENT_USER.user;
         target.cancelledAt = new Date().toISOString();
 
+        // Optimistic UI Update
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+        renderLiveTable();
+
         // Direct Supabase call
         if (window.supabaseClient) {
             const { error } = await window.supabaseClient.from('live_bookings').update({ data: target }).eq('id', id);
-            if (error) { alert("Failed to cancel booking."); console.error(error); return; }
+            if (error) { 
+                alert("Failed to cancel booking."); 
+                console.error(error); 
+                if(typeof loadFromServer === 'function') await loadFromServer(true); // Revert
+                renderLiveTable();
+                return; 
+            }
         }
         
         // Also save cancellation counts authoritatively
@@ -1423,10 +1532,21 @@ async function markBookingComplete(id) {
     const target = bookings.find(b => b.id === id);
     if(target) {
         target.status = 'Completed';
+        
+        // Optimistic UI Update
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+        renderLiveTable();
+
         // Direct Supabase call
         if (window.supabaseClient) {
             const { error } = await window.supabaseClient.from('live_bookings').update({ data: target }).eq('id', id);
-            if (error) { alert("Failed to update booking."); console.error(error); return; }
+            if (error) { 
+                alert("Failed to update booking."); 
+                console.error(error); 
+                if(typeof loadFromServer === 'function') await loadFromServer(true); // Revert
+                renderLiveTable();
+                return; 
+            }
         }
     }
 }
@@ -1557,7 +1677,7 @@ function getTraineeScheduleId(username, schedules) {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     let myGroupId = null;
     for (const [gid, members] of Object.entries(rosters)) {
-        if (members.includes(username)) { myGroupId = gid; break; }
+        if (members.some(m => m.toLowerCase() === username.toLowerCase())) { myGroupId = gid; break; }
     }
     if (!myGroupId) return null;
     return Object.keys(schedules).find(key => schedules[key].assigned === myGroupId) || null;

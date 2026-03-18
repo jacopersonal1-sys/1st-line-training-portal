@@ -2015,10 +2015,6 @@ function setupRealtimeListeners() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'live_bookings' }, (payload) => {
             handleLiveBookingRealtime(payload);
         })
-        // 4. LIVE BOOKINGS (Schedule Updates)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'live_bookings' }, (payload) => {
-            handleLiveBookingRealtime(payload);
-        })
         // 5. LIVE SESSIONS (Instant Dashboard Alert)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, (payload) => {
             handleLiveSessionRealtime(payload);
@@ -2067,9 +2063,26 @@ function processIncomingDataQueue() {
     // HIGH-PRIORITY OVERRIDE: If the user is in the Vetting or Live Arena, process immediately to prevent interaction lag.
     const isLiveArenaActive = document.getElementById('live-execution')?.classList.contains('active');
     const isVettingArenaActive = document.getElementById('vetting-arena')?.classList.contains('active');
+    const isLiveBookingActive = document.getElementById('live-assessment')?.classList.contains('active');
+
+    // CHECK FOR CRITICAL INTERRUPT EVENTS (Live Assessment / Vetting Start)
+    // If true, bypasses the typing protection to instantly alert the agent.
+    const hasCriticalEvent = INCOMING_DATA_QUEUE.some(item => {
+        if ((item.type === 'sessions' || item.type === 'vetting') && item.payload && item.payload.new && item.payload.new.data) {
+            const data = item.payload.new.data;
+            if (item.type === 'sessions' && data.trainee === CURRENT_USER?.user && data.active) return true;
+            if (item.type === 'vetting' && data.active) {
+                const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+                if (!data.targetGroup || data.targetGroup === 'all') return true;
+                const members = rosters[data.targetGroup] || [];
+                if (members.some(m => m.toLowerCase() === CURRENT_USER?.user?.toLowerCase())) return true;
+            }
+        }
+        return false;
+    });
 
     const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
-    if (isUserTyping() && timeSinceInteraction < 30000 && !isLiveArenaActive && !isVettingArenaActive) {
+    if (!hasCriticalEvent && isUserTyping() && timeSinceInteraction < 30000 && !isLiveArenaActive && !isVettingArenaActive && !isLiveBookingActive) {
         return;
     }
 
@@ -2227,11 +2240,6 @@ function handleMonitorRealtime(payload) {
 
 function handleAttendanceRealtime(payload) {
     INCOMING_DATA_QUEUE.push({ type: 'attendance', payload });
-    updateQueueIndicator();
-}
-
-function handleLiveBookingRealtime(payload) {
-    INCOMING_DATA_QUEUE.push({ type: 'bookings', payload });
     updateQueueIndicator();
 }
 

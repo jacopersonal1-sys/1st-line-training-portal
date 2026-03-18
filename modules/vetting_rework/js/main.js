@@ -3,17 +3,25 @@
 // Small UI Helper (Isolated)
 function getAvatarHTML(name, size = 35) {
     if (!name) name = "?";
-    const initial = name.charAt(0).toUpperCase();
-    return `<div style="width:${size}px; height:${size}px; background:var(--bg-input); border:1px solid var(--border-color); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; color:var(--text-muted); flex-shrink:0;">${initial}</div>`;
+    const initials = name.substring(0, 2).toUpperCase();
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    const color = "#" + "00000".substring(0, 6 - c.length) + c;
+    return `<div style="width:${size}px; height:${size}px; background:${color}; border:1px solid var(--border-color); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; color:#fff; flex-shrink:0; box-shadow:0 2px 4px rgba(0,0,0,0.2);">${initials}</div>`;
 }
 
 const App = {
     state: {
         viewMode: 'split',
         activeTabId: null,
-        pollInterval: null,
         timerTick: null,
-        realtimeUnsub: null
+        realtimeUnsub: null,
+        // --- NEW: Trainee State ---
+        traineeSession: null,
+        isCheckingCompliance: false,
+        securityWarningCount: 0,
+        localPoller: null
     },
 
     init: async function() {
@@ -23,6 +31,20 @@ const App = {
 
         await DataService.loadInitialData();
 
+        // Route user based on role
+        if (AppContext.user && AppContext.user.role === 'trainee') {
+            await this.initTrainee();
+        } else {
+            await this.initAdmin();
+        }
+        
+        } catch(e) {
+            container.innerHTML = `<div style="padding:20px; color:#ff5252; background:var(--bg-input); border-radius:8px; border:1px solid #ff5252;"><strong>Sandbox Crashed:</strong><br>${e.message}<br><small>${e.stack}</small></div>`;
+        }
+    },
+
+    initAdmin: async function() {
+        const container = document.getElementById('app-container');
         // Rebuild DOM Shell
         container.innerHTML = '<div id="va-static-form"></div><div id="va-dynamic-views"></div>';
 
@@ -40,14 +62,17 @@ const App = {
         }, 1000);
 
         // 2. Fetch Initial State
-        await DataService.pollSessions();
+        await DataService.pollSessions(); // Now async
+        await DataService.ensureServerState(); // Restore lost failover sessions
         this.render();
 
         // 3. Setup Realtime Listener
+        let realtimeRenderDebounce = null;
         this.state.realtimeUnsub = DataService.setupRealtime((payload) => {
             let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
             if (payload.eventType === 'DELETE') {
                 sessions = sessions.filter(s => s.sessionId !== payload.old.id);
+                if (this.state.activeTabId === payload.old.id) this.state.activeTabId = null;
             } else if (payload.new && payload.new.data) {
                 const newData = payload.new.data;
                 const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
@@ -59,18 +84,112 @@ const App = {
                 }
             }
             localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
-            this.render();
+            
+            // BATCH RENDER: Prevent UI Freeze on mass trainee connections
+            if (realtimeRenderDebounce) clearTimeout(realtimeRenderDebounce);
+            realtimeRenderDebounce = setTimeout(() => this.render(), 100);
         });
+    },
 
-        // 4. Setup Fallback Poller (5s)
-        this.state.pollInterval = setInterval(async () => {
-            await DataService.pollSessions();
-            this.render();
-        }, 5000);
+    // ==========================================
+    // TRAINEE LOGIC & KIOSK ENGINE
+    // ==========================================
+
+    initTrainee: async function() {
+        const container = document.getElementById('app-container');
+        container.innerHTML = '<div id="va-trainee-view"></div>';
         
-        } catch(e) {
-            container.innerHTML = `<div style="padding:20px; color:#ff5252; background:var(--bg-input); border-radius:8px; border:1px solid #ff5252;"><strong>Sandbox Crashed:</strong><br>${e.message}<br><small>${e.stack}</small></div>`;
+        // Initial Fetch
+        const sessions = await DataService.pollSessions();
+        this.processTraineeSessions(sessions);
+
+        // Setup Realtime Push
+        this.state.realtimeUnsub = DataService.setupRealtime((payload) => {
+            DataService.pollSessions().then(s => this.processTraineeSessions(s));
+        });
+    },
+
+    processTraineeSessions: function(sessions) {
+        const myName = AppContext.user.user;
+        const rosters = DataService.getRosters();
+        
+        let mySession = null;
+        for (const s of sessions) {
+            let isTarget = false;
+            if (!s.targetGroup || s.targetGroup === 'all') isTarget = true;
+            else {
+                const members = rosters[s.targetGroup] || [];
+                if (members.some(m => m.toLowerCase() === myName.toLowerCase())) isTarget = true;
+            }
+            if (isTarget) { mySession = s; break; }
         }
+
+        this.state.traineeSession = mySession;
+        this.renderTrainee();
+    },
+
+    renderTrainee: function() {
+        const container = document.getElementById('va-trainee-view');
+        if (!container) return;
+
+        if (!this.state.traineeSession) {
+            this.stopTraineePollers();
+            container.innerHTML = `
+                <div style="text-align:center; padding:50px;">
+                    <i class="fas fa-door-closed" style="font-size:4rem; color:var(--text-muted); margin-bottom:20px;"></i>
+                    <h3>Arena Closed</h3>
+                    <p style="color:var(--text-muted);">There is no active Sandbox session for your group.</p>
+                </div>`;
+            return;
+        }
+
+        const session = this.state.traineeSession;
+        const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
+
+        if (myData && myData.status === 'completed') {
+            this.stopTraineePollers();
+            container.innerHTML = `
+                <div style="text-align:center; padding:50px;">
+                    <i class="fas fa-lock" style="font-size:4rem; color:#f1c40f; margin-bottom:20px;"></i>
+                    <h3>Assessment Submitted</h3>
+                    <p style="font-size:1.1rem; margin-bottom:30px;">Your sandbox test has been securely submitted.</p>
+                </div>`;
+            return;
+        }
+
+        if (myData && myData.status === 'started') {
+            // Kiosk In-Progress View
+            container.innerHTML = `
+                <div class="card" style="border-left:5px solid #2ecc71; text-align:center;">
+                    <h2><i class="fas fa-hammer" style="color:var(--primary);"></i> Sandbox Test Active</h2>
+                    <p style="color:var(--text-muted); margin-bottom:30px;">You are locked in the Sandbox Arena. Security monitors are active.</p>
+                    <button class="btn-danger btn-lg" onclick="App.exitArena()">Submit & Exit Sandbox</button>
+                </div>`;
+            this.startActiveTestMonitoring();
+            return;
+        }
+
+        // Pre-Flight (Waiting/Ready/Blocked)
+        const tests = DataService.getTests();
+        const test = tests.find(t => t.id == session.testId);
+
+        container.innerHTML = `
+            <div class="card" style="text-align:center; max-width:600px; margin:0 auto;">
+                <i class="fas fa-shield-alt" style="font-size:4rem; color:var(--primary); margin-bottom:20px;"></i>
+                <h2 style="color:var(--primary);">Sandbox Assessment Ready</h2>
+                <h3 style="margin-bottom:20px;">${test ? test.title : 'Assessment'}</h3>
+                
+                <div style="position:relative;">
+                    <div id="sandboxSecurityLog" style="background:var(--bg-input); padding:15px; border-radius:6px; border:1px solid var(--border-color); text-align:left; min-height:80px; margin-bottom:20px;">
+                        <div style="color:var(--primary);"><i class="fas fa-circle-notch fa-spin"></i> Scanning system...</div>
+                    </div>
+                </div>
+
+                <button id="btnEnterSandbox" class="btn-primary btn-lg" disabled style="opacity:0.5; cursor:not-allowed;" onclick="App.enterArena()">ENTER SANDBOX KIOSK</button>
+            </div>
+        `;
+        
+        this.startTraineePreFlight();
     },
 
     // --- RENDER ENGINE ---
@@ -165,6 +284,8 @@ const App = {
 
     // --- HTML GENERATORS ---
     renderIdleShell: function(isCompact) {
+        const isViewer = AppContext.user && AppContext.user.role === 'special_viewer';
+        
         let displayStyle = isCompact ? 'display:flex; align-items:center; gap:15px; padding:15px;' : 'text-align:center; padding:50px;';
         let iconStyle = isCompact ? 'font-size:2rem; margin:0;' : 'font-size:3rem; margin-bottom:20px;';
         let formLayout = isCompact ? 'display:flex; gap:10px; align-items:flex-end; flex:1;' : 'max-width:500px; margin:0 auto; display:flex; flex-direction:column; gap:10px;';
@@ -183,9 +304,9 @@ const App = {
                     </div>
                     <div style="${isCompact ? 'flex:1;' : ''}">
                         <label style="text-align:left; font-weight:bold; font-size:0.85rem;">Select Group</label>
-                        <select id="rwGroupSelect" class="va-select"><option value="">Loading...</option></select>
+                        <select id="rwGroupSelect" class="va-select" ${isViewer ? 'disabled' : ''}><option value="">Loading...</option></select>
                     </div>
-                    <button class="btn-primary" style="height:42px; ${isCompact?'padding:0 25px;':'margin-top:10px;'}" onclick="App.startSession()">START SESSION</button>
+                    <button class="btn-primary" style="height:42px; ${isCompact?'padding:0 25px;':'margin-top:10px;'}" onclick="App.startSession()" ${isViewer ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>START SESSION</button>
                 </div>
             </div>
         `;
@@ -197,6 +318,7 @@ const App = {
         const title = activeTest ? activeTest.title : "Unknown Test";
         const targetGroup = session.targetGroup === 'all' || !session.targetGroup ? 'All Groups' : session.targetGroup;
         const sessionTitle = indexLabel ? `Session ${indexLabel}: ${title}` : title;
+        const isViewer = AppContext.user && AppContext.user.role === 'special_viewer';
         
         return `
             <div class="card" style="border-left:5px solid #2ecc71; background: linear-gradient(to right, rgba(46, 204, 113, 0.05), transparent); padding:20px; margin-bottom:15px;">
@@ -210,7 +332,7 @@ const App = {
                             <p style="margin:5px 0 0 0; color:var(--text-muted);">Target: <strong>${targetGroup}</strong></p>
                         </div>
                     </div>
-                    <button class="btn-danger" onclick="App.endSession('${session.sessionId}')"><i class="fas fa-stop-circle"></i> END SESSION</button>
+                    ${isViewer ? '' : `<button class="btn-danger" onclick="App.endSession('${session.sessionId}')"><i class="fas fa-stop-circle"></i> END SESSION</button>`}
                 </div>
                 
                 <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px;">
@@ -306,15 +428,17 @@ const App = {
             }
 
             // Actions
+            const isViewer = AppContext.user && AppContext.user.role === 'special_viewer';
             let mainAction = '';
             const safeUser = user.replace(/'/g, "\\'");
-            if (data.status === 'started') mainAction = `<button class="btn-danger btn-sm" onclick="App.forceSubmitTrainee('${session.sessionId}', '${safeUser}')" title="Force Stop"><i class="fas fa-stop"></i></button>`;
-            else if (data.status === 'blocked' && !data.override) mainAction = `<button class="btn-warning btn-sm" onclick="App.overrideSecurity('${session.sessionId}', '${safeUser}')" title="Override"><i class="fas fa-key"></i></button>`;
+            if (data.status === 'started' && !isViewer) mainAction = `<button class="btn-danger btn-sm" onclick="App.forceSubmitTrainee('${session.sessionId}', '${safeUser}')" title="Force Stop"><i class="fas fa-stop"></i></button>`;
+            else if (data.status === 'blocked' && !data.override && !isViewer) mainAction = `<button class="btn-warning btn-sm" onclick="App.overrideSecurity('${session.sessionId}', '${safeUser}')" title="Override"><i class="fas fa-key"></i></button>`;
 
             const isSecurityOn = !(data.relaxed === true);
+            const disabledAttr = isViewer ? 'disabled' : '';
             const switchHtml = `
                 <label class="switch" title="Toggle Security Rules">
-                    <input type="checkbox" ${isSecurityOn ? 'checked' : ''} onchange="App.toggleSecurity('${session.sessionId}', '${safeUser}', !this.checked)">
+                    <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="App.toggleSecurity('${session.sessionId}', '${safeUser}', !this.checked)">
                     <span class="slider"></span>
                 </label>`;
 
@@ -395,6 +519,11 @@ const App = {
     switchTab: function(id) { this.state.activeTabId = id; this.render(); },
 
     startSession: async function() {
+        if (AppContext.user && AppContext.user.role === 'special_viewer') {
+            alert("Access Denied: View Only Mode.");
+            return;
+        }
+        
         const testId = document.getElementById('rwTestSelect').value;
         const groupId = document.getElementById('rwGroupSelect').value;
         if (!testId) return alert("Select a test.");
@@ -416,7 +545,7 @@ const App = {
         if (activeSessions.length > 1) this.state.viewMode = 'split';
 
         await DataService.saveSessionDirectly(session);
-        this.render();
+        // No render needed, realtime will trigger it
     },
 
     endSession: async function(sessionId) {
@@ -427,7 +556,7 @@ const App = {
         
         if (session) {
             session.active = false;
-            await DataService.deleteSession(sessionId);
+            await DataService.deleteSession(sessionId); // Now async
         }
         
         activeSessions = activeSessions.filter(s => s.sessionId !== sessionId);
@@ -459,9 +588,133 @@ const App = {
         if (!session.trainees[username]) session.trainees[username] = {};
         session.trainees[username] = { ...session.trainees[username], ...patchData };
         
+        // 1. Optimistic Local Update (Instant Visual Feedback)
         localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
-        await DataService.saveSessionDirectly(session);
-        this.render();
+        this.render(); 
+        
+        // 2. Safe Server Patch (Prevents race conditions)
+        await DataService.patchSessionUser(sessionId, username, patchData);
+    },
+
+    // --- TRAINEE SECURITY ACTIONS ---
+    stopTraineePollers: function() {
+        if (this.state.localPoller) clearInterval(this.state.localPoller);
+        this.state.localPoller = null;
+    },
+
+    startTraineePreFlight: function() {
+        this.stopTraineePollers();
+        this.checkSystemCompliance();
+        // Poll every 2s for background app closures
+        this.state.localPoller = setInterval(() => this.checkSystemCompliance(), 2000);
+    },
+
+    startActiveTestMonitoring: function() {
+        this.stopTraineePollers();
+        // Aggressive polling during active test
+        this.state.localPoller = setInterval(() => this.checkActiveSecurity(), 3000);
+    },
+
+    checkSystemCompliance: async function() {
+        if (this.state.isCheckingCompliance) return;
+        this.state.isCheckingCompliance = true;
+        
+        try {
+            const session = this.state.traineeSession;
+            if (!session) return;
+            
+            const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
+            const isOverridden = myData && myData.override;
+            const isRelaxed = myData && myData.relaxed;
+            
+            let errors = [];
+            
+            // Call the core Electron IPC (Inherits WhatsApp/Edge logic automatically)
+            if (!isRelaxed && typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                const screenCount = await ipcRenderer.invoke('get-screen-count');
+                if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
+                
+                const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                const apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
+                if (apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
+            }
+
+            const logBox = document.getElementById('sandboxSecurityLog');
+            const btn = document.getElementById('btnEnterSandbox');
+            if (!logBox || !btn) return;
+
+            let status = 'ready';
+            if (errors.length > 0 && !isOverridden && !isRelaxed) status = 'blocked';
+
+            if (errors.length === 0) {
+                logBox.innerHTML = `<div style="color:#2ecc71; font-weight:bold;"><i class="fas fa-check-circle" style="font-size:1.5rem; vertical-align:middle; margin-right:10px;"></i> System Secure. Ready to start.</div>`;
+                btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; btn.style.animation = 'pulse 2s infinite';
+            } else if (isOverridden) {
+                logBox.innerHTML = `<div style="color:#f1c40f; font-weight:bold; margin-bottom:10px;"><i class="fas fa-exclamation-triangle"></i> Admin Override Active</div>` + errors.map(e => `<div style="color:var(--text-muted); font-size:0.85rem;">- ${e} (Ignored)</div>`).join('');
+                btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; btn.style.animation = 'none';
+            } else {
+                logBox.innerHTML = errors.map(e => `<div style="color:#ff5252; padding:5px 0;"><i class="fas fa-ban"></i> ${e}</div>`).join('');
+                btn.disabled = true; btn.style.opacity = '0.5'; btn.style.cursor = 'not-allowed'; btn.style.animation = 'none';
+            }
+
+            // Auto-report status change to Admin
+            if (!myData || myData.status !== status) {
+                await DataService.patchSessionUser(session.sessionId, AppContext.user.user, { status: status });
+            }
+
+        } finally {
+            this.state.isCheckingCompliance = false;
+        }
+    },
+
+    checkActiveSecurity: async function() {
+        const session = this.state.traineeSession;
+        const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
+        if (myData && myData.relaxed) return; // Admin dropped shields mid-test
+
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            
+            // Ensure shields stay up
+            ipcRenderer.invoke('set-kiosk-mode', true).catch(()=>{});
+            
+            const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+            const apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
+            
+            if (apps.length > 0) {
+                this.state.securityWarningCount++;
+                // 4 strikes (~12 seconds) before kick
+                if (this.state.securityWarningCount >= 4) {
+                    alert("Security Violation: Background App Detected. Test Terminated.");
+                    this.exitArena();
+                }
+            } else {
+                this.state.securityWarningCount = 0; // Forgive if they close it quickly
+            }
+        }
+    },
+
+    enterArena: async function() {
+        this.stopTraineePollers(); // Stop pre-flight
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            await ipcRenderer.invoke('set-kiosk-mode', true);
+            await ipcRenderer.invoke('set-content-protection', true);
+        }
+        await DataService.patchSessionUser(this.state.traineeSession.sessionId, AppContext.user.user, { status: 'started', startedAt: Date.now() });
+        this.renderTrainee(); // Render active view
+    },
+
+    exitArena: async function() {
+        this.stopTraineePollers();
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            await ipcRenderer.invoke('set-kiosk-mode', false);
+            await ipcRenderer.invoke('set-content-protection', false);
+        }
+        await DataService.patchSessionUser(this.state.traineeSession.sessionId, AppContext.user.user, { status: 'completed' });
+        this.renderTrainee(); // Render completion screen
     }
 };
 

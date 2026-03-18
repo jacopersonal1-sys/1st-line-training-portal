@@ -25,31 +25,89 @@ const DataService = {
 
     // --- VETTING SESSION SYNC ---
     pollSessions: async function() {
-        // ISOLATED SANDBOX: We do NOT poll the live database to protect real trainees.
-        // We only read from the isolated webview localStorage.
-        return JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        if (!AppContext.supabase) return [];
+        const { data, error } = await AppContext.supabase.from('vetting_sessions_v2').select('data');
+        if (error) { console.error("Poll sessions error:", error); return []; }
+        const sessions = data.map(r => r.data).filter(s => s && s.active);
+        localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+        return sessions;
+    },
+
+    ensureServerState: async function() {
+        if (!AppContext.supabase) return;
+        const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        if (activeSessions.length === 0) return;
+
+        // Fetch all IDs currently on server
+        const { data, error } = await AppContext.supabase.from('vetting_sessions_v2').select('id');
+        const serverIds = new Set(data ? data.map(r => r.id) : []);
+
+        for (const session of activeSessions) {
+            if (!serverIds.has(session.sessionId)) {
+                console.warn(`[Vetting Rework] Session ${session.sessionId} missing on server. Restoring...`);
+                await this.saveSessionDirectly(session);
+            }
+        }
+    },
+
+    patchSessionUser: async function(sessionId, username, patchData) {
+        if (!AppContext.supabase) return;
+        
+        // 1. Fetch latest server state atomically
+        const { data, error } = await AppContext.supabase
+            .from('vetting_sessions_v2')
+            .select('data')
+            .eq('id', sessionId)
+            .single();
+            
+        if (error || !data) return;
+        
+        const serverSession = data.data;
+        if (!serverSession.trainees) serverSession.trainees = {};
+        
+        // 2. Merge ONLY this specific user's data to prevent wiping other changes
+        serverSession.trainees[username] = { ...(serverSession.trainees[username] || {}), ...patchData };
+        
+        // 3. Save back
+        await AppContext.supabase.from('vetting_sessions_v2').update({ data: serverSession, updated_at: new Date().toISOString() }).eq('id', sessionId);
     },
 
     saveSessionDirectly: async function(session) {
-        // ISOLATED SANDBOX: Save to local partition only. No Cloud DB writes.
-        // This ensures your clicks don't overwrite live environments.
+        // Also update local cache for immediate UI response
         let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
         const idx = sessions.findIndex(s => s.sessionId === session.sessionId);
         if (idx > -1) sessions[idx] = session;
         else sessions.push(session);
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+
+        if (!AppContext.supabase) return;
+        const { error } = await AppContext.supabase.from('vetting_sessions_v2').upsert({
+            id: session.sessionId,
+            data: session,
+            updated_at: new Date().toISOString()
+        });
+        if (error) console.error("Save session error:", error);
     },
 
     deleteSession: async function(id) {
-        // ISOLATED SANDBOX: Delete locally only.
+        // Also update local cache
         let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
         sessions = sessions.filter(s => s.sessionId !== id);
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+
+        if (!AppContext.supabase) return;
+        const { error } = await AppContext.supabase.from('vetting_sessions_v2').delete().eq('id', id);
+        if (error) console.error("Delete session error:", error);
     },
 
     // --- REALTIME SUBSCRIPTION ---
     setupRealtime: function(onUpdateCallback) {
-        // ISOLATED SANDBOX: Realtime disabled so live trainees don't trigger UI updates here.
-        return () => {};
+        if (!AppContext.supabase) return () => {};
+        const channel = AppContext.supabase.channel('vetting_rework_v2')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions_v2' }, payload => {
+                onUpdateCallback(payload);
+            })
+            .subscribe();
+        return () => { try { channel.unsubscribe(); } catch(e){} };
     }
 };

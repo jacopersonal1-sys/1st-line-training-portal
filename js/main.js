@@ -1726,6 +1726,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.46": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Architecture:</strong> Refactored Attendance, Vetting Arena, and Live Execution to use a "Realtime-First" model, eliminating data loss and race conditions.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Patched critical edge cases including offline clock-ins, UI wipes during typing, and drag-and-drop failures.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Removed redundant polling from Live/Vetting modules, relying on the central sync engine for immediate, high-priority updates.</li>
+            </ul>`,
         "2.4.44": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Live Assessment Stability:</strong> Completely overhauled the Live Assessment grid to prevent race conditions, double-bookings, and mid-interaction UI resets.</li>
