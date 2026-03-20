@@ -1815,6 +1815,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.53": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a critical "infinite loop" bug during server failovers that could crash the application.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added a mutex lock to the silent failover engine to prevent concurrent database connections from colliding.</li>
+                <li style="margin-bottom: 8px;"><strong>Dev Tools:</strong> Added safety bypasses for the version checker during local development or bootloader crashes.</li>
+            </ul>`,
         "2.4.52": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a startup crash on the login screen caused by background sync engines attempting to process Live Assessments before user authentication.</li>
