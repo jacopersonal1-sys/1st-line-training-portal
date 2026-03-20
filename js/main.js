@@ -42,6 +42,64 @@ window.onerror = function(msg, url, line, col, error) {
     return false; // Let default handler run
 };
 
+// --- NEW: SILENT BACKGROUND SERVER FAILOVER ---
+window.performSilentServerSwitch = async function(newTarget) {
+    console.warn(`[Silent Failover] Initiating transition to ${newTarget.toUpperCase()}`);
+    if (typeof showToast === 'function') showToast(`Switching to ${newTarget.toUpperCase()} Server...`, 'info');
+
+    const lastTarget = localStorage.getItem('last_connected_server') || localStorage.getItem('active_server_target') || 'cloud';
+    localStorage.setItem('active_server_target', newTarget);
+
+    // 1. Clear old Realtime Channels
+    if (window.supabaseClient) {
+        try { await window.supabaseClient.removeAllChannels(); } catch(e) {}
+    }
+
+    // 2. Re-initialize Database Client
+    if (typeof initSupabaseClient === 'function') initSupabaseClient();
+
+    if (!window.supabaseClient) {
+        if (typeof showToast === 'function') showToast(`Failed to connect to ${newTarget.toUpperCase()}.`, 'error');
+        return;
+    }
+
+    // 3. Perform Migration Logic (Silent background equivalent of boot migration)
+    if (lastTarget !== newTarget) {
+        Object.keys(localStorage).forEach(k => {
+            if(k.startsWith('hash_map_')) localStorage.removeItem(k);
+            if(k.startsWith('sync_ts_')) localStorage.removeItem(k);
+            if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
+        });
+
+        if (newTarget === 'cloud') {
+            const tablesToWipe = ['records', 'submissions', 'liveBookings', 'attendance_records', 'accessLogs', 'auditLogs', 'error_reports', 'monitor_history', 'graduated_agents', 'linkRequests', 'savedReports', 'calendarEvents', 'tl_task_submissions'];
+            tablesToWipe.forEach(key => localStorage.setItem(key, '[]'));
+            localStorage.setItem('liveSessions', '[]');
+            localStorage.setItem('monitor_data', '{}');
+            localStorage.setItem('vettingSession', '{"active":false}');
+        } else {
+            if (typeof saveToServer === 'function') {
+                let configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
+                if (newTarget === 'staging') configKeys = ['system_config'];
+                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
+                saveToServer(safeKeys, false).catch(()=>{}); // Fire & Forget
+            }
+        }
+        localStorage.setItem('last_connected_server', newTarget);
+    }
+
+    // 4. Restart Engine & Pull fresh data
+    if (typeof loadFromServer === 'function') await loadFromServer(true);
+    if (typeof setupRealtimeListeners === 'function') setupRealtimeListeners();
+
+    // 5. Update Server Indicator Visual
+    if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
+    if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+
+    if (typeof showToast === 'function') showToast(`Successfully connected to ${newTarget.toUpperCase()}.`, 'success');
+};
+
+
 // --- HELPER: ASYNC SAVE ---
 // Ensures initialization data (like default admin) is saved to Supabase before app usage.
 async function secureInitSave() {
@@ -521,28 +579,38 @@ window.onload = async function() {
         // 3. Reset Row Sync Timestamps (Forces fresh fetch of records/logs)
         Object.keys(localStorage).forEach(k => { if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k); });
 
-        // 3. Force Push Local Data to New Server
-        if (typeof saveToServer === 'function') {
-            try {
-                // Show visual indicator if loader is present
-                const txt = document.getElementById('loader-text');
-                if(txt) txt.innerText = "Migrating Data to New Server...";
+        if (currentTarget === 'cloud') {
+            // SWITCHING TO CLOUD (Master Authority)
+            // We do NOT push local data to the Cloud, as the Cloud is the source of truth.
+            // Pushing would overwrite the Cloud with stale local data.
+            // Instead, we wipe local volatile tables to force a pristine download from the Cloud.
+            console.log("Switching to Cloud: Purging volatile local cache to ensure pristine sync.");
+            
+            const tablesToWipe = ['records', 'submissions', 'liveBookings', 'attendance_records', 'accessLogs', 'auditLogs', 'error_reports', 'monitor_history', 'graduated_agents', 'linkRequests', 'savedReports', 'calendarEvents', 'tl_task_submissions'];
+            tablesToWipe.forEach(key => localStorage.setItem(key, '[]'));
+            
+            localStorage.setItem('liveSessions', '[]');
+            localStorage.setItem('monitor_data', '{}');
+            localStorage.setItem('vettingSession', '{"active":false}');
+        } else {
+            // SWITCHING TO LOCAL/STAGING (Seeding)
+            // We want to clone our current state into the new, blank server.
+            if (typeof saveToServer === 'function') {
+                try {
+                    const txt = document.getElementById('loader-text');
+                    if(txt) txt.innerText = "Migrating Data to New Server...";
 
-                // EXCLUDE Global Config Keys to prevent overwriting server settings with stale local config
-                let configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
-                
-                // FIX: If switching to Staging, force a FULL CLONE (Upload Users, Rosters, Tests)
-                if (currentTarget === 'staging') {
-                    configKeys = ['system_config']; // Only protect config (contains server URL)
+                    let configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
+                    if (currentTarget === 'staging') {
+                        configKeys = ['system_config']; 
+                    }
+
+                    const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
+                    await saveToServer(safeKeys, false); 
+                    console.log("Migration: User data pushed to new server.");
+                } catch(e) { 
+                    console.error("Migration Push Failed (Non-Critical):", e); 
                 }
-
-                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
-                await saveToServer(safeKeys, false); 
-                
-                console.log("Migration: User data pushed to new server (Config skipped).");
-            } catch(e) { 
-                console.error("Migration Push Failed (Non-Critical):", e); 
-                // Continue anyway so we don't get stuck in a loop
             }
         }
         // CRITICAL FIX: Update this AFTER attempt, regardless of success, to stop the loop.
@@ -573,10 +641,14 @@ window.onload = async function() {
                         });
                         const { error } = await cloudClient.from('app_documents').select('key').limit(1);
                         if (!error) {
-                            alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
-                            localStorage.setItem('active_server_target', 'cloud');
                             sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop
-                            location.reload();
+                            if (typeof performSilentServerSwitch === 'function') {
+                                await performSilentServerSwitch('cloud');
+                            } else {
+                                alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
+                                localStorage.setItem('active_server_target', 'cloud');
+                                location.reload();
+                            }
                             return;
                         }
                     } catch(recErr) { console.error("Recovery check failed:", recErr); }
@@ -1726,6 +1798,17 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.49": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Failover Recovery:</strong> Fixed an issue where reconnecting to the Cloud server after an outage could overwrite live data with stale local cache.</li>
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented a 'Pristine Pull' protocol when migrating to the Cloud server, ensuring absolute data accuracy.</li>
+            </ul>`,
+        "2.4.48": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Live & Vetting Arenas:</strong> Added 'Test Connection' diagnostic tool and 'Force Refresh' remote commands to help Admins assist stuck trainees instantly.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added a graceful fallback UI to prevent crashes when a trainee's device hasn't downloaded the latest test definitions yet.</li>
+                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented fallback recovery for dropped network connections during live assessments to ensure questions stay in sync.</li>
+            </ul>`,
         "2.4.47": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Added global popup alerts for trainees when a session starts. Implemented strict duplicate booking prevention.</li>

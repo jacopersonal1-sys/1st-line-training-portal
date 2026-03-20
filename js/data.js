@@ -29,7 +29,11 @@ const DB_SCHEMA = {
     },
     // --- SUPER ADMIN CONFIGURATION ---
     system_config: {
-        sync_rates: { admin: 4000, teamleader: 60000, trainee: 15000 },
+        sync_rates: {
+            cloud: { admin: 4000, teamleader: 60000, trainee: 15000 },
+            local: { admin: 2000, teamleader: 30000, trainee: 5000 },
+            staging: { admin: 4000, teamleader: 60000, trainee: 15000 }
+        },
         heartbeat_rates: { admin: 5000, default: 30000 },
         idle_thresholds: { warning: 60000, logout: 900000 },
         attendance: { work_start: "08:00", late_cutoff: "08:15", work_end: "17:00", reminder_start: "16:45", allow_weekend_login: false },
@@ -508,10 +512,12 @@ async function loadFromServer(silent = false) {
         }
 
         // --- PHASE C: MONITOR STATE SYNC (Real-time Activity) ---
-        // Fetch all active user states from the table
+        // Fetch only recently active user states (Last 24 hours) to prevent payload bloat
+        const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
         const { data: monRows, error: monErr } = await window.supabaseClient
             .from('monitor_state')
-            .select('user_id, data');
+            .select('user_id, data')
+            .gt('updated_at', oneDayAgo);
             
         if (monRows) {
             // Merge server state into local monitor_data
@@ -635,11 +641,14 @@ async function startServerLookout() {
                         
                         // Update Local Config to match
                         localStorage.setItem('system_config', JSON.stringify(data.content));
-                        localStorage.setItem('active_server_target', remoteActive);
                         
-                        // Reload to apply new connection
-                        alert(`System Update: Switching to ${remoteActive.toUpperCase()} Server.`);
-                        location.reload();
+                        if (typeof performSilentServerSwitch === 'function') {
+                            performSilentServerSwitch(remoteActive);
+                        } else {
+                            localStorage.setItem('active_server_target', remoteActive);
+                            alert(`System Update: Switching to ${remoteActive.toUpperCase()} Server.`);
+                            location.reload();
+                        }
                     }
                 }
             } catch (e) { /* Ignore connection errors during lookout */ }
@@ -1913,7 +1922,17 @@ function startRealtimeSync() {
     if (HEARTBEAT_INTERVAL_ID) clearInterval(HEARTBEAT_INTERVAL_ID);
 
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-    const rates = config.sync_rates || { admin: 10000, teamleader: 300000, trainee: 60000 };
+    const rawRates = config.sync_rates || {};
+    const activeTarget = localStorage.getItem('active_server_target') || 'cloud';
+    
+    let rates;
+    if (typeof rawRates.admin !== 'undefined') {
+        rates = rawRates; // Legacy single-tier mode fallback
+    } else if (rawRates[activeTarget]) {
+        rates = rawRates[activeTarget]; // Per-server mode
+    } else {
+        rates = { admin: 4000, teamleader: 60000, trainee: 15000 };
+    }
     const beats = config.heartbeat_rates || { admin: 5000, default: 60000 };
 
     // Default Rates (Trainee/Guest)

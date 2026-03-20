@@ -9,65 +9,57 @@ window.CLOUD_CREDENTIALS = {
     key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVraGd5dmhxb2lqZ2V0eHpsenB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njg4MDQsImV4cCI6MjA4NTM0NDgwNH0.FONPTHcaicp7IAI47gwmic4frYM1ruitTSfNQT8vEf4'
 };
 
-// 2. Determine Active Server
-let activeTarget = localStorage.getItem('active_server_target') || 'cloud';
-const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
-const localSettings = systemConfig.server_settings || {};
+// --- NEW: DYNAMIC CLIENT INITIALIZATION ---
+window.initSupabaseClient = function() {
+    let activeTarget = localStorage.getItem('active_server_target') || 'cloud';
+    const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const localSettings = systemConfig.server_settings || {};
 
-let SUPABASE_URL = window.CLOUD_CREDENTIALS.url;
-let SUPABASE_ANON_KEY = window.CLOUD_CREDENTIALS.key;
+    let SUPABASE_URL = window.CLOUD_CREDENTIALS.url;
+    let SUPABASE_ANON_KEY = window.CLOUD_CREDENTIALS.key;
 
-const stagingCreds = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
+    const stagingCreds = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
 
-if (activeTarget === 'staging' && stagingCreds.url && stagingCreds.key) {
-    console.log("Using STAGING Server Credentials");
-    SUPABASE_URL = stagingCreds.url;
-    // FIX: Auto-prepend http:// if protocol is missing (Common mistake with IP addresses)
-    if (!SUPABASE_URL.match(/^https?:\/\//)) SUPABASE_URL = 'http://' + SUPABASE_URL;
-    SUPABASE_ANON_KEY = stagingCreds.key;
-} else if (activeTarget === 'local' && localSettings.local_url && localSettings.local_key) {
-    console.log("Using LOCAL Server Credentials");
-    SUPABASE_URL = localSettings.local_url;
-    // FIX: Auto-prepend http:// if protocol is missing
-    if (!SUPABASE_URL.match(/^https?:\/\//)) SUPABASE_URL = 'http://' + SUPABASE_URL;
-    SUPABASE_ANON_KEY = localSettings.local_key;
-} else {
-    console.log("Using CLOUD Server Credentials");
-}
+    if (activeTarget === 'staging' && stagingCreds.url && stagingCreds.key) {
+        console.log("Using STAGING Server Credentials");
+        SUPABASE_URL = stagingCreds.url;
+        if (!SUPABASE_URL.match(/^https?:\/\//)) SUPABASE_URL = 'http://' + SUPABASE_URL;
+        SUPABASE_ANON_KEY = stagingCreds.key;
+    } else if (activeTarget === 'local' && localSettings.local_url && localSettings.local_key) {
+        console.log("Using LOCAL Server Credentials");
+        SUPABASE_URL = localSettings.local_url;
+        if (!SUPABASE_URL.match(/^https?:\/\//)) SUPABASE_URL = 'http://' + SUPABASE_URL;
+        SUPABASE_ANON_KEY = localSettings.local_key;
+    } else {
+        console.log("Using CLOUD Server Credentials");
+    }
 
-// Initialize the Supabase Client
-// We use 'window.supabaseClient' to avoid conflict with the library's global 'supabase' variable.
-if (typeof window !== 'undefined' && window.supabase) {
-    try {
-        const options = {
-            global: {
-                headers: { 'ngrok-skip-browser-warning': 'true' }
+    if (typeof window !== 'undefined' && window.supabase) {
+        try {
+            const options = { global: { headers: { 'ngrok-skip-browser-warning': 'true' } } };
+            window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
+            console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}) -> ${SUPABASE_URL}`);
+        } catch (e) {
+            console.error("Supabase Initialization Failed:", e); 
+            if (activeTarget === 'local' && localStorage.getItem('force_local') !== 'true') {
+                console.warn("Local Server Unreachable. Silently reverting to Cloud...");
+                localStorage.setItem('active_server_target', 'cloud');
+                sessionStorage.setItem('recovery_mode', 'true');
+                if (typeof performSilentServerSwitch === 'function') {
+                    performSilentServerSwitch('cloud');
+                } else {
+                    setTimeout(() => location.reload(), 1000);
+                }
             }
-        };
-        window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
-        console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}) -> ${SUPABASE_URL}`);
-    } catch (e) {
-        console.error("Supabase Initialization Failed:", e); 
-        // FAILSAFE: If Local fails, revert to Cloud immediately
-        // BYPASS: If 'force_local' is set, do not revert (Manual Override)
-        if (activeTarget === 'local' && localStorage.getItem('force_local') !== 'true') {
-            console.warn("Local Server Unreachable. Reverting to Cloud...");
-            localStorage.setItem('active_server_target', 'cloud');
-            sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop
-            // Reload to apply
-            setTimeout(() => location.reload(), 1000);
         }
+    } else {
+        window.supabaseClient = null;
+        console.error("Supabase Library not found. Check internet connection.");
     }
-} else {
-    window.supabaseClient = null;
-    // We don't error here immediately to allow for local testing if needed,
-    // but data.js will warn if it tries to use it.
-    console.error("Supabase Library not found. Check internet connection.");
-    // Alert the user if they are likely offline on startup
-    if(document.readyState === 'complete') {
-        alert("Warning: Could not connect to Cloud Database library.\nCheck your internet connection and restart the app.");
-    }
-}
+};
+
+// Boot client immediately
+window.initSupabaseClient();
 
 // Scoring Constants
 const PASS = 90;

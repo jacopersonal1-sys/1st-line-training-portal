@@ -28,6 +28,17 @@ function loadLiveExecution() {
     updateSocketStatusUI();
 }
 
+// --- NEW: GLOBAL REJOIN LOGIC ---
+window.rejoinLiveSession = function(sessionId) {
+    localStorage.setItem('currentLiveSessionId', sessionId);
+    const allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const target = allSessions.find(s => s.sessionId === sessionId);
+    if (target) {
+        localStorage.setItem('liveSession', JSON.stringify(target));
+    }
+    showTab('live-execution');
+};
+
 async function syncLiveSessionState() {
     // TARGETED POLLING (Efficient & Stable)
     // Matches Vetting Arena logic to prevent full re-renders wiping user input
@@ -347,49 +358,60 @@ function renderAdminLivePanel(container) {
             </div>`;
     }
 
-    container.innerHTML = `
-        <div style="display:flex; height:calc(100vh - 180px); gap:10px;">
-            <div style="width:200px; background:var(--bg-card); border-right:1px solid var(--border-color); overflow-y:auto;">
-                <div style="padding:10px; font-weight:bold; background:var(--bg-input);">Questions</div>
-                ${qListHtml}
-            </div>
-            <div style="flex:1; overflow-y:auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border-color); margin-bottom:10px;">
-                    <div style="display:flex; align-items:center; gap:15px;">
-                        ${getAvatarHTML(session.trainee, 48)}
-                        <div>
-                            <div style="display:flex; align-items:center; gap:10px;">
-                                <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
-                                <div id="socket-status" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
-                                    <i class="fas fa-bolt"></i> ...
+    // SMART WRAPPER: Only rebuild the outer shell if we switch sessions or first load
+    let wrapper = document.getElementById('admin-live-wrapper');
+    if (!wrapper || wrapper.dataset.sessionId !== session.sessionId) {
+        container.innerHTML = `
+            <div id="admin-live-wrapper" data-session-id="${session.sessionId}" style="display:flex; height:calc(100vh - 180px); gap:10px;">
+                <div style="width:200px; background:var(--bg-card); border-right:1px solid var(--border-color); overflow-y:auto; display:flex; flex-direction:column;">
+                    <div style="padding:10px; font-weight:bold; background:var(--bg-input); position:sticky; top:0; z-index:1;">Questions</div>
+                    <div id="admin-live-sidebar-list" style="flex:1;"></div>
+                </div>
+                <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border-color); margin-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:15px;">
+                            ${getAvatarHTML(session.trainee, 48)}
+                            <div>
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <h3 style="margin:0;">Live Session: ${session.trainee}</h3>
+                                    <div id="socket-status" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
+                                        <i class="fas fa-bolt"></i> ...
+                                    </div>
                                 </div>
-                            </div>
-                            <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
-                                Checking connection...
-                            <div style="display:flex; align-items:center; gap:10px; margin-top:3px;">
-                                <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted);">
-                                    Checking connection...
+                                <div style="display:flex; align-items:center; gap:10px; margin-top:3px;">
+                                    <div id="live-conn-status" style="font-size:0.85rem; color:var(--text-muted);">
+                                        Checking connection...
+                                    </div>
+                                    <button class="btn-secondary btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="runLiveDiagnostics()" title="Send test packet to trainee"><i class="fas fa-satellite-dish"></i> Test Connection</button>
+                                    <button class="btn-warning btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="if(typeof sendRemoteCommand === 'function') sendRemoteCommand('${session.trainee}', 'restart')" title="Force Trainee App to Refresh"><i class="fas fa-sync"></i> Force Refresh</button>
                                 </div>
-                                <button class="btn-secondary btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="runLiveDiagnostics()" title="Send test packet to trainee"><i class="fas fa-satellite-dish"></i> Test Connection</button>
-                                <button class="btn-warning btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="if(typeof sendRemoteCommand === 'function') sendRemoteCommand('${session.trainee}', 'restart')" title="Force Trainee App to Refresh"><i class="fas fa-sync"></i> Force Refresh</button>
                             </div>
                         </div>
+                        <button class="btn-danger btn-sm" onclick="endLiveSession()">Abort Session</button>
                     </div>
-                    <button class="btn-danger btn-sm" onclick="endLiveSession()">Abort Session</button>
+                    <div id="admin-live-main-area" style="flex:1;"></div>
                 </div>
-                ${mainHtml}
-            </div>
-        </div>`;
+            </div>`;
 
-    // Start connection status polling for this trainee
-    if (typeof updateLiveConnectionStatus === 'function') {
-        updateLiveConnectionStatus(session.trainee);
-        if (LIVE_CONN_INTERVAL) clearInterval(LIVE_CONN_INTERVAL);
-        LIVE_CONN_INTERVAL = setInterval(() => {
+        if (typeof updateLiveConnectionStatus === 'function') {
             updateLiveConnectionStatus(session.trainee);
-        }, 10000); // every 10s while panel is open
+            if (LIVE_CONN_INTERVAL) clearInterval(LIVE_CONN_INTERVAL);
+            LIVE_CONN_INTERVAL = setInterval(() => { updateLiveConnectionStatus(session.trainee); }, 10000);
+        }
+        updateSocketStatusUI();
     }
-    updateSocketStatusUI();
+
+    // SMOOTH DOM PATCHING
+    document.getElementById('admin-live-sidebar-list').innerHTML = qListHtml;
+    
+    const mainArea = document.getElementById('admin-live-main-area');
+    if (mainArea.dataset.currentQ !== String(currentQ)) {
+        mainArea.style.animation = 'none';
+        mainArea.offsetHeight; // Reflow
+        mainArea.style.animation = 'fadeSlideUp 0.3s ease-out forwards';
+        mainArea.innerHTML = mainHtml;
+        mainArea.dataset.currentQ = String(currentQ);
+    }
 }
 
 function updateAdminLiveView() {
@@ -552,8 +574,54 @@ function renderTraineeLivePanel(container) {
         return false; // Tell caller to not update LAST_RENDERED_Q
     }
 
-    if (session.currentQ === -1) {
+    // SMART WRAPPER: Preserve the outer shell and timer to prevent visual thrashing
+    let wrapper = document.getElementById('trainee-live-wrapper');
+    if (!wrapper || wrapper.dataset.sessionId !== session.sessionId) {
+        const timer = session.timer || { active: false, duration: 300, start: null };
         container.innerHTML = `
+            <div id="trainee-live-wrapper" data-session-id="${session.sessionId}" style="max-width:95%; margin:0 auto; padding:20px;">
+                <div style="margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h2 style="margin:0;">Live Assessment</h2>
+                        <div id="socket-status-trainee" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
+                            <i class="fas fa-bolt"></i> ...
+                        </div>
+                    </div>
+                    <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
+                        Checking connection...
+                    </div>
+                    <div id="traineeTimerDisplay" style="text-align:center; font-size:1.5rem; font-weight:bold; color:${timer.active ? '#e74c3c' : 'var(--text-muted)'}; margin-top:10px;">
+                        ${formatTimer(calculateTimeLeft(timer))}
+                    </div>
+                </div>
+                <div class="progress-track" style="margin-bottom:20px;">
+                    <div id="trainee-live-progress" class="progress-fill" style="width:0%"></div>
+                </div>
+                <div id="trainee-live-main"></div>
+            </div>`;
+            
+        if (typeof updateLiveConnectionStatus === 'function') {
+            updateLiveConnectionStatus(CURRENT_USER.user, 'live-conn-status-trainee');
+            if (LIVE_CONN_INTERVAL) clearInterval(LIVE_CONN_INTERVAL);
+            LIVE_CONN_INTERVAL = setInterval(() => { updateLiveConnectionStatus(CURRENT_USER.user, 'live-conn-status-trainee'); }, 10000);
+        }
+        updateSocketStatusUI();
+    }
+
+    const mainEl = document.getElementById('trainee-live-main');
+    const progressEl = document.getElementById('trainee-live-progress');
+    
+    if (progressEl && test.questions && test.questions.length > 0) {
+        progressEl.style.width = `${((session.currentQ+1)/test.questions.length)*100}%`;
+    }
+
+    let mainContent = '';
+    let q = null;
+    let isSubmitted = false;
+    let btnText = '';
+
+    if (session.currentQ === -1) {
+        mainContent = `
             <div style="text-align:center; padding:50px; max-width: 800px; margin: 0 auto;">
                 <h1>${test.title}</h1>
                 <h3>Get Ready!</h3>
@@ -567,14 +635,11 @@ function renderTraineeLivePanel(container) {
                         <li>If you are unable to answer a question within <strong>5 minutes</strong> of it being provided, the marks obtained for that question are final & the next question will be provided.</li>
                     </ul>
                 </div>
-
                 <div class="loader" style="margin:20px auto;"></div>
                 <div style="color:var(--text-muted); font-size:0.9rem;">Waiting for trainer to push the first question...</div>
             </div>`;
-        return;
-    }
-
-    const q = test.questions[session.currentQ];
+    } else {
+    q = test.questions[session.currentQ];
     let existingAns = session.answers[session.currentQ];
 
     // --- FIX: Initialize default answers for complex types if undefined (Prevents Matrix Reset) ---
@@ -605,63 +670,51 @@ function renderTraineeLivePanel(container) {
         inputHtml = '<p>Error: Input renderer not loaded.</p>';
     }
 
-    const isSubmitted = (session.answers[session.currentQ] !== undefined && session.answers[session.currentQ] !== null && session.answers[session.currentQ] !== "");
+    isSubmitted = (session.answers[session.currentQ] !== undefined && session.answers[session.currentQ] !== null && session.answers[session.currentQ] !== "");
 
-    const btnText = (q.type === 'live_practical') ? 'Done' : (isSubmitted ? 'Update Answer' : 'Submit Answer');
+    btnText = (q.type === 'live_practical') ? 'Done' : (isSubmitted ? 'Update Answer' : 'Submit Answer');
     
     // Reference Button
     const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
     
-    // Timer
-    const timer = session.timer || { active: false, duration: 300, start: null };
-
-    container.innerHTML = `
-        <div style="max-width:95%; margin:0 auto; padding:20px;">
-            <div style="margin-bottom:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <h2 style="margin:0;">Live Assessment</h2>
-                    <div id="socket-status-trainee" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
-                        <i class="fas fa-bolt"></i> ...
-                    </div>
-                </div>
-                <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
-                    Checking connection...
-                </div>
-                <div id="traineeTimerDisplay" style="text-align:center; font-size:1.5rem; font-weight:bold; color:${timer.active ? '#e74c3c' : 'var(--text-muted)'}; margin-top:10px;">
-                    ${formatTimer(calculateTimeLeft(timer))}
+        mainContent = `
+        <div class="card" style="padding:40px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start;">
+                <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">${session.currentQ + 1}. ${q.text} ${refBtn} <span style="font-size:1rem; color:var(--text-muted); font-weight:normal; margin-left:10px;">(${q.points || 1} pts)</span></div>
+                <div class="live-input-area" style="font-size:1.2rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
+                    ${inputHtml}
                 </div>
             </div>
-            <div class="progress-track" style="margin-bottom:20px;">
-                <div class="progress-fill" style="width:${((session.currentQ+1)/test.questions.length)*100}%"></div>
-            </div>
-            
-            <div class="card" style="padding:40px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start;">
-                    <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">${session.currentQ + 1}. ${q.text} ${refBtn} <span style="font-size:1rem; color:var(--text-muted); font-weight:normal; margin-left:10px;">(${q.points || 1} pts)</span></div>
-                    <div class="live-input-area" style="font-size:1.2rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
-                        ${inputHtml}
-                    </div>
-                </div>
-
-                <div style="margin-top:40px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:15px;">
-                    ${isSubmitted ? '<span id="submit-status" style="color:#2ecc71; font-weight:bold; font-size:1.1rem;"><i class="fas fa-check-circle"></i> Answer Submitted</span>' : '<span id="submit-status"></span>'}
-                    <button class="btn-primary btn-lg" onclick="submitLiveAnswer(${session.currentQ})">${btnText}</button>
-                </div>
+            <div style="margin-top:40px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:15px;">
+                ${isSubmitted ? '<span id="submit-status" style="color:#2ecc71; font-weight:bold; font-size:1.1rem;"><i class="fas fa-check-circle"></i> Answer Submitted</span>' : '<span id="submit-status"></span>'}
+                <button class="btn-primary btn-lg" onclick="submitLiveAnswer(${session.currentQ})">${btnText}</button>
             </div>
         </div>`;
-
-    // NEW: Attach listeners for Real-time Admin Monitoring (Typing/Selecting)
-    attachRealtimeListeners(session.currentQ);
-
-    // Trainee-side connection hint (simple, read-only)
-    if (typeof updateLiveConnectionStatus === 'function') {
-        updateLiveConnectionStatus(CURRENT_USER.user, 'live-conn-status-trainee');
-        if (LIVE_CONN_INTERVAL) clearInterval(LIVE_CONN_INTERVAL);
-        LIVE_CONN_INTERVAL = setInterval(() => {
-            updateLiveConnectionStatus(CURRENT_USER.user, 'live-conn-status-trainee');
-        }, 10000);
     }
-    updateSocketStatusUI();
+    
+    // SMOOTH DOM PATCHING
+    if (mainEl.dataset.currentQ !== String(session.currentQ)) {
+        mainEl.style.animation = 'none';
+        mainEl.offsetHeight; // Reflow
+        mainEl.style.animation = 'fadeSlideUp 0.3s ease-out forwards';
+        mainEl.innerHTML = mainContent;
+        mainEl.dataset.currentQ = String(session.currentQ);
+        
+        if (session.currentQ !== -1) attachRealtimeListeners(session.currentQ);
+    } else {
+        // If same question, just patch the submission status text without wiping user inputs
+        const statusSpan = document.getElementById('submit-status');
+        if (statusSpan && isSubmitted && !statusSpan.innerHTML.includes('Answer Submitted')) {
+             statusSpan.innerHTML = '<i class="fas fa-check-circle"></i> Answer Submitted';
+             statusSpan.style.color = '#2ecc71';
+             statusSpan.style.fontWeight = 'bold';
+             statusSpan.style.fontSize = '1.1rem';
+        }
+        const btn = mainEl.querySelector('.btn-primary.btn-lg');
+        if (btn && q) {
+             if (btn.innerText !== btnText) btn.innerText = btnText;
+        }
+    }
     return true;
 }
 

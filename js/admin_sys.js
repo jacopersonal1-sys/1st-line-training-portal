@@ -924,7 +924,24 @@ function openSuperAdminConfig() {
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
     
     // Defaults if missing
-    const rates = config.sync_rates || { admin: 10000, teamleader: 300000, trainee: 60000 }; // ms
+    const rawRates = config.sync_rates || {};
+    let envRates = rawRates;
+    
+    // Legacy data migration
+    if (typeof rawRates.admin !== 'undefined') {
+        envRates = {
+            cloud: { admin: rawRates.admin, teamleader: rawRates.teamleader, trainee: rawRates.trainee },
+            local: { admin: Math.max(2000, rawRates.admin / 2), teamleader: Math.max(30000, rawRates.teamleader / 2), trainee: Math.max(5000, rawRates.trainee / 2) },
+            staging: { admin: rawRates.admin, teamleader: rawRates.teamleader, trainee: rawRates.trainee }
+        };
+    } else if (!envRates.cloud) {
+        envRates = {
+            cloud: { admin: 4000, teamleader: 60000, trainee: 15000 },
+            local: { admin: 2000, teamleader: 30000, trainee: 5000 },
+            staging: { admin: 4000, teamleader: 60000, trainee: 15000 }
+        };
+    }
+    const getR = (env, role, def) => (envRates[env] && envRates[env][role]) ? envRates[env][role] / 1000 : def;
     const att = config.attendance || { work_start: "08:00", work_end: "17:00", reminder_start: "16:45", late_cutoff: "08:15" };
     const sec = config.security || { maintenance_mode: false, min_version: "0.0.0", banned_clients: [] };
     const feat = config.features || { vetting_arena: true, live_assessments: true, disable_animations: false };
@@ -1032,13 +1049,35 @@ function openSuperAdminConfig() {
 
                     <!-- TAB: CONFIGURATION -->
                     <div id="sa-tab-config" class="sa-tab-content hidden">
-                        <div class="grid-2">
-                            <div class="card">
-                                <h4><i class="fas fa-sync"></i> Sync Rates</h4>
-                                <label>Admin (Sec)</label><input type="number" id="sa_sync_admin" value="${rates.admin / 1000}">
-                                <label>Trainee (Sec)</label><input type="number" id="sa_sync_trainee" value="${rates.trainee / 1000}">
-                                <label>TL (Min)</label><input type="number" id="sa_sync_tl" value="${rates.teamleader / 60000}">
+                        <div class="card" style="margin-bottom: 15px;">
+                            <h4><i class="fas fa-sync"></i> Sync Rates by Server (Seconds)</h4>
+                            <div class="table-responsive">
+                                <table class="admin-table compressed-table" style="margin:0;">
+                                    <thead><tr><th>Server</th><th>Admin</th><th>Team Leader</th><th>Trainee</th></tr></thead>
+                                    <tbody>
+                                        <tr>
+                                            <td><i class="fas fa-cloud" style="color:#3498db;"></i> Cloud</td>
+                                            <td><input type="number" id="sa_sync_cloud_admin" value="${getR('cloud','admin',4)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" id="sa_sync_cloud_tl" value="${getR('cloud','teamleader',60)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" id="sa_sync_cloud_trainee" value="${getR('cloud','trainee',15)}" style="width:80px; margin:0;"></td>
+                                        </tr>
+                                        <tr>
+                                            <td><i class="fas fa-server" style="color:#9b59b6;"></i> Local</td>
+                                            <td><input type="number" id="sa_sync_local_admin" value="${getR('local','admin',2)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" id="sa_sync_local_tl" value="${getR('local','teamleader',30)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" id="sa_sync_local_trainee" value="${getR('local','trainee',5)}" style="width:80px; margin:0;"></td>
+                                        </tr>
+                                        <tr>
+                                            <td><i class="fas fa-flask" style="color:#f1c40f;"></i> Staging</td>
+                                            <td><input type="number" id="sa_sync_staging_admin" value="${getR('staging','admin',4)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" id="sa_sync_staging_tl" value="${getR('staging','teamleader',60)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" id="sa_sync_staging_trainee" value="${getR('staging','trainee',15)}" style="width:80px; margin:0;"></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
+                        </div>
+                        <div class="grid-2">
                             <div class="card">
                                 <h4><i class="fas fa-clock"></i> Attendance</h4>
                                 <label>Start</label><input type="time" id="sa_att_start" value="${att.work_start}">
@@ -1053,14 +1092,22 @@ function openSuperAdminConfig() {
                             
                             ${statusBanner}
                             
-                            <div style="display:flex; gap:10px; align-items:center; margin-bottom:15px; padding:10px; background:var(--bg-input); border-radius:6px;">
-                                <label style="margin:0; font-weight:bold;">Global Target (All Users):</label>
-                                <select id="sa_srv_active" style="flex:1;">
-                                    <option value="cloud" ${srv.active === 'cloud' ? 'selected' : ''}>Cloud (Main)</option>
-                                    <option value="local" ${srv.active === 'local' ? 'selected' : ''}>Local (VM)</option>
-                                    <option value="staging" disabled>Staging (Manual Only)</option>
-                                </select>
-                                <button class="btn-secondary btn-sm" onclick="testServerConnections()"><i class="fas fa-network-wired"></i> Test Connectivity</button>
+                            <div style="margin-bottom:20px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                    <label style="margin:0; font-weight:bold;">Global Target (All Users):</label>
+                                    <button class="btn-secondary btn-sm" onclick="testServerConnections()"><i class="fas fa-network-wired"></i> Test Connectivity</button>
+                                </div>
+                                <div style="display:flex; gap:15px;">
+                                    <input type="hidden" id="sa_srv_active" value="${srv.active === 'local' ? 'local' : 'cloud'}">
+                                    <div id="btn_target_cloud" onclick="setGlobalTarget('cloud')" style="flex:1; cursor:pointer; padding:15px; border-radius:8px; border:2px solid ${srv.active !== 'local' ? '#3498db' : 'var(--border-color)'}; background:${srv.active !== 'local' ? 'rgba(52, 152, 219, 0.1)' : 'var(--bg-input)'}; text-align:center; transition:0.2s;">
+                                        <i class="fas fa-cloud" style="font-size:2rem; color:#3498db; margin-bottom:10px;"></i>
+                                        <div style="font-weight:bold; color:var(--text-main);">Cloud (Production)</div>
+                                    </div>
+                                    <div id="btn_target_local" onclick="setGlobalTarget('local')" style="flex:1; cursor:pointer; padding:15px; border-radius:8px; border:2px solid ${srv.active === 'local' ? '#9b59b6' : 'var(--border-color)'}; background:${srv.active === 'local' ? 'rgba(155, 89, 182, 0.1)' : 'var(--bg-input)'}; text-align:center; transition:0.2s;">
+                                        <i class="fas fa-server" style="font-size:2rem; color:#9b59b6; margin-bottom:10px;"></i>
+                                        <div style="font-weight:bold; color:var(--text-main);">Local (VM Backup)</div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="grid-2" style="gap:15px;">
@@ -1229,6 +1276,22 @@ window.switchSaTab = function(tabName, btn) {
     
     document.querySelectorAll('.sa-tab-btn').forEach(el => el.classList.remove('active'));
     btn.classList.add('active');
+};
+
+window.setGlobalTarget = function(target) {
+    const hiddenInput = document.getElementById('sa_srv_active');
+    if (hiddenInput) hiddenInput.value = target;
+    
+    const btnCloud = document.getElementById('btn_target_cloud');
+    const btnLocal = document.getElementById('btn_target_local');
+    
+    if (target === 'cloud') {
+        if(btnCloud) { btnCloud.style.borderColor = '#3498db'; btnCloud.style.background = 'rgba(52, 152, 219, 0.1)'; }
+        if(btnLocal) { btnLocal.style.borderColor = 'var(--border-color)'; btnLocal.style.background = 'var(--bg-input)'; }
+    } else {
+        if(btnLocal) { btnLocal.style.borderColor = '#9b59b6'; btnLocal.style.background = 'rgba(155, 89, 182, 0.1)'; }
+        if(btnCloud) { btnCloud.style.borderColor = 'var(--border-color)'; btnCloud.style.background = 'var(--bg-input)'; }
+    }
 };
 
 window.loadRawDataKey = function() {
@@ -1780,9 +1843,21 @@ async function saveSuperAdminConfig() {
     };
 
     config.sync_rates = {
-        admin: parseInt(getVal('sa_sync_admin', '10')) * 1000,
-        teamleader: parseInt(getVal('sa_sync_tl', '5')) * 60000,
-        trainee: parseInt(getVal('sa_sync_trainee', '60')) * 1000
+        cloud: {
+            admin: parseInt(getVal('sa_sync_cloud_admin', '4')) * 1000,
+            teamleader: parseInt(getVal('sa_sync_cloud_tl', '60')) * 1000,
+            trainee: parseInt(getVal('sa_sync_cloud_trainee', '15')) * 1000
+        },
+        local: {
+            admin: parseInt(getVal('sa_sync_local_admin', '2')) * 1000,
+            teamleader: parseInt(getVal('sa_sync_local_tl', '30')) * 1000,
+            trainee: parseInt(getVal('sa_sync_local_trainee', '5')) * 1000
+        },
+        staging: {
+            admin: parseInt(getVal('sa_sync_staging_admin', '4')) * 1000,
+            teamleader: parseInt(getVal('sa_sync_staging_tl', '60')) * 1000,
+            trainee: parseInt(getVal('sa_sync_staging_trainee', '15')) * 1000
+        }
     };
     
     config.attendance = { ...config.attendance,
@@ -1822,8 +1897,12 @@ async function saveSuperAdminConfig() {
     // IMMEDIATE SWITCH: If Admin changes the target, apply it locally immediately
     // This prevents getting stuck on a dead 'local' server.
     if (newTarget !== oldTarget) {
-        localStorage.setItem('active_server_target', config.server_settings.active);
         sessionStorage.removeItem('recovery_mode'); // Clear safety flag to allow manual switch
+        if (typeof performSilentServerSwitch === 'function') {
+            performSilentServerSwitch(newTarget);
+        } else {
+            localStorage.setItem('active_server_target', newTarget);
+        }
     }
 
     localStorage.setItem('system_config', JSON.stringify(config));
@@ -2251,23 +2330,35 @@ window.switchToStaging = function() {
     if (!url.match(/^https?:\/\//)) url = 'http://' + url;
 
     localStorage.setItem('staging_credentials', JSON.stringify({ url, key }));
-    localStorage.setItem('active_server_target', 'staging');
     // Clear recovery mode to ensure it sticks
     sessionStorage.removeItem('recovery_mode');
     
-    alert("Switched to Staging Mode. App will reload connected to the test server.");
-    location.reload();
+    if (typeof performSilentServerSwitch === 'function') {
+        performSilentServerSwitch('staging');
+        const modal = document.getElementById('superAdminModal');
+        if (modal) modal.remove();
+    } else {
+        localStorage.setItem('active_server_target', 'staging');
+        alert("Switched to Staging Mode. App will reload connected to the test server.");
+        location.reload();
+    }
 };
 
 window.exitStaging = function() {
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');
     const target = (config.server_settings && config.server_settings.active) ? config.server_settings.active : 'cloud';
     
-    localStorage.setItem('active_server_target', target);
     sessionStorage.removeItem('recovery_mode');
     
-    alert(`Exiting Staging Mode.\n\nReverting to ${target.toUpperCase()} (Production).`);
-    location.reload();
+    if (typeof performSilentServerSwitch === 'function') {
+        performSilentServerSwitch(target);
+        const modal = document.getElementById('superAdminModal');
+        if (modal) modal.remove();
+    } else {
+        localStorage.setItem('active_server_target', target);
+        alert(`Exiting Staging Mode.\n\nReverting to ${target.toUpperCase()} (Production).`);
+        location.reload();
+    }
 };
 
 window.forceMigrationPush = async function() {

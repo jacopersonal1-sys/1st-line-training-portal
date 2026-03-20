@@ -155,6 +155,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.49**: **Failover Recovery**: Fixed server migration protocol to prevent stale local data from overwriting the cloud database when reconnecting. Implemented Pristine Pull.
+ - **v2.4.48**: **Arena Diagnostics**: Added Test Connection ping tool and Force Refresh remote commands to Live and Vetting Arenas. Added missing test data fallback recovery.
  - **v2.4.47**: **Live Assessment UX**: Added global floating alerts for session starts. Implemented strict server-side duplicate booking prevention. Added manual refresh button. Improved Trainee schedule sync logic.
  - **v2.4.46**: **Realtime-First Refactor**: Migrated Attendance, Vetting, and Live Execution to a direct-to-database model for instant updates. Patched critical edge cases related to offline use and UI stability.
  - **v2.4.44**: **Live Assessment Fixes**: Eliminated race conditions causing Double-Bookings, Ghost Renders, and UI-Wipes during drag-and-drop. Implemented atomic collision checks directly to Supabase.

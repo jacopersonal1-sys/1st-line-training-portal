@@ -626,7 +626,7 @@ async function renderLiveTable() {
 
                         if(!isCompleted) {
                             if (existingSession) {
-                                actions += `<button class="btn-warning btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="showTab('live-execution')" title="Rejoin Active Session"><i class="fas fa-sign-in-alt"></i> Rejoin</button>`;
+                                actions += `<button class="btn-warning btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="rejoinLiveSession('${existingSession.sessionId}')" title="Rejoin Active Session"><i class="fas fa-sign-in-alt"></i> Rejoin</button>`;
                             } else {
                                 actions += `<button class="btn-primary btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="initiateLiveSession('${booking.id}', '${booking.assessment}', '${booking.trainee}')" title="Start Live Session"><i class="fas fa-play"></i> Start</button>`;
                                 actions += `<button class="btn-success btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="markBookingComplete('${booking.id}')" title="Mark Complete"><i class="fas fa-check"></i></button>`;
