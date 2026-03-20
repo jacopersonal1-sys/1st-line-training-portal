@@ -72,6 +72,9 @@ async function syncLiveSessionState() {
 
 // --- HELPER: PROCESS STATE (Shared by Poller & Realtime) ---
 function processLiveSessionState(allSessions) {
+    // SAFETY GUARD: Prevent execution if not logged in (e.g., during initial boot sync on login screen)
+    if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER) return;
+
     // FIND MY RELEVANT SESSION
     let myServerSession = null;
     const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');

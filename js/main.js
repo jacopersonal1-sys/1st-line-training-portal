@@ -1805,6 +1805,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.51": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Added a 'Type Filter' to the Assessment Manager to easily isolate Vetting, Live, or Standard tests.</li>
+                <li style="margin-bottom: 8px;"><strong>Grading Queue:</strong> Completely redesigned the Marking Queue. Submissions are now cleanly grouped by Trainee with color-coded test type badges for faster grading.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Hardened failover logic. Reconnecting to the cloud now actively synchronizes offline local work and explicitly seeks out and destroys cloud "Ghost Data".</li>
+            </ul>`,
         "2.4.50": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Performance:</strong> Optimized 'monitor_state' queries to drastically reduce bandwidth and database load.</li>
