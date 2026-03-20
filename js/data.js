@@ -293,7 +293,7 @@ async function loadFromServer(silent = false) {
                 // FIX: For specific Admin keys (Rosters, Schedules, Tests), do NOT merge. 
                 // Merging restores deleted items if the server hasn't updated yet or if we are out of sync.
                 // We trust the Server's snapshot if it is newer, or our local overwrite if we just saved.
-                const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules'];
+                const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
                 
                 if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(doc.key)) {
                     let strategy = 'server_wins';

@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.50**: **Performance & Admin UI**: Optimized background sync queries. Added per-environment sync rate configurations and visual server failover cards.
  - **v2.4.49**: **Failover Recovery**: Fixed server migration protocol to prevent stale local data from overwriting the cloud database when reconnecting. Implemented Pristine Pull.
  - **v2.4.48**: **Arena Diagnostics**: Added Test Connection ping tool and Force Refresh remote commands to Live and Vetting Arenas. Added missing test data fallback recovery.
  - **v2.4.47**: **Live Assessment UX**: Added global floating alerts for session starts. Implemented strict server-side duplicate booking prevention. Added manual refresh button. Improved Trainee schedule sync logic.

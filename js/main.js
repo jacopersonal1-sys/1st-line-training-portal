@@ -71,19 +71,28 @@ window.performSilentServerSwitch = async function(newTarget) {
             if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
         });
 
-        if (newTarget === 'cloud') {
-            const tablesToWipe = ['records', 'submissions', 'liveBookings', 'attendance_records', 'accessLogs', 'auditLogs', 'error_reports', 'monitor_history', 'graduated_agents', 'linkRequests', 'savedReports', 'calendarEvents', 'tl_task_submissions'];
-            tablesToWipe.forEach(key => localStorage.setItem(key, '[]'));
-            localStorage.setItem('liveSessions', '[]');
-            localStorage.setItem('monitor_data', '{}');
-            localStorage.setItem('vettingSession', '{"active":false}');
-        } else {
-            if (typeof saveToServer === 'function') {
-                let configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
-                if (newTarget === 'staging') configKeys = ['system_config'];
-                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
-                saveToServer(safeKeys, false).catch(()=>{}); // Fire & Forget
-            }
+        if (typeof saveToServer === 'function') {
+            let configKeys = ['system_config'];
+            const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
+            
+            // Force push local state & perform Mirror Cleanup to destroy server-side ghost data
+            saveToServer(safeKeys, true, true).then(async () => {
+                if (window.supabaseClient) {
+                    const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
+                    for (const table of tables) {
+                        const { data: serverIds } = await window.supabaseClient.from(table).select('id');
+                        if (serverIds) {
+                            const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
+                            if (localKey) {
+                                const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+                                const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
+                                const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
+                                if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
+                            }
+                        }
+                    }
+                }
+            }).catch(()=>{}); 
         }
         localStorage.setItem('last_connected_server', newTarget);
     }
@@ -579,38 +588,36 @@ window.onload = async function() {
         // 3. Reset Row Sync Timestamps (Forces fresh fetch of records/logs)
         Object.keys(localStorage).forEach(k => { if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k); });
 
-        if (currentTarget === 'cloud') {
-            // SWITCHING TO CLOUD (Master Authority)
-            // We do NOT push local data to the Cloud, as the Cloud is the source of truth.
-            // Pushing would overwrite the Cloud with stale local data.
-            // Instead, we wipe local volatile tables to force a pristine download from the Cloud.
-            console.log("Switching to Cloud: Purging volatile local cache to ensure pristine sync.");
-            
-            const tablesToWipe = ['records', 'submissions', 'liveBookings', 'attendance_records', 'accessLogs', 'auditLogs', 'error_reports', 'monitor_history', 'graduated_agents', 'linkRequests', 'savedReports', 'calendarEvents', 'tl_task_submissions'];
-            tablesToWipe.forEach(key => localStorage.setItem(key, '[]'));
-            
-            localStorage.setItem('liveSessions', '[]');
-            localStorage.setItem('monitor_data', '{}');
-            localStorage.setItem('vettingSession', '{"active":false}');
-        } else {
-            // SWITCHING TO LOCAL/STAGING (Seeding)
-            // We want to clone our current state into the new, blank server.
-            if (typeof saveToServer === 'function') {
-                try {
-                    const txt = document.getElementById('loader-text');
-                    if(txt) txt.innerText = "Migrating Data to New Server...";
+        // MASTER AUTHORITY: The local device retains all offline work.
+        // Push the complete local state to the new server and destroy server-side ghost data.
+        if (typeof saveToServer === 'function') {
+            try {
+                const txt = document.getElementById('loader-text');
+                if(txt) txt.innerText = "Synchronizing Data to New Server...";
 
-                    let configKeys = ['system_config', 'accessControl', 'assessments', 'vettingTopics', 'rosters', 'users', 'dailyTips'];
-                    if (currentTarget === 'staging') {
-                        configKeys = ['system_config']; 
+                let configKeys = ['system_config'];
+                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
+                
+                await saveToServer(safeKeys, true); 
+                
+                if (window.supabaseClient) {
+                    const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
+                    for (const table of tables) {
+                        const { data: serverIds } = await window.supabaseClient.from(table).select('id');
+                        if (serverIds) {
+                            const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
+                            if (localKey) {
+                                const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+                                const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
+                                const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
+                                if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
+                            }
+                        }
                     }
-
-                    const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
-                    await saveToServer(safeKeys, false); 
-                    console.log("Migration: User data pushed to new server.");
-                } catch(e) { 
-                    console.error("Migration Push Failed (Non-Critical):", e); 
                 }
+                console.log("Migration: Target server synchronized with local state.");
+            } catch(e) { 
+                console.error("Migration Push Failed:", e); 
             }
         }
         // CRITICAL FIX: Update this AFTER attempt, regardless of success, to stop the loop.
@@ -1798,6 +1805,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.50": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Optimized 'monitor_state' queries to drastically reduce bandwidth and database load.</li>
+                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Separated sync rate configurations for Cloud, Local, and Staging environments.</li>
+                <li style="margin-bottom: 8px;"><strong>UI/UX:</strong> Upgraded the Global Target server selection to a visual card-based interface in the Super Admin console.</li>
+            </ul>`,
         "2.4.49": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Failover Recovery:</strong> Fixed an issue where reconnecting to the Cloud server after an outage could overwrite live data with stale local cache.</li>

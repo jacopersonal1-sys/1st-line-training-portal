@@ -119,21 +119,55 @@ function loadMarkingQueue() {
         return;
     }
 
-    container.innerHTML = validPending.map(s => `
-        <div class="test-card-row" style="border-left: 4px solid var(--primary); margin-bottom:10px;">
-            <div style="display:flex; align-items:center; gap:10px;">
-                ${getAvatarHTML(s.trainee)}
+    // --- GROUP BY TRAINEE ---
+    const grouped = {};
+    validPending.forEach(s => {
+        if (!grouped[s.trainee]) grouped[s.trainee] = [];
+        grouped[s.trainee].push(s);
+    });
+
+    const sortedTrainees = Object.keys(grouped).sort();
+
+    container.innerHTML = sortedTrainees.map(trainee => {
+        const traineeSubs = grouped[trainee];
+        // Sort chronologically
+        traineeSubs.sort((a,b) => new Date(a.date) - new Date(b.date));
+
+        const rowsHtml = traineeSubs.map(s => {
+            const tType = s.testSnapshot?.type || (s.testTitle.toLowerCase().includes('vetting') ? 'vetting' : 'standard');
+            let typeBadge = `<span style="font-size:0.75rem; background:var(--bg-input); padding:2px 6px; border-radius:4px; color:var(--text-muted); border:1px solid var(--border-color); margin-left:10px;"><i class="fas fa-file-alt"></i> Standard</span>`;
+            
+            if (tType === 'vetting') {
+                typeBadge = `<span style="font-size:0.75rem; background:rgba(155, 89, 182, 0.1); padding:2px 6px; border-radius:4px; color:#9b59b6; border:1px solid #9b59b6; margin-left:10px;"><i class="fas fa-shield-alt"></i> Vetting</span>`;
+            } else if (tType === 'live') {
+                typeBadge = `<span style="font-size:0.75rem; background:rgba(243, 112, 33, 0.1); padding:2px 6px; border-radius:4px; color:var(--primary); border:1px solid var(--primary); margin-left:10px;"><i class="fas fa-satellite-dish"></i> Live</span>`;
+            }
+
+            return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 15px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-app);">
                 <div>
-                    <strong>${s.trainee}</strong>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">${s.testTitle} | Submitted: ${s.date} | Score: ${s.score || 0}%</div>
+                    <div style="font-weight:bold; margin-bottom:4px; display:flex; align-items:center;">${s.testTitle} ${typeBadge}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);"><i class="fas fa-calendar-alt"></i> Submitted: ${s.date} | Current Score: <span style="color:var(--text-main); font-weight:bold;">${s.score || 0}%</span></div>
                 </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-primary btn-sm" onclick="approveSubmission('${s.id}')" title="Quick Approve (Accept Score)"><i class="fas fa-check"></i> Approve</button>
+                    <button class="btn-secondary btn-sm" onclick="openAdminMarking('${s.id}')" title="Detailed Grade"><i class="fas fa-highlighter"></i> Grade</button>
+                </div>
+            </div>`;
+        }).join('');
+
+        return `
+        <div class="card" style="padding:0; overflow:hidden; margin-bottom:20px; border:1px solid var(--border-color);">
+            <div style="background:var(--bg-input); padding:10px 15px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border-color);">
+                ${getAvatarHTML(trainee)}
+                <h3 style="margin:0;">${trainee}</h3>
+                <span class="badge-count" style="position:static; margin-left:auto; background:var(--primary); font-size:0.8rem;">${traineeSubs.length} Pending</span>
             </div>
-            <div style="display:flex; gap:5px;">
-                <button class="btn-primary btn-sm" onclick="approveSubmission('${s.id}')" title="Quick Approve"><i class="fas fa-check"></i></button>
-                <button class="btn-secondary btn-sm" onclick="openAdminMarking('${s.id}')" title="Detailed Mark">Edit</button>
+            <div style="padding:15px; display:flex; flex-direction:column; gap:10px;">
+                ${rowsHtml}
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 // QUICK APPROVE

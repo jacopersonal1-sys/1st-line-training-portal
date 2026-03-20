@@ -555,10 +555,32 @@ function loadManageTests() {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const records = JSON.parse(localStorage.getItem('records') || '[]'); // For Ghost Data check
-    const search = document.getElementById('testManagerSearch') ? document.getElementById('testManagerSearch').value.toLowerCase() : '';
+    const searchInput = document.getElementById('testManagerSearch');
+    const search = searchInput ? searchInput.value.toLowerCase() : '';
+    
+    // --- INJECT TYPE FILTER ---
+    if (searchInput && !document.getElementById('testManagerTypeFilter')) {
+        const select = document.createElement('select');
+        select.id = 'testManagerTypeFilter';
+        select.style.cssText = "padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-input); color: var(--text-main); margin-right: 10px; vertical-align: middle;";
+        select.onchange = () => loadManageTests();
+        select.innerHTML = `
+            <option value="">All Types</option>
+            <option value="standard">Standard</option>
+            <option value="live">Live Assessment</option>
+            <option value="vetting">Vetting Test</option>
+        `;
+        searchInput.parentNode.insertBefore(select, searchInput);
+    }
+    
+    const typeFilter = document.getElementById('testManagerTypeFilter') ? document.getElementById('testManagerTypeFilter').value : '';
     
     // Filter
-    const filtered = tests.filter(t => t.title.toLowerCase().includes(search));
+    const filtered = tests.filter(t => {
+        if (search && !t.title.toLowerCase().includes(search)) return false;
+        if (typeFilter && t.type !== typeFilter && (t.type || 'standard') !== typeFilter) return false;
+        return true;
+    });
 
     if (filtered.length === 0) {
         container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);">No assessments found.</div>';
