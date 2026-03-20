@@ -42,70 +42,79 @@ window.onerror = function(msg, url, line, col, error) {
     return false; // Let default handler run
 };
 
+// Lock to prevent concurrent failovers destroying the boot cycle
+window._isSwitchingServers = false;
+
 // --- NEW: SILENT BACKGROUND SERVER FAILOVER ---
 window.performSilentServerSwitch = async function(newTarget) {
-    console.warn(`[Silent Failover] Initiating transition to ${newTarget.toUpperCase()}`);
-    if (typeof showToast === 'function') showToast(`Switching to ${newTarget.toUpperCase()} Server...`, 'info');
+    if (window._isSwitchingServers) return;
+    window._isSwitchingServers = true;
+    try {
+        console.warn(`[Silent Failover] Initiating transition to ${newTarget.toUpperCase()}`);
+        if (typeof showToast === 'function') showToast(`Switching to ${newTarget.toUpperCase()} Server...`, 'info');
 
-    const lastTarget = localStorage.getItem('last_connected_server') || localStorage.getItem('active_server_target') || 'cloud';
-    localStorage.setItem('active_server_target', newTarget);
+        const lastTarget = localStorage.getItem('last_connected_server') || localStorage.getItem('active_server_target') || 'cloud';
+        localStorage.setItem('active_server_target', newTarget);
 
-    // 1. Clear old Realtime Channels
-    if (window.supabaseClient) {
-        try { await window.supabaseClient.removeAllChannels(); } catch(e) {}
-    }
+        // 1. Clear old Realtime Channels
+        if (window.supabaseClient) {
+            try { await window.supabaseClient.removeAllChannels(); } catch(e) {}
+        }
 
-    // 2. Re-initialize Database Client
-    if (typeof initSupabaseClient === 'function') initSupabaseClient();
+        // 2. Re-initialize Database Client
+        if (typeof initSupabaseClient === 'function') initSupabaseClient();
 
-    if (!window.supabaseClient) {
-        if (typeof showToast === 'function') showToast(`Failed to connect to ${newTarget.toUpperCase()}.`, 'error');
-        return;
-    }
+        if (!window.supabaseClient) {
+            if (typeof showToast === 'function') showToast(`Failed to connect to ${newTarget.toUpperCase()}.`, 'error');
+            return;
+        }
 
-    // 3. Perform Migration Logic (Silent background equivalent of boot migration)
-    if (lastTarget !== newTarget) {
-        Object.keys(localStorage).forEach(k => {
-            if(k.startsWith('hash_map_')) localStorage.removeItem(k);
-            if(k.startsWith('sync_ts_')) localStorage.removeItem(k);
-            if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
-        });
+        // 3. Perform Migration Logic (Silent background equivalent of boot migration)
+        if (lastTarget !== newTarget) {
+            Object.keys(localStorage).forEach(k => {
+                if(k.startsWith('hash_map_')) localStorage.removeItem(k);
+                if(k.startsWith('sync_ts_')) localStorage.removeItem(k);
+                if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
+            });
 
-        if (typeof saveToServer === 'function') {
-            let configKeys = ['system_config'];
-            const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
-            
-            // Force push local state & perform Mirror Cleanup to destroy server-side ghost data
-            saveToServer(safeKeys, true, true).then(async () => {
-                if (window.supabaseClient) {
-                    const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
-                    for (const table of tables) {
-                        const { data: serverIds } = await window.supabaseClient.from(table).select('id');
-                        if (serverIds) {
-                            const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
-                            if (localKey) {
-                                const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
-                                const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
-                                const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
-                                if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
+            if (typeof saveToServer === 'function') {
+                let configKeys = ['system_config'];
+                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
+                
+                // Force push local state & perform Mirror Cleanup to destroy server-side ghost data
+                saveToServer(safeKeys, true, true).then(async () => {
+                    if (window.supabaseClient) {
+                        const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
+                        for (const table of tables) {
+                            const { data: serverIds } = await window.supabaseClient.from(table).select('id');
+                            if (serverIds) {
+                                const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
+                                if (localKey) {
+                                    const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+                                    const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
+                                    const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
+                                    if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
+                                }
                             }
                         }
                     }
-                }
-            }).catch(()=>{}); 
+                }).catch(()=>{}); 
+            }
+            localStorage.setItem('last_connected_server', newTarget);
         }
-        localStorage.setItem('last_connected_server', newTarget);
+
+        // 4. Restart Engine & Pull fresh data
+        if (typeof loadFromServer === 'function') await loadFromServer(true);
+        if (typeof setupRealtimeListeners === 'function') setupRealtimeListeners();
+
+        // 5. Update Server Indicator Visual
+        if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
+        if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+
+        if (typeof showToast === 'function') showToast(`Successfully connected to ${newTarget.toUpperCase()}.`, 'success');
+    } finally {
+        window._isSwitchingServers = false;
     }
-
-    // 4. Restart Engine & Pull fresh data
-    if (typeof loadFromServer === 'function') await loadFromServer(true);
-    if (typeof setupRealtimeListeners === 'function') setupRealtimeListeners();
-
-    // 5. Update Server Indicator Visual
-    if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
-    if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
-
-    if (typeof showToast === 'function') showToast(`Successfully connected to ${newTarget.toUpperCase()}.`, 'success');
 };
 
 
@@ -651,6 +660,7 @@ window.onload = async function() {
                             sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop
                             if (typeof performSilentServerSwitch === 'function') {
                                 await performSilentServerSwitch('cloud');
+                                alert("⚠️ Local Server Unreachable.\n\nAuto-recovered via Cloud Server.\nPlease verify your Local Server IP in Super Admin settings.");
                             } else {
                                 alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
                                 localStorage.setItem('active_server_target', 'cloud');
@@ -1805,6 +1815,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.52": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a startup crash on the login screen caused by background sync engines attempting to process Live Assessments before user authentication.</li>
+            </ul>`,
         "2.4.51": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Added a 'Type Filter' to the Assessment Manager to easily isolate Vetting, Live, or Standard tests.</li>

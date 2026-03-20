@@ -578,12 +578,12 @@ async function startServerLookout() {
     if (SERVER_LOOKOUT_INTERVAL) clearInterval(SERVER_LOOKOUT_INTERVAL);
     // Run every 30 seconds
     SERVER_LOOKOUT_INTERVAL = setInterval(async () => {
-        const localConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
-        const currentTarget = localStorage.getItem('active_server_target') || 'cloud';
-        const settings = localConfig.server_settings || { active: 'cloud' };
+        // RECOVERY MODE LOCK: Do not automatically switch servers if we just auto-recovered.
+        // The Admin must explicitly save configuration to clear this flag and attempt local again.
+        if (sessionStorage.getItem('recovery_mode') === 'true') return;
 
-        // SAFETY: If we are in Staging mode (Test), ignore remote switch commands
-        if (currentTarget === 'staging') return;
+        const localConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const settings = localConfig.server_settings || { active: 'cloud' };
 
         // Define potential servers
         const servers = [
@@ -592,6 +592,11 @@ async function startServerLookout() {
         ];
 
         for (const srv of servers) {
+            const currentTarget = localStorage.getItem('active_server_target') || 'cloud';
+            
+            // SAFETY: If we are in Staging mode (Test), ignore remote switch commands
+            if (currentTarget === 'staging') return;
+
             // Skip if local server is not configured
             if (srv.name === 'local' && (!srv.url || !srv.key)) continue;
 

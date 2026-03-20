@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.52**: **Hotfix**: Fixed login screen crash caused by background Live Assessment syncing without an active user session.
  - **v2.4.51**: **Test Engine UI**: Added Type Filter to Assessment Manager. Redesigned Marking Queue to group submissions by Trainee with color-coded tags. Fixed offline failover "Ghost Data" persistence.
  - **v2.4.50**: **Performance & Admin UI**: Optimized background sync queries. Added per-environment sync rate configurations and visual server failover cards.
  - **v2.4.49**: **Failover Recovery**: Fixed server migration protocol to prevent stale local data from overwriting the cloud database when reconnecting. Implemented Pristine Pull.

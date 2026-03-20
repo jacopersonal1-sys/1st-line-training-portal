@@ -121,8 +121,16 @@ async function attemptLogin() {
   if (config.security) {
       // Version Check (Semantic Comparison)
       if (config.security.min_version) {
-          // Default to 0.0.0 if APP_VERSION is missing (e.g. dev mode or load error) to force check
-          const appVer = window.APP_VERSION || '0.0.0';
+          // Fetch dynamically if missing to allow Dev Mode (npm start) logins
+          let appVer = window.APP_VERSION;
+          if (!appVer) {
+              if (typeof require !== 'undefined') {
+                  try { appVer = await require('electron').ipcRenderer.invoke('get-app-version'); } catch(e) {}
+              }
+              if (!appVer) appVer = '999.99.99'; // Fallback for dev mode / crashes
+              window.APP_VERSION = appVer;
+          }
+          
           const currentParts = appVer.split('.').map(Number);
           const minParts = config.security.min_version.split('.').map(Number);
           
