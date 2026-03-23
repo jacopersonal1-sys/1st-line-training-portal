@@ -1822,6 +1822,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.56": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Emergency override to sever Cloud connection. Local server is now the definitive primary target.</li>
+            </ul>`,
         "2.4.55": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Converted the 'users' database to Row-Level Sync to prevent Admin race conditions.</li>
@@ -2378,5 +2382,7 @@ function checkDatabaseHealth() {
     const mb = total / (1024 * 1024);
     if (mb > 10) {
         if(typeof showToast === 'function') showToast(`⚠️ DB Alert: Storage is heavy (${mb.toFixed(1)} MB). Run cleanup.`, 'warning');
+    }
+}       if(typeof showToast === 'function') showToast(`⚠️ DB Alert: Storage is heavy (${mb.toFixed(1)} MB). Run cleanup.`, 'warning');
     }
 }

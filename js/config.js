@@ -11,6 +11,9 @@ window.CLOUD_CREDENTIALS = {
 
 // --- NEW: DYNAMIC CLIENT INITIALIZATION ---
 window.initSupabaseClient = function() {
+    // CLOUD DEAD OVERRIDE: Force all clients to default to Local
+    localStorage.setItem('active_server_target', 'local');
+
     let activeTarget = localStorage.getItem('active_server_target') || 'cloud';
     const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
     const localSettings = systemConfig.server_settings || {};

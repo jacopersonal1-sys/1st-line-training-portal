@@ -576,6 +576,9 @@ let SERVER_LOOKOUT_INTERVAL = null;
 // --- SERVER LOOKOUT (Dual-Aware Monitoring) ---
 // Checks both Cloud and Local servers for a "Switch" command in system_config.
 async function startServerLookout() {
+    // CLOUD DEAD OVERRIDE: Disable Lookout to prevent the app from seeking the dead cloud
+    return;
+
     if (SERVER_LOOKOUT_INTERVAL) clearInterval(SERVER_LOOKOUT_INTERVAL);
     // Run every 30 seconds
     SERVER_LOOKOUT_INTERVAL = setInterval(async () => {
