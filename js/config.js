@@ -18,6 +18,13 @@ window.initSupabaseClient = function() {
     const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
     const localSettings = systemConfig.server_settings || {};
 
+    // CLOUD DEAD OVERRIDE: Mutate the CLOUD_CREDENTIALS to point to the Local VM
+    // This prevents any residual background services (like the Admin Tester) from pinging the dead cloud.
+    if (localSettings.local_url && localSettings.local_key) {
+        window.CLOUD_CREDENTIALS.url = localSettings.local_url;
+        window.CLOUD_CREDENTIALS.key = localSettings.local_key;
+    }
+
     let SUPABASE_URL = window.CLOUD_CREDENTIALS.url;
     let SUPABASE_ANON_KEY = window.CLOUD_CREDENTIALS.key;
 

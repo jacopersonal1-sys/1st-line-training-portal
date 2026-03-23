@@ -1802,6 +1802,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.57": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>System:</strong> Silenced phantom cloud pings. The app will no longer attempt to reach the destroyed cloud server for background diagnostic tests.</li>
+            </ul>`,
         "2.4.55": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Converted the 'users' database to Row-Level Sync to prevent Admin race conditions.</li>
