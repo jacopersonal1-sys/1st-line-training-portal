@@ -313,9 +313,29 @@ function openRecordEdit(index) {
 
 async function saveRecordEdit() {
     const records = JSON.parse(localStorage.getItem('records'));
+    const originalRec = records[editRecIndex];
+
+    // --- OPTIMISTIC CONCURRENCY CONTROL (OCC) ---
+    if (window.supabaseClient && originalRec.id) {
+        try {
+            const { data } = await window.supabaseClient.from('records').select('data').eq('id', originalRec.id).single();
+            if (data && data.data && data.data.lastModified) {
+                const serverTime = new Date(data.data.lastModified).getTime();
+                const localTime = new Date(originalRec.lastModified || 0).getTime();
+                if (serverTime > localTime) {
+                    if (!confirm(`⚠️ CONFLICT DETECTED\n\nAdmin '${data.data.modifiedBy || 'Unknown'}' updated this record recently.\nDo you want to forcefully overwrite their changes?`)) {
+                        return; // Abort save
+                    }
+                }
+            }
+        } catch(e) { console.warn("OCC Check failed, proceeding...", e); }
+    }
+
     records[editRecIndex].trainee = document.getElementById('editRecName').value;
     records[editRecIndex].assessment = document.getElementById('editRecAssess').value;
     records[editRecIndex].score = Number(document.getElementById('editRecScore').value);
+    records[editRecIndex].lastModified = new Date().toISOString();
+    records[editRecIndex].modifiedBy = CURRENT_USER.user;
     
     localStorage.setItem('records', JSON.stringify(records));
     
@@ -421,8 +441,8 @@ async function cleanupDuplicateRecords() {
     records.forEach(r => {
         if (!r.trainee || !r.assessment) return;
         
-        // Create unique key based on Trainee + Assessment
-        const key = `${r.trainee.trim().toLowerCase()}|${r.assessment.trim().toLowerCase()}`;
+        // Create unique key based on Trainee + Assessment + Group + Phase
+        const key = `${r.trainee.trim().toLowerCase()}|${r.assessment.trim().toLowerCase()}|${(r.groupID||'').trim().toLowerCase()}|${(r.phase||'').trim().toLowerCase()}`;
         
         if (uniqueMap.has(key)) {
             const existing = uniqueMap.get(key);
@@ -944,7 +964,7 @@ function openSuperAdminConfig() {
     const getR = (env, role, def) => (envRates[env] && envRates[env][role]) ? envRates[env][role] / 1000 : def;
     const att = config.attendance || { work_start: "08:00", work_end: "17:00", reminder_start: "16:45", late_cutoff: "08:15" };
     const sec = config.security || { maintenance_mode: false, min_version: "0.0.0", banned_clients: [] };
-    const feat = config.features || { vetting_arena: true, live_assessments: true, disable_animations: false };
+    const feat = config.features || {};
     const ann = config.announcement || { active: false, message: "", type: "info" };
     const banned = sec.banned_clients || [];
     const whitelist = sec.client_whitelist || [];
@@ -1135,9 +1155,9 @@ function openSuperAdminConfig() {
                         <div class="card" style="margin-top:15px;">
                             <h4><i class="fas fa-toggle-on"></i> Features</h4>
                             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                                <label><input type="checkbox" id="sa_feat_vet" ${feat.vetting_arena ? 'checked' : ''}> Vetting Arena</label>
-                                <label><input type="checkbox" id="sa_feat_live" ${feat.live_assessments ? 'checked' : ''}> Live Assessments</label>
-                                <label><input type="checkbox" id="sa_feat_nps" ${feat.nps_surveys ? 'checked' : ''}> NPS Surveys</label>
+                                <label><input type="checkbox" id="sa_feat_vet" ${feat.vetting_arena !== false ? 'checked' : ''}> Vetting Arena</label>
+                                <label><input type="checkbox" id="sa_feat_live" ${feat.live_assessments !== false ? 'checked' : ''}> Live Assessments</label>
+                                <label><input type="checkbox" id="sa_feat_nps" ${feat.nps_surveys !== false ? 'checked' : ''}> NPS Surveys</label>
                                 <label><input type="checkbox" id="sa_feat_tips" ${feat.daily_tips !== false ? 'checked' : ''}> Daily Tips</label>
                                 <label><input type="checkbox" id="sa_feat_anim" ${feat.disable_animations ? 'checked' : ''}> Disable Animations</label>
                             </div>
@@ -1410,7 +1430,7 @@ window.forceResyncRows = async function() {
         if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
     });
     
-    if(typeof loadFromServer === 'function') await loadFromServer(true);
+    if(typeof loadFromServer === 'function') await loadFromServer(false);
     
     if(btn && btn.tagName === 'BUTTON') { btn.disabled = false; btn.innerText = "Force Pull Rows"; }
     checkRowSyncStatus();
@@ -1648,6 +1668,11 @@ window.performBlobToRowMigration = async function() {
                 if (error) throw error;
             }
         };
+
+        // 0. Users (Row-Level Sync Migration)
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        if(mode === 'real') { users.forEach(u => { if(!u.id) u.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('users', JSON.stringify(users)); }
+        await uploadBatch('users', users, u => ({ id: u.id, data: u, updated_at: new Date().toISOString() }));
 
         // 1. Records
         const records = JSON.parse(localStorage.getItem('records') || '[]');
@@ -2572,4 +2597,4 @@ window.openDevTools = function() {
         const { ipcRenderer } = require('electron');
         ipcRenderer.send('open-devtools');
     }
-};
+};me

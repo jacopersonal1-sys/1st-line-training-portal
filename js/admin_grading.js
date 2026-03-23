@@ -167,6 +167,8 @@ async function saveScores() {
                 recs[existingIndex].date = captureDate; // Update date
                 recs[existingIndex].docSaved = docChecked;
                 recs[existingIndex].videoSaved = videoChecked;
+                recs[existingIndex].lastModified = new Date().toISOString();
+                recs[existingIndex].modifiedBy = CURRENT_USER.user;
                 // Ensure ID exists (Migration for old records)
                 if(!recs[existingIndex].id) recs[existingIndex].id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
             } else {
@@ -182,7 +184,9 @@ async function saveScores() {
                     date: captureDate, // Save selected date
                     docSaved: docChecked, 
                     videoSaved: videoChecked, 
-                    link: "" 
+                    link: "",
+                    lastModified: new Date().toISOString(),
+                    modifiedBy: CURRENT_USER.user
                 }); 
             }
 

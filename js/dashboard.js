@@ -1191,6 +1191,7 @@ function buildTLWidgets(container) {
             }
             // Last Score
             const myRecs = records.filter(r => r.trainee === t.user);
+            myRecs.sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
             const lastRec = myRecs[myRecs.length - 1];
             let score = '-';
             if (lastRec) {
@@ -1539,7 +1540,8 @@ function buildTraineeWidgets(container) {
     // 2. Recent Results
     const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
     const myRecords = allRecords.filter(r => r.trainee === CURRENT_USER.user);
-    // Sort by date desc (assuming records are appended, reverse is safer)
+    // FIX: Force chronological sorting before slicing to ensure accuracy
+    myRecords.sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
     
     // 3. Attendance Status
     const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');

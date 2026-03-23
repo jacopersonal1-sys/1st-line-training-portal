@@ -449,7 +449,7 @@ async function scanAndGenerateUsers(silent = false, emailMap = {}) {
                 pin = Math.floor(1000 + Math.random() * 9000).toString();
             }
             
-            const newUser = { user: name, pass: pin, role: 'trainee' };
+            const newUser = { user: name, pass: pin, role: 'trainee', createdBy: 'System Auto-Gen', lastModified: new Date().toISOString() };
             
             // Inject Email if available from Roster creation
             if (emailMap && emailMap[name]) {
@@ -1046,6 +1046,8 @@ async function saveUserEdit() {
     users[editTargetIndex].traineeData.email = newEmail;
     users[editTargetIndex].traineeData.phone = newPhone;
     users[editTargetIndex].traineeData.contact = `${newEmail} | ${newPhone}`; // Legacy support
+    users[editTargetIndex].lastModified = new Date().toISOString();
+    users[editTargetIndex].modifiedBy = CURRENT_USER.user;
 
     localStorage.setItem('users', JSON.stringify(users));
 
@@ -1142,7 +1144,7 @@ async function restoreAgent(username) {
     if (!users.some(u => u.user === username)) {
         // Generate temp pin
         const pin = Math.floor(1000 + Math.random() * 9000).toString();
-        users.push({ user: username, pass: pin, role: 'trainee' });
+        users.push({ user: username, pass: pin, role: 'trainee', lastModified: new Date().toISOString(), modifiedBy: CURRENT_USER.user });
         localStorage.setItem('users', JSON.stringify(users));
         alert(`User restored. Temporary PIN: ${pin}`);
     }

@@ -72,6 +72,7 @@ const DB_SCHEMA = {
 // --- HYBRID SYNC CONFIGURATION ---
 // Maps local keys to Supabase Tables for Row-Level Sync
 const ROW_MAP = {
+    'users': 'users',
     'records': 'records',
     'submissions': 'submissions',
     'auditLogs': 'audit_logs',
@@ -169,7 +170,7 @@ async function hardDelete(tableName, id) {
         // FIX: Sync the tombstone list so other clients know about the deletion.
         // Use a silent, non-forced save to run in the background.
         if (typeof saveToServer === 'function') {
-            saveToServer(['system_tombstones'], false, true);
+            saveToServer(['system_tombstones'], true); // Authoritative push for instant soft-delete propagation
         }
     }
 

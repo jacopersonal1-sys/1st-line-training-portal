@@ -784,7 +784,7 @@ async function moveLiveBooking(id, date, time, trainer) {
         if (window.supabaseClient) {
             const { error } = await window.supabaseClient
                 .from('live_bookings')
-                .update({ data: targetBooking })
+                .update({ data: targetBooking, updated_at: new Date().toISOString() })
                 .eq('id', id);
             if (error) throw error; // Throw to be caught by catch block
         }
@@ -1364,7 +1364,7 @@ window.confirmAdminBooking = async function() {
 
         // Direct Supabase call
         if (window.supabaseClient) {
-            const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee });
+            const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee, updated_at: new Date().toISOString() });
             if (error) throw error;
         }
         
@@ -1466,7 +1466,7 @@ async function confirmBooking() {
 
         // Direct Supabase call
         if (window.supabaseClient) {
-            const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee });
+            const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee, updated_at: new Date().toISOString() });
             if (error) throw error;
         }
 
@@ -1510,7 +1510,7 @@ async function cancelBooking(id) {
 
         // Direct Supabase call
         if (window.supabaseClient) {
-            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target }).eq('id', id);
+            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target, updated_at: new Date().toISOString() }).eq('id', id);
             if (error) { 
                 alert("Failed to cancel booking."); 
                 console.error(error); 
@@ -1539,7 +1539,7 @@ async function markBookingComplete(id) {
 
         // Direct Supabase call
         if (window.supabaseClient) {
-            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target }).eq('id', id);
+            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target, updated_at: new Date().toISOString() }).eq('id', id);
             if (error) { 
                 alert("Failed to update booking."); 
                 console.error(error); 

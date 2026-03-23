@@ -470,6 +470,8 @@ async function saveTest() {
             tests[idx].type = type;
             tests[idx].duration = type === 'vetting' ? dur : null;
             tests[idx].questions = BUILDER_QUESTIONS;
+            tests[idx].lastModified = new Date().toISOString();
+            tests[idx].modifiedBy = CURRENT_USER.user;
         } else {
             // Fallback: If ID mismatch, push as new to avoid data loss
             // UPDATED: Use consistent string ID
@@ -478,7 +480,9 @@ async function saveTest() {
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
-                questions: BUILDER_QUESTIONS
+                questions: BUILDER_QUESTIONS,
+                lastModified: new Date().toISOString(),
+                modifiedBy: CURRENT_USER.user
             };
             tests.push(newTest);
         }
@@ -490,13 +494,17 @@ async function saveTest() {
              tests[existingIdx].type = type;
              tests[existingIdx].duration = type === 'vetting' ? dur : null;
              tests[existingIdx].questions = BUILDER_QUESTIONS;
+             tests[existingIdx].lastModified = new Date().toISOString();
+             tests[existingIdx].modifiedBy = CURRENT_USER.user;
         } else {
             const newTest = {
                 id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
-                questions: BUILDER_QUESTIONS
+                questions: BUILDER_QUESTIONS,
+                lastModified: new Date().toISOString(),
+                modifiedBy: CURRENT_USER.user
             };
             tests.push(newTest);
         }

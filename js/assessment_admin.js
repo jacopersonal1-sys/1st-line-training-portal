@@ -533,6 +533,22 @@ async function finalizeAdminMarking(subId) {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
     
+    // --- OPTIMISTIC CONCURRENCY CONTROL (OCC) ---
+    if (window.supabaseClient && sub.id) {
+        try {
+            const { data } = await window.supabaseClient.from('submissions').select('data').eq('id', sub.id).single();
+            if (data && data.data && data.data.lastEditedDate) {
+                const serverTime = new Date(data.data.lastEditedDate).getTime();
+                const localTime = new Date(sub.lastEditedDate || 0).getTime();
+                if (serverTime > localTime) {
+                    if (!confirm(`⚠️ CONFLICT DETECTED\n\nAdmin '${data.data.lastEditedBy || 'Unknown'}' just graded this submission.\nDo you want to forcefully overwrite their grade?`)) {
+                        return; // Abort save
+                    }
+                }
+            }
+        } catch(e) { console.warn("OCC Check failed, proceeding...", e); }
+    }
+
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == sub.testId);
     let maxScore = 0;
