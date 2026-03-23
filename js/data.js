@@ -998,6 +998,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         await processPendingDeletes();
 
         for (const key of keysToSave) {
+            try {
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
             
             // --- STRATEGY A: ROW-LEVEL SYNC (Records, Submissions, Logs) ---
@@ -1133,6 +1134,11 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 
                 localStorage.setItem(key, JSON.stringify(finalContent));
                 if(savedData && savedData[0]) localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
+            }
+            } catch (keyErr) {
+                console.warn(`[Sync Sandbox] Failed to process key '${key}':`, keyErr.message || keyErr);
+                const msg = keyErr.message || '';
+                if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('521') || msg.includes('503')) throw keyErr;
             }
         }
 
