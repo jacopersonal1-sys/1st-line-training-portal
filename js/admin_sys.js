@@ -2597,4 +2597,4 @@ window.openDevTools = function() {
         const { ipcRenderer } = require('electron');
         ipcRenderer.send('open-devtools');
     }
-};me
+};

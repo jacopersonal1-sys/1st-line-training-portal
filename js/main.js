@@ -1822,6 +1822,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.55": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Converted the 'users' database to Row-Level Sync to prevent Admin race conditions.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented global 'Soft Deletes' (Tombstones) to permanently eliminate 'Ghost Data'.</li>
+                <li style="margin-bottom: 8px;"><strong>Grading Locks:</strong> Added Optimistic Concurrency Control (OCC) to prevent Admins from overwriting each other's manual score edits.</li>
+            </ul>`,
         "2.4.54": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>System:</strong> Version synchronization to resolve GitHub auto-updater pipeline conflicts. Contains all recent stability patches.</li>
