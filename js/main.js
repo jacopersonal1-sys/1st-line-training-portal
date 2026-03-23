@@ -648,28 +648,8 @@ window.onload = async function() {
             // --- AUTO-RECOVERY: Revert to Cloud if Local is dead ---
             const target = localStorage.getItem('active_server_target');
             if (target === 'local') {
-                console.warn("Local Server failed to load. Attempting recovery to Cloud...");
-                if (window.CLOUD_CREDENTIALS) {
-                    try {
-                        // Bypass standard client and try direct Cloud connection
-                        const cloudClient = window.supabase.createClient(window.CLOUD_CREDENTIALS.url, window.CLOUD_CREDENTIALS.key, {
-                            auth: { persistSession: false }
-                        });
-                        const { error } = await cloudClient.from('app_documents').select('key').limit(1);
-                        if (!error) {
-                            sessionStorage.setItem('recovery_mode', 'true'); // Prevent immediate switch-back loop
-                            if (typeof performSilentServerSwitch === 'function') {
-                                await performSilentServerSwitch('cloud');
-                                alert("⚠️ Local Server Unreachable.\n\nAuto-recovered via Cloud Server.\nPlease verify your Local Server IP in Super Admin settings.");
-                            } else {
-                                alert("⚠️ Local Server Unreachable.\n\nSwitching back to Cloud Server automatically.");
-                                localStorage.setItem('active_server_target', 'cloud');
-                                location.reload();
-                            }
-                            return;
-                        }
-                    } catch(recErr) { console.error("Recovery check failed:", recErr); }
-                }
+                // CLOUD DEAD OVERRIDE: Do not attempt to recover to cloud.
+                alert("⚠️ LOCAL SERVER UNREACHABLE.\n\nThe Cloud server is currently offline/destroyed. The application cannot recover until the Local Server is back online.");
             }
             // -------------------------------------------------------
 
@@ -1822,10 +1802,6 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
-        "2.4.56": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Emergency override to sever Cloud connection. Local server is now the definitive primary target.</li>
-            </ul>`,
         "2.4.55": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Converted the 'users' database to Row-Level Sync to prevent Admin race conditions.</li>
@@ -2382,7 +2358,5 @@ function checkDatabaseHealth() {
     const mb = total / (1024 * 1024);
     if (mb > 10) {
         if(typeof showToast === 'function') showToast(`⚠️ DB Alert: Storage is heavy (${mb.toFixed(1)} MB). Run cleanup.`, 'warning');
-    }
-}       if(typeof showToast === 'function') showToast(`⚠️ DB Alert: Storage is heavy (${mb.toFixed(1)} MB). Run cleanup.`, 'warning');
     }
 }
