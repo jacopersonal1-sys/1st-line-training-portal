@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor, Menu, MenuItem } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { exec } = require('child_process');
@@ -76,7 +76,7 @@ function createWindow() {
         autoUpdater.checkForUpdatesAndNotify();
     });
 
-    // SECURITY: Block DevTools shortcuts & Context Menu in Production
+    // SECURITY: Block DevTools shortcuts in Production
     if (app.isPackaged) {
         mainWindow.webContents.on('before-input-event', (event, input) => {
             if (input.control && input.shift && input.key.toLowerCase() === 'i') {
@@ -86,11 +86,66 @@ function createWindow() {
                 event.preventDefault();
             }
         });
-        
-        mainWindow.webContents.on('context-menu', (e) => {
-            e.preventDefault();
-        });
     }
+
+    // CUSTOM CONTEXT MENU: Spellcheck & Copy/Paste Support
+    mainWindow.webContents.on('context-menu', (event, params) => {
+        event.preventDefault();
+        
+        const menu = new Menu();
+        let hasItems = false;
+
+        // 1. Spellcheck Suggestions
+        if (params.dictionarySuggestions && params.dictionarySuggestions.length > 0) {
+            for (const suggestion of params.dictionarySuggestions) {
+                menu.append(new MenuItem({
+                    label: suggestion,
+                    click: () => mainWindow.webContents.replaceMisspelling(suggestion)
+                }));
+            }
+            menu.append(new MenuItem({ type: 'separator' }));
+            hasItems = true;
+        }
+
+        // 2. Add to Dictionary
+        if (params.misspelledWord) {
+            menu.append(new MenuItem({
+                label: `Add "${params.misspelledWord}" to Dictionary`,
+                click: () => mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+            }));
+            menu.append(new MenuItem({ type: 'separator' }));
+            hasItems = true;
+        }
+
+        // 3. Basic Text Editing
+        if (params.isEditable) {
+            menu.append(new MenuItem({ role: 'undo' }));
+            menu.append(new MenuItem({ role: 'redo' }));
+            menu.append(new MenuItem({ type: 'separator' }));
+            menu.append(new MenuItem({ role: 'cut' }));
+            menu.append(new MenuItem({ role: 'copy' }));
+            menu.append(new MenuItem({ role: 'paste' }));
+            menu.append(new MenuItem({ role: 'selectAll' }));
+            hasItems = true;
+        } else if (params.selectionText && params.selectionText.trim().length > 0) {
+            menu.append(new MenuItem({ role: 'copy' }));
+            hasItems = true;
+        }
+
+        // 4. DevTools (Only if NOT packaged)
+        if (!app.isPackaged) {
+            if (hasItems) menu.append(new MenuItem({ type: 'separator' }));
+            menu.append(new MenuItem({
+                label: 'Inspect Element',
+                click: () => mainWindow.webContents.inspectElement(params.x, params.y)
+            }));
+            hasItems = true;
+        }
+
+        if (hasItems) {
+            menu.popup({ window: mainWindow, x: params.x, y: params.y });
+        }
+    });
 
     // SECURITY: Prevent closing during Vetting Lockdown
     mainWindow.on('close', (e) => {

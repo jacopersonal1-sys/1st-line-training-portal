@@ -291,7 +291,9 @@ function openAdminMarking(subId) {
         let markHtml = '';
         let autoScore = 0;
         
-        let adminNoteHtml = q.adminNotes ? `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> ${q.adminNotes}</div>` : '';
+        const noteText = q.adminNotes || 'No note added';
+        const editBtn = `<button class="btn-secondary btn-sm" onclick="editMarkerNote('${sub.testId}', ${lookupIdx}, '${sub.id}')" style="margin-left:10px; padding:2px 6px; font-size:0.7rem;"><i class="fas fa-edit"></i> Edit Note</button>`;
+        let adminNoteHtml = `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> <span id="marker-note-text-${lookupIdx}">${noteText}</span> ${editBtn}</div>`;
         
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
@@ -656,3 +658,51 @@ function printAssessmentView() {
     window.print();
     document.body.classList.remove('printing-modal');
 }
+
+// --- NEW: LIVE MARKER NOTE EDITOR ---
+window.editMarkerNote = async function(testId, qIdx, subId = null) {
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const test = tests.find(t => t.id == testId);
+    
+    if (!test || !test.questions[qIdx]) return alert("Master test or question not found.");
+    
+    const currentNote = test.questions[qIdx].adminNotes || '';
+    const newNote = await customPrompt("Edit Marker Note", "Update the admin note for this question. This will update the master test template for everyone.", currentNote);
+    
+    if (newNote === null) return; // Cancelled
+    
+    // 1. Update Master Test
+    test.questions[qIdx].adminNotes = newNote;
+    test.questions[qIdx].adminNotesUpdated = Date.now();
+    test.lastModified = new Date().toISOString();
+    if (typeof CURRENT_USER !== 'undefined') test.modifiedBy = CURRENT_USER.user;
+    
+    localStorage.setItem('tests', JSON.stringify(tests));
+    
+    // 2. Update Submission Snapshot (if marking an existing submission)
+    if (subId) {
+        const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const sub = subs.find(s => s.id === subId);
+        if (sub && sub.testSnapshot && sub.testSnapshot.questions[qIdx]) {
+            sub.testSnapshot.questions[qIdx].adminNotes = newNote;
+            sub.testSnapshot.questions[qIdx].adminNotesUpdated = Date.now();
+            localStorage.setItem('submissions', JSON.stringify(subs));
+        }
+    }
+    
+    // 3. UI Update (Optimistic visual refresh)
+    const span = document.getElementById(`marker-note-text-${qIdx}`);
+    if (span) {
+        span.innerText = newNote || 'No note added';
+        span.style.color = '#2ecc71';
+        setTimeout(() => span.style.color = '', 1500);
+    }
+    
+    // 4. Cloud Sync (Safe Merge to invoke timestamp checks)
+    if (typeof saveToServer === 'function') {
+        const keysToSync = subId ? ['tests', 'submissions'] : ['tests'];
+        saveToServer(keysToSync, false);
+    }
+    
+    if (typeof showToast === 'function') showToast("Marker note updated globally.", "success");
+};

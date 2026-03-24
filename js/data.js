@@ -260,6 +260,13 @@ async function loadFromServer(silent = false) {
 
         const start = Date.now();
         
+        // --- IDENTIFY TRAINEE EARLY ---
+        const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+        if (isTrainee) {
+            localStorage.removeItem('agentNotes'); // Security & Memory Purge
+            localStorage.removeItem('tl_personal_lists');
+        }
+        
         // --- PHASE A: BLOB SYNC (Settings, Rosters, Users) ---
         const { data: meta, error } = await window.supabaseClient
             .from('app_documents')
@@ -271,6 +278,9 @@ async function loadFromServer(silent = false) {
         // Identify Stale Blobs
         const keysToFetch = [];
         meta.forEach(row => {
+            // SECURITY & MINIMIZATION: Skip admin-only blobs for trainees
+            if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(row.key)) return;
+            
             const localTs = localStorage.getItem('sync_ts_' + row.key);
             // If we don't have it, or server is newer, fetch it
             if (!localTs || new Date(row.updated_at) > new Date(localTs)) {
@@ -331,6 +341,12 @@ async function loadFromServer(silent = false) {
         const heavyTables = ['error_reports', 'accessLogs', 'auditLogs', 'monitor_history'];
 
         for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
+            
+            // TRAINEE DATA MINIMIZATION: Completely skip Admin-only tables to save bandwidth
+            if (isTrainee && ['audit_logs', 'access_logs', 'error_reports', 'nps_responses', 'archived_users', 'network_diagnostics', 'saved_reports', 'insight_reviews', 'tl_task_submissions'].includes(tableName)) {
+                continue;
+            }
+
             // Skip heavy tables unless it's a forced full sync (Optimization)
             if (silent && heavyTables.includes(tableName)) {
                 continue;
@@ -362,6 +378,15 @@ async function loadFromServer(silent = false) {
                 // DELTA SYNC: Only fetch rows updated since our safe clock-skew timestamp
                 // CRITICAL FIX: Must order by updated_at ascending so we don't truncate random rows when hitting the limit!
                 query = query.gt('updated_at', safeSyncTime).order('updated_at', { ascending: true });
+            }
+            
+            // TRAINEE DATA MINIMIZATION: Only query my own rows for massive tables
+            if (isTrainee) {
+                if (['records', 'submissions', 'exemptions', 'link_requests'].includes(tableName)) {
+                    query = query.eq('trainee', CURRENT_USER.user);
+                } else if (['attendance', 'monitor_history'].includes(tableName)) {
+                    query = query.eq('user_id', CURRENT_USER.user);
+                }
             }
             
             // Limit batch size (Increased to 2000 to ensure fast catch-up without skipping data)
@@ -417,6 +442,15 @@ async function loadFromServer(silent = false) {
                 }).map(r => r.data);
 
                 let localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
+                
+                // --- TRAINEE LOCAL CACHE PURGE (Free up memory from past global syncs) ---
+                if (isTrainee) {
+                    if (['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
+                        localItems = localItems.filter(i => i.trainee === CURRENT_USER.user || i.user === CURRENT_USER.user);
+                    } else if (['attendance_records', 'monitor_history'].includes(localKey)) {
+                        localItems = localItems.filter(i => i.user === CURRENT_USER.user || i.user_id === CURRENT_USER.user);
+                    }
+                }
                 
                 const hashMapKey = `hash_map_${localKey}`;
                 const hashMap = JSON.parse(localStorage.getItem(hashMapKey) || '{}');
@@ -1279,7 +1313,40 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                         if (key === 'liveSessions' && localItem.sessionId && i.sessionId) return localItem.sessionId === i.sessionId;
                         return JSON.stringify(i) === JSON.stringify(localItem);
                     });
-                        if(index > -1) combined[index] = localItem;
+                        if(index > -1) {
+                            // --- NEW: Deep Merge for Test Questions (Marker Notes) ---
+                            if (key === 'tests') {
+                                const sTest = combined[index];
+                                if (sTest.questions && localItem.questions) {
+                                    localItem.questions.forEach((lQ, qIdx) => {
+                                        const sQ = sTest.questions[qIdx];
+                                        if (sQ && (sQ.adminNotesUpdated || 0) > (lQ.adminNotesUpdated || 0)) {
+                                            lQ.adminNotes = sQ.adminNotes;
+                                            lQ.adminNotesUpdated = sQ.adminNotesUpdated;
+                                        }
+                                    });
+                                }
+                            }
+                            // ---------------------------------------------------------
+                            combined[index] = localItem;
+                        }
+                    } else if (strategy === 'server_wins') {
+                        // NEW: Preserve newer local marker notes even if server wins overall
+                        if (key === 'tests') {
+                            const index = combined.findIndex(i => i.id && localItem.id && i.id.toString() === localItem.id.toString());
+                            if (index > -1) {
+                                const sTest = combined[index];
+                                if (sTest.questions && localItem.questions) {
+                                    sTest.questions.forEach((sQ, qIdx) => {
+                                        const lQ = localItem.questions[qIdx];
+                                        if (lQ && (lQ.adminNotesUpdated || 0) > (sQ.adminNotesUpdated || 0)) {
+                                            sQ.adminNotes = lQ.adminNotes;
+                                            sQ.adminNotesUpdated = lQ.adminNotesUpdated;
+                                        }
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
             });
@@ -2061,10 +2128,34 @@ function setupRealtimeListeners() {
             const row = payload.new;
             if (row && (row.username || row.user)) {
                 const uName = row.username || row.user;
+                
+                // Trainee Minimization (Don't cache everyone's presence)
+                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee' && uName !== CURRENT_USER.user) return;
+
                 window.ACTIVE_USERS_CACHE[uName] = {
                     ...row,
                     local_received_at: Date.now()
                 };
+
+                // --- NEW: INSTANT REMOTE COMMAND EXECUTION ---
+                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && uName === CURRENT_USER.user) {
+                    if (row.pending_action) {
+                        // Clear immediately to prevent infinite loops
+                        if (window.supabaseClient) window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', uName).then(()=>{});
+                        
+                        if (row.pending_action === 'restart') {
+                            if (typeof triggerForceRestart === 'function') triggerForceRestart();
+                            else location.reload();
+                        } else if (row.pending_action === 'logout') {
+                            if (typeof logout === 'function') logout();
+                        } else if (row.pending_action.startsWith('msg:')) {
+                            alert("💬 ADMIN MESSAGE:\n\n" + row.pending_action.replace('msg:', ''));
+                        } else if (row.pending_action === 'force_update' && typeof require !== 'undefined') {
+                            sessionStorage.setItem('force_update_active', 'true');
+                            require('electron').ipcRenderer.send('manual-update-check');
+                        }
+                    }
+                }
             }
             // Debounce dashboard update to prevent flickering on every heartbeat
             if (window.DASH_UPDATE_TIMEOUT) clearTimeout(window.DASH_UPDATE_TIMEOUT);
@@ -2126,21 +2217,8 @@ function processIncomingDataQueue() {
     const isVettingArenaActive = document.getElementById('vetting-arena')?.classList.contains('active');
     const isLiveBookingActive = document.getElementById('live-assessment')?.classList.contains('active');
 
-    // CHECK FOR CRITICAL INTERRUPT EVENTS (Live Assessment / Vetting Start)
-    // If true, bypasses the typing protection to instantly alert the agent.
-    const hasCriticalEvent = INCOMING_DATA_QUEUE.some(item => {
-        if ((item.type === 'sessions' || item.type === 'vetting') && item.payload && item.payload.new && item.payload.new.data) {
-            const data = item.payload.new.data;
-            if (item.type === 'sessions' && data.trainee === CURRENT_USER?.user && data.active) return true;
-            if (item.type === 'vetting' && data.active) {
-                const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-                if (!data.targetGroup || data.targetGroup === 'all') return true;
-                const members = rosters[data.targetGroup] || [];
-                if (members.some(m => m.toLowerCase() === CURRENT_USER?.user?.toLowerCase())) return true;
-            }
-        }
-        return false;
-    });
+    // Live Assessment and Vetting are now processed instantly outside of this queue
+    const hasCriticalEvent = false;
 
     const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
     if (!hasCriticalEvent && isUserTyping() && timeSinceInteraction < 30000 && !isLiveArenaActive && !isVettingArenaActive && !isLiveBookingActive) {
@@ -2161,9 +2239,7 @@ function processIncomingDataQueue() {
     const batches = {
         monitor: [],
         attendance: [],
-        bookings: [],
-        sessions: [],
-        vetting: []
+        bookings: []
     };
 
     queue.forEach(item => {
@@ -2199,6 +2275,10 @@ function processIncomingDataQueue() {
                 const item = newRow.data;
                 item.id = newRow.id;
                 item.user = newRow.user_id;
+                
+                // Trainee Minimization
+                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee' && item.user !== CURRENT_USER.user) return;
+
                 const idx = records.findIndex(r => r.id === item.id);
                 if (idx > -1) records[idx] = item;
                 else records.push(item);
@@ -2230,65 +2310,6 @@ function processIncomingDataQueue() {
         if (typeof updateNotifications === 'function') updateNotifications();
     }
 
-    // 4. Process Sessions (Dashboard Banner Only)
-    if (batches.sessions.length > 0) {
-        let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-        batches.sessions.forEach(p => {
-            if (p.eventType === 'DELETE') {
-                allSessions = allSessions.filter(s => s.sessionId !== p.old.id);
-            } else {
-                if (!p.new.data) return; // Ignore Postgres WAL partial updates
-                const newData = p.new.data;
-                if (newData) {
-                    if (!newData.sessionId) newData.sessionId = p.new.id;
-                    allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
-                    allSessions.push(newData);
-                }
-            }
-        });
-        localStorage.setItem('liveSessions', JSON.stringify(allSessions));
-        
-        // Update Live Execution UI instantly if open
-        if (typeof processLiveSessionState === 'function') processLiveSessionState(allSessions);
-
-        // SOFT UPDATE: Only update the banner, do NOT re-render the whole dashboard
-        const dashView = document.getElementById('dashboard-view');
-        if (dashView && dashView.classList.contains('active') && typeof updateLiveBannerUI === 'function') {
-            updateLiveBannerUI();
-        }
-    }
-
-    // 5. Process Vetting
-    if (batches.vetting.length > 0) {
-        let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
-        batches.vetting.forEach(p => {
-            if (p.eventType === 'DELETE') {
-                sessions = sessions.filter(s => s.sessionId !== p.old.id);
-                const local = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-                if (local.sessionId === p.old.id && typeof handleVettingUpdate === 'function') {
-                    handleVettingUpdate({ active: false });
-                }
-            } else {
-                const newData = p.new.data;
-                if (!newData) return;
-                const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
-                if (newData.active) {
-                    if (idx > -1) sessions[idx] = newData;
-                    else sessions.push(newData);
-                } else {
-                    sessions = sessions.filter(s => s.sessionId !== newData.sessionId);
-                }
-                if (typeof checkAndHandleSession === 'function') checkAndHandleSession(newData);
-            }
-        });
-        localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
-        
-        const activeTab = document.querySelector('section.active');
-        if (activeTab && activeTab.id === 'vetting-arena' && typeof renderAdminArena === 'function') {
-            renderAdminArena(); // Refresh Admin UI
-        }
-    }
-
     // After processing, update the indicator with the current queue state.
     updateQueueIndicator();
 }
@@ -2310,13 +2331,58 @@ function handleLiveBookingRealtime(payload) {
 }
 
 function handleLiveSessionRealtime(payload) {
-    INCOMING_DATA_QUEUE.push({ type: 'sessions', payload });
-    updateQueueIndicator();
+    // INSTANT PROCESSING (Bypass Queue for Zero Latency)
+    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    if (payload.eventType === 'DELETE') {
+        allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
+    } else {
+        if (!payload.new.data) return; // Ignore Postgres WAL partial updates
+        const newData = payload.new.data;
+        if (newData) {
+            if (!newData.sessionId) newData.sessionId = payload.new.id;
+            allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
+            allSessions.push(newData);
+        }
+    }
+    localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+    
+    // Update Live Execution UI instantly if open
+    if (typeof processLiveSessionState === 'function') processLiveSessionState(allSessions);
+
+    // SOFT UPDATE: Only update the banner
+    const dashView = document.getElementById('dashboard-view');
+    if (dashView && dashView.classList.contains('active') && typeof updateLiveBannerUI === 'function') {
+        updateLiveBannerUI();
+    }
 }
 
 function handleVettingRealtime(payload) {
-    INCOMING_DATA_QUEUE.push({ type: 'vetting', payload });
-    updateQueueIndicator();
+    // INSTANT PROCESSING (Bypass Queue for Zero Latency)
+    let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    if (payload.eventType === 'DELETE') {
+        sessions = sessions.filter(s => s.sessionId !== payload.old.id);
+        const local = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        if (local.sessionId === payload.old.id && typeof handleVettingUpdate === 'function') {
+            handleVettingUpdate({ active: false });
+        }
+    } else {
+        const newData = payload.new.data;
+        if (!newData) return;
+        const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
+        if (newData.active) {
+            if (idx > -1) sessions[idx] = newData;
+            else sessions.push(newData);
+        } else {
+            sessions = sessions.filter(s => s.sessionId !== newData.sessionId);
+        }
+        if (typeof checkAndHandleSession === 'function') checkAndHandleSession(newData);
+    }
+    localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+    
+    const activeTab = document.querySelector('section.active');
+    if (activeTab && activeTab.id === 'vetting-arena' && typeof renderAdminArena === 'function') {
+        renderAdminArena(); // Refresh Admin UI
+    }
 }
 
 // 6. FACTORY RESET (Cloud & Local)

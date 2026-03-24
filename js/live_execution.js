@@ -127,6 +127,14 @@ function processLiveSessionState(allSessions) {
 
     // --- NEW: DIAGNOSTIC INTERCEPTS ---
     if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
+        // Trainee: Detect Instant Remote Command
+        if (myServerSession.remoteCommand && (!localSession.remoteCommand || localSession.remoteCommand.ts !== myServerSession.remoteCommand.ts)) {
+            if (myServerSession.remoteCommand.action === 'restart') {
+                if (typeof triggerForceRestart === 'function') triggerForceRestart();
+                else location.reload();
+            }
+        }
+
         // Trainee: Detect Ping Request
         if (myServerSession.diagnosticReq && myServerSession.diagnosticReq !== localSession.diagnosticReq) {
             const netLogs = JSON.parse(localStorage.getItem('network_diagnostics') || '[]');
@@ -386,7 +394,7 @@ function renderAdminLivePanel(container) {
                                         Checking connection...
                                     </div>
                                     <button class="btn-secondary btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="runLiveDiagnostics()" title="Send test packet to trainee"><i class="fas fa-satellite-dish"></i> Test Connection</button>
-                                    <button class="btn-warning btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="if(typeof sendRemoteCommand === 'function') sendRemoteCommand('${session.trainee}', 'restart')" title="Force Trainee App to Refresh"><i class="fas fa-sync"></i> Force Refresh</button>
+                                    <button class="btn-warning btn-sm" style="padding:2px 8px; font-size:0.75rem;" onclick="forceTraineeRefresh('${session.trainee.replace(/'/g, "\\'")}')" title="Force Trainee App to Refresh"><i class="fas fa-sync"></i> Force Refresh</button>
                                 </div>
                             </div>
                         </div>
@@ -1278,6 +1286,25 @@ function updateTimerDisplays() {
 
 // --- NEW: LIVE DIAGNOSTICS ENGINE ---
 
+// --- NEW: GUARANTEED INSTANT FORCE REFRESH ---
+window.forceTraineeRefresh = async function(traineeUsername) {
+    if(!confirm(`Force ${traineeUsername}'s app to reload immediately?`)) return;
+    
+    // 1. Try Live Session Stream (Fastest)
+    const session = JSON.parse(localStorage.getItem('liveSession'));
+    if (session && session.active && session.trainee === traineeUsername) {
+        session.remoteCommand = { action: 'restart', ts: Date.now() };
+        localStorage.setItem('liveSession', JSON.stringify(session));
+        if (typeof updateGlobalSessionArray === 'function') updateGlobalSessionArray(session, true).catch(()=>{});
+    }
+    
+    // 2. Backup: Use Sessions Table (Global Fallback)
+    if (window.supabaseClient) {
+        window.supabaseClient.from('sessions').update({ pending_action: 'restart' }).eq('username', traineeUsername).then(()=>{});
+    }
+    if (typeof showToast === 'function') showToast(`Refresh command sent to ${traineeUsername}.`, "success");
+};
+
 window.runLiveDiagnostics = async function() {
     const session = JSON.parse(localStorage.getItem('liveSession'));
     if (!session || !session.active) return;
@@ -1297,12 +1324,12 @@ window.runLiveDiagnostics = async function() {
         if (check.diagnosticReq === session.diagnosticReq && !check.diagnosticRes) {
             if(el) el.innerHTML = '<i class="fas fa-times-circle" style="color:#ff5252;"></i> Ping Timeout (Trainee unreachable)';
         }
-    }, 10000);
+    }, 15000);
 };
 
 window.showDiagnosticReport = function(rtt, net) {
-    // Discard severely delayed ghost responses (e.g. arrived >15s later due to DB queue)
-    if (rtt > 15000) {
+    // Discard severely delayed ghost responses
+    if (rtt > 60000) {
         console.warn(`Discarded stale diagnostic response (RTT: ${rtt}ms)`);
         return;
     }
