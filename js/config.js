@@ -5,25 +5,21 @@
 
 // 1. Define Available Servers
 window.CLOUD_CREDENTIALS = {
-    url: 'https://ukhgyvhqoijgetxzlzpy.supabase.co',
-    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVraGd5dmhxb2lqZ2V0eHpsenB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njg4MDQsImV4cCI6MjA4NTM0NDgwNH0.FONPTHcaicp7IAI47gwmic4frYM1ruitTSfNQT8vEf4'
+    url: 'http://169.159.128.176:8000',
+    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE'
 };
 
 // --- NEW: DYNAMIC CLIENT INITIALIZATION ---
 window.initSupabaseClient = function() {
-    // CLOUD DEAD OVERRIDE: Force all clients to default to Local
-    localStorage.setItem('active_server_target', 'local');
-
+    // EMERGENCY RESCUE: Force all stranded clients to point to the new Local VM as the primary server.
+    const currentTarget = localStorage.getItem('active_server_target');
+    if (currentTarget === 'local') {
+        localStorage.setItem('active_server_target', 'cloud'); // We treat the new VM as the master "Cloud"
+    }
+    
     let activeTarget = localStorage.getItem('active_server_target') || 'cloud';
     const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
     const localSettings = systemConfig.server_settings || {};
-
-    // CLOUD DEAD OVERRIDE: Mutate the CLOUD_CREDENTIALS to point to the Local VM
-    // This prevents any residual background services (like the Admin Tester) from pinging the dead cloud.
-    if (localSettings.local_url && localSettings.local_key) {
-        window.CLOUD_CREDENTIALS.url = localSettings.local_url;
-        window.CLOUD_CREDENTIALS.key = localSettings.local_key;
-    }
 
     let SUPABASE_URL = window.CLOUD_CREDENTIALS.url;
     let SUPABASE_ANON_KEY = window.CLOUD_CREDENTIALS.key;

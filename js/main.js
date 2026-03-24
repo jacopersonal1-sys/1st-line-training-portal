@@ -1802,6 +1802,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.59": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Emergency Rescue:</strong> Forced stranded clients on the old infrastructure to connect directly to the new Local VM as the primary "Cloud" source.</li>
+                <li style="margin-bottom: 8px;"><strong>UI Fix:</strong> Resolved missing data on the Trainee Dashboard caused by case-sensitivity mismatches in user names.</li>
+            </ul>`,
         "2.4.58": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Upgraded the Sync Engine with 'Fault Tolerant Sandboxing'. If a specific data table encounters an error or payload limit, the system will now isolate the failure and allow the rest of the app to sync perfectly.</li>

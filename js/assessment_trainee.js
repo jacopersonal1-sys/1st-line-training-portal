@@ -44,7 +44,7 @@ function loadTraineeTests() {
     }
 
     container.innerHTML = visibleTests.map(t => {
-        const sub = submissions.find(s => s.testId == t.id && s.trainee === CURRENT_USER.user && !s.archived);
+        const sub = submissions.find(s => s.testId == t.id && s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && !s.archived);
         let statusHtml = '<span class="status-badge status-improve">Not Started</span>';
         
         let isLocked = false;
@@ -180,7 +180,7 @@ function openTestTaker(testId, isArenaMode = false) {
     const existing = subs.find(s => 
         s.testId && testId && 
         s.testId.toString() === testId.toString() && 
-        s.trainee === CURRENT_USER.user
+        s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase()
     );
     
     if (existing && !existing.archived) {
@@ -361,7 +361,7 @@ async function submitTest(forceSubmit = false) {
     const existing = subs.find(s => 
         s.testId && window.CURRENT_TEST.id && 
         s.testId.toString() === window.CURRENT_TEST.id.toString() && 
-        s.trainee === CURRENT_USER.user && 
+        s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && 
         !s.archived
     );
     if (existing) {

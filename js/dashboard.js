@@ -1183,14 +1183,14 @@ function buildTLWidgets(container) {
         teamHtml = '<div class="table-responsive" style="max-height:200px; overflow-y:auto;"><table class="admin-table compressed-table"><thead><tr><th>Agent</th><th>Attendance</th><th>Last Score</th></tr></thead><tbody>';
         allTrainees.forEach(t => {
             // Attendance
-            const att = attRecords.find(r => r.user === t.user && r.date === today);
+                const att = attRecords.find(r => r.user && r.user.trim().toLowerCase() === t.user.trim().toLowerCase() && r.date === today);
             let attStatus = '<span style="color:var(--text-muted);">-</span>';
             if (att) {
                 if (att.isLate) attStatus = '<span style="color:#ff5252;">Late</span>';
                 else attStatus = '<span style="color:#2ecc71;">Present</span>';
             }
             // Last Score
-            const myRecs = records.filter(r => r.trainee === t.user);
+                const myRecs = records.filter(r => r.trainee && r.trainee.trim().toLowerCase() === t.user.trim().toLowerCase());
             myRecs.sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
             const lastRec = myRecs[myRecs.length - 1];
             let score = '-';
@@ -1539,14 +1539,14 @@ function buildTraineeWidgets(container) {
 
     // 2. Recent Results
     const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
-    const myRecords = allRecords.filter(r => r.trainee === CURRENT_USER.user);
+    const myRecords = allRecords.filter(r => r.trainee && r.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase());
     // FIX: Force chronological sorting before slicing to ensure accuracy
     myRecords.sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
     
     // 3. Attendance Status
     const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     const today = new Date().toISOString().split('T')[0];
-    const myAtt = attRecords.find(r => r.user === CURRENT_USER.user && r.date === today);
+    const myAtt = attRecords.find(r => r.user && r.user.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && r.date === today);
     
     let clockOutBtn = '';
     if (myAtt && !myAtt.clockOut) {
@@ -1559,7 +1559,7 @@ function buildTraineeWidgets(container) {
     const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
     const now = Date.now();
     const myLive = liveSessions.find(s => {
-        if (s.trainee !== CURRENT_USER.user || !s.active) return false;
+        if (!s.trainee || s.trainee.trim().toLowerCase() !== CURRENT_USER.user.trim().toLowerCase() || !s.active) return false;
         const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
         // Ignore if older than 12 hours
         return (now - start < 43200000);
@@ -1611,7 +1611,7 @@ function buildTraineeWidgets(container) {
 
     // 2. Live Upcoming
     const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const myUpcomingLive = liveBookings.filter(b => b.trainee === CURRENT_USER.user && b.status === 'Booked' && b.date >= todayStr).sort((a,b) => a.date.localeCompare(b.date));
+    const myUpcomingLive = liveBookings.filter(b => b.trainee && b.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && b.status === 'Booked' && b.date >= todayStr).sort((a,b) => a.date.localeCompare(b.date));
     
     let liveHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-calendar-check"></i></div><h3 style="margin:0;">Live Bookings</h3></div>`;
     if (myUpcomingLive.length === 0) {
@@ -1809,7 +1809,7 @@ window.updateLiveBannerUI = function() {
     const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
     const now = Date.now();
     const myLive = liveSessions.find(s => {
-        if (s.trainee !== CURRENT_USER.user || !s.active) return false;
+        if (!s.trainee || s.trainee.trim().toLowerCase() !== CURRENT_USER.user.trim().toLowerCase() || !s.active) return false;
         const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
         return (now - start < 43200000);
     });
