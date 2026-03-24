@@ -11,11 +11,17 @@ const StudyMonitor = {
     activeWebview: null,
     viewMode: 'list', // 'list' or 'summary'
     pendingTopic: null, // For classification modal
-    externalPoller: null, // Track the interval for external monitoring
+    activityPoller: null, // Track the interval for global activity monitoring
     queueSelection: new Set(), // Persist selections across refreshes
     cachedWhitelist: [], // Cache for performance
     lastSyncedPayload: null, // OPTIMIZATION: Track last sync to prevent duplicate pushes
-
+    // --- NEW: Tabbed Browser State ---
+    browserState: {
+        tabs: [],
+        activeTabId: null,
+        homeUrl: null,
+    },
+    
     init: function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
 
@@ -47,19 +53,10 @@ const StudyMonitor = {
         // --- DAILY ARCHIVE CHECK ---
         this.checkDailyReset();
 
-        // --- TRACK EXTERNAL ACTIVITY ---
-        window.addEventListener('blur', () => {
-            if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
-                this.track("External Activity (App Backgrounded)");
-                this.startExternalMonitoring();
-            }
-        });
-        window.addEventListener('focus', () => {
-            if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
-                this.track("Resumed App Activity");
-                this.stopExternalMonitoring();
-            }
-        });
+        // --- START BULLETPROOF OS-LEVEL ACTIVITY POLLER ---
+        if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+            this.startActivityPoller();
+        }
 
         // --- NEW: CAPTURE EXIT ---
         window.addEventListener('beforeunload', () => {
@@ -82,23 +79,40 @@ const StudyMonitor = {
                 localStorage.setItem('monitor_data', JSON.stringify(md));
             }
         });
+
+        // --- NEW: IPC Listener for OS-Level Webview Links (PDF Fix) ---
+        if (typeof require !== 'undefined') {
+            const { ipcRenderer } = require('electron');
+            ipcRenderer.removeAllListeners('webview-new-window');
+            ipcRenderer.on('webview-new-window', (e, url) => {
+                if (this.isStudyOpen) {
+                    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) {
+                        this.addTab(url, "New Tab", true);
+                    } else {
+                        require('electron').shell.openExternal(url);
+                    }
+                } else {
+                    require('electron').shell.openExternal(url); // Fallback for TL Hub / other webviews
+                }
+            });
+        }
     },
 
-    // --- EXTERNAL APP POLLING ---
-    startExternalMonitoring: function() {
-        if (this.externalPoller) clearInterval(this.externalPoller);
+    // --- OS-AWARE ACTIVITY POLLING ---
+    startActivityPoller: function() {
+        if (this.activityPoller) clearInterval(this.activityPoller);
         
         // Poll every 5 seconds to check what app they are using
-        this.externalPoller = setInterval(async () => {
+        this.activityPoller = setInterval(async () => {
             if (typeof require !== 'undefined') {
                 try {
                     const { ipcRenderer } = require('electron');
 
-                    // --- NEW: IDLE CHECK ---
-                    // If no interaction for 60s, force Idle state regardless of active window
-                    if (window.LAST_INTERACTION && (Date.now() - window.LAST_INTERACTION > 60000)) {
+                    // 1. OS-LEVEL IDLE CHECK (Bulletproof Hardware Tracking)
+                    const osIdleSeconds = await ipcRenderer.invoke('get-system-idle-time');
                         
-                        // FIX: Allow idling if waiting in Vetting Arena after submission
+                    if (osIdleSeconds > 60) {
+                        // Allow idling if waiting in Vetting Arena after submission
                         const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
                         if (vSession.active && vSession.trainees && CURRENT_USER && vSession.trainees[CURRENT_USER.user]?.status === 'completed') {
                              if (this.currentActivity !== 'Vetting: Waiting') this.track('Vetting: Waiting');
@@ -109,13 +123,26 @@ const StudyMonitor = {
                         return;
                     }
 
+                    // 2. CHECK ACTIVE FOREGROUND WINDOW
                     const activeWindow = await ipcRenderer.invoke('get-active-window');
                     
-                    // Only track if it's different from current to avoid spamming history
+                    // If the active window is our portal, check for idle/return, otherwise do nothing
+                    if (activeWindow && activeWindow.includes('1st Line Training Portal')) {
+                        if (this.isStudyOpen) return; // Specific activity handled by webview events
+                        
+                        if (this.currentActivity === 'Idle' || this.currentActivity.startsWith('External:') || this.currentActivity.startsWith('Violation:')) {
+                            this.track("Navigating Portal");
+                        }
+                        return;
+                    } else {
+                        // External App Detected
+                        this.triggerExternalAppWarning();
+                    }
+
+                    // 3. EXTERNAL APP CLASSIFICATION
                     let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
 
                     if (activeWindow) {
-                        // --- WORK SITES WHITELIST ---
                         const defaultSites = [
                             'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
                             'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
@@ -140,12 +167,58 @@ const StudyMonitor = {
         }, 5000);
     },
 
-    stopExternalMonitoring: function() {
-        if (this.externalPoller) clearInterval(this.externalPoller);
-        this.externalPoller = null;
+    triggerExternalAppWarning: function() {
+        // DEFUSAL 3: Prevent infinite stacking of warning modals
+        if (document.getElementById('external-app-warning-modal')) return;
+
+        // Throttle: show once every 5 minutes max
+        const lastWarning = sessionStorage.getItem('last_ext_warn');
+        if (lastWarning && (Date.now() - parseInt(lastWarning) < 300000)) {
+            return;
+        }
+
+        // Check time
+        const now = new Date();
+        const hour = now.getHours();
+        
+        // Check if within working hours (8 AM to 5 PM)
+        if (hour < 8 || hour >= 17) return;
+
+        // Check if lunch time (12 PM)
+        if (hour === 12) return;
+
+        // Check if in a live assessment
+        const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        const myLive = liveSessions.find(s => s.trainee === CURRENT_USER.user && s.active);
+        if (myLive) return;
+
+        // DEFUSAL 4: Suppress warnings if user is in an active Vetting Session (Vetting Arena handles its own security)
+        const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        if (vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user]) return;
+
+        // All conditions met, show the warning
+        sessionStorage.setItem('last_ext_warn', Date.now().toString());
+        this.track("Violation: External App Usage");
+
+        const modalHtml = `
+            <div id="external-app-warning-modal">
+                <div class="modal-box">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: #f1c40f; margin-bottom: 15px;"></i>
+                    <h2 style="color: #f1c40f;">Attention</h2>
+                    <p style="line-height: 1.6;">
+                        Moving outside of the scope of your Training Period is Prohibited during your study times.
+                        <br><br>
+                        <strong>Exceptions:</strong> Lunch, Live Assessments (if Required), or before 8 AM and after 5 PM.
+                        <br><br>
+                        <strong style="color: #ff5252;">Violation of this Protocol will be noted for Disciplinary action.</strong>
+                    </p>
+                    <button class="btn-primary" style="margin-top: 20px;" onclick="document.getElementById('external-app-warning-modal').remove()">I Understand</button>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
     },
 
-    // --- CORE TRACKING ---
     track: function(activityName) {
         const now = Date.now();
         const duration = now - this.startTime;
@@ -183,11 +256,40 @@ const StudyMonitor = {
         if (typeof window !== 'undefined') window.LAST_INTERACTION = Date.now();
     },
 
+    // --- DEFUSAL 1: PREVENT ADMIN DATA OVERWRITES ---
+    reclassifyHistory: function() {
+        this.updateWhitelistCache();
+        let changed = false;
+        
+        const applyWhitelist = (activityString) => {
+            if (activityString.startsWith('External: ') && !activityString.includes('(Reclassified)')) {
+                const raw = activityString.replace('External: ', '').trim();
+                if (this.cachedWhitelist.some(w => raw.toLowerCase().includes(w.toLowerCase()))) {
+                    return `Studying: ${raw} (Reclassified)`;
+                }
+            }
+            return activityString;
+        };
+
+        this.history.forEach(h => {
+            const newAct = applyWhitelist(h.activity);
+            if (newAct !== h.activity) { h.activity = newAct; changed = true; }
+        });
+        
+        const newCurr = applyWhitelist(this.currentActivity);
+        if (newCurr !== this.currentActivity) { this.currentActivity = newCurr; changed = true; }
+        
+        return changed;
+    },
+
     sync: async function() {
         if (!CURRENT_USER || CURRENT_USER.role === 'admin') return; // Don't track admins
 
         // ROBUSTNESS: Check for day rollover dynamically (e.g. user left app open overnight)
         await this.checkDailyReset();
+
+        // Auto-reconcile history against latest Admin rules before pushing
+        this.reclassifyHistory();
 
         const payload = {
             user: CURRENT_USER.user,
@@ -247,22 +349,24 @@ const StudyMonitor = {
         return `${y}-${m}-${d}`;
     },
 
-    // --- HELPER: CENTRALIZED CLASSIFICATION ---
+    // --- HELPER: CENTRALIZED CLASSIFICATION (with Violation) ---
     getCategory: function(activityString) {
         if (!activityString) return 'idle';
         const act = activityString.toLowerCase();
         
-        // 1. Dynamic Whitelist Check (Overrides "External" label)
+        // 0. Violation is always external
+        if (act.startsWith('violation:')) return 'external';
+
+        // 1. Dynamic Whitelist Check
         // Strip prefixes to match raw content against whitelist
         const raw = act.replace(/^external:\s*/, '').replace(/^studying:\s*/, '').trim();
         if (this.cachedWhitelist.some(w => raw.includes(w.toLowerCase()))) {
             return 'study';
         }
 
-        // STRICT MODE CHECK
+        // 2. STRICT MODE CHECK
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
         if (config.monitoring && config.monitoring.whitelist_strict) {
-            // If strict, and not whitelisted (passed above), and not explicitly 'idle', assume external
             if (!act.startsWith('idle:')) return 'external';
         }
         
@@ -395,80 +499,316 @@ const StudyMonitor = {
         }
     },
 
-    // --- STUDY WINDOW UI ---
-    openStudyWindow: function(url, title) {
+    // --- STUDY BROWSER REWORK ---
+    openStudyWindow: function(url, title, targetScrollY = null) {
         const overlay = document.getElementById('study-overlay');
-        const container = document.getElementById('study-webview-container');
-        const titleEl = document.getElementById('study-title');
+        if (!overlay) return;
 
-        if (!overlay || !container) return;
+        // Remove restore button if it was floating
+        const restoreBtn = document.getElementById('study-restore-btn');
+        if (restoreBtn) restoreBtn.remove();
 
         this.isStudyOpen = true;
         this.track(`Studying: ${title}`);
+        this.browserState.homeUrl = this.cleanUrl(url);
 
-        this.clickCount = 0; // Reset for this material
-        titleEl.innerText = title;
-        container.innerHTML = ''; // Clear previous
+        // Build browser shell if it doesn't exist
+        if (!document.getElementById('study-browser-shell')) {
+            overlay.innerHTML = this.getBrowserShellHTML();
+            this.attachNavEvents();
+            this.addTab(url, title, true, targetScrollY); // Add and activate the first tab
+        } else {
+            // Shell exists (was hidden), check if tab already exists to prevent duplicates
+            const cleanUrl = this.cleanUrl(url);
+            const existingTab = this.browserState.tabs.find(t => t.url === cleanUrl || t.title === title);
+            if (existingTab) {
+                this.switchTab(existingTab.id);
+                if (targetScrollY && existingTab.webview) {
+                    existingTab.webview.executeJavaScript(`window.scrollTo({top: ${targetScrollY}, behavior: 'smooth'})`).catch(()=>{});
+                }
+            } else {
+                this.addTab(url, title, true, targetScrollY);
+            }
+        }
+        
+        overlay.classList.remove('hidden');
+    },
 
-        // Create Webview
+    minimizeStudyWindow: function() {
+        const overlay = document.getElementById('study-overlay');
+        if (overlay) overlay.classList.add('hidden');
+        this.isStudyOpen = false;
+        this.track("Navigating: Dashboard (Study Minimized)");
+        
+        // Add persistent floating button to return to tabs
+        if (!document.getElementById('study-restore-btn')) {
+            const btn = document.createElement('button');
+            btn.id = 'study-restore-btn';
+            btn.className = 'btn-primary';
+            btn.innerHTML = '<i class="fas fa-book-open"></i> Active Study Session (Click to Return)';
+            btn.style.cssText = 'position:fixed; bottom:40px; right:40px; z-index:99999; box-shadow:0 10px 30px rgba(243, 112, 33, 0.6); border-radius:30px; padding:15px 30px; font-weight:bold; font-size:1.2rem; background: var(--primary); color: white; animation: pulse 2s infinite; border: 3px solid white; cursor: pointer;';
+            btn.onclick = () => StudyMonitor.restoreStudyWindow();
+            document.body.appendChild(btn);
+        }
+    },
+
+    restoreStudyWindow: function() {
+        const overlay = document.getElementById('study-overlay');
+        if (overlay) overlay.classList.remove('hidden');
+        this.isStudyOpen = true;
+        
+        const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId);
+        if (activeTab) {
+            this.track(`Studying: ${activeTab.title}`);
+        } else {
+            this.track("Navigating: Study Browser");
+        }
+        
+        const btn = document.getElementById('study-restore-btn');
+        if (btn) btn.remove();
+    },
+
+    closeStudyWindow: function() {
+        const overlay = document.getElementById('study-overlay');
+        if (overlay) overlay.classList.add('hidden');
+        
+        // Cleanup
+        this.isStudyOpen = false;
+        this.browserState.tabs = [];
+        this.browserState.activeTabId = null;
+        this.browserState.homeUrl = null;
+        if (overlay) overlay.innerHTML = ''; // Destroy webviews and UI
+
+        const btn = document.getElementById('study-restore-btn');
+        if (btn) btn.remove();
+
+        this.track("Navigating: Schedule"); // Assume return to schedule
+    },
+
+    getBrowserShellHTML: function() {
+        const quickLinks = [
+            { name: "Q-Contact", url: "https://herotel.qcontact.com/login" },
+            { name: "CRM", url: "https://crm.herotel.com" },
+            { name: "Radius", url: "https://radius.herotel.com" },
+            { name: "Odoo", url: "https://odoo.herotel.com/web#cids=1&menu_id=1040&action=1653" },
+            { name: "ACS", url: "https://acs.herotel.systems" },
+            { name: "Hosting", url: "https://hosting.herotel.com/login" }
+        ];
+
+        return `
+            <div id="study-browser-shell">
+                <div class="study-header">
+                    <div class="study-nav-controls">
+                        <button id="study-nav-back" title="Back"><i class="fas fa-arrow-left"></i></button>
+                        <button id="study-nav-forward" title="Forward"><i class="fas fa-arrow-right"></i></button>
+                        <button id="study-nav-reload" title="Reload"><i class="fas fa-sync-alt"></i></button>
+                        <button id="study-nav-home" title="Home"><i class="fas fa-home"></i></button>
+                    </div>
+                    <div class="study-tabs-container">
+                        <div id="study-tabs-list"></div>
+                    </div>
+                    <div class="study-header-actions">
+                        <button id="study-bookmark-btn" class="btn-secondary" onclick="StudyMonitor.bookmarkCurrentPage()" title="Save this spot to Notes" style="padding: 8px 15px; font-weight:bold; border-color:#f1c40f; color:#f1c40f;"><i class="fas fa-bookmark"></i> Bookmark</button>
+                        <button id="study-min-btn" class="btn-primary" onclick="StudyMonitor.minimizeStudyWindow()" title="Keep tabs open and return to Dashboard" style="padding: 8px 15px; font-weight:bold;"><i class="fas fa-desktop"></i> Dashboard</button>
+                        <select id="study-quick-links" onchange="StudyMonitor.navigateQuickLink(this.value)">
+                            <option value="">Program Links</option>
+                            ${quickLinks.map(l => `<option value="${l.url}">${l.name}</option>`).join('')}
+                        </select>
+                        <button id="study-close-btn" onclick="StudyMonitor.closeStudyWindow()" title="Close all tabs and exit"><i class="fas fa-times"></i> Exit</button>
+                    </div>
+                </div>
+                <div id="study-webview-container"></div>
+            </div>
+        `;
+    },
+
+    attachNavEvents: function() {
+        document.getElementById('study-nav-back').onclick = () => this.getActiveWebview()?.goBack();
+        document.getElementById('study-nav-forward').onclick = () => this.getActiveWebview()?.goForward();
+        document.getElementById('study-nav-reload').onclick = () => this.getActiveWebview()?.reload();
+        document.getElementById('study-nav-home').onclick = () => this.getActiveWebview()?.loadURL(this.browserState.homeUrl);
+    },
+
+    navigateQuickLink: function(url) {
+        if (!url) return;
+        const activeWv = this.getActiveWebview();
+        if (activeWv) {
+            activeWv.loadURL(url);
+        } else {
+            // If they closed all tabs, auto-generate a new one for the link
+            this.addTab(url, "Program Link", true);
+        }
+        document.getElementById('study-quick-links').selectedIndex = 0; // Reset dropdown
+    },
+
+    bookmarkCurrentPage: async function() {
+        const wv = this.getActiveWebview();
+        if (!wv) return alert("No active tab to bookmark.");
+        
+        let url = wv.getURL();
+        let title = wv.getTitle();
+        let scrollY = 0;
+        
+        let selection = "";
+        try {
+            // Attempt to capture highlighted text and scroll position natively
+            selection = await wv.executeJavaScript('window.getSelection().toString()');
+            scrollY = await wv.executeJavaScript('window.scrollY');
+        } catch(e) {}
+        
+        let promptMsg = `Page: ${title}\n`;
+        if (selection && selection.trim().length > 0) {
+            promptMsg += `\nHighlighted Text:\n"${selection.substring(0, 150)}${selection.length > 150 ? '...' : ''}"\n`;
+        } else {
+            promptMsg += `\n(Tip: You can highlight text on the page to automatically capture it)\n`;
+        }
+        promptMsg += `\nPlease add a clarification or note for this bookmark (Required):`;
+        
+        const note = await customPrompt("Save Bookmark", promptMsg, "");
+        if (note === null) return; // Cancelled
+        if (note.trim() === "") return alert("Clarification is required to save a bookmark.");
+        
+        let finalNote = note.trim();
+        if (selection && selection.trim().length > 0) {
+            finalNote = `Highlight: "${selection.substring(0, 150)}"\nNote: ${finalNote}`;
+        }
+
+        const allBookmarks = JSON.parse(localStorage.getItem('trainee_bookmarks') || '{}');
+        const bookmarks = allBookmarks[CURRENT_USER.user] || [];
+        bookmarks.push({
+            id: Date.now(), url: url, title: title.substring(0, 50), note: finalNote, scrollY: scrollY, date: new Date().toISOString()
+        });
+        
+        allBookmarks[CURRENT_USER.user] = bookmarks;
+        localStorage.setItem('trainee_bookmarks', JSON.stringify(allBookmarks));
+        if (typeof saveToServer === 'function') saveToServer(['trainee_bookmarks'], false);
+        
+        if (typeof showToast === 'function') showToast("Spot bookmarked with your clarification!", "success");
+    },
+
+    addTab: function(url, title, activate = false, targetScrollY = null) {
+        const tabId = `tab-${Date.now()}`;
+        const cleanUrl = this.cleanUrl(url);
+
         const webview = document.createElement('webview');
-        webview.src = this.cleanUrl(url);
-        // webview.partition = 'persist:study'; // REMOVED: Use default session for better OS/SSO integration
+        webview.id = `webview-${tabId}`;
+        webview.src = cleanUrl;
         webview.style.width = '100%';
         webview.style.height = '100%';
+        // REQUIRED: Allows target="_blank" links to fire the 'new-window' event so we can intercept them.
         webview.setAttribute('allowpopups', 'true');
-        // Fix for SharePoint/Microsoft 365 blank pages (Spoof standard Chrome UA)
-        webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        // DEFUSAL 2: Strict Microsoft Edge Spoofing to bypass SSO Conditional Access blocks
+        webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
+        webview.classList.add('study-webview');
+        if (!activate) webview.classList.add('hidden');
+
+        const container = document.getElementById('study-webview-container');
+        container.appendChild(webview);
+
+        const newTab = { id: tabId, title: title.substring(0, 20), url: cleanUrl, webview: webview, targetScrollY: targetScrollY };
+        this.browserState.tabs.push(newTab);
+
+        this.renderTabs();
+        this.attachWebviewEvents(newTab);
+
+        if (activate) {
+            this.switchTab(tabId);
+        }
+    },
+
+    switchTab: function(tabId) {
+        this.browserState.activeTabId = tabId;
+        this.browserState.tabs.forEach(tab => {
+            const isHidden = tab.id !== tabId;
+            tab.webview.classList.toggle('hidden', isHidden);
+        });
+        this.renderTabs();
+    },
+
+    closeTab: function(tabId) {
+        const tabIndex = this.browserState.tabs.findIndex(t => t.id === tabId);
+        if (tabIndex === -1) return;
+
+        const tabToClose = this.browserState.tabs[tabIndex];
+        tabToClose.webview.remove();
+
+        this.browserState.tabs.splice(tabIndex, 1);
+
+        if (this.browserState.tabs.length === 0) {
+            this.closeStudyWindow();
+        } else {
+            if (this.browserState.activeTabId === tabId) {
+                const newActiveIndex = Math.max(0, tabIndex - 1);
+                this.switchTab(this.browserState.tabs[newActiveIndex].id);
+            }
+            this.renderTabs();
+        }
+    },
+
+    renderTabs: function() {
+        const tabsList = document.getElementById('study-tabs-list');
+        if (!tabsList) return;
+        tabsList.innerHTML = this.browserState.tabs.map(tab => {
+            const isActive = tab.id === this.browserState.activeTabId;
+            return `
+                <div class="study-tab ${isActive ? 'active' : ''}" onclick="StudyMonitor.switchTab('${tab.id}')">
+                    <span class="study-tab-title">${tab.title}</span>
+                    <button class="study-tab-close" onclick="event.stopPropagation(); StudyMonitor.closeTab('${tab.id}')"><i class="fas fa-times"></i></button>
+                </div>
+            `;
+        }).join('');
+    },
+
+    getActiveWebview: function() {
+        if (!this.browserState.activeTabId) return null;
+        const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId);
+        return activeTab ? activeTab.webview : null;
+    },
+
+    attachWebviewEvents: function(tab) {
+        const webview = tab.webview;
         
-        this.activeWebview = webview;
-        
-        // Event Listeners for Tracking
         webview.addEventListener('did-start-loading', () => {
-            titleEl.innerHTML = `${title} <small>(Loading...)</small>`;
+            const tabEl = document.querySelector(`.study-tab[onclick*="${tab.id}"] .study-tab-title`);
+            if (tabEl) tabEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading...`;
         });
 
         webview.addEventListener('did-stop-loading', () => {
-            titleEl.innerText = title;
-        });
-
-        webview.addEventListener('did-navigate', (e) => {
-            // Track internal navigation (e.g. clicking links in Genially/SharePoint)
-            // We try to extract a meaningful name from the URL
-            let subPage = "Content";
-            if (e.url.includes('.pdf')) subPage = "PDF Document";
-            else if (e.url.includes('sharepoint')) subPage = "SharePoint Doc";
-            else if (e.url.includes('genially')) subPage = "Interactive Flow";
+            const newTitle = webview.getTitle().substring(0, 20);
+            tab.title = newTitle;
+            this.renderTabs();
             
-            this.track(`Studying: ${title} (${subPage})`);
-            
-            // Auto-fix SharePoint redirects that add ?web=1
-            if (e.url.includes('web=1') && e.url.toLowerCase().includes('.pdf')) {
-                const clean = this.cleanUrl(e.url);
-                if (clean !== e.url) webview.src = clean;
+            // Restore Scroll Position if requested
+            if (tab.targetScrollY) {
+                setTimeout(() => {
+                    webview.executeJavaScript(`window.scrollTo({top: ${tab.targetScrollY}, behavior: 'smooth'})`).catch(()=>{});
+                    tab.targetScrollY = null; // Clear after use to prevent re-scrolls on normal navigation
+                }, 500);
             }
         });
 
-        // NEW: Capture navigation attempts before they happen
-        webview.addEventListener('will-navigate', (e) => {
-            // Ensure we track the intent, even if it redirects
-            this.track(`Studying: ${title} (Navigating...)`);
+        webview.addEventListener('did-navigate', (e) => {
+            tab.url = e.url;
+            this.track(`Studying: ${webview.getTitle()}`);
         });
 
-        // Force new windows to open in the same webview (Keep them captured)
         webview.addEventListener('new-window', (e) => {
             e.preventDefault();
-            webview.src = this.cleanUrl(e.url);
+            // DEFUSAL 2 (Part B): Catch standard links + SharePoint blobs, send Native OS triggers (mailto/ms-auth) outward
+            // Note: This is kept as a fallback, but the IPC listener above now handles the heavy lifting for PDFs.
+            if (e.url.startsWith('http://') || e.url.startsWith('https://') || e.url.startsWith('blob:') || e.url.startsWith('data:')) {
+                this.addTab(e.url, "New Tab", true);
+            } else {
+                if (typeof require !== 'undefined') require('electron').shell.openExternal(e.url);
+            }
         });
 
-        // SAFETY: Handle Crashes
         webview.addEventListener('crashed', () => {
             this.track("System: Study Window Crashed");
-            this.closeStudyWindow();
+            this.closeTab(tab.id);
         });
 
-        // --- NEW: CLICK TRACKING INJECTION ---
         webview.addEventListener('dom-ready', () => {
-            // Inject script to detect clicks and log a specific message
             webview.executeJavaScript(`
                 document.addEventListener('click', () => { console.log('__STUDY_CLICK__'); });
             `);
@@ -479,9 +819,6 @@ const StudyMonitor = {
                 this.recordClick();
             }
         });
-
-        container.appendChild(webview);
-        overlay.classList.remove('hidden');
     },
 
     reload: function() {
@@ -510,18 +847,6 @@ const StudyMonitor = {
         return url;
     },
 
-    closeStudyWindow: function() {
-        const overlay = document.getElementById('study-overlay');
-        const container = document.getElementById('study-webview-container');
-        
-        if (overlay) overlay.classList.add('hidden');
-        if (container) container.innerHTML = ''; // Kill webview process
-
-        this.isStudyOpen = false;
-        this.activeWebview = null;
-        this.track("Navigating: Schedule"); // Assume return to schedule
-    },
-    
     // --- WIDGET HELPER: GET SCHEDULED AGENTS ---
     getScheduledAgents: function() {
         const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');

@@ -2012,10 +2012,9 @@ async function refreshClientHealthTable() {
     const container = document.getElementById('sa_client_health_table');
     if (!container || !window.supabaseClient) return;
 
-    const { data: sessions, error } = await supabaseClient
+    const { data: sessions, error } = await window.supabaseClient
         .from('sessions')
-        .select('*')
-        .order('lastSeen', { ascending: false });
+        .select('*');
 
     if (error) {
         container.innerHTML = `<div style="color:#ff5252;">Error fetching health data.</div>`;
@@ -2029,24 +2028,37 @@ async function refreshClientHealthTable() {
 
     let html = `<table class="admin-table compressed-table"><thead><tr><th>User</th><th>Client ID</th><th>Activity</th><th>Latency</th><th>Action</th></tr></thead><tbody>`;
     
+    const now = Date.now();
+
+    // Sort by last seen desc
+    sessions.sort((a,b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
+
     sessions.forEach(s => {
         const latency = s.latency || 0;
         let latColor = '#2ecc71';
         if (latency > 500) latColor = '#f1c40f';
         if (latency > 1500) latColor = '#ff5252';
         
-        const seenTime = new Date(s.lastSeen).toLocaleTimeString();
-        const isOnline = (Date.now() - new Date(s.lastSeen).getTime()) < 90000; // 90s threshold
+        // Determine online status (Cache first, fallback to time)
+        let isOnline = false;
+        const uName = s.username || s.user || 'Unknown';
+        
+        if (window.ACTIVE_USERS_CACHE && window.ACTIVE_USERS_CACHE[uName]) {
+            isOnline = (now - window.ACTIVE_USERS_CACHE[uName].local_received_at) < 90000;
+        } else {
+            isOnline = (now - new Date(s.lastSeen).getTime()) < 180000; // 3 min tolerance
+        }
+
         const statusDot = isOnline ? `<span style="color:#2ecc71;">●</span>` : `<span style="color:#95a5a6;">○</span>`;
         const clientId = s.clientId || 'Unknown';
         const activity = s.activity || '-';
         const roleStr = s.role || '?';
-        const safeUser = s.username.replace(/'/g, "\\'"); // FIX: Escape quotes for button
+        const safeUser = uName.replace(/'/g, "\\'"); 
         
         const banBtn = (clientId !== 'Unknown' && s.role !== 'super_admin') ? `<button class="btn-danger btn-sm" style="padding:0 4px; font-size:0.7rem; margin-left:5px;" onclick="banClient('${clientId}', '${s.username}')" title="Ban Terminal"><i class="fas fa-ban"></i></button>` : '';
 
-        html += `<tr>
-            <td>${statusDot} <strong>${s.username}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">(${roleStr})</span></td>
+        html += `<tr style="${isOnline ? '' : 'opacity:0.6;'}">
+            <td>${statusDot} <strong>${uName}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">(${roleStr})</span></td>
             <td style="font-family:monospace; font-size:0.8rem;">${clientId}${banBtn}</td>
             <td style="font-size:0.8rem; max-width:150px; overflow:hidden; text-overflow:ellipsis;" title="${activity}">${activity}</td>
             <td style="color:${latColor}; font-weight:bold;">${latency}ms</td>

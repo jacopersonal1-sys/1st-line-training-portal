@@ -215,6 +215,40 @@ window.onload = async function() {
                 pointer-events: none;
                 will-change: opacity, transform, filter;
             }
+            
+            /* --- STUDY BROWSER --- */
+            #study-browser-shell { display: flex; flex-direction: column; height: 100%; background: var(--bg-card); }
+            .study-header { display: flex; align-items: center; background: var(--bg-input); padding: 10px 140px 10px 15px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; -webkit-app-region: drag; }
+            .study-nav-controls { display: flex; gap: 8px; -webkit-app-region: no-drag; margin-right: 15px; }
+            .study-nav-controls button { background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-main); width: 42px; height: 42px; border-radius: 8px; cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:1.2rem; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .study-nav-controls button:hover { background: var(--primary); color: white; border-color: var(--primary); transform: translateY(-2px); }
+            .study-tabs-container { flex: 1; display: flex; overflow-x: auto; padding: 0 10px; -webkit-app-region: no-drag; }
+            #study-tabs-list { display: flex; gap: 5px; align-items: flex-end; }
+            .study-tab { display: flex; align-items: center; gap: 8px; background: var(--bg-card); padding: 8px 12px; border-radius: 6px 6px 0 0; border: 1px solid var(--border-color); border-bottom: none; cursor: pointer; font-size: 0.8rem; white-space: nowrap; }
+            .study-tab.active { background: var(--bg-app); border-bottom: 1px solid var(--bg-app); color: var(--primary); font-weight: bold; }
+            .study-tab-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; width: 16px; height: 16px; line-height: 16px; text-align: center; border-radius: 50%; }
+            .study-tab-close:hover { background: var(--bg-hover); color: #ff5252; }
+            .study-header-actions { display: flex; gap: 15px; align-items: center; -webkit-app-region: no-drag; }
+            #study-quick-links { font-size: 0.9rem; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-main); cursor: pointer; font-weight: bold; }
+            #study-close-btn { background: rgba(255, 82, 82, 0.1); color: #ff5252; border: 1px solid #ff5252; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            #study-close-btn:hover { background: #ff5252; color: white; }
+            #study-webview-container { flex: 1; position: relative; }
+            .study-webview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+            .study-webview.hidden { visibility: hidden; }
+            
+            /* --- EXTERNAL APP WARNING --- */
+            #external-app-warning-modal {
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.9); z-index: 20000;
+                display: flex; align-items: center; justify-content: center;
+                animation: fadeIn 0.3s ease;
+            }
+            #external-app-warning-modal .modal-box {
+                max-width: 500px; text-align: center;
+                border-top: 5px solid #f1c40f;
+            }
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
             /* --- MODERN MINIMALIST LOGIN --- */
             .login-box {
                 background: rgba(255, 255, 255, 0.02) !important;
@@ -631,6 +665,16 @@ window.onload = async function() {
         }
         // CRITICAL FIX: Update this AFTER attempt, regardless of success, to stop the loop.
         localStorage.setItem('last_connected_server', currentTarget);
+    }
+
+    // --- EMERGENCY SYNC HEALING (v2.4.60) ---
+    // Clears timestamps to force all clients to download missing rows skipped by the old sync engine.
+    if (!localStorage.getItem('v2460_sync_patch')) {
+        console.log("Applying Sync Healing Patch...");
+        Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
+        });
+        localStorage.setItem('v2460_sync_patch', 'true');
     }
 
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
@@ -1802,6 +1846,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.60": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Sync Engine Fix:</strong> Resolved a critical data truncation bug where background syncing would permanently skip downloading Trainee records. Trainee Dashboards will now fully populate.</li>
+            </ul>`,
         "2.4.59": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Emergency Rescue:</strong> Forced stranded clients on the old infrastructure to connect directly to the new Local VM as the primary "Cloud" source.</li>

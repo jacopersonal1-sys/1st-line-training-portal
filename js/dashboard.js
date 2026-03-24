@@ -220,7 +220,7 @@ function renderDashboard() {
 window.DASH_UPDATE_TIMEOUT = null;
 
 // --- SYSTEM HEALTH & ACTIVE USERS (DASHBOARD SPECIFIC - MIGRATED TO SUPABASE) ---
-async function updateDashboardHealth() {
+async function updateDashboardHealth(useCache = false) {
     const storageEl = document.getElementById('dashStorage');
     const latencyEl = document.getElementById('dashLatency');
     const syncEl = document.getElementById('dashLastSync'); 
@@ -248,31 +248,57 @@ async function updateDashboardHealth() {
 
     const start = Date.now();
     try {
-        // FIX: Use 'supabaseClient' (defined in config.js) to avoid naming conflict
         if (!window.supabaseClient) {
             if(latencyEl) latencyEl.innerText = "Lib Missing";
             return;
         }
 
-        const twoMinsAgo = new Date(Date.now() - 120000).toISOString();
+        let activeUsers = [];
+        let latency = window.CURRENT_LATENCY || 0;
         
-        // Fetch active sessions from Supabase
-        const { data: activeUsers, error } = await supabaseClient
-            .from('sessions')
-            .select('*') // Fallback to * to avoid column errors
-            .gte('lastSeen', twoMinsAgo);
+        if (useCache && window.ACTIVE_USERS_CACHE) {
+            const now = Date.now();
+            Object.values(window.ACTIVE_USERS_CACHE).forEach(u => {
+                // Consider online if heartbeat received in last 90 seconds
+                if (now - u.local_received_at < 90000) {
+                    activeUsers.push(u);
+                }
+            });
+        } else {
+            // Fallback: Full Query
+            const { data: sessionUsers, error } = await window.supabaseClient
+                .from('sessions')
+                .select('*');
 
-        if (error) {
-            console.warn("Dashboard Health Check Warning:", error.message);
-            if(latencyEl) {
-                latencyEl.innerText = "Svc Err";
-                latencyEl.style.color = "orange";
+            if (error) {
+                console.warn("Dashboard Health Check Warning:", error.message);
+                if(latencyEl) {
+                    latencyEl.innerText = "Svc Err";
+                    latencyEl.style.color = "orange";
+                }
+                return; // Exit gracefully without throwing
             }
-            return; // Exit gracefully without throwing
-        }
 
-        const end = Date.now();
-        const latency = end - start;
+            latency = Date.now() - start;
+            window.CURRENT_LATENCY = latency;
+            
+            const now = Date.now();
+            if (!window.ACTIVE_USERS_CACHE) window.ACTIVE_USERS_CACHE = {};
+            
+            if (sessionUsers) {
+                sessionUsers.forEach(u => {
+                    const uName = u.username || u.user;
+                    if (uName) {
+                        const seenMs = new Date(u.lastSeen).getTime();
+                        // If seen in last 3 minutes (handles moderate clock skew)
+                        if (now - seenMs < 180000 || seenMs > now) {
+                            window.ACTIVE_USERS_CACHE[uName] = { ...u, local_received_at: now };
+                            activeUsers.push(window.ACTIVE_USERS_CACHE[uName]);
+                        }
+                    }
+                });
+            }
+        }
 
         // Calculate Storage Size locally (JSON string size)
         let sizeStr = "0 B";
@@ -303,6 +329,8 @@ async function updateDashboardHealth() {
             if(activeUsers.length === 0) {
                 activeTableBody.innerHTML = '<tr><td colspan="4" class="text-center" style="color:var(--text-muted);">No active users.</td></tr>';
             } else {
+                activeUsers.sort((a,b) => (a.username || a.user || '').localeCompare(b.username || b.user || ''));
+                
                 activeTableBody.innerHTML = activeUsers.map(u => {
                     const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
                         ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0)+'s')
@@ -1412,6 +1440,25 @@ window.submitHelpRequest = async function() {
     }
 };
 
+window.deleteBookmark = function(id, e) {
+    if (e) e.stopPropagation();
+    if(!confirm("Delete this bookmark?")) return;
+    const allBookmarks = JSON.parse(localStorage.getItem('trainee_bookmarks') || '{}');
+    const bookmarks = allBookmarks[CURRENT_USER.user] || [];
+    const updated = bookmarks.filter(b => b.id !== id);
+    allBookmarks[CURRENT_USER.user] = updated;
+    localStorage.setItem('trainee_bookmarks', JSON.stringify(allBookmarks));
+    if (typeof saveToServer === 'function') saveToServer(['trainee_bookmarks'], false);
+    renderDashboard();
+};
+
+window.updateTraineeNote = function(val) {
+    const notes = JSON.parse(localStorage.getItem('trainee_notes') || '{}');
+    notes[CURRENT_USER.user] = val;
+    localStorage.setItem('trainee_notes', JSON.stringify(notes));
+    if (typeof saveToServer === 'function') saveToServer(['trainee_notes'], false);
+};
+
 // --- BADGE LOGIC ---
 function getTraineeBadges(user, records, attendance) {
     const badges = [];
@@ -1653,16 +1700,59 @@ function buildTraineeWidgets(container) {
     let availableHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-unlock"></i></div><h3 style="margin:0;">Available Now</h3></div>`;
     availableHtml += `<div style="text-align:center; padding:10px;"><button class="btn-primary" onclick="showTab('my-tests')">View All Assessments</button></div>`;
 
-    // 5. Notepad
-    const savedNote = localStorage.getItem('user_notes_' + CURRENT_USER.user) || '';
+    // 5. Notepad (Now Notes & Bookmarks)
+    
+    // Legacy Cloud Migration
+    const legacyNoteKey = 'user_notes_' + CURRENT_USER.user;
+    let allNotes = JSON.parse(localStorage.getItem('trainee_notes') || '{}');
+    if (localStorage.getItem(legacyNoteKey) !== null) {
+        allNotes[CURRENT_USER.user] = localStorage.getItem(legacyNoteKey);
+        localStorage.setItem('trainee_notes', JSON.stringify(allNotes));
+        localStorage.removeItem(legacyNoteKey);
+        if (typeof saveToServer === 'function') saveToServer(['trainee_notes'], false);
+    }
+    
+    const legacyBmKey = 'trainee_bookmarks_' + CURRENT_USER.user;
+    let allBookmarks = JSON.parse(localStorage.getItem('trainee_bookmarks') || '{}');
+    if (localStorage.getItem(legacyBmKey) !== null) {
+        allBookmarks[CURRENT_USER.user] = JSON.parse(localStorage.getItem(legacyBmKey));
+        localStorage.setItem('trainee_bookmarks', JSON.stringify(allBookmarks));
+        localStorage.removeItem(legacyBmKey);
+        if (typeof saveToServer === 'function') saveToServer(['trainee_bookmarks'], false);
+    }
+
+    const savedNote = allNotes[CURRENT_USER.user] || '';
     const safeNote = (typeof escapeHTML === 'function') ? escapeHTML(savedNote) : savedNote;
+    
+    const bookmarks = allBookmarks[CURRENT_USER.user] || [];
+    let bookmarksHtml = '';
+    if (bookmarks.length === 0) {
+        bookmarksHtml = '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; padding:10px; text-align:center;">No bookmarks saved. Use the <i class="fas fa-bookmark" style="color:#f1c40f;"></i> button in the Study Browser to save specific spots.</div>';
+    } else {
+        bookmarksHtml = '<div style="overflow-y:auto; max-height:120px; margin-top:10px; border-top:1px dashed var(--border-color); padding-top:10px;">' + bookmarks.map(b => {
+            const safeTitle = (typeof escapeHTML === 'function') ? escapeHTML(b.title) : b.title;
+            const safeBMNote = (typeof escapeHTML === 'function') ? escapeHTML(b.note || 'No note') : (b.note || 'No note');
+            const jsUrl = b.url.replace(/'/g, "\\'");
+            const jsTitle = b.title.replace(/'/g, "\\'");
+            return `
+            <div style="background:var(--bg-input); padding:8px; border-radius:6px; margin-bottom:5px; font-size:0.8rem; display:flex; justify-content:space-between; align-items:center; border:1px solid var(--border-color);">
+                <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;" onclick="StudyMonitor.openStudyWindow('${jsUrl}', '${jsTitle}', ${b.scrollY || 0})" title="${safeTitle}">
+                    <strong style="color:var(--primary);"><i class="fas fa-bookmark"></i> ${safeTitle}</strong><br>
+                    <span style="color:var(--text-muted);">${safeBMNote}</span>
+                </div>
+                <button class="btn-danger btn-sm" style="padding:2px 6px;" onclick="deleteBookmark(${b.id}, event)"><i class="fas fa-trash"></i></button>
+            </div>
+        `}).join('') + '</div>';
+    }
+
     const notepadHtml = `
         <div style="display:flex; flex-direction:column; height:100%;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">
                 <i class="fas fa-sticky-note" style="color:#f1c40f; font-size:1.2rem;"></i>
-                <h4 style="margin:0;">My Notes</h4>
+                <h4 style="margin:0;">Notes & Bookmarks</h4>
             </div>
-            <textarea class="notepad-area" placeholder="Type your notes here..." oninput="localStorage.setItem('user_notes_' + CURRENT_USER.user, this.value)">${safeNote}</textarea>
+            <textarea class="notepad-area" style="flex:1; min-height:80px;" placeholder="Type your notes here..." oninput="updateTraineeNote(this.value)">${safeNote}</textarea>
+            ${bookmarksHtml}
         </div>`;
 
     // 6. Daily Tip

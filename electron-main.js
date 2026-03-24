@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { exec } = require('child_process');
@@ -100,6 +100,18 @@ function createWindow() {
     });
 }
 
+// NEW: Catch Webview Window Spawns at OS Level (Fix for PDF Links)
+app.on('web-contents-created', (event, contents) => {
+    if (contents.getType() === 'webview') {
+        contents.setWindowOpenHandler(({ url }) => {
+            if (mainWindow) {
+                mainWindow.webContents.send('webview-new-window', url);
+            }
+            return { action: 'deny' }; // Prevent the external Electron window from opening
+        });
+    }
+});
+
 // App Life Cycle
 
 // SECURITY: Enforce Single Instance Lock in Production (Trainees)
@@ -197,6 +209,11 @@ ipcMain.on('set-update-channel', (event, channel) => {
 // IPC Listener for DevTools (Super Admin Only)
 ipcMain.on('open-devtools', () => {
     if (mainWindow) mainWindow.webContents.openDevTools();
+});
+
+// IPC Listener for System Idle Time (Activity Monitor)
+ipcMain.handle('get-system-idle-time', () => {
+    return powerMonitor.getSystemIdleTime();
 });
 
 // --- AUTO-UPDATER EVENTS ---

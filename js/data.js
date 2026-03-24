@@ -62,6 +62,8 @@ const DB_SCHEMA = {
     nps_surveys: [], // Admin defined surveys
     nps_responses: [], // Trainee responses
     graduated_agents: [], // Archived data for graduated trainees
+    trainee_notes: {}, // Unified syncable notepad { "username": "text" }
+    trainee_bookmarks: {}, // Unified syncable bookmarks { "username": [ { id, url... } ] }
     monitor_whitelist: [], // Custom whitelist for work-related apps
     monitor_reviewed: [], // Apps confirmed as External/Idle (Dismissed from queue)
     dailyTips: [], // Admin controlled daily tips
@@ -114,6 +116,7 @@ const SAVE_DEBOUNCE_MS = 3000; // 3 seconds
 // --- NEW: INCOMING DATA QUEUE (STABILITY) ---
 let INCOMING_DATA_QUEUE = [];
 let QUEUE_PROCESSOR_INTERVAL = null;
+window.ACTIVE_USERS_CACHE = {}; // Realtime Presence Cache
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -357,13 +360,12 @@ async function loadFromServer(silent = false) {
                 }
             } else {
                 // DELTA SYNC: Only fetch rows updated since our safe clock-skew timestamp
-                query = query.gt('updated_at', safeSyncTime);
+                // CRITICAL FIX: Must order by updated_at ascending so we don't truncate random rows when hitting the limit!
+                query = query.gt('updated_at', safeSyncTime).order('updated_at', { ascending: true });
             }
             
-            // Limit batch size (Authoritative tables shouldn't be massive, but safety first)
-            // For authoritative, we might need pagination if it grows, but for now 2000 is plenty for bookings.
-            // OPTIMIZATION: Reduce limit for background syncs to avoid UI thread blocking
-            const fetchLimit = silent ? 200 : 2000;
+            // Limit batch size (Increased to 2000 to ensure fast catch-up without skipping data)
+            const fetchLimit = 2000;
             const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
 
             if (rowErr) {
@@ -1333,7 +1335,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
         // Case 2b: Monitor Data (User-Specific Merge)
         // Prevents "War for Data" where local stale data overwrites other users' fresh server data
-        else if (key === 'monitor_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
+        else if ((key === 'monitor_data' || key === 'trainee_notes' || key === 'trainee_bookmarks') && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
              // 1. Start with Server data (Source of truth for everyone else)
              merged[key] = { ...sVal };
              
@@ -1624,9 +1626,22 @@ async function sendHeartbeat() {
     
     const last = window.LAST_INTERACTION || Date.now();
     const now = Date.now();
-    const diff = now - last;
+    let diff = now - last;
     const limit = (typeof IDLE_THRESHOLD !== 'undefined') ? IDLE_THRESHOLD : 60000;
-    const isIdle = diff > limit;
+    
+    let isIdle = diff > limit;
+
+    // --- OS-LEVEL IDLE ACCURACY ---
+    if (typeof require !== 'undefined') {
+        try {
+            const { ipcRenderer } = require('electron');
+            const osIdleSecs = await ipcRenderer.invoke('get-system-idle-time');
+            if (osIdleSecs !== undefined && osIdleSecs !== null) {
+                diff = osIdleSecs * 1000; // Use actual hardware idle time
+                isIdle = diff > limit;
+            }
+        } catch(e) {}
+    }
     
     // Get extra info
     const clientId = localStorage.getItem('client_id') || 'unknown';
@@ -2044,10 +2059,18 @@ function setupRealtimeListeners() {
         })
         // 3. SESSIONS (Active Users)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, (payload) => {
+            const row = payload.new;
+            if (row && (row.username || row.user)) {
+                const uName = row.username || row.user;
+                window.ACTIVE_USERS_CACHE[uName] = {
+                    ...row,
+                    local_received_at: Date.now()
+                };
+            }
             // Debounce dashboard update to prevent flickering on every heartbeat
             if (window.DASH_UPDATE_TIMEOUT) clearTimeout(window.DASH_UPDATE_TIMEOUT);
             window.DASH_UPDATE_TIMEOUT = setTimeout(() => {
-                if (typeof updateDashboardHealth === 'function') updateDashboardHealth();
+                if (typeof updateDashboardHealth === 'function') updateDashboardHealth(true);
             }, 1000);
         })
         // 4. LIVE BOOKINGS (Schedule Updates)
