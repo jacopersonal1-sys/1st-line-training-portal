@@ -39,7 +39,14 @@ const NPSSystem = {
                 const triggerTime = new Date(s.triggerTime);
                 return now >= triggerTime;
             } 
-            // 'completion' triggers are handled by specific events (e.g. submitTest)
+            
+            // ARCHITECTURAL FIX: RETROACTIVE COMPLETION CATCHER
+            // Prevents lost surveys if the app crashes during submission
+            if (s.triggerType === 'completion' && s.contextType === 'assessment') {
+                const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+                return subs.some(sub => sub.trainee === CURRENT_USER.user && sub.status === 'completed' && sub.testId == s.contextId);
+            }
+            
             return false;
         });
 

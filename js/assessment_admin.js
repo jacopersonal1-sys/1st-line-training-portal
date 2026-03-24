@@ -172,6 +172,10 @@ function loadMarkingQueue() {
 
 // QUICK APPROVE
 async function approveSubmission(subId) {
+    // ARCHITECTURAL FIX: RACE CONDITION PREVENTION
+    if (window._isApproving === subId) return;
+    window._isApproving = subId;
+
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
     if (!sub) return;
@@ -245,6 +249,8 @@ async function approveSubmission(subId) {
     loadMarkingQueue();
     if(typeof loadTestRecords === 'function') loadTestRecords();
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+
+    setTimeout(() => { window._isApproving = null; }, 1000); // Release lock
 }
 
 // DETAILED MARKING (Modal)

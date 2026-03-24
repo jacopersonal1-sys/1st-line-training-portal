@@ -52,6 +52,9 @@ window.CONSOLE_HISTORY = [];
 window.UPDATE_DOWNLOADED = false; // Track update status
 const MAX_LOG_SIZE = 200; // Keep last 200 entries to manage memory
 
+// ARCHITECTURAL FIX: Recursion lock for error reporting
+window._IS_REPORTING_ERROR = false;
+
 function captureLog(type, args) {
     try {
         const msg = args.map(a => {
@@ -64,12 +67,13 @@ function captureLog(type, args) {
         if (window.CONSOLE_HISTORY.length > MAX_LOG_SIZE) window.CONSOLE_HISTORY.shift();
 
         // --- SILENT CLOUD REPORTING ---
-        // Send error to Super Admin instead of showing local popup
-        // FILTER: Ignore network/fetch errors to prevent loops
         const strMsg = msg.toString();
-        if ((type === 'error' || type === 'fatal') && typeof reportSystemError === 'function' && 
+        // ARCHITECTURAL FIX: Prevent infinite stack overflow loops if the save function itself throws an error.
+        if ((type === 'error' || type === 'fatal') && typeof reportSystemError === 'function' && !window._IS_REPORTING_ERROR &&
             !strMsg.includes('Failed to fetch') && !strMsg.includes('NetworkError') && !strMsg.includes('521')) {
+            window._IS_REPORTING_ERROR = true;
             reportSystemError(msg, type);
+            setTimeout(() => { window._IS_REPORTING_ERROR = false; }, 1000);
         }
     } catch(e) { /* Prevent infinite loops if logging fails */ }
 }

@@ -765,11 +765,23 @@ async function moveLiveBooking(id, date, time, trainer) {
     
     if (!targetBooking) return;
 
-    // Check Target Availability
-    const conflict = bookings.find(b => b.date === date && b.time === time && b.trainer === trainer && b.status !== 'Cancelled' && b.id !== id);
-    if (conflict) {
-        if(typeof showToast === 'function') showToast("Target slot is already occupied.", "error");
-        return;
+    // ARCHITECTURAL FIX: ATOMIC COLLISION CHECK FOR DRAG & DROP
+    // Ensure another admin didn't take this slot fractions of a second ago.
+    if (window.supabaseClient) {
+        const { data: remoteConflict } = await window.supabaseClient.from('live_bookings')
+            .select('id')
+            .eq('data->>date', date)
+            .eq('data->>time', time)
+            .eq('data->>trainer', trainer)
+            .neq('data->>status', 'Cancelled')
+            .neq('id', id);
+            
+        if (remoteConflict && remoteConflict.length > 0) {
+            if(typeof showToast === 'function') showToast("Target slot was just taken by another Admin.", "error");
+            if (typeof loadFromServer === 'function') await loadFromServer(true);
+            renderLiveTable();
+            return;
+        }
     }
 
     targetBooking.date = date;
@@ -1481,6 +1493,10 @@ async function confirmBooking() {
 }
 
 async function cancelBooking(id) {
+    // ARCHITECTURAL FIX: DOUBLE-CLICK CANCELLATION RACE CONDITION
+    if (window._isCancelling === id) return;
+    window._isCancelling = id;
+
     if(!confirm("Are you sure you want to cancel this booking?")) return;
 
     // CHECK CANCELLATION POLICY
@@ -1490,6 +1506,7 @@ async function cancelBooking(id) {
         
         if(myCount >= 1) {
             alert("Cancellation Limit Reached.\n\nPlease contact your trainer to change this booking.");
+            window._isCancelling = null;
             return;
         }
         
@@ -1516,6 +1533,7 @@ async function cancelBooking(id) {
                 console.error(error); 
                 if(typeof loadFromServer === 'function') await loadFromServer(true); // Revert
                 renderLiveTable();
+                window._isCancelling = null;
                 return; 
             }
         }
@@ -1525,6 +1543,7 @@ async function cancelBooking(id) {
             await saveToServer(['cancellationCounts'], true);
         }
     }
+    setTimeout(() => { window._isCancelling = null; }, 1000);
 }
 
 async function markBookingComplete(id) {

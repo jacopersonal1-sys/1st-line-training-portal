@@ -537,16 +537,11 @@ async function loadFromServer(silent = false) {
                 localStorage.setItem(`row_sync_ts_${localKey}`, newest);
                 
                 // Update Hash Map for these items to prevent re-uploading what we just downloaded
-                // For heavy logs, we skip the hash map entirely to save space.
-                if (['monitor_history', 'accessLogs', 'error_reports'].includes(localKey)) {
-                    localStorage.removeItem(hashMapKey);
-                } else {
-                    // Update Hash Map for all other tables
-                    safeServerItems.forEach(item => {
-                        if(item.id) hashMap[item.id] = generateChecksum(JSON.stringify(item));
-                    });
-                    localStorage.setItem(hashMapKey, JSON.stringify(hashMap));
-                }
+                // ARCHITECTURAL FIX: Keep hash maps for heavy logs so we don't re-upload them continuously.
+                safeServerItems.forEach(item => {
+                    if(item.id) hashMap[item.id] = generateChecksum(JSON.stringify(item));
+                });
+                localStorage.setItem(hashMapKey, JSON.stringify(hashMap));
                 }
             } else if (isFullAuthoritativePull && !rowErr) {
                 // If authoritative and 0 rows returned, it means table is empty. Clear local.
@@ -2261,16 +2256,14 @@ function processIncomingDataQueue() {
 
     // PROTECTION: Don't update if user is actively interacting/typing.
     // OVERRIDE: If user hasn't interacted for 30s, assume they left focus by accident and process anyway.
-    // HIGH-PRIORITY OVERRIDE: If the user is in the Vetting or Live Arena, process immediately to prevent interaction lag.
-    const isLiveArenaActive = document.getElementById('live-execution')?.classList.contains('active');
-    const isVettingArenaActive = document.getElementById('vetting-arena')?.classList.contains('active');
-    const isLiveBookingActive = document.getElementById('live-assessment')?.classList.contains('active');
 
     // Live Assessment and Vetting are now processed instantly outside of this queue
-    const hasCriticalEvent = false;
 
     const timeSinceInteraction = Date.now() - (window.LAST_INTERACTION || 0);
-    if (!hasCriticalEvent && isUserTyping() && timeSinceInteraction < 30000 && !isLiveArenaActive && !isVettingArenaActive && !isLiveBookingActive) {
+    // UI PROTECTION: Block queue processing if the user is typing. 
+    // Since Vetting/Live Arena handle their own high-priority updates instantly, 
+    // it is absolutely safe to block this background queue to prevent DOM wipes and cursor stealing.
+    if (isUserTyping() && timeSinceInteraction < 30000) {
         return;
     }
 
@@ -2384,7 +2377,13 @@ function processIncomingDataQueue() {
                 if (key === 'system_config') applySystemConfig();
             }
         });
-        if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        
+        // UI PROTECTION: Block schedule list re-renders if an Admin is actively editing a schedule item.
+        // This prevents array index shifting from corrupting data upon save.
+        const isEditingSchedule = document.getElementById('scheduleModal') && !document.getElementById('scheduleModal').classList.contains('hidden');
+        if (typeof refreshAllDropdowns === 'function' && !isEditingSchedule) {
+            refreshAllDropdowns();
+        }
     }
 
     // 5. Process Generic Rows (Records, Submissions, Logs)
@@ -2540,12 +2539,22 @@ function handleVettingRealtime(payload) {
     }
     localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
     
-    const activeTab = document.querySelector('section.active');
-    if (activeTab && activeTab.id === 'vetting-arena' && typeof renderAdminArena === 'function') {
-        renderAdminArena(); // Refresh Admin UI
-    }
+    safeRenderVettingArena();
 }
 
+let _vettingRenderTimer = null;
+function safeRenderVettingArena() {
+    const activeTab = document.querySelector('section.active');
+    if (activeTab && activeTab.id === 'vetting-arena' && typeof renderAdminArena === 'function') {
+        if (isUserTyping()) {
+            // Defer the UI wipe until the Admin stops typing
+            if (_vettingRenderTimer) clearTimeout(_vettingRenderTimer);
+            _vettingRenderTimer = setTimeout(safeRenderVettingArena, 1000);
+        } else {
+            renderAdminArena(); // Refresh Admin UI safely
+        }
+    }
+}
 // 6. FACTORY RESET (Cloud & Local)
 // This function wipes both Supabase and LocalStorage to prevent "Zombie Data" from re-syncing.
 function closeResetModal() {

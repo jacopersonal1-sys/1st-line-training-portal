@@ -328,17 +328,38 @@ function uploadImage(idx, input) {
     const file = input.files[0];
     if(!file) return;
     
-    // Limit to 3MB (Increased for PDF support)
-    if(file.size > 3 * 1024 * 1024) {
-        alert("File too large. Please use a file under 3MB to prevent storage issues.");
-        input.value = "";
-        return;
-    }
 
     const reader = new FileReader();
     reader.onload = function(e) {
-        updateImageLink(idx, e.target.result);
-        renderBuilder();
+        // ARCHITECTURAL FIX: CLIENT-SIDE COMPRESSION FOR LOCALSTORAGE LIMITS
+        if (file.type.startsWith('image/')) {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                const MAX_WIDTH = 1200;
+                const MAX_HEIGHT = 1200;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height && width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; } 
+                else if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                const compressedData = canvas.toDataURL('image/jpeg', 0.6); // Compress to 60% JPEG
+                updateImageLink(idx, compressedData);
+                renderBuilder();
+            };
+            img.src = e.target.result;
+        } else {
+            // PDFs cannot be compressed this way, enforce strict limit
+            if(file.size > 2 * 1024 * 1024) return alert("PDFs must be under 2MB to prevent memory crashes.");
+            updateImageLink(idx, e.target.result);
+            renderBuilder();
+        }
     };
     reader.readAsDataURL(file);
 }
@@ -666,16 +687,20 @@ async function deleteTest(id) {
     let tests = JSON.parse(localStorage.getItem('tests') || '[]');
     tests = tests.filter(t => t.id != id);
     
+    // ARCHITECTURAL FIX: Must update local storage BEFORE calling saveToServer
+    // Otherwise saveToServer reads the old array and uploads the deleted test back to the cloud.
+    localStorage.setItem('tests', JSON.stringify(tests));
+    
     // AUTHORITATIVE DELETE: Save to server first.
     if(typeof saveToServer === 'function') {
         const success = await saveToServer(['tests'], true);
         if (!success) {
+            // Revert local state on network failure
+            if (typeof loadFromServer === 'function') loadFromServer(true);
             alert("Failed to delete test from server. Please check connection.");
             return; // Abort on failure
         }
     }
-
-    localStorage.setItem('tests', JSON.stringify(tests));
     
     loadManageTests();
 }

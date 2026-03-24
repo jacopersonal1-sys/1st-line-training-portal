@@ -133,10 +133,10 @@ window.showLunchModal = function() {
         <div class="modal-box" style="text-align:center; max-width:400px;">
             <i class="fas fa-hamburger" style="font-size:3rem; color:#f1c40f; margin-bottom:15px; animation: bounce 2s infinite;"></i>
             <h2 style="margin-top:0;">Lunch Time!</h2>
-            <p style="color:var(--text-muted); margin-bottom:20px;">It's time for your scheduled lunch break.</p>
+            <p style="color:var(--text-muted); margin-bottom:20px;">It's time for your scheduled lunch break. Taking lunch will log you out.</p>
             <div style="display:flex; justify-content:center; gap:10px;">
-                <button class="btn-secondary" onclick="document.getElementById('lunchModal').remove()">Dismiss</button>
-                <button class="btn-primary" onclick="takeLunchBreak()">Take Lunch (Log Out)</button>
+                <button class="btn-secondary" onclick="document.getElementById('lunchModal').remove()">Cancel</button>
+                <button class="btn-primary" onclick="takeLunchBreak()">Take</button>
             </div>
         </div>
     `;
@@ -178,6 +178,13 @@ function toggleInformedDetails() {
 }
 
 async function submitClockIn() {
+    // ARCHITECTURAL FIX: DOUBLE-CLICK RACE CONDITION
+    const btn = document.activeElement;
+    if(btn && btn.tagName === 'BUTTON') {
+        btn.disabled = true;
+        btn.innerText = "Clocking In...";
+    }
+
     const now = new Date();
     const today = now.toISOString().split('T')[0];
     const timeStr = now.toLocaleTimeString();
@@ -241,9 +248,21 @@ async function submitClockIn() {
 
     document.getElementById('attendanceModal').classList.add('hidden');
     if (typeof showToast === 'function') showToast("Clocked In Successfully", "success");
+
+    if(btn && btn.tagName === 'BUTTON') {
+        btn.disabled = false;
+        btn.innerText = "Clock In";
+    }
 }
 
 async function submitClockOut() {
+    // ARCHITECTURAL FIX: DOUBLE-CLICK RACE CONDITION
+    const btn = document.activeElement;
+    if(btn && btn.tagName === 'BUTTON') { 
+        btn.disabled = true; 
+        btn.innerText = "Clocking Out...";
+    }
+
     if (!confirm("Are you sure you want to Clock Out?")) return;
 
     const today = new Date().toISOString().split('T')[0];
@@ -268,6 +287,11 @@ async function submitClockOut() {
         if (typeof showToast === 'function') showToast("Clocked Out Successfully", "success");
     } else {
         alert("No Clock In record found for today.");
+    }
+
+    if(btn && btn.tagName === 'BUTTON') {
+        btn.disabled = false;
+        btn.innerText = "Clock Out";
     }
 }
 

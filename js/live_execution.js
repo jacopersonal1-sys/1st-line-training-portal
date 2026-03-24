@@ -153,6 +153,15 @@ function processLiveSessionState(allSessions) {
             } else {
                 // Trainee: ONLY re-render if the question changed or session status changed
                 if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
+                    
+                    // ARCHITECTURAL FIX: FLUSH PENDING KEYSTROKES BEFORE DOM WIPE
+                    if (typeof REALTIME_SAVE_TIMEOUT !== 'undefined' && REALTIME_SAVE_TIMEOUT) {
+                        clearTimeout(REALTIME_SAVE_TIMEOUT);
+                        REALTIME_SAVE_TIMEOUT = null;
+                        const sessionToSave = JSON.parse(localStorage.getItem('liveSession') || '{}');
+                        if (typeof updateGlobalSessionArray === 'function') updateGlobalSessionArray(sessionToSave, true).catch(()=>{});
+                    }
+
                     const success = renderTraineeLivePanel(container);
                     if (success !== false) LAST_RENDERED_Q = myServerSession.currentQ;
                     else LAST_RENDERED_Q = -2; // Force retry on next tick

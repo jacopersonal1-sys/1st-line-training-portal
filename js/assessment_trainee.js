@@ -335,6 +335,14 @@ function restoreAssessmentDraft() {
     // CRITICAL: Ensure the draft belongs to the currently logged in user
     if (draft.user !== CURRENT_USER.user) return;
 
+    // ARCHITECTURAL FIX: "TIME-STOP" EXPLOIT PREVENTION
+    // Calculate how much time passed while the draft was "asleep"
+    if (draft.test && draft.test.remainingSeconds) {
+        const timeAsleepSeconds = Math.floor((Date.now() - draft.timestamp) / 1000);
+        draft.test.remainingSeconds -= timeAsleepSeconds;
+        if (draft.test.remainingSeconds <= 0) draft.test.remainingSeconds = 1; // Force 1s to trigger immediate timeout
+    }
+
     window.CURRENT_TEST = draft.test;
     window.USER_ANSWERS = draft.answers || {};
     

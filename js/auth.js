@@ -623,6 +623,17 @@ function applyRolePermissions() {
 }
 
 async function logout() { 
+  // ARCHITECTURAL FIX: KIOSK MODE TRAP
+  // Ensure we drop OS lockdown shields before logging out, otherwise 
+  // the user gets trapped on the login screen in full-screen Kiosk mode.
+  if (typeof require !== 'undefined') {
+      try {
+          const { ipcRenderer } = require('electron');
+          await ipcRenderer.invoke('set-kiosk-mode', false);
+          await ipcRenderer.invoke('set-content-protection', false);
+      } catch(e) { console.error("Kiosk unlock failed on logout:", e); }
+  }
+
   if (CURRENT_USER && typeof logAccessEvent === 'function') {
       await logAccessEvent(CURRENT_USER.user, 'Logout');
   }
