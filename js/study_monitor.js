@@ -152,6 +152,9 @@ const StudyMonitor = {
                             } else if (activeWindow.toLowerCase().includes('teams') || activeWindow.toLowerCase().includes('microsoft teams')) {
                                 activityLabel = `Studying: MS Teams (Communication)`;
                                 isPermitted = true;
+                            } else if (activeWindow.toLowerCase().includes('outlook') || activeWindow.toLowerCase().includes('mail')) {
+                                activityLabel = `Studying: Email (Communication)`;
+                                isPermitted = true;
                             }
                         }
                     }

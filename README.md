@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.62**: **Study Browser & Monitor**: Fixed stale UI buttons, added Preseem to quick links, and whitelisted MS Teams/Outlook.
  - **v2.4.61**: **Study Monitor**: Added full Sandbox Browser with tab support, Cloud-synced Bookmarks, and OS-level hardware idle tracking.
  - **v2.4.53**: **Hotfix**: Resolved infinite failover loop and added mutex locks for silent server switching. Added dev-mode version bypass.
  - **v2.4.52**: **Hotfix**: Fixed login screen crash caused by background Live Assessment syncing without an active user session.

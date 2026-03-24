@@ -1846,6 +1846,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.62": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Study Browser:</strong> Fixed UI overlap causing navigation buttons to become unresponsive. Added Preseem to quick links.</li>
+                <li style="margin-bottom: 8px;"><strong>Activity Monitor:</strong> Added whitelist exemptions for MS Teams and Outlook to prevent false violation warnings.</li>
+            </ul>`,
         "2.4.61": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Study Monitor:</strong> Upgraded to a full Sandbox Browser with tabs, quick links, and active external app monitoring.</li>
