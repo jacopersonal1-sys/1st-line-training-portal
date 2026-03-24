@@ -126,41 +126,46 @@ const StudyMonitor = {
                     // 2. CHECK ACTIVE FOREGROUND WINDOW
                     const activeWindow = await ipcRenderer.invoke('get-active-window');
                     
-                    // If the active window is our portal, check for idle/return, otherwise do nothing
-                    if (activeWindow && activeWindow.includes('1st Line Training Portal')) {
-                        if (this.isStudyOpen) return; // Specific activity handled by webview events
-                        
-                        if (this.currentActivity === 'Idle' || this.currentActivity.startsWith('External:') || this.currentActivity.startsWith('Violation:')) {
-                            this.track("Navigating Portal");
+                    let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
+                    let isPermitted = false;
+
+                    if (activeWindow) {
+                        if (activeWindow.includes('1st Line Training Portal')) {
+                            isPermitted = true;
+                            if (this.isStudyOpen) return; // Specific activity handled by webview events
+                            activityLabel = "Navigating Portal";
+                        } else {
+                            const defaultSites = [
+                                'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
+                                'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
+                                'cp1.herotel.com', 'cp2.herotel.com'
+                            ];
+                            const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
+
+                            // Check if window title contains any of the work sites
+                            const matchedSite = workSites.find(site => site && activeWindow.toLowerCase().includes(site.toLowerCase()));
+                            
+                            if (matchedSite) {
+                                // Classify as "Studying" (or Work) so it counts towards Focus Score
+                                activityLabel = `Studying: ${matchedSite} (Work System)`;
+                                isPermitted = true;
+                            } else if (activeWindow.toLowerCase().includes('teams') || activeWindow.toLowerCase().includes('microsoft teams')) {
+                                activityLabel = `Studying: MS Teams (Communication)`;
+                                isPermitted = true;
+                            }
                         }
-                        return;
-                    } else {
-                        // External App Detected
+                    }
+
+                    // Only trigger the warning if it's strictly an external, non-permitted app
+                    if (!isPermitted && activeWindow) {
                         this.triggerExternalAppWarning();
                     }
 
-                    // 3. EXTERNAL APP CLASSIFICATION
-                    let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
-
-                    if (activeWindow) {
-                        const defaultSites = [
-                            'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
-                            'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
-                            'cp1.herotel.com', 'cp2.herotel.com'
-                        ];
-                        const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
-
-                        // Check if window title contains any of the work sites
-                        const matchedSite = workSites.find(site => site && activeWindow.toLowerCase().includes(site.toLowerCase()));
-                        
-                        if (matchedSite) {
-                            // Classify as "Studying" (or Work) so it counts towards Focus Score
-                            activityLabel = `Studying: ${matchedSite} (Work System)`;
-                        }
-                    }
-
-                    if (this.currentActivity !== activityLabel) {
+                    // Track the state change
+                    if (this.currentActivity !== activityLabel && activityLabel !== "Navigating Portal") {
                         this.track(activityLabel);
+                    } else if (activityLabel === "Navigating Portal" && (this.currentActivity === 'Idle' || this.currentActivity.startsWith('External:') || this.currentActivity.startsWith('Violation:'))) {
+                        this.track("Navigating Portal");
                     }
                 } catch (e) { console.error("External Monitor Error:", e); }
             }
@@ -592,7 +597,8 @@ const StudyMonitor = {
             { name: "Radius", url: "https://radius.herotel.com" },
             { name: "Odoo", url: "https://odoo.herotel.com/web#cids=1&menu_id=1040&action=1653" },
             { name: "ACS", url: "https://acs.herotel.systems" },
-            { name: "Hosting", url: "https://hosting.herotel.com/login" }
+            { name: "Hosting", url: "https://hosting.herotel.com/login" },
+            { name: "Preseem", url: "https://app.preseem.com" }
         ];
 
         return `
