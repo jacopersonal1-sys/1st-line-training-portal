@@ -515,32 +515,31 @@ async function loadFromServer(silent = false) {
         }
 
         // --- PHASE C: MONITOR STATE SYNC (Real-time Activity) ---
-        // Fetch only recently active user states (Last 24 hours) to prevent payload bloat
-        const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
-        const { data: monRows, error: monErr } = await window.supabaseClient
-            .from('monitor_state')
-            .select('user_id, data')
-            .gt('updated_at', oneDayAgo);
-            
-        if (monRows) {
-            // Merge server state into local monitor_data
-            const monData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-            monRows.forEach(r => {
-                // GHOST DATA FIX: Check if this user is pending deletion
-                const isDeleted = pendingQueries.some(q => q.table === 'monitor_state' && q.col === 'user_id' && q.val === r.user_id);
-                if (!isDeleted) {
-                    monData[r.user_id] = r.data;
-                }
-            });
-            
-            // Preserve MY local state (Optimistic UI) - Don't let server overwrite my own live status
-            if (CURRENT_USER) {
+        // OPTIMIZATION: Only Admins/TeamLeaders need to download the entire company's live activity data.
+        if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'teamleader')) {
+            const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+            const { data: monRows, error: monErr } = await window.supabaseClient
+                .from('monitor_state')
+                .select('user_id, data')
+                .gt('updated_at', oneDayAgo);
+                
+            if (monRows) {
+                // Merge server state into local monitor_data
+                const monData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                monRows.forEach(r => {
+                    const isDeleted = pendingQueries.some(q => q.table === 'monitor_state' && q.col === 'user_id' && q.val === r.user_id);
+                    if (!isDeleted) {
+                        monData[r.user_id] = r.data;
+                    }
+                });
+                
+                // Preserve MY local state (Optimistic UI)
                 const currentLocal = JSON.parse(localStorage.getItem('monitor_data') || '{}');
                 if (currentLocal[CURRENT_USER.user]) {
                     monData[CURRENT_USER.user] = currentLocal[CURRENT_USER.user];
                 }
+                localStorage.setItem('monitor_data', JSON.stringify(monData));
             }
-            localStorage.setItem('monitor_data', JSON.stringify(monData));
         }
 
         // --- PHASE D: POST-SYNC ACTIONS ---

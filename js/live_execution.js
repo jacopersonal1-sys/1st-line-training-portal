@@ -1301,6 +1301,12 @@ window.runLiveDiagnostics = async function() {
 };
 
 window.showDiagnosticReport = function(rtt, net) {
+    // Discard severely delayed ghost responses (e.g. arrived >15s later due to DB queue)
+    if (rtt > 15000) {
+        console.warn(`Discarded stale diagnostic response (RTT: ${rtt}ms)`);
+        return;
+    }
+
     // Reset connection status text so it resumes normal polling display
     const session = JSON.parse(localStorage.getItem('liveSession'));
     if(typeof updateLiveConnectionStatus === 'function') updateLiveConnectionStatus(session.trainee);

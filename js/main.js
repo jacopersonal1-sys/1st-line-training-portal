@@ -1846,6 +1846,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.63": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance Optimization:</strong> Drastically reduced database latency and bandwidth by adding SQL indexes to Cloud tables and restricting Activity Monitor payload downloads to Admin roles only.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added a failsafe to silently discard extremely delayed "ghost" diagnostic popups in the Live Assessment Arena.</li>
+            </ul>`,
         "2.4.62": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Study Browser:</strong> Fixed UI overlap causing navigation buttons to become unresponsive. Added Preseem to quick links.</li>
