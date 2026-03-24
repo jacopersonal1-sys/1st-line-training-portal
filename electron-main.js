@@ -1,8 +1,9 @@
-const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor, Menu, MenuItem } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor, Menu, MenuItem, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { exec } = require('child_process');
 const os = require('os');
+const fs = require('fs');
 
 // Enable logging for the auto-updater (helps debug "nothing happening")
 autoUpdater.logger = console;
@@ -40,8 +41,10 @@ function createWindow() {
             height: 35
         },
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false, // Needed for some legacy JS interactions
+            nodeIntegration: false,
+            contextIsolation: true, // SECURED: Protects from RCE attacks
+            preload: path.join(__dirname, 'preload.js'),
+            backgroundThrottling: false, // SHIELD: Prevents CPU throttling when app is minimized
             webviewTag: true, // ENABLED: Required for SharePoint/External Reference Viewer
             devTools: true // ENABLED: Required for Super Admin access (Shortcuts blocked below)
         }
@@ -147,11 +150,27 @@ function createWindow() {
         }
     });
 
-    // SECURITY: Prevent closing during Vetting Lockdown
+    let isSafeToQuit = false;
+    // SECURITY & SAFE QUIT: Prevent closing during lockdown or data sync
     mainWindow.on('close', (e) => {
         if (vettingLockdown) {
             e.preventDefault(); // Block closing
+            return;
         }
+        if (!isSafeToQuit) {
+            e.preventDefault();
+            if (mainWindow) mainWindow.webContents.send('force-final-sync');
+            // Failsafe: force close after 3 seconds if network is hung
+            setTimeout(() => {
+                isSafeToQuit = true;
+                app.quit();
+            }, 3000);
+        }
+    });
+
+    ipcMain.on('final-sync-complete', () => {
+        isSafeToQuit = true;
+        app.quit();
     });
 }
 
@@ -208,6 +227,15 @@ if (!gotTheLock) {
 
     app.whenReady().then(() => {
         createWindow();
+
+        // SHIELD: Hardware Wake/Resume Triggers (The "Sleep Mode" Fix)
+        powerMonitor.on('resume', () => {
+            if (mainWindow) mainWindow.webContents.send('os-resume');
+        });
+        powerMonitor.on('unlock-screen', () => {
+            if (mainWindow) mainWindow.webContents.send('os-resume');
+        });
+
         app.on('activate', () => {
             if (BrowserWindow.getAllWindows().length === 0) createWindow();
         });
@@ -448,6 +476,77 @@ ipcMain.handle('get-system-stats', async () => {
         connType: connectionType,
         disk: diskUsage
     };
+});
+
+// --- HIGH-PERFORMANCE BACKGROUND POLLER ---
+let activityMonitorInterval = null;
+
+ipcMain.on('start-activity-monitor', (event) => {
+    if (activityMonitorInterval) clearInterval(activityMonitorInterval);
+    
+    activityMonitorInterval = setInterval(() => {
+        if (!mainWindow) return;
+        const osIdleSeconds = powerMonitor.getSystemIdleTime();
+        
+        if (process.platform === 'win32') {
+            const cmd = `powershell -NoProfile -Command "try { $code = '[DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\")] public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);'; $type = Add-Type -MemberDefinition $code -Name Win32 -Namespace Win32 -PassThru; $hwnd = $type::GetForegroundWindow(); $pidOut = 0; $type::GetWindowThreadProcessId($hwnd, [ref]$pidOut) | Out-Null; $p = Get-Process -Id $pidOut; if ($p.MainWindowTitle) { $p.MainWindowTitle + ' [' + $p.ProcessName + ']' } else { $p.ProcessName } } catch { 'Unknown External App' }"`;
+            
+            exec(cmd, (err, stdout) => {
+                const activeWindow = err ? "External Activity (Unknown)" : (stdout.trim() || "External Activity");
+                mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow });
+            });
+        } else {
+            mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow: "External Activity (OS Not Supported)" });
+        }
+    }, 5000);
+});
+
+ipcMain.on('stop-activity-monitor', () => {
+    if (activityMonitorInterval) {
+        clearInterval(activityMonitorInterval);
+        activityMonitorInterval = null;
+    }
+});
+
+// --- NATIVE OS NOTIFICATIONS ---
+ipcMain.on('show-notification', (event, { title, body }) => {
+    if (Notification.isSupported()) {
+        const notif = new Notification({
+            title: title,
+            body: body,
+            icon: path.join(__dirname, 'ico.ico')
+        });
+        notif.on('click', () => {
+            if (mainWindow) {
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.focus();
+            }
+        });
+        notif.show();
+    }
+});
+
+// --- NATIVE DISK CACHE (Infinite Storage / Auto-Backup) ---
+ipcMain.handle('save-disk-cache', async (event, jsonData) => {
+    try {
+        const cachePath = path.join(app.getPath('userData'), 'native_cache.json');
+        // Write asynchronously to prevent blocking the main thread
+        await fs.promises.writeFile(cachePath, jsonData, 'utf8');
+        return true;
+    } catch(e) {
+        console.error("Disk Cache Save Error:", e);
+        return false;
+    }
+});
+
+ipcMain.handle('load-disk-cache', async (event) => {
+    try {
+        const cachePath = path.join(app.getPath('userData'), 'native_cache.json');
+        if (fs.existsSync(cachePath)) {
+            return await fs.promises.readFile(cachePath, 'utf8');
+        }
+        return null;
+    } catch(e) { return null; }
 });
 
 // --- ACTIVE WINDOW TRACKING (Activity Monitor) ---

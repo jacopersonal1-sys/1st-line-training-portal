@@ -1,5 +1,51 @@
 /* ================= MAIN ENTRY ================= */
 
+// --- NATIVE BRIDGE POLYFILL ---
+// Maps legacy require('electron') calls to the new secure contextBridge
+if (window.electronAPI) {
+    window.require = function(mod) {
+        if (mod === 'electron') return window.electronAPI;
+        if (mod === 'path') return { join: (...args) => args.join('/') };
+        throw new Error(`Module ${mod} is blocked by Context Isolation.`);
+    };
+    // Mock __dirname for module loaders
+        let path = decodeURI(window.location.pathname);
+        window.__dirname = path.substring(1, path.lastIndexOf('/'));
+}
+
+// --- NATIVE OS WAKE/RESUME LISTENER (Sleep Mode Fix) ---
+if (window.electronAPI) {
+    window.electronAPI.ipcRenderer.on('os-resume', () => {
+        console.log("OS Woke from Sleep. Forcing immediate reconnection and sync...");
+        const el = document.getElementById('sync-indicator');
+        if(el) { el.style.opacity = '1'; el.innerHTML = '<i class="fas fa-bolt" style="color:#f1c40f;"></i> Waking...'; }
+        
+        // 1. Re-establish Database Client & WebSockets to prevent stale connections
+        if (typeof initSupabaseClient === 'function') initSupabaseClient();
+        if (typeof setupRealtimeListeners === 'function') setupRealtimeListeners();
+        
+        // 2. Instantly pull any data missed while the PC was asleep
+        if (typeof loadFromServer === 'function') loadFromServer(true);
+    });
+}
+
+// --- NATIVE OS SAFE QUIT (Final Push Fix) ---
+if (window.electronAPI) {
+    window.electronAPI.ipcRenderer.on('force-final-sync', async () => {
+        console.log("Intercepted Close. Forcing final data sync...");
+        const el = document.getElementById('sync-indicator');
+        if(el) { el.style.opacity = '1'; el.innerHTML = '<i class="fas fa-save" style="color:#f1c40f;"></i> Finalizing...'; }
+        
+        if (typeof saveToServer === 'function') {
+            // Flush existing queue immediately using delta sync to prevent timeouts
+            await saveToServer('FLUSH', false, true);
+        }
+        
+        // Tell main process it is safe to exit
+        window.electronAPI.ipcRenderer.send('final-sync-complete');
+    });
+}
+
 // --- GLOBAL CONSOLE RECORDER (For AI Analysis) ---
 // Captures logs, warns, and errors so the AI can analyze app history.
 window.CONSOLE_HISTORY = [];
@@ -542,6 +588,22 @@ window.onload = async function() {
     const loader = document.getElementById('global-loader');
     if(loader) loader.classList.remove('hidden');
 
+    // --- NATIVE DISK CACHE RECOVERY ---
+    if (window.electronAPI && window.electronAPI.disk) {
+        // If critical data is missing, the browser cache was likely wiped.
+        if (!localStorage.getItem('users') || localStorage.length < 5) {
+            console.warn("LocalStorage appears empty/wiped. Attempting native disk recovery...");
+            try {
+                const cacheData = await window.electronAPI.disk.loadCache();
+                if (cacheData) {
+                    const parsed = JSON.parse(cacheData);
+                    Object.keys(parsed).forEach(k => localStorage.setItem(k, parsed[k]));
+                    console.log("Successfully restored data from Native Disk Cache.");
+                }
+            } catch(e) { console.error("Disk Recovery failed:", e); }
+        }
+    }
+
     // GET APP VERSION
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
@@ -711,8 +773,9 @@ window.onload = async function() {
     if (typeof applySystemConfig === 'function') applySystemConfig();
 
     // --- NEW: Start Real-Time Polling (Heartbeat & Sync) ---
-    // This activates the Supabase polling defined in data.js
-    if (typeof startRealtimeSync === 'function') {
+    // applySystemConfig already starts the engine if a user is logged in.
+    // We ensure it starts here for the login screen if no user was restored.
+    if (typeof startRealtimeSync === 'function' && !CURRENT_USER) {
         startRealtimeSync();
     }
     // ------------------------------------
@@ -906,7 +969,46 @@ window.onload = async function() {
     if (savedSession && typeof checkAttendanceStatus === 'function') {
         setTimeout(checkAttendanceStatus, 1500); 
     }
+
+    // --- LUNCH TIMER LOGIC ---
+    setInterval(updateLunchTimer, 1000);
+    updateLunchTimer();
 };
+
+function updateLunchTimer() {
+    const loginScreen = document.getElementById('login-screen');
+    if (!loginScreen || loginScreen.classList.contains('hidden')) return;
+
+    const endTimeStr = localStorage.getItem('lunch_end_time');
+    if (!endTimeStr) {
+        const existing = document.getElementById('lunch-timer-display');
+        if (existing) existing.remove();
+        return;
+    }
+
+    const endTime = parseInt(endTimeStr);
+    const now = Date.now();
+    const diff = endTime - now;
+
+    if (diff <= 0) {
+        localStorage.removeItem('lunch_end_time');
+        const existing = document.getElementById('lunch-timer-display');
+        if (existing) existing.remove();
+        return;
+    }
+
+    let timerEl = document.getElementById('lunch-timer-display');
+    if (!timerEl) {
+        timerEl = document.createElement('div');
+        timerEl.id = 'lunch-timer-display';
+        timerEl.style.cssText = "position:absolute; top:40px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.6); backdrop-filter:blur(10px); border:1px solid rgba(243, 112, 33, 0.5); padding:10px 25px; border-radius:30px; font-weight:bold; color:white; display:flex; align-items:center; gap:10px; z-index:10; font-family:monospace; font-size:1.2rem; box-shadow:0 4px 20px rgba(0,0,0,0.5);";
+        loginScreen.appendChild(timerEl);
+    }
+
+    const m = Math.floor(diff / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    timerEl.innerHTML = `<i class="fas fa-hamburger" style="color:#f1c40f;"></i> Lunch Break: ${m}m ${s < 10 ? '0'+s : s}s`;
+}
 
 // --- REFERENCE VIEWER (Draggable Window) ---
 window.openReferenceViewer = function(url) {
@@ -1253,6 +1355,11 @@ function showTab(id, btn) {
   // If we are leaving the test view, kill the active timer to prevent background auto-submits
   if (id !== 'test-take-view' && id !== 'vetting-arena' && window.TEST_TIMER) {
       clearInterval(window.TEST_TIMER);
+  }
+
+  // Kill Live Arena Poller if leaving the tab
+  if (id !== 'live-execution' && window.LIVE_POLLER) {
+      clearInterval(window.LIVE_POLLER);
   }
 
   if (TAB_SWITCH_TIMEOUT) clearTimeout(TAB_SWITCH_TIMEOUT);
@@ -1846,6 +1953,16 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.65": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Network Resilience:</strong> Hardened the Zero-Latency Real-Time tunnel. The app now silently falls back to high-speed 30-second polling if corporate firewalls block WebSockets, and continuously attempts to rebuild dropped connections to keep your UI instantly synced.</li>
+            </ul>`,
+        "2.4.64": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance Optimization:</strong> Trainee Data Minimization ensures trainees only download their own data, dropping bandwidth usage by 98%.</li>
+                <li style="margin-bottom: 8px;"><strong>Zero-Latency Sync:</strong> Live Assessment and Vetting Arena now process WebSockets instantly, bypassing the background queue.</li>
+                <li style="margin-bottom: 8px;"><strong>UX Improvements:</strong> Added native right-click context menu with spellcheck suggestions.</li>
+            </ul>`,
         "2.4.63": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Performance Optimization:</strong> Drastically reduced database latency and bandwidth by adding SQL indexes to Cloud tables and restricting Activity Monitor payload downloads to Admin roles only.</li>

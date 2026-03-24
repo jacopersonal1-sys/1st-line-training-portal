@@ -256,48 +256,15 @@ async function updateDashboardHealth(useCache = false) {
         let activeUsers = [];
         let latency = window.CURRENT_LATENCY || 0;
         
-        if (useCache && window.ACTIVE_USERS_CACHE) {
-            const now = Date.now();
+        // USE PRESENCE CACHE EXCLUSIVELY
+        const now = Date.now();
+        if (window.ACTIVE_USERS_CACHE) {
             Object.values(window.ACTIVE_USERS_CACHE).forEach(u => {
                 // Consider online if heartbeat received in last 90 seconds
-                if (now - u.local_received_at < 90000) {
+                if (now - (u.local_received_at || 0) < 90000) {
                     activeUsers.push(u);
                 }
             });
-        } else {
-            // Fallback: Full Query
-            const { data: sessionUsers, error } = await window.supabaseClient
-                .from('sessions')
-                .select('*');
-
-            if (error) {
-                console.warn("Dashboard Health Check Warning:", error.message);
-                if(latencyEl) {
-                    latencyEl.innerText = "Svc Err";
-                    latencyEl.style.color = "orange";
-                }
-                return; // Exit gracefully without throwing
-            }
-
-            latency = Date.now() - start;
-            window.CURRENT_LATENCY = latency;
-            
-            const now = Date.now();
-            if (!window.ACTIVE_USERS_CACHE) window.ACTIVE_USERS_CACHE = {};
-            
-            if (sessionUsers) {
-                sessionUsers.forEach(u => {
-                    const uName = u.username || u.user;
-                    if (uName) {
-                        const seenMs = new Date(u.lastSeen).getTime();
-                        // If seen in last 3 minutes (handles moderate clock skew)
-                        if (now - seenMs < 180000 || seenMs > now) {
-                            window.ACTIVE_USERS_CACHE[uName] = { ...u, local_received_at: now };
-                            activeUsers.push(window.ACTIVE_USERS_CACHE[uName]);
-                        }
-                    }
-                });
-            }
         }
 
         // Calculate Storage Size locally (JSON string size)
@@ -1727,7 +1694,7 @@ function buildTraineeWidgets(container) {
     const bookmarks = allBookmarks[CURRENT_USER.user] || [];
     let bookmarksHtml = '';
     if (bookmarks.length === 0) {
-        bookmarksHtml = '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; padding:10px; text-align:center;">No bookmarks saved. Use the <i class="fas fa-bookmark" style="color:#f1c40f;"></i> button in the Study Browser to save specific spots.</div>';
+        bookmarksHtml = '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; padding:10px; text-align:center;">No marks saved. Use the <i class="fas fa-crop-alt" style="color:#f1c40f;"></i> button in the Study Browser to mark areas for clarity.</div>';
     } else {
         bookmarksHtml = '<div style="overflow-y:auto; max-height:120px; margin-top:10px; border-top:1px dashed var(--border-color); padding-top:10px;">' + bookmarks.map(b => {
             const safeTitle = (typeof escapeHTML === 'function') ? escapeHTML(b.title) : b.title;
@@ -1737,7 +1704,7 @@ function buildTraineeWidgets(container) {
             return `
             <div style="background:var(--bg-input); padding:8px; border-radius:6px; margin-bottom:5px; font-size:0.8rem; display:flex; justify-content:space-between; align-items:center; border:1px solid var(--border-color);">
                 <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;" onclick="StudyMonitor.openStudyWindow('${jsUrl}', '${jsTitle}', ${b.scrollY || 0})" title="${safeTitle}">
-                    <strong style="color:var(--primary);"><i class="fas fa-bookmark"></i> ${safeTitle}</strong><br>
+                    <strong style="color:var(--primary);"><i class="fas fa-question-circle"></i> ${safeTitle}</strong><br>
                     <span style="color:var(--text-muted);">${safeBMNote}</span>
                 </div>
                 <button class="btn-danger btn-sm" style="padding:2px 6px;" onclick="deleteBookmark(${b.id}, event)"><i class="fas fa-trash"></i></button>
@@ -1749,7 +1716,7 @@ function buildTraineeWidgets(container) {
         <div style="display:flex; flex-direction:column; height:100%;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">
                 <i class="fas fa-sticky-note" style="color:#f1c40f; font-size:1.2rem;"></i>
-                <h4 style="margin:0;">Notes & Bookmarks</h4>
+                <h4 style="margin:0;">Notes & Clarity Marks</h4>
             </div>
             <textarea class="notepad-area" style="flex:1; min-height:80px;" placeholder="Type your notes here..." oninput="updateTraineeNote(this.value)">${safeNote}</textarea>
             ${bookmarksHtml}

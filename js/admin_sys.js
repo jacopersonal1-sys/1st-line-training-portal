@@ -1100,10 +1100,14 @@ function openSuperAdminConfig() {
                         <div class="grid-2">
                             <div class="card">
                                 <h4><i class="fas fa-clock"></i> Attendance</h4>
-                                <label>Start</label><input type="time" id="sa_att_start" value="${att.work_start}">
-                                <label>Late Cutoff</label><input type="time" id="sa_att_late" value="${att.late_cutoff}">
-                                <label>End</label><input type="time" id="sa_att_end" value="${att.work_end}">
-                                <label>Reminder</label><input type="time" id="sa_att_remind" value="${att.reminder_start}">
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                    <div><label>Start</label><input type="time" id="sa_att_start" value="${att.work_start}"></div>
+                                    <div><label>Late Cutoff</label><input type="time" id="sa_att_late" value="${att.late_cutoff}"></div>
+                                    <div><label>End</label><input type="time" id="sa_att_end" value="${att.work_end}"></div>
+                                    <div><label>Reminder</label><input type="time" id="sa_att_remind" value="${att.reminder_start}"></div>
+                                    <div><label>Lunch Start</label><input type="time" id="sa_att_lunch_start" value="${att.lunch_start || '12:00'}"></div>
+                                    <div><label>Lunch Dur (m)</label><input type="number" id="sa_att_lunch_dur" value="${att.lunch_duration || 60}" style="width:100%;"></div>
+                                </div>
                             </div>
                         </div>
                         
@@ -1889,7 +1893,9 @@ async function saveSuperAdminConfig() {
         work_start: getVal('sa_att_start', '08:00'),
         late_cutoff: getVal('sa_att_late', '08:15'),
         work_end: getVal('sa_att_end', '17:00'),
-        reminder_start: getVal('sa_att_remind', '16:45')
+        reminder_start: getVal('sa_att_remind', '16:45'),
+        lunch_start: getVal('sa_att_lunch_start', '12:00'),
+        lunch_duration: parseInt(getVal('sa_att_lunch_dur', '60')) || 60
     };
 
     config.security = { ...config.security,
@@ -2010,16 +2016,10 @@ async function sendSystemBroadcast() {
 
 async function refreshClientHealthTable() {
     const container = document.getElementById('sa_client_health_table');
-    if (!container || !window.supabaseClient) return;
+    if (!container) return;
 
-    const { data: sessions, error } = await window.supabaseClient
-        .from('sessions')
-        .select('*');
-
-    if (error) {
-        container.innerHTML = `<div style="color:#ff5252;">Error fetching health data.</div>`;
-        return;
-    }
+    const now = Date.now();
+    const sessions = Object.values(window.ACTIVE_USERS_CACHE || {}).filter(u => (now - (u.local_received_at || 0)) < 90000);
 
     if (!sessions || sessions.length === 0) {
         container.innerHTML = `<div style="color:var(--text-muted);">No active sessions.</div>`;
@@ -2027,8 +2027,6 @@ async function refreshClientHealthTable() {
     }
 
     let html = `<table class="admin-table compressed-table"><thead><tr><th>User</th><th>Client ID</th><th>Activity</th><th>Latency</th><th>Action</th></tr></thead><tbody>`;
-    
-    const now = Date.now();
 
     // Sort by last seen desc
     sessions.sort((a,b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());

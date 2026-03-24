@@ -440,14 +440,10 @@ async function scanAndGenerateUsers(silent = false, emailMap = {}) {
                 resurrectedCount++;
             }
 
-            let pin = "0000";
-            if (typeof require !== 'undefined') {
-                const { randomBytes } = require('crypto');
-                const buf = randomBytes(2);
-                pin = ((buf.readUInt16BE(0) % 9000) + 1000).toString();
-            } else {
-                pin = Math.floor(1000 + Math.random() * 9000).toString();
-            }
+            // Secure native browser RNG
+            const arr = new Uint16Array(1);
+            window.crypto.getRandomValues(arr);
+            const pin = ((arr[0] % 9000) + 1000).toString();
             
             const newUser = { user: name, pass: pin, role: 'trainee', createdBy: 'System Auto-Gen', lastModified: new Date().toISOString() };
             
@@ -798,16 +794,10 @@ async function demoteSuperAdmin(username) {
 function generatePassword() { 
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$";
     let pass = "";
-    if (typeof require !== 'undefined') {
-        const { randomBytes } = require('crypto');
-        const buf = randomBytes(12);
-        for(let i=0; i<12; i++) {
-            pass += chars.charAt(buf[i] % chars.length);
-        }
-    } else {
-        for(let i=0; i<12; i++) {
-            pass += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
+    const arr = new Uint8Array(12);
+    window.crypto.getRandomValues(arr);
+    for(let i=0; i<12; i++) {
+        pass += chars.charAt(arr[i] % chars.length);
     }
     document.getElementById('newUserPass').value = pass; 
 }

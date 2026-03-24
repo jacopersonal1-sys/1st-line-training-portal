@@ -1,13 +1,13 @@
 /* ================= LIVE ASSESSMENT EXECUTION ENGINE ================= */
 /* Handles real-time interaction between Trainer (Admin) and Trainee */
 
-let LIVE_POLLER = null;
+window.LIVE_POLLER = null;
 let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
 let LIVE_CONN_INTERVAL = null;
 let LIVE_TIMER_INTERVAL = null;
 
 function loadLiveExecution() {
-    if (LIVE_POLLER) clearInterval(LIVE_POLLER);
+    if (window.LIVE_POLLER) clearInterval(window.LIVE_POLLER);
     if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
     
     if (LIVE_TIMER_INTERVAL) clearInterval(LIVE_TIMER_INTERVAL);
@@ -26,6 +26,9 @@ function loadLiveExecution() {
     // Realtime is now fully managed by data.js INCOMING_DATA_QUEUE
     syncLiveSessionState();
     updateSocketStatusUI();
+
+    // REINSTATE FALLBACK POLLER: Guarantees fast question switching (3s) even if WebSockets are blocked by firewalls.
+    window.LIVE_POLLER = setInterval(syncLiveSessionState, 3000);
 }
 
 // --- NEW: GLOBAL REJOIN LOGIC ---
@@ -40,34 +43,11 @@ window.rejoinLiveSession = function(sessionId) {
 };
 
 async function syncLiveSessionState() {
-    // TARGETED POLLING (Efficient & Stable)
-    // Matches Vetting Arena logic to prevent full re-renders wiping user input
-    if (!window.supabaseClient) return;
-
-    // Fetch from TABLE (live_sessions)
-    const { data: rows, error } = await window.supabaseClient
-        .from('live_sessions')
-        .select('data');
-
-    if (rows) {
-        let allSessions = rows.map(r => r.data);
-        
-        // OPTIMISTIC FIX: Preserve recently started sessions that haven't hit the DB read-replica yet.
-        // Prevents the Admin screen from flashing "No Active Session" immediately after starting.
-        const localLiveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-        localLiveSessions.forEach(localS => {
-            if (localS.active && !allSessions.some(s => s.sessionId === localS.sessionId)) {
-                const age = Date.now() - (localS.startTime || 0);
-                if (age < 10000) {
-                    allSessions.push(localS);
-                }
-            }
-        });
-
-        localStorage.setItem('liveSessions', JSON.stringify(allSessions));
-
-        processLiveSessionState(allSessions);
-    }
+    // READ FROM REALTIME CACHE INSTEAD OF HAMMERING DATABASE
+    // The data.js WebSocket listener automatically keeps this array perfectly up to date with 0 latency.
+    const allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    
+    processLiveSessionState(allSessions);
 }
 
 // --- HELPER: PROCESS STATE (Shared by Poller & Realtime) ---
@@ -234,6 +214,10 @@ window.updateGlobalLiveAlert = function(session) {
             <button class="btn-success" style="background:white; color:#2ecc71; border:none; padding:6px 15px; border-radius:15px; font-weight:bold; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1);">Join Now</button>
         `;
         
+        if (window.electronAPI && window.electronAPI.notifications) {
+            window.electronAPI.notifications.show('Live Assessment Started!', 'Your trainer is waiting in the arena. Click here to join.');
+        }
+
         // Anywhere they click on the banner teleports them directly to the Arena
         el.onclick = function() {
             showTab('live-execution');
@@ -475,21 +459,17 @@ function updateAdminLiveView() {
 // --- CONNECTION HEALTH (ADMIN & TRAINEE VIEW) ---
 async function updateLiveConnectionStatus(traineeUser, elementId = 'live-conn-status') {
     const el = document.getElementById(elementId);
-    if (!el || !window.supabaseClient || !traineeUser) return;
+    if (!el || !traineeUser) return;
 
     try {
-        const { data, error } = await window.supabaseClient
-            .from('sessions')
-            .select('lastSeen, idleTime, isIdle')
-            .eq('username', traineeUser)
-            .single();
+        const data = window.ACTIVE_USERS_CACHE[traineeUser];
 
-        if (error || !data) {
+        if (!data) {
             el.innerHTML = '<i class="fas fa-question-circle" style="color:var(--text-muted);"></i> Connection: Unknown';
             return;
         }
 
-        const lastSeen = new Date(data.lastSeen).getTime();
+        const lastSeen = data.local_received_at || Date.now();
         const now = Date.now();
         const ageMs = now - lastSeen;
         const online = ageMs < 90000; // seen in last 90s (Accommodates 60s heartbeat)
@@ -1318,13 +1298,13 @@ window.runLiveDiagnostics = async function() {
     
     await updateGlobalSessionArray(session, true);
     
-    // Timeout fallback (10 seconds)
+    // Timeout fallback (Extended to 35 seconds to allow HTTP fallback loops if WebSockets are blocked)
     setTimeout(() => {
         const check = JSON.parse(localStorage.getItem('liveSession'));
         if (check.diagnosticReq === session.diagnosticReq && !check.diagnosticRes) {
             if(el) el.innerHTML = '<i class="fas fa-times-circle" style="color:#ff5252;"></i> Ping Timeout (Trainee unreachable)';
         }
-    }, 15000);
+    }, 35000);
 };
 
 window.showDiagnosticReport = function(rtt, net) {

@@ -61,6 +61,7 @@ const StudyMonitor = {
         // --- NEW: CAPTURE EXIT ---
         window.addEventListener('beforeunload', () => {
             if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+                if (window.electronAPI) window.electronAPI.ipcRenderer.send('stop-activity-monitor');
                 this.track("App Closed / Refreshed");
                 // Attempt synchronous local save to ensure data isn't lost
                 const payload = {
@@ -100,16 +101,14 @@ const StudyMonitor = {
 
     // --- OS-AWARE ACTIVITY POLLING ---
     startActivityPoller: function() {
-        if (this.activityPoller) clearInterval(this.activityPoller);
+        if (this.activityPoller) clearInterval(this.activityPoller); // Clear legacy timeouts
         
-        // Poll every 5 seconds to check what app they are using
-        this.activityPoller = setInterval(async () => {
-            if (typeof require !== 'undefined') {
+        if (window.electronAPI) {
+            window.electronAPI.ipcRenderer.removeAllListeners('activity-update');
+            window.electronAPI.ipcRenderer.on('activity-update', (event, data) => {
                 try {
-                    const { ipcRenderer } = require('electron');
-
-                    // 1. OS-LEVEL IDLE CHECK (Bulletproof Hardware Tracking)
-                    const osIdleSeconds = await ipcRenderer.invoke('get-system-idle-time');
+                    const osIdleSeconds = data.osIdleSeconds;
+                    const activeWindow = data.activeWindow;
                         
                     if (osIdleSeconds > 60) {
                         // Allow idling if waiting in Vetting Arena after submission
@@ -123,8 +122,6 @@ const StudyMonitor = {
                         return;
                     }
 
-                    // 2. CHECK ACTIVE FOREGROUND WINDOW
-                    const activeWindow = await ipcRenderer.invoke('get-active-window');
                     
                     let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
                     let isPermitted = false;
@@ -155,6 +152,12 @@ const StudyMonitor = {
                             } else if (activeWindow.toLowerCase().includes('outlook') || activeWindow.toLowerCase().includes('mail')) {
                                 activityLabel = `Studying: Email (Communication)`;
                                 isPermitted = true;
+                            } else if (activeWindow.toLowerCase().includes('taskmgr') || activeWindow.toLowerCase().includes('task manager')) {
+                                activityLabel = `System: Task Manager`;
+                                isPermitted = true;
+                            } else if (['explorer', 'searchhost', 'shellexperiencehost', 'taskbar', 'system tray', 'notification center', 'start', 'windows input experience'].some(sysApp => activeWindow.toLowerCase().includes(sysApp))) {
+                                activityLabel = `System: Windows Navigation`;
+                                isPermitted = true;
                             }
                         }
                     }
@@ -171,8 +174,10 @@ const StudyMonitor = {
                         this.track("Navigating Portal");
                     }
                 } catch (e) { console.error("External Monitor Error:", e); }
-            }
-        }, 5000);
+            });
+            
+            window.electronAPI.ipcRenderer.send('start-activity-monitor');
+        }
     },
 
     triggerExternalAppWarning: function() {
@@ -528,7 +533,8 @@ const StudyMonitor = {
         } else {
             // Shell exists (was hidden), check if tab already exists to prevent duplicates
             const cleanUrl = this.cleanUrl(url);
-            const existingTab = this.browserState.tabs.find(t => t.url === cleanUrl || t.title === title);
+            // FIX: Match ONLY by URL to prevent overwriting different tabs with the same generic title
+            const existingTab = this.browserState.tabs.find(t => t.url === cleanUrl);
             if (existingTab) {
                 this.switchTab(existingTab.id);
                 if (targetScrollY && existingTab.webview) {
@@ -617,7 +623,7 @@ const StudyMonitor = {
                         <div id="study-tabs-list"></div>
                     </div>
                     <div class="study-header-actions">
-                        <button id="study-bookmark-btn" class="btn-secondary" onclick="StudyMonitor.bookmarkCurrentPage()" title="Save this spot to Notes" style="padding: 8px 15px; font-weight:bold; border-color:#f1c40f; color:#f1c40f;"><i class="fas fa-bookmark"></i> Bookmark</button>
+                        <button id="study-bookmark-btn" class="btn-secondary" onclick="StudyMonitor.startMarkForClarity()" title="Drag a box to mark a spot for clarity" style="padding: 8px 15px; font-weight:bold; border-color:#f1c40f; color:#f1c40f;"><i class="fas fa-crop-alt"></i> Mark for Clarity</button>
                         <button id="study-min-btn" class="btn-primary" onclick="StudyMonitor.minimizeStudyWindow()" title="Keep tabs open and return to Dashboard" style="padding: 8px 15px; font-weight:bold;"><i class="fas fa-desktop"></i> Dashboard</button>
                         <select id="study-quick-links" onchange="StudyMonitor.navigateQuickLink(this.value)">
                             <option value="">Program Links</option>
@@ -640,46 +646,163 @@ const StudyMonitor = {
 
     navigateQuickLink: function(url) {
         if (!url) return;
-        const activeWv = this.getActiveWebview();
-        if (activeWv) {
-            activeWv.loadURL(url);
-        } else {
-            // If they closed all tabs, auto-generate a new one for the link
-            this.addTab(url, "Program Link", true);
-        }
-        document.getElementById('study-quick-links').selectedIndex = 0; // Reset dropdown
+        const sel = document.getElementById('study-quick-links');
+        const title = sel.options[sel.selectedIndex].text;
+        
+        // FIX: Always open Quick Links in a new tab to prevent overwriting active study material
+        this.addTab(url, title, true);
+        
+        sel.selectedIndex = 0; // Reset dropdown
     },
 
-    bookmarkCurrentPage: async function() {
+    startMarkForClarity: function() {
         const wv = this.getActiveWebview();
-        if (!wv) return alert("No active tab to bookmark.");
+        if (!wv) return alert("No active tab to mark.");
         
+        const script = `
+            (function() {
+                if(window.__markActive) return;
+                window.__markActive = true;
+
+                var overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.top = '0'; overlay.style.left = '0';
+                overlay.style.width = '100vw'; overlay.style.height = '100vh';
+                overlay.style.zIndex = '2147483647';
+                overlay.style.cursor = 'crosshair';
+                overlay.style.background = 'rgba(0,0,0,0.2)';
+                
+                var banner = document.createElement('div');
+                banner.style.position = 'absolute';
+                banner.style.top = '20px';
+                banner.style.left = '50%';
+                banner.style.transform = 'translateX(-50%)';
+                banner.style.background = '#f1c40f';
+                banner.style.color = '#000';
+                banner.style.padding = '10px 20px';
+                banner.style.borderRadius = '30px';
+                banner.style.fontWeight = 'bold';
+                banner.style.fontFamily = 'sans-serif';
+                banner.style.pointerEvents = 'none';
+                banner.innerText = "Click and drag to mark a specific area for clarity. (Press ESC to cancel)";
+                overlay.appendChild(banner);
+
+                document.body.appendChild(overlay);
+
+                var box = document.createElement('div');
+                box.style.position = 'absolute';
+                box.style.border = '3px dashed #f1c40f';
+                box.style.background = 'rgba(241, 196, 15, 0.3)';
+                box.style.pointerEvents = 'none';
+                document.body.appendChild(box);
+
+                var startX, startY;
+                var isDrawing = false;
+
+                var onMouseDown = function(e) {
+                    isDrawing = true;
+                    startX = e.clientX;
+                    startY = e.clientY;
+                    box.style.left = startX + 'px';
+                    box.style.top = startY + 'px';
+                    box.style.width = '0px';
+                    box.style.height = '0px';
+                };
+
+                var onMouseMove = function(e) {
+                    if(!isDrawing) return;
+                    var currentX = e.clientX;
+                    var currentY = e.clientY;
+                    box.style.left = Math.min(currentX, startX) + 'px';
+                    box.style.top = Math.min(currentY, startY) + 'px';
+                    box.style.width = Math.abs(currentX - startX) + 'px';
+                    box.style.height = Math.abs(currentY - startY) + 'px';
+                };
+
+                var onMouseUp = function(e) {
+                    if(!isDrawing) return;
+                    isDrawing = false;
+                    
+                    var rect = box.getBoundingClientRect();
+                    var targetY = window.scrollY + rect.top;
+                    var selection = window.getSelection().toString();
+
+                    cleanup();
+                    
+                    var marker = document.createElement('div');
+                    marker.style.position = 'absolute';
+                    marker.style.left = '0';
+                    marker.style.top = targetY + 'px';
+                    marker.style.width = '8px';
+                    marker.style.height = Math.max(20, rect.height) + 'px';
+                    marker.style.background = '#f1c40f';
+                    marker.style.zIndex = '2147483646';
+                    marker.style.borderTopRightRadius = '4px';
+                    marker.style.borderBottomRightRadius = '4px';
+                    marker.title = "Marked for Clarity";
+                    document.body.appendChild(marker);
+
+                    console.log('__MARK_CLARITY__:' + JSON.stringify({ scrollY: targetY, selection: selection }));
+                };
+
+                var onKeyDown = function(e) {
+                    if(e.key === 'Escape') cleanup();
+                };
+
+                var cleanup = function() {
+                    overlay.removeEventListener('mousedown', onMouseDown);
+                    overlay.removeEventListener('mousemove', onMouseMove);
+                    overlay.removeEventListener('mouseup', onMouseUp);
+                    document.removeEventListener('keydown', onKeyDown);
+                    if(overlay.parentNode) overlay.remove();
+                    if(box.parentNode) box.remove();
+                    window.__markActive = false;
+                };
+
+                overlay.addEventListener('mousedown', onMouseDown);
+                overlay.addEventListener('mousemove', onMouseMove);
+                overlay.addEventListener('mouseup', onMouseUp);
+                document.addEventListener('keydown', onKeyDown);
+            })();
+        `;
+        wv.executeJavaScript(script).catch(e => console.error("Mark Script Injection Failed", e));
+    },
+
+    processMarkForClarity: async function(dataStr, tabId) {
+        const data = JSON.parse(dataStr);
+        const tab = this.browserState.tabs.find(t => t.id === tabId);
+        if(!tab) return;
+        const wv = tab.webview;
+
         let url = wv.getURL();
         let title = wv.getTitle();
-        let scrollY = 0;
+        let scrollY = data.scrollY || 0;
+        let selection = data.selection || "";
+
+        // HIDE ENTIRE STUDY OVERLAY TO SHOW PROMPT (Fixes Z-Index and native PDF viewer issues)
+        const overlay = document.getElementById('study-overlay');
+        if(overlay) overlay.style.display = 'none';
         
-        let selection = "";
-        try {
-            // Attempt to capture highlighted text and scroll position natively
-            selection = await wv.executeJavaScript('window.getSelection().toString()');
-            scrollY = await wv.executeJavaScript('window.scrollY');
-        } catch(e) {}
+        const inputModal = document.getElementById('genericInputModal');
+        if(inputModal) inputModal.style.zIndex = '2147483647';
         
-        let promptMsg = `Page: ${title}\n`;
+        let promptMsg = `Page: ${title}\n\n`;
         if (selection && selection.trim().length > 0) {
-            promptMsg += `\nHighlighted Text:\n"${selection.substring(0, 150)}${selection.length > 150 ? '...' : ''}"\n`;
-        } else {
-            promptMsg += `\n(Tip: You can highlight text on the page to automatically capture it)\n`;
+            promptMsg += `Highlighted Text: "${selection.substring(0, 100)}..."\n\n`;
         }
-        promptMsg += `\nPlease add a clarification or note for this bookmark (Required):`;
+        promptMsg += `What do you need clarity on for this marked section? (Required)`;
         
-        const note = await customPrompt("Save Bookmark", promptMsg, "");
+        const note = await customPrompt("Mark for Clarity", promptMsg, "");
+        
+        // RESTORE OVERLAY IMMEDIATELY
+        if(overlay) overlay.style.display = '';
+
         if (note === null) return; // Cancelled
-        if (note.trim() === "") return alert("Clarification is required to save a bookmark.");
+        if (note.trim() === "") return alert("A clarification question or note is required.");
         
         let finalNote = note.trim();
         if (selection && selection.trim().length > 0) {
-            finalNote = `Highlight: "${selection.substring(0, 150)}"\nNote: ${finalNote}`;
+            finalNote = `Context: "${selection.substring(0, 100)}"\nQuestion: ${finalNote}`;
         }
 
         const allBookmarks = JSON.parse(localStorage.getItem('trainee_bookmarks') || '{}');
@@ -692,7 +815,7 @@ const StudyMonitor = {
         localStorage.setItem('trainee_bookmarks', JSON.stringify(allBookmarks));
         if (typeof saveToServer === 'function') saveToServer(['trainee_bookmarks'], false);
         
-        if (typeof showToast === 'function') showToast("Spot bookmarked with your clarification!", "success");
+        if (typeof showToast === 'function') showToast("Spot marked for clarity! Check your Dashboard.", "success");
     },
 
     addTab: function(url, title, activate = false, targetScrollY = null) {
@@ -826,6 +949,9 @@ const StudyMonitor = {
         webview.addEventListener('console-message', (e) => {
             if (e.message === '__STUDY_CLICK__') {
                 this.recordClick();
+            } else if (typeof e.message === 'string' && e.message.startsWith('__MARK_CLARITY__:')) {
+                const dataStr = e.message.substring(17);
+                this.processMarkForClarity(dataStr, tab.id);
             }
         });
     },

@@ -36,7 +36,7 @@ const DB_SCHEMA = {
         },
         heartbeat_rates: { admin: 5000, default: 30000 },
         idle_thresholds: { warning: 60000, logout: 900000 },
-        attendance: { work_start: "08:00", late_cutoff: "08:15", work_end: "17:00", reminder_start: "16:45", allow_weekend_login: false },
+        attendance: { work_start: "08:00", late_cutoff: "08:15", work_end: "17:00", reminder_start: "16:45", lunch_start: "12:00", lunch_duration: 60, allow_weekend_login: false },
         security: { maintenance_mode: false, lockdown_mode: false, min_version: "0.0.0", force_kiosk_global: false, allowed_ips: [], banned_clients: [], client_whitelist: [] },
         features: { vetting_arena: true, live_assessments: true, nps_surveys: true, daily_tips: true, disable_animations: false },
         monitoring: { tolerance_ms: 180000, whitelist_strict: false },
@@ -111,12 +111,17 @@ const AUTHORITATIVE_TABLES = [
 // and processing it a few seconds later in the background.
 let SAVE_QUEUE = new Set();
 let SAVE_TIMEOUT = null;
-const SAVE_DEBOUNCE_MS = 3000; // 3 seconds
+window._SAVE_QUEUE_NOT_SILENT = false;
+const SAVE_DEBOUNCE_MS = 500; // 500ms (High-Speed Server Authority)
 
 // --- NEW: INCOMING DATA QUEUE (STABILITY) ---
 let INCOMING_DATA_QUEUE = [];
 let QUEUE_PROCESSOR_INTERVAL = null;
 window.ACTIVE_USERS_CACHE = {}; // Realtime Presence Cache
+
+window.GLOBAL_CHANGES_CHANNEL = null;
+window.REALTIME_RECONNECT_TIMER = null;
+window.CURRENT_FALLBACK_RATE = 600000;
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -145,8 +150,8 @@ function isUserTyping() {
     const el = document.activeElement;
     if (!el) return false;
     const tag = el.tagName.toLowerCase();
-    // Returns true if user is in an Input, Textarea, or Select box
-    return (tag === 'input' || tag === 'textarea' || tag === 'select');
+    // Returns true if user is in an Input, Textarea, Select box, OR Rich Text Editor
+    return (tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable);
 }
 
 // --- HARD DELETE PROTOCOL (Ghost Data Fix) ---
@@ -237,6 +242,8 @@ window.addEventListener('online', () => {
         if (typeof saveToServer === 'function') await saveToServer(null, false, true);
         // 2. Then pull authoritative state
         loadFromServer(true);
+        // 3. Immediately attempt to re-establish the Realtime Tunnel
+        if (typeof setupRealtimeListeners === 'function') setupRealtimeListeners();
     }, 1500);
 });
 window.addEventListener('offline', () => {
@@ -590,6 +597,11 @@ async function loadFromServer(silent = false) {
             }
         }
         updateSyncUI('success');
+        
+        // NATIVE DISK CACHE BACKUP
+        if (window.electronAPI && window.electronAPI.disk) {
+            window.electronAPI.disk.saveCache(JSON.stringify(localStorage)).catch(()=>{});
+        }
         return true; // Signal Success
 
     } catch (err) { 
@@ -963,6 +975,20 @@ function generateChecksum(str) {
 // 3. SAVE CONTROLLER (Public Function)
 // Queues save operations and processes them after a debounce period for performance.
 async function saveToServer(targetKeys = null, force = false, silent = false) {
+    // 1. Flush Command (Executes queue immediately using delta sync without adding all keys)
+    if (targetKeys === 'FLUSH') {
+        if (SAVE_TIMEOUT) clearTimeout(SAVE_TIMEOUT);
+        SAVE_TIMEOUT = null;
+        const isSilent = !window._SAVE_QUEUE_NOT_SILENT;
+        window._SAVE_QUEUE_NOT_SILENT = false;
+        
+        // SAFE QUIT FIX: If a save is actively processing, wait for it to finish before flushing.
+        // This prevents the Mutex from tricking Electron into closing the app before data is secured.
+        while (_IS_PROCESSING_SAVE) { await new Promise(r => setTimeout(r, 50)); }
+        
+        return await _processSaveQueue(false, isSilent);
+    }
+
     // Legacy support: if first arg is boolean, treat as force for ALL keys
     if (typeof targetKeys === 'boolean') {
         force = targetKeys;
@@ -972,16 +998,29 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
     const keysToQueue = targetKeys || Object.keys(DB_SCHEMA);
     keysToQueue.forEach(k => SAVE_QUEUE.add(k));
 
-    if (!silent) updateSyncUI('pending');
+    if (!silent) {
+        window._SAVE_QUEUE_NOT_SILENT = true;
+        updateSyncUI('pending');
+    }
 
     if (force) {
         if (SAVE_TIMEOUT) clearTimeout(SAVE_TIMEOUT);
         SAVE_TIMEOUT = null;
+        const isSilent = !window._SAVE_QUEUE_NOT_SILENT;
+        window._SAVE_QUEUE_NOT_SILENT = false;
+        
+        // FAKE SUCCESS FIX: Wait for the Mutex to release so the UI doesn't get a fake "success" before the upload actually finishes
+        while (_IS_PROCESSING_SAVE) { await new Promise(r => setTimeout(r, 50)); }
+        
         // Await the actual processing when forced
-        return await _processSaveQueue(force, silent);
+        return await _processSaveQueue(force, isSilent);
     } else {
         if (SAVE_TIMEOUT) clearTimeout(SAVE_TIMEOUT);
-        SAVE_TIMEOUT = setTimeout(() => _processSaveQueue(force, silent), SAVE_DEBOUNCE_MS);
+        SAVE_TIMEOUT = setTimeout(() => {
+            const isSilent = !window._SAVE_QUEUE_NOT_SILENT;
+            window._SAVE_QUEUE_NOT_SILENT = false;
+            _processSaveQueue(false, isSilent);
+        }, SAVE_DEBOUNCE_MS);
         // Return optimistically for debounced saves
         return true;
     }
@@ -989,7 +1028,16 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
 
 // 4. SAVE PROCESSOR (Internal Function)
 // The original saveToServer logic, now processes the queue.
+let _IS_PROCESSING_SAVE = false;
+let _RETRIGGER_SAVE = false;
+
 async function _processSaveQueue(force = false, silent = false, retryCount = 0) {
+    if (_IS_PROCESSING_SAVE && retryCount === 0) {
+        _RETRIGGER_SAVE = true;
+        return true;
+    }
+    _IS_PROCESSING_SAVE = true;
+
     try {
         // LOCKDOWN CHECK
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
@@ -1179,13 +1227,18 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
 
         if(!silent) updateSyncUI('success');
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        
+        // NATIVE DISK CACHE BACKUP
+        if (window.electronAPI && window.electronAPI.disk) {
+            window.electronAPI.disk.saveCache(JSON.stringify(localStorage)).catch(()=>{});
+        }
         return true;
 
     } catch (err) {
         // RETRY LOGIC: Try once more if it failed (Network blip)
         if (retryCount < 1) {
             console.warn("Sync failed, retrying...", err);
-            return _processSaveQueue(force, silent, retryCount + 1);
+                return await _processSaveQueue(force, silent, retryCount + 1);
         }
 
         if(!silent) updateSyncUI('error');
@@ -1200,6 +1253,12 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         
         if(typeof showToast === 'function' && !silent) showToast("Save Failed: " + msg, 'error');
         return false;
+    } finally {
+        _IS_PROCESSING_SAVE = false;
+        if (_RETRIGGER_SAVE) {
+            _RETRIGGER_SAVE = false;
+            setTimeout(() => _processSaveQueue(false, true), 100);
+        }
     }
 }
 
@@ -1485,18 +1544,11 @@ async function fetchSystemStatus() {
             if(localStorage.hasOwnProperty(key)) storageSize += localStorage[key].length;
         }
         
-        const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
+        const now = Date.now();
+        const activeUsers = Object.values(window.ACTIVE_USERS_CACHE || {}).filter(u => (now - (u.local_received_at || 0)) < 90000);
         
-        // OPTIMIZED: Select only specific columns instead of '*' to save bandwidth
-        const { data: activeUsers, error } = await window.supabaseClient
-            .from('sessions')
-            .select('*') // Fallback to * to avoid column name errors during migration
-            .gte('lastSeen', twoMinutesAgo);
-
-        if (error) {
-            console.warn("System Status Fetch Warning:", error.message);
-            return { error: "Server Error (500)" };
-        }
+        // Dummy query to measure latency accurately
+        await window.supabaseClient.from('app_documents').select('key').limit(1);
 
         const end = Date.now();
         const latency = end - start;
@@ -1687,7 +1739,7 @@ async function logAuditAction(username, action, details) {
 let HEARTBEAT_SAFE_MODE = false; // false | 'safe' | 'minimal'
 
 // 5. SUPABASE: Send Heartbeat
-async function sendHeartbeat() {
+async function sendHeartbeat(forceInit = false) {
     if (!CURRENT_USER || !window.supabaseClient) return;
     
     const last = window.LAST_INTERACTION || Date.now();
@@ -1717,60 +1769,37 @@ async function sendHeartbeat() {
     }
 
     try {
-        // 1. Try Full Heartbeat (Default)
-        if (!HEARTBEAT_SAFE_MODE) {
-            const safeActivity = currentActivity.length > 250 ? currentActivity.substring(0, 247) + '...' : currentActivity;
-            const fullPayload = {
+        const safeActivity = currentActivity.length > 250 ? currentActivity.substring(0, 247) + '...' : currentActivity;
+        const payload = {
+            username: CURRENT_USER.user,
+            role: CURRENT_USER.role,
+            version: window.APP_VERSION || 'Unknown',
+            idleTime: Math.round(diff),
+            isIdle: isIdle,
+            lastSeen: new Date().toISOString(),
+            clientId: clientId,
+            activity: safeActivity
+        };
+
+        // 1. SUPABASE PRESENCE (0-Latency, 0 Database impact)
+        if (window.PRESENCE_CHANNEL) {
+            window.PRESENCE_CHANNEL.track(payload).catch(()=>{});
+        }
+        
+        // 2. BACKUP DB WRITE (Every 10 mins to persist row for remote commands)
+        const lastDbWrite = parseInt(sessionStorage.getItem('last_db_heartbeat') || '0');
+        if ((typeof forceInit !== 'undefined' && forceInit) || Date.now() - lastDbWrite > 600000) {
+            sessionStorage.setItem('last_db_heartbeat', Date.now().toString());
+            window.supabaseClient.from('sessions').upsert({
                 username: CURRENT_USER.user, // New Schema
                 role: CURRENT_USER.role,
-                version: window.APP_VERSION || 'Unknown',
-                idleTime: Math.round(diff),
-                isIdle: isIdle,
-                lastSeen: new Date().toISOString(),
-                clientId: clientId,
-                activity: safeActivity
-            };
-            
-            const { error } = await window.supabaseClient.from('sessions').upsert(fullPayload);
-            if (!error) return; // Success
-            
-            // NETWORK ERROR CHECK: Do not downgrade if it's just a timeout or server overload
-            const msg = error.message || '';
-            if (msg.includes('fetch') || error.code === '503' || msg.includes('timeout') || error.code === 'PGRST002') return;
-
-            console.warn("Heartbeat Full failed (Schema mismatch?). Downgrading to Safe Mode.");
-            HEARTBEAT_SAFE_MODE = 'safe';
-        }
-
-        // 2. Safe Mode (Common fields only)
-        if (HEARTBEAT_SAFE_MODE === 'safe') {
-            const { error } = await window.supabaseClient.from('sessions').upsert({
-                username: CURRENT_USER.user, // New Schema
-                lastSeen: new Date().toISOString(),
-                isIdle: isIdle,
-                idleTime: Math.round(diff)
-            });
-            if (!error) return;
-            
-            // NETWORK ERROR CHECK
-            const msg = error.message || '';
-            if (msg.includes('fetch') || error.code === '503' || msg.includes('timeout') || error.code === 'PGRST002') return;
-
-            console.warn("Heartbeat Safe failed. Downgrading to Minimal.");
-            HEARTBEAT_SAFE_MODE = 'minimal';
-        }
-
-        // 3. Minimal Mode (Absolute basics)
-        if (HEARTBEAT_SAFE_MODE === 'minimal') {
-            await window.supabaseClient.from('sessions').upsert({
-                username: CURRENT_USER.user, // New Schema
                 lastSeen: new Date().toISOString()
-            });
+            }).then(()=>{}).catch(()=>{});
         }
             
-        // 2. Check for Remote Commands (Pending Actions)
-        const { data: sessionData } = await supabaseClient
-            .from('sessions') // supabaseClient is likely defined in scope here if not window., but consistent use is better.
+        // 3. Remote Commands
+        const { data: sessionData } = await window.supabaseClient
+            .from('sessions')
             .select('pending_action')
             .eq('username', CURRENT_USER.user) // New Schema
             .single();
@@ -2013,6 +2042,20 @@ function subscribeToDocKey(docKey, onContent) {
     }
 }
 
+// --- DYNAMIC FALLBACK POLLER ---
+function setFallbackPollingRate(ms) {
+    window.CURRENT_FALLBACK_RATE = ms;
+    if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);
+    SYNC_INTERVAL = setInterval(async () => {
+        await loadFromServer(true); 
+        if (typeof performOrphanCleanup === 'function') {
+            const lastRun = parseInt(localStorage.getItem('last_orphan_cleanup_ts') || '0');
+            if (Date.now() - lastRun > 86400000) { performOrphanCleanup(true); }
+        }
+    }, ms);
+    console.log(`[Sync Engine] Fallback polling rate adjusted to ${ms / 1000}s`);
+}
+
 function startRealtimeSync() {
     if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);
     if (HEARTBEAT_INTERVAL_ID) clearInterval(HEARTBEAT_INTERVAL_ID);
@@ -2048,21 +2091,10 @@ function startRealtimeSync() {
     // Start the Incoming Queue Processor (Checks every 2 seconds)
     startQueueProcessor();
 
-    console.log(`Starting Sync Engine. Sync: ${syncRate/1000}s, Heartbeat: ${beatRate/1000}s`);
+    console.log(`Starting Sync Engine. Realtime WebSockets Active. Fallback Polling: 10m, Heartbeat: ${beatRate/1000}s`);
     
-    // 1. DATA SYNC: Poll every 60 Seconds (High Performance / Cohort Safe)
-    // Uses "loadFromServer" to pull changes from others (e.g. Trainees to Admin)
-    SYNC_INTERVAL = setInterval(async () => {
-        await loadFromServer(true); 
-        
-        // AUTOMATED MAINTENANCE (Daily Orphan Cleanup)
-        if (typeof performOrphanCleanup === 'function') {
-            const lastRun = parseInt(localStorage.getItem('last_orphan_cleanup_ts') || '0');
-            if (Date.now() - lastRun > 86400000) { // 24 hours
-                performOrphanCleanup(true);
-            }
-        }
-    }, syncRate);
+    // 1. DATA SYNC: Initialize dynamic fallback polling (defaults to 10 mins)
+    setFallbackPollingRate(600000);
 
     // 2. HEARTBEAT: Poll every 15 seconds
     // Fast updates for "Active User" dashboard status
@@ -2113,69 +2145,86 @@ function startRealtimeSync() {
 function setupRealtimeListeners() {
     if (!window.supabaseClient) return;
 
-    // Subscribe to critical tables
-    const channel = window.supabaseClient.channel('global_app_changes')
-        // 1. MONITOR STATE (Activity Monitor)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'monitor_state' }, (payload) => {
-            handleMonitorRealtime(payload);
-        })
-        // 2. ATTENDANCE (Register)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload) => {
-            handleAttendanceRealtime(payload);
-        })
-        // 3. SESSIONS (Active Users)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, (payload) => {
-            const row = payload.new;
-            if (row && (row.username || row.user)) {
-                const uName = row.username || row.user;
-                
-                // Trainee Minimization (Don't cache everyone's presence)
-                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee' && uName !== CURRENT_USER.user) return;
+    // Cleanup existing channel to prevent duplicate parallel listeners
+    if (window.GLOBAL_CHANGES_CHANNEL) {
+        window.supabaseClient.removeChannel(window.GLOBAL_CHANGES_CHANNEL).catch(()=>{});
+    }
 
-                window.ACTIVE_USERS_CACHE[uName] = {
-                    ...row,
-                    local_received_at: Date.now()
-                };
-
-                // --- NEW: INSTANT REMOTE COMMAND EXECUTION ---
-                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && uName === CURRENT_USER.user) {
-                    if (row.pending_action) {
-                        // Clear immediately to prevent infinite loops
-                        if (window.supabaseClient) window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', uName).then(()=>{});
-                        
-                        if (row.pending_action === 'restart') {
-                            if (typeof triggerForceRestart === 'function') triggerForceRestart();
-                            else location.reload();
-                        } else if (row.pending_action === 'logout') {
-                            if (typeof logout === 'function') logout();
-                        } else if (row.pending_action.startsWith('msg:')) {
-                            alert("💬 ADMIN MESSAGE:\n\n" + row.pending_action.replace('msg:', ''));
-                        } else if (row.pending_action === 'force_update' && typeof require !== 'undefined') {
-                            sessionStorage.setItem('force_update_active', 'true');
-                            require('electron').ipcRenderer.send('manual-update-check');
-                        }
-                    }
+    // Subscribe to the ENTIRE public schema for 0-latency updates
+    window.GLOBAL_CHANGES_CHANNEL = window.supabaseClient.channel('global_app_changes')
+        .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+            const table = payload.table;
+            
+            // Route to specific handlers
+            if (table === 'monitor_state') handleMonitorRealtime(payload);
+            else if (table === 'attendance') handleAttendanceRealtime(payload);
+            else if (table === 'sessions') handleSessionRealtime(payload);
+            else if (table === 'live_bookings') handleLiveBookingRealtime(payload);
+            else if (table === 'live_sessions') handleLiveSessionRealtime(payload);
+            else if (table === 'vetting_sessions') handleVettingRealtime(payload);
+            else if (table === 'app_documents') handleAppDocumentRealtime(payload);
+            else {
+                // Catch all generic data rows (records, submissions, logs, etc.)
+                if (Object.values(ROW_MAP).includes(table)) {
+                    handleRowRealtime(payload);
                 }
             }
-            // Debounce dashboard update to prevent flickering on every heartbeat
-            if (window.DASH_UPDATE_TIMEOUT) clearTimeout(window.DASH_UPDATE_TIMEOUT);
-            window.DASH_UPDATE_TIMEOUT = setTimeout(() => {
-                if (typeof updateDashboardHealth === 'function') updateDashboardHealth(true);
-            }, 1000);
         })
-        // 4. LIVE BOOKINGS (Schedule Updates)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'live_bookings' }, (payload) => {
-            handleLiveBookingRealtime(payload);
-        })
-        // 5. LIVE SESSIONS (Instant Dashboard Alert)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, (payload) => {
-            handleLiveSessionRealtime(payload);
-        })
-        // 6. VETTING SESSIONS
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'vetting_sessions' }, (payload) => {
-            handleVettingRealtime(payload);
-        })
-        .subscribe();
+        .subscribe((status, err) => {
+            console.log(`[Realtime Tunnel] Data Channel Status: ${status}`, err || '');
+            const indicator = document.getElementById('sync-indicator');
+            
+            if (status === 'SUBSCRIBED') {
+                if (window.REALTIME_RECONNECT_TIMER) { clearInterval(window.REALTIME_RECONNECT_TIMER); window.REALTIME_RECONNECT_TIMER = null; }
+                
+                // Throttle fallback polling back to 10 mins since tunnel is healthy
+                if (window.CURRENT_FALLBACK_RATE !== 600000) setFallbackPollingRate(600000);
+                
+                if (indicator && indicator.innerHTML.includes('Dropped')) {
+                    indicator.style.opacity = '1';
+                    indicator.innerHTML = '<i class="fas fa-bolt" style="color:#2ecc71;"></i> Tunnel Restored';
+                    setTimeout(() => { if (indicator.innerHTML.includes('Restored')) indicator.style.opacity = '0'; }, 3000);
+                }
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                // Tunnel collapsed. Accelerate fallback polling to 30s to maintain near-realtime UI
+                if (window.CURRENT_FALLBACK_RATE !== 30000) setFallbackPollingRate(30000);
+                
+                if (indicator) {
+                    indicator.style.opacity = '1';
+                    indicator.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#f1c40f;"></i> Tunnel Dropped (Polling Active)';
+                }
+                
+                if (!window.REALTIME_RECONNECT_TIMER && navigator.onLine) {
+                    window.REALTIME_RECONNECT_TIMER = setInterval(() => { console.warn("Attempting tunnel reconnect..."); setupRealtimeListeners(); }, 15000);
+                }
+            }
+        });
+        
+    // --- NEW: PRESENCE CHANNEL (0-Latency, 0-DB Cost Heartbeats) ---
+    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
+        if (window.PRESENCE_CHANNEL) window.supabaseClient.removeChannel(window.PRESENCE_CHANNEL).catch(()=>{});
+        window.PRESENCE_CHANNEL = window.supabaseClient.channel('online_users', {
+            config: { presence: { key: CURRENT_USER.user } }
+        });
+
+        window.PRESENCE_CHANNEL
+            .on('presence', { event: 'sync' }, () => {
+                const state = window.PRESENCE_CHANNEL.presenceState();
+                for (const [userKey, presences] of Object.entries(state)) {
+                    if (presences && presences.length > 0) {
+                        window.ACTIVE_USERS_CACHE[userKey] = {
+                            ...presences[0],
+                            local_received_at: Date.now()
+                        };
+                    }
+                }
+            })
+            .subscribe(async (status) => {
+                if (status === 'SUBSCRIBED') {
+                    if (typeof sendHeartbeat === 'function') sendHeartbeat(true);
+                }
+            });
+    }
 }
 
 // --- NEW: QUEUE INDICATOR ---
@@ -2239,7 +2288,9 @@ function processIncomingDataQueue() {
     const batches = {
         monitor: [],
         attendance: [],
-        bookings: []
+        bookings: [],
+        app_documents: [],
+        generic_rows: []
     };
 
     queue.forEach(item => {
@@ -2310,6 +2361,81 @@ function processIncomingDataQueue() {
         if (typeof updateNotifications === 'function') updateNotifications();
     }
 
+    // 4. Process App Documents (Settings, Rosters, Users)
+    if (batches.app_documents.length > 0) {
+        batches.app_documents.forEach(p => {
+            if (p.eventType === 'UPDATE' || p.eventType === 'INSERT') {
+                const key = p.new.key;
+                const content = p.new.content;
+                
+                // Trainee Data Minimization (Security)
+                const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+                if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(key)) return;
+
+                const localVal = JSON.parse(localStorage.getItem(key));
+                const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
+                
+                if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(key)) {
+                    const merged = performSmartMerge({[key]: content}, {[key]: localVal}, 'server_wins');
+                    localStorage.setItem(key, JSON.stringify(merged[key]));
+                } else {
+                    localStorage.setItem(key, JSON.stringify(content));
+                }
+                if (key === 'system_config') applySystemConfig();
+            }
+        });
+        if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+    }
+
+    // 5. Process Generic Rows (Records, Submissions, Logs)
+    if (batches.generic_rows.length > 0) {
+        const tableUpdates = {};
+        batches.generic_rows.forEach(p => {
+            if (!tableUpdates[p.table]) tableUpdates[p.table] = [];
+            tableUpdates[p.table].push(p);
+        });
+
+        Object.keys(tableUpdates).forEach(table => {
+            const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
+            if (!localKey) return;
+            let items = JSON.parse(localStorage.getItem(localKey) || '[]');
+            const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+
+            tableUpdates[table].forEach(p => {
+                if (p.eventType === 'DELETE') {
+                    items = items.filter(i => (i.id && i.id.toString()) !== p.old.id.toString());
+                } else {
+                    if (!p.new.data) return;
+                    const newItem = p.new.data;
+                    if (!newItem.id) newItem.id = p.new.id;
+                    
+                    if (isTrainee && ['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
+                        if (newItem.trainee !== CURRENT_USER.user && newItem.user !== CURRENT_USER.user) return;
+                    }
+
+                    const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
+                    if (idx > -1) {
+                        // Local Edit Shield: Don't overwrite if local item is waiting in the save queue
+                        const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
+                        const currentLocalHash = generateChecksum(JSON.stringify(items[idx]));
+                        const syncedHash = hashMap[newItem.id];
+                        if (syncedHash && currentLocalHash !== syncedHash) return; 
+                        items[idx] = newItem;
+                    } else {
+                        items.push(newItem);
+                    }
+                }
+            });
+            localStorage.setItem(localKey, JSON.stringify(items));
+        });
+        
+        // Soft UI Refreshes based on active view
+        if (typeof loadAdminDatabase === 'function' && document.getElementById('admin-view-data')?.classList.contains('active')) loadAdminDatabase();
+        if (typeof renderMonthly === 'function' && document.getElementById('monthly')?.classList.contains('active')) renderMonthly();
+        if (typeof loadTestRecords === 'function' && document.getElementById('test-records')?.classList.contains('active')) loadTestRecords();
+        if (typeof loadManageTests === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadManageTests();
+    }
+
     // After processing, update the indicator with the current queue state.
     updateQueueIndicator();
 }
@@ -2327,6 +2453,41 @@ function handleAttendanceRealtime(payload) {
 
 function handleLiveBookingRealtime(payload) {
     INCOMING_DATA_QUEUE.push({ type: 'bookings', payload });
+    updateQueueIndicator();
+}
+
+function handleSessionRealtime(payload) {
+    const row = payload.new;
+    if (row && (row.username || row.user)) {
+        const uName = row.username || row.user;
+        
+        if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && uName === CURRENT_USER.user) {
+            if (row.pending_action) {
+                if (window.supabaseClient) window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', uName).then(()=>{});
+                
+                if (row.pending_action === 'restart') {
+                    if (typeof triggerForceRestart === 'function') triggerForceRestart();
+                    else location.reload();
+                } else if (row.pending_action === 'logout') {
+                    if (typeof logout === 'function') logout();
+                } else if (row.pending_action.startsWith('msg:')) {
+                    alert("💬 ADMIN MESSAGE:\n\n" + row.pending_action.replace('msg:', ''));
+                } else if (row.pending_action === 'force_update' && typeof require !== 'undefined') {
+                    sessionStorage.setItem('force_update_active', 'true');
+                    require('electron').ipcRenderer.send('manual-update-check');
+                }
+            }
+        }
+    }
+}
+
+function handleAppDocumentRealtime(payload) {
+    INCOMING_DATA_QUEUE.push({ type: 'app_documents', payload });
+    updateQueueIndicator();
+}
+
+function handleRowRealtime(payload) {
+    INCOMING_DATA_QUEUE.push({ type: 'generic_rows', payload });
     updateQueueIndicator();
 }
 

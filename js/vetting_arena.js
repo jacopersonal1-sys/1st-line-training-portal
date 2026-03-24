@@ -1262,24 +1262,18 @@ window.initVettingEnforcer = function() {
 };
 
 async function checkAndEnforceVetting() {
-    if (!window.supabaseClient) return;
-    
     try {
-        // Fetch ALL active sessions
-        const { data, error } = await window.supabaseClient
-            .from('vetting_sessions')
-            .select('data');
-            
+        // Use Realtime-synced local cache instead of hammering the DB
+        const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
         const localSession = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
         let foundTargetSession = null;
             
-        if (data && data.length > 0) {
+        if (activeSessions.length > 0) {
             // Update Sidebar Visibility (Show/Hide tab based on active status)
             if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
 
             // Find relevant session
-            for (const row of data) {
-                const s = row.data;
+            for (const s of activeSessions) {
                 if (!s.active) continue;
 
                 // Check if I am target

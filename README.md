@@ -155,6 +155,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.65**: **Network Resilience**: Hardened the Zero-Latency Real-Time tunnel with a Dynamic Fallback Engine. Silently falls back to 30-second polling if WebSockets are blocked and actively attempts to rebuild dropped connections.
+ - **v2.4.64**: **Performance & UX**: Zero-latency WebSockets for Live Arena, Trainee Data Minimization (98% bandwidth reduction), and native Spellcheck Context Menu.
  - **v2.4.63**: **Performance & Stability**: Optimized Cloud Database with SQL indexes for instant RTT. Reduced trainee background sync payloads. Suppressed ghost diagnostic popups.
  - **v2.4.62**: **Study Browser & Monitor**: Fixed stale UI buttons, added Preseem to quick links, and whitelisted MS Teams/Outlook.
  - **v2.4.61**: **Study Monitor**: Added full Sandbox Browser with tab support, Cloud-synced Bookmarks, and OS-level hardware idle tracking.

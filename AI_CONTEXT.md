@@ -7,17 +7,17 @@
 **Type:** Thick Client / Local-First SPA
 **Runtime:** Electron (Node.js + Chromium)
 **Frontend:** Vanilla JavaScript, HTML5, CSS3
-**Backend:** Supabase (PostgreSQL + Realtime)
-**Sync Strategy:** Hybrid Row-Level Sync (Optimistic UI with Authoritative Deletes & Server Authority for Critical Tables)
+**Backend:** Supabase (PostgreSQL + Realtime WebSockets + Presence API)
+**Sync Strategy:** Zero-Latency Real-Time Push Architecture with Mutex-Locked Fast Saves
 
 ### Core Principles
-1.  **Local-First:** `localStorage` is the primary data source for the UI. The app works offline and syncs when online.
-2.  **Hybrid Sync:**
+1.  **True Native Desktop App:** The application operates with `contextIsolation: true`. Frontend JavaScript cannot directly access the OS. It communicates with `electron-main.js` securely via the `window.electronAPI` bridge defined in `preload.js`.
+2.  **Zero-Polling & Real-Time Push:** The application does not use `setInterval` to ask the database for updates. A single Global WebSocket listener (`data.js`) instantly catches all database changes and injects them into the local cache. The UI simply reacts to these cache updates.
+3.  **Local-First with Infinite Disk Cache:** `localStorage` acts as the immediate RAM for the UI. To bypass browser limits and prevent data loss, the application silently streams a backup of `localStorage` directly to a native `.json` file on the hard drive via the OS File System.
+4.  **Hybrid Sync Engine:**
     *   **Blobs (`app_documents` table):** Low-volume, atomic data (Config, Rosters, Users) syncs as full JSON objects.
-    *   **Rows (Dedicated Tables):** High-volume data (Records, Logs, Submissions) syncs as individual rows to save bandwidth and prevent overwrites.
-3.  **Dual-Server Failover:** The client can hot-swap between a Cloud Supabase instance and a Local Docker Supabase instance based on `system_config`.
-4.  **Authoritative Deletes:** Critical deletions (Groups, Records, Tests) are executed on the server *first* before updating local state to prevent "Ghost Data" recurrence.
-5.  **Server Authority:** Critical shared tables (`live_bookings`, `live_sessions`) use a "Full Sync" strategy (overwrite local) to ensure absolute consistency.
+    *   **Rows (Dedicated Tables):** High-volume data (Records, Logs, Submissions) syncs as individual rows.
+5.  **Authoritative Deletes:** Critical deletions (Groups, Records, Tests) are executed on the server *first* before updating local state to prevent "Ghost Data" recurrence.
 
 ---
 
@@ -77,8 +77,13 @@ Maps local `localStorage` keys to Supabase tables.
 
 ### Core Infrastructure
 
+#### `preload.js` (Secure OS Bridge)
+- **Responsibility:** Creates the impenetrable wall between the web content and the Operating System.
+- **Key Objects:** Exposes `window.electronAPI` containing safe wrappers for `ipcRenderer.invoke/send`, `shell.openExternal`, `notifications.show`, and `disk.saveCache/loadCache`.
+- **Security:** Prevents Remote Code Execution (RCE) attacks by stripping raw Node.js modules from the frontend.
+
 #### `js/main.js` (Bootloader)
-- **Responsibility:** App initialization, version checks, failover recovery, and global event listeners.
+- **Responsibility:** App initialization, version checks, failover recovery, global event listeners, and Native OS bridging (`preload.js`).
 - **Key Functions:**
     - `window.onload`: Main entry point. Checks `last_connected_server` for server migration logic. Calls `loadFromServer`.
     - `loadFromServer()`: **CRITICAL**. Orchestrates the sync process. Returns `true` on partial/full success.
@@ -86,9 +91,10 @@ Maps local `localStorage` keys to Supabase tables.
     - `applySystemConfig()`: Applies hot-reload settings (Announcements, Sync Rates).
     - `checkReleaseNotes(ver)`: Shows changelog popup on update.
     - `performUpdateRestart()`: Saves user state (drafts, active tab) and restarts the app after an update is downloaded.
+    - **Native Overrides:** Intercepts `os-resume` to instantly re-establish WebSockets after a PC wakes from sleep. Intercepts `force-final-sync` to execute Safe Quits.
 
 #### `js/data.js` (Sync Engine)
- - **Responsibility:** Data synchronization logic (Pull/Push/Merge) and **Realtime Subscriptions**.
+ - **Responsibility:** Data synchronization logic (Pull/Push/Merge), **Global Realtime WebSockets**, and **Supabase Presence API**.
 - **Key Functions:**
     - `loadFromServer(silent)`: Pulls data.
         - **Blobs:** Checks `updated_at` timestamps in `app_documents`.
@@ -96,13 +102,13 @@ Maps local `localStorage` keys to Supabase tables.
         - **Ghost Slayer:** Actively purges local cache of items deleted on other clients (Tombstones & Revoked Users).
         - **Local Edits Shield:** Rejects incoming server data if a local, unsynced edit exists for the same item, preventing overwrites.
     - `saveToServer(keys, force)`: Pushes data.
-        - **Rows:** Calculates checksums. Upserts changed items. **Hard Deletes** removed items via Pending Queue.
-        - **Blobs:** Upserts to `app_documents`. **Guarded:** `system_config` requires Super Admin.
-        - **Debounced Queue:** Non-forced saves are queued and processed after a 3-second delay to prevent UI freezing.
+        - **Fast-Save Mutex:** Uses `_IS_PROCESSING_SAVE` lock to allow hyper-fast 500ms saves without overlapping network race conditions.
+        - **Safe Quit Flush:** Using target `FLUSH`, it awaits the mutex and pushes all remaining data before allowing the OS to kill the app.
     - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name/Composite Key.
-    - `setupRealtimeListeners()`: Subscribes to Supabase `postgres_changes` for live updates.
+    - `setupRealtimeListeners()`: Subscribes to the entire `public` schema. Routes changes instantly to the `INCOMING_DATA_QUEUE`.
     - `handle...Realtime(payload)`: Pushes incoming realtime events into a temporary `INCOMING_DATA_QUEUE`.
-    - `processIncomingDataQueue()`: Processes the queue when the user is not interacting with the UI. This prevents focus-stealing and UI thrashing by batching updates.
+    - `processIncomingDataQueue()`: Processes the queue. Uses `isUserTyping()` to prevent UI re-renders from stealing cursor focus.
+    - `sendHeartbeat()`: Uses `window.PRESENCE_CHANNEL.track()` to track active users with 0 database impact.
 
 #### `js/auth.js` (Authentication)
 - **Responsibility:** Login, Session Management, Security Checks.
@@ -144,18 +150,19 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/live_execution.js` (Live Arena)
 - **Responsibility:** Real-time interactive assessments.
 - **Key Functions:**
-    - `loadLiveExecution()`: Starts the Live Arena. Subscribes to `live_sessions` realtime channel.
+    - `loadLiveExecution()`: Starts the Live Arena.
+    - `syncLiveSessionState()`: **No Database Polling.** Reads strictly from `localStorage.getItem('liveSessions')` which is kept instantly up-to-date by the global WebSocket engine.
     - `adminPushQuestion(idx)`: Updates session state to show a specific question.
     - `renderTraineeLivePanel()`: Renders the active question for the trainee.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
-    - `updateLiveConnectionStatus()`: Checks `sessions` table for trainee connectivity health (Online/Idle/Offline).
+    - `updateLiveConnectionStatus()`: Checks `ACTIVE_USERS_CACHE` (Presence API) for trainee connectivity health with zero database impact.
 
 #### `js/vetting_arena.js` (Security)
 - **Responsibility:** Secure testing environment (Kiosk Mode).
 - **Key Functions:**
     - `enterArena()`: Locks the terminal (Kiosk Mode) and hides the sidebar.
     - `checkSystemCompliance()`: Checks for 2nd monitors or forbidden apps via IPC.
-    - `renderAdminArena()`: Renders the multi-session Admin UI, supporting **Split View** and **Tabbed View** for monitoring concurrent groups.
+    - `checkAndEnforceVetting()`: **No Database Polling.** Reads strictly from `localStorage.getItem('adminVettingSessions')` which is kept instantly up-to-date by the global WebSocket engine.
     - `patchTraineeStatus()`: Safely updates a single trainee's status on the server without overwriting other data, preventing race conditions.
     - `updateTraineeStatus()`: Pushes status (Started/Blocked/Completed) to `vetting_sessions`.
 
@@ -215,11 +222,11 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/study_monitor.js` (Activity Tracker)
 - **Responsibility:** Tracks active window titles and idle time.
 - **Key Functions:**
+    - `startActivityPoller()`: **No Frontend Timers.** Listens to `activity-update` from the `electron-main.js` background thread.
+    - `startMarkForClarity()`: Interactive drawing engine overlay injected into the `<webview>` for precision bounding-box screenshots/bookmarks.
     - `track(activity)`: Logs current activity.
     - `sync()`: Pushes `monitor_data` to server.
     - `checkDailyReset()`: Archives daily logs to `monitor_history` at midnight.
-    - `renderActivityMonitorContent()`: Renders the Admin view (Live Grid or Review Queue).
-    - `updateWidget()`: Refreshes the Admin Monitor UI when realtime data arrives.
 
 #### `js/insight.js` (Analytics)
 - **Responsibility:** Performance dashboards.
@@ -238,7 +245,7 @@ Maps local `localStorage` keys to Supabase tables.
 - **Responsibility:** Main dashboard widgets.
 - **Key Functions:**
     - `renderDashboard()`: Builds the grid layout based on user role.
-    - `updateDashboardHealth()`: Fetches system stats (Active Users, Latency).
+    - `updateDashboardHealth()`: Reads Active Users instantly from `window.ACTIVE_USERS_CACHE` without hitting the database.
     - `buildNoticeManager()`: Admin tool for posting broadcasts.
 
 #### `js/reporting.js` (Reports)
@@ -313,14 +320,30 @@ Maps local `localStorage` keys to Supabase tables.
     *   **Switch:** Update local config, reload app.
 3.  **Migration:** On reboot, `main.js` detects the switch and pushes local data to the new server.
 
-### E. Global Realtime Sync (Push Architecture)
-1.  **Initialization:** `data.js` -> `setupRealtimeListeners()` connects to Supabase channels.
-2.  **Queueing:** Incoming `postgres_changes` events for `monitor_state`, `attendance`, `live_bookings`, and `live_sessions` are pushed into a temporary `INCOMING_DATA_QUEUE`. This prevents the UI from refreshing while the user is typing or interacting.
-3.  **Processing:** `processIncomingDataQueue()` runs on an interval. If the user is idle, it processes the entire queue, batching updates by type. It then updates the relevant `localStorage` keys and triggers a single UI refresh for each module (`StudyMonitor.updateWidget`, `updateAttendanceUI`, etc.). This architecture ensures a smooth, non-disruptive user experience.
+### E. Global Realtime Sync & UI Protection
+1.  **The Global Net:** `data.js` -> `setupRealtimeListeners()` subscribes to the entire `public` database schema. Any change by any user triggers a push. **Includes a Dynamic Fallback Engine** that actively monitors tunnel health, instantly accelerating to 30-second polling if corporate firewalls block WebSockets, and automatically attempts to rebuild dropped connections.
+2.  **Queueing:** Incoming events are pushed into `INCOMING_DATA_QUEUE`.
+3.  **Protection:** `processIncomingDataQueue()` checks `isUserTyping()`. If an Admin is actively typing in a field, the UI refresh is paused to prevent cursor stealing or text wiping, while the data is silently updated in the background cache.
+
+### F. Presence Engine (Zero Database Heartbeats)
+Instead of every user writing to the `sessions` table every 15 seconds:
+1.  Users join the `online_users` Realtime channel.
+2.  They broadcast their status (Idle/Active/Window) via WebSockets (`PRESENCE_CHANNEL.track()`).
+3.  Admins read from `window.ACTIVE_USERS_CACHE` which updates with 0-latency and 0-database writes.
+
+### G. Native OS Integrations
+1.  **Disk Cache Recovery:** On every successful sync, `data.js` sends the entire database payload to `electron-main.js` via `save-disk-cache`. If a user accidentally clears their browser cache, `main.js` intercepts the boot, loads the JSON file from the hard drive, and fully restores the system without needing the internet.
+2.  **Intercepted Safe Quit:** When a user clicks "X" to close the app, `electron-main.js` blocks the close event, commands the frontend to `FLUSH` its data queue to the cloud, waits for the Mutex lock to complete the upload, and *then* cleanly shuts down the app.
 
 ---
 
 ## 5. IPC Channels (Electron Main)
+- `start-activity-monitor` / `stop-activity-monitor`: Controls background OS polling.
+- `activity-update`: Event pushed to UI containing OS-level idle time and active external window.
+- `show-notification`: Triggers Native Windows OS Toast Notifications.
+- `save-disk-cache` / `load-disk-cache`: Bypasses browser limits for infinite hard-drive storage.
+- `force-final-sync` / `final-sync-complete`: Handshake for the Intercepted Safe Quit flow.
+- `os-resume`: Triggers instant WebSocket reconnection when PC wakes from sleep.
 - `get-app-version`: Returns `package.json` version.
 - `manual-update-check`: Triggers auto-updater.
 - `set-kiosk-mode`: Toggles Kiosk mode.
@@ -354,3 +377,11 @@ Maps local `localStorage` keys to Supabase tables.
         git commit -m "feat: vX.X.X - Summary of changes"
         git push origin main
         ```
+
+## 7. Anti-Regression Rules (CRITICAL FOR AI)
+> **AI INSTRUCTION:** You MUST abide by these rules to prevent breaking the application's performance architecture.
+1. **Context Isolation**: `nodeIntegration` is FALSE. You cannot use `require('electron')` in frontend files. You must use `window.electronAPI` routed through `preload.js`.
+2. **No Polling the Database**: Do not use `setInterval` with `supabaseClient.from(...).select()`. All data reads must come from the Real-time cache (`localStorage.getItem(...)`) populated by the Global WebSocket in `data.js`.
+3. **No Database Heartbeats**: Do not write to the `sessions` table every 15 seconds. Use `window.PRESENCE_CHANNEL.track()`.
+4. **Protect the UI**: When rendering data from WebSockets, always check `isUserTyping()` or specific input focus states to ensure you do not wipe out a user's active text field.
+5. **Mutex Saves**: If modifying `saveToServer` or `_processSaveQueue`, you must respect the `_IS_PROCESSING_SAVE` mutex to prevent concurrent database upsert corruption.

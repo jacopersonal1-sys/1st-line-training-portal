@@ -54,6 +54,22 @@ function checkClockOutReminder() {
 
     if ((day === 0 || day === 6) && !allowWeekend) return;
 
+    // --- LUNCH REMINDER LOGIC ---
+    const lunchStart = config.attendance ? (config.attendance.lunch_start || "12:00") : "12:00";
+    const [lunchH, lunchM] = lunchStart.split(':').map(Number);
+    
+    if (hour === lunchH && min >= lunchM && min < (lunchM + 5)) {
+        const todayStr = now.toISOString().split('T')[0];
+        const lunchKey = 'lunch_prompted_' + todayStr;
+        if (!localStorage.getItem(lunchKey)) {
+            localStorage.setItem(lunchKey, 'true');
+            if (typeof showLunchModal === 'function') showLunchModal();
+            if (window.electronAPI && window.electronAPI.notifications) {
+                window.electronAPI.notifications.show('Lunch Time!', 'It is time for your scheduled lunch break.');
+            }
+        }
+    }
+
     // DYNAMIC CONFIG
     const remindTime = config.attendance ? config.attendance.reminder_start : "16:45";
     const [remindH, remindM] = remindTime.split(':').map(Number);
@@ -70,7 +86,12 @@ function checkClockOutReminder() {
             if (min % 5 === 0) {
                 if (typeof showToast === 'function') showToast(`⚠️ REMINDER: Please Clock Out before ${endH}:00!`, "warning");
                 // Stern Popup 5 mins before end
-                if (min >= (60 - 5)) alert(`⚠️ URGENT REMINDER\n\nPlease Clock Out now before the ${endH}:00 cutoff.`);
+                if (min >= (60 - 5)) {
+                    if (window.electronAPI && window.electronAPI.notifications) {
+                        window.electronAPI.notifications.show('Urgent Reminder', `Please Clock Out now before the ${endH}:00 cutoff.`);
+                    }
+                    alert(`⚠️ URGENT REMINDER\n\nPlease Clock Out now before the ${endH}:00 cutoff.`);
+                }
             }
         }
     }
@@ -101,6 +122,36 @@ function openClockInModal() {
 
     modal.classList.remove('hidden');
 }
+
+window.showLunchModal = function() {
+    if (document.getElementById('lunchModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'lunchModal';
+    modal.className = 'modal-overlay';
+    modal.style.zIndex = '12000';
+    modal.innerHTML = `
+        <div class="modal-box" style="text-align:center; max-width:400px;">
+            <i class="fas fa-hamburger" style="font-size:3rem; color:#f1c40f; margin-bottom:15px; animation: bounce 2s infinite;"></i>
+            <h2 style="margin-top:0;">Lunch Time!</h2>
+            <p style="color:var(--text-muted); margin-bottom:20px;">It's time for your scheduled lunch break.</p>
+            <div style="display:flex; justify-content:center; gap:10px;">
+                <button class="btn-secondary" onclick="document.getElementById('lunchModal').remove()">Dismiss</button>
+                <button class="btn-primary" onclick="takeLunchBreak()">Take Lunch (Log Out)</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+};
+
+window.takeLunchBreak = function() {
+    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const duration = config.attendance ? (config.attendance.lunch_duration || 60) : 60;
+    const lunchEndTime = Date.now() + (duration * 60000);
+    localStorage.setItem('lunch_end_time', lunchEndTime.toString());
+    
+    document.getElementById('lunchModal').remove();
+    if(typeof logout === 'function') logout();
+};
 
 function populateAttendanceDropdowns() {
     const settings = JSON.parse(localStorage.getItem('attendance_settings') || '{"platforms":[], "contacts":[]}');

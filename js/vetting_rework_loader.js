@@ -22,10 +22,10 @@ const VettingReworkLoader = {
         const userParam = encodeURIComponent(userStr);
         const credsParam = encodeURIComponent(credsStr);
 
-        let modulePath = 'modules/vetting_rework/index.html';
-        if (typeof require !== 'undefined') {
-            modulePath = 'file://' + require('path').join(__dirname, 'modules', 'vetting_rework', 'index.html');
-        }
+        // Derive the absolute path based on the current window location safely
+        const basePath = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
+        const modulePath = basePath + '/modules/vetting_rework/index.html';
+
         console.log("[Sandbox Loader] Injecting Webview mapped to:", modulePath);
 
         container.innerHTML = `
