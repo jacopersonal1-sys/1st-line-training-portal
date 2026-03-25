@@ -1179,7 +1179,7 @@ function renderActivityMonitorContent() {
         const histContainer = document.getElementById(`mon_hist_${safeId}`);
         if (activity.history && activity.history.length > 0) {
             const recent = activity.history.slice().reverse(); // Show all history
-            histContainer.innerHTML = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            let histHtml = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
                 ${recent.map(h => {
                     const dur = Math.round(h.duration / 1000) + 's';
                     const time = new Date(h.start).toLocaleTimeString();
@@ -1191,8 +1191,13 @@ function renderActivityMonitorContent() {
                     </li>`;
                 }).join('')}
             </ul>`;
+            if (histContainer) {
+                const scrollPos = histContainer.scrollTop;
+                histContainer.innerHTML = histHtml;
+                histContainer.scrollTop = scrollPos;
+            }
         } else {
-            histContainer.innerHTML = '<div style="font-style:italic; color:var(--text-muted);">No history recorded yet.</div>';
+            if (histContainer) histContainer.innerHTML = '<div style="font-style:italic; color:var(--text-muted);">No history recorded yet.</div>';
         }
     });
 
@@ -1465,7 +1470,7 @@ function renderActivitySummary(container) {
         const extTopics = Object.entries(topicMap).filter(t => t[1].type === 'external').sort((a,b)=>b[1].ms - a[1].ms);
         const vioTopics = Object.entries(topicMap).filter(t => t[1].type === 'violation').sort((a,b)=>b[1].ms - a[1].ms);
 
-        let breakdownHtml = '<div class="topic-breakdown" style="max-height:160px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:5px; background:var(--bg-app);">';
+        let breakdownHtml = '';
         
         const renderList = (title, items, color, icon) => {
             if (items.length === 0) return '';
@@ -1489,7 +1494,6 @@ function renderActivitySummary(container) {
         if (matTopics.length===0 && toolTopics.length===0 && extTopics.length===0 && vioTopics.length===0) {
             breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; text-align:center; padding:10px;">No specific activities logged.</div>';
         }
-        breakdownHtml += '</div>';
 
         // 4. Build Timeline Bar
         // Normalize segments to percentages
@@ -1599,7 +1603,7 @@ function renderActivitySummary(container) {
                 </div>
                 <div style="margin-bottom:15px;">
                     <div style="font-size:0.75rem; font-weight:bold; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase;">Activity Breakdown</div>
-                    <div id="sum_topics_${safeId}" class="topic-breakdown"></div>
+                    <div id="sum_topics_${safeId}" class="topic-breakdown" style="max-height:160px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:5px; background:var(--bg-app);"></div>
                 </div>
                 <div id="sum_timeline_${safeId}" class="timeline-visual" onclick="StudyMonitor.expandTimeline('${agent.replace(/'/g, "\\'")}')" style="cursor:pointer;" title="Click to expand details"></div>
                 <div style="display:flex; justify-content:space-between; font-size:0.65rem; color:var(--text-muted); margin-top:4px; font-family:monospace; opacity:0.7;">
