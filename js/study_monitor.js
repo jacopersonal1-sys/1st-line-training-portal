@@ -1393,7 +1393,7 @@ function renderActivitySummary(container) {
             
             if (category === 'material') {
                 materialMs += effectiveDuration;
-                const topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
+                let topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
                 // URL CLEANUP
                 if (topic.includes('sharepoint.com') || topic.includes('microsoftonline.com')) {
                     if (topic.includes('.mp4') || topic.includes('stream.aspx')) topic = 'Training Video (SharePoint)';
