@@ -368,10 +368,10 @@ const StudyMonitor = {
         if (act.startsWith('violation:')) return 'external';
 
         // 1. Dynamic Whitelist Check
-        // Strip prefixes to match raw content against whitelist
-        const raw = act.replace(/^external:\s*/, '').replace(/^studying:\s*/, '').trim();
+        const raw = act.replace(/^(external:\s*|violation:\s*|studying:\s*)/i, '').trim();
         if (this.cachedWhitelist.some(w => raw.includes(w.toLowerCase()))) {
-            return 'study';
+            if (raw.includes('sharepoint') || raw.includes('training')) return 'material';
+            return 'tool';
         }
 
         // 2. STRICT MODE CHECK
@@ -380,7 +380,10 @@ const StudyMonitor = {
             if (!act.startsWith('idle:')) return 'external';
         }
         
-        if (act.startsWith('studying:') || (act.includes('studying') && !act.startsWith('external:')) || act.includes('system:') || act.includes('navigating:') || act.includes('vetting:')) return 'study';
+        // Distinguish between actual course material and supportive tools
+        if (act.includes('sharepoint') || act.includes('course') || act.includes('navigating portal') || act.includes('vetting:')) return 'material';
+        if (act.startsWith('studying:') || act.includes('system:') || act.includes('navigating:')) return 'tool';
+
         if (act.startsWith('external:') || act.includes('external') || act.includes('background')) return 'external';
         if (act.startsWith('idle:')) return 'idle';
         return 'idle'; // Default
@@ -388,7 +391,7 @@ const StudyMonitor = {
 
     // --- HELPER: CALCULATE DAILY STATS (Working Hours Only) ---
     calculateDailyStats: function(historySegments) {
-        let totalMs = 0, studyMs = 0, extMs = 0, idleMs = 0;
+        let totalMs = 0, materialMs = 0, toolMs = 0, extMs = 0, idleMs = 0;
         
         historySegments.forEach(seg => {
              const segStart = seg.start || (seg.end - seg.duration);
@@ -417,26 +420,28 @@ const StudyMonitor = {
              const config = JSON.parse(localStorage.getItem('system_config') || '{}');
              const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
              
-             if (category === 'study') {
-                 studyMs += effectiveDuration;
+             if (category === 'material') {
+                 materialMs += effectiveDuration;
+             } else if (category === 'tool') {
+                 toolMs += effectiveDuration;
              } else if (category === 'external') {
                  if (effectiveDuration > TOLERANCE) {
-                     studyMs += TOLERANCE;
+                     toolMs += TOLERANCE;
                      extMs += (effectiveDuration - TOLERANCE);
                  } else {
-                     studyMs += effectiveDuration;
+                     toolMs += effectiveDuration;
                  }
              } else {
                  if (effectiveDuration > TOLERANCE) {
-                     studyMs += TOLERANCE;
+                     toolMs += TOLERANCE;
                      idleMs += (effectiveDuration - TOLERANCE);
                  } else {
-                     studyMs += effectiveDuration;
+                     toolMs += effectiveDuration;
                  }
              }
         });
         
-        return { study: studyMs, external: extMs, idle: idleMs, total: totalMs };
+        return { material: materialMs, tool: toolMs, study: materialMs + toolMs, external: extMs, idle: idleMs, total: totalMs };
     },
 
     // --- DAILY ARCHIVE LOGIC ---
@@ -918,7 +923,30 @@ const StudyMonitor = {
 
         webview.addEventListener('did-navigate', (e) => {
             tab.url = e.url;
-            this.track(`Studying: ${webview.getTitle()}`);
+            
+            // ARCHITECTURAL FIX: SANDBOX FIREWALL (The Trojan Horse Fix)
+            // Prevent agents from surfing the web inside the study browser via PDF hyperlinks.
+            try {
+                const urlObj = new URL(e.url);
+                // List of permitted root domains for the internal browser
+                const safeDomains = ['herotel.com', 'sharepoint.com', 'microsoftonline.com', 'qcontact.com', 'preseem.com', 'herotel.systems', 'office.com'];
+                
+                if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
+                    const isSafe = safeDomains.some(d => urlObj.hostname.toLowerCase().includes(d));
+                    
+                    if (!isSafe) {
+                        console.warn(`[Firewall] Blocked unauthorized navigation to: ${urlObj.hostname}`);
+                        this.track(`Violation: Unauthorized Webview Escape (${urlObj.hostname})`);
+                        this.triggerExternalAppWarning();
+                        
+                        // Instantly terminate the unauthorized tab
+                        this.closeTab(tab.id);
+                        return;
+                    }
+                }
+            } catch(err) { /* Ignore invalid URLs (blob/data) */ }
+
+            this.track(`Studying: ${webview.getTitle().substring(0, 50)}`);
         });
 
         webview.addEventListener('new-window', (e) => {
@@ -1295,11 +1323,29 @@ function renderActivitySummary(container) {
     targetAgents.sort().forEach(agent => {
         const activity = data[agent] || { history: [], current: 'No Data', since: Date.now() };
         const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
+        
+        // --- ADMIN UX: FETCH TODAY'S SCHEDULED TASK ---
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        let todaysTask = "No Task Assigned";
+        let myGroupId = null;
+        for (const [gid, members] of Object.entries(rosters)) {
+            if (members.some(m => m.toLowerCase() === agent.toLowerCase())) { myGroupId = gid; break; }
+        }
+        if (myGroupId) {
+            const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
+            if (schedKey && schedules[schedKey].items) {
+                const todayStr = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+                const task = schedules[schedKey].items.find(i => {
+                    if (typeof isDateInRange === 'function') return isDateInRange(i.dateRange, i.dueDate, todayStr);
+                    return i.dateRange <= todayStr && (i.dueDate ? i.dueDate >= todayStr : i.dateRange >= todayStr);
+                });
+                if (task) todaysTask = task.courseName;
+            }
+        }
+
         // 1. Aggregate Data
-        let totalMs = 0;
-        let studyMs = 0;
-        let extMs = 0;
-        let idleMs = 0;
+        let totalMs = 0, materialMs = 0, toolMs = 0, extMs = 0, idleMs = 0;
         const topicMap = {};
         
         // Combine history + current active session
@@ -1345,23 +1391,34 @@ function renderActivitySummary(container) {
             const config = JSON.parse(localStorage.getItem('system_config') || '{}');
             const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
             
-            if (category === 'study') {
-                studyMs += effectiveDuration;
-                // Track specific topics
+            if (category === 'material') {
+                materialMs += effectiveDuration;
                 const topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
-                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' };
+                // URL CLEANUP
+                if (topic.includes('sharepoint.com') || topic.includes('microsoftonline.com')) {
+                    if (topic.includes('.mp4') || topic.includes('stream.aspx')) topic = 'Training Video (SharePoint)';
+                    else topic = 'Training Document (SharePoint)';
+                }
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'material' };
+                topicMap[topic].ms += effectiveDuration;
+            } else if (category === 'tool') {
+                toolMs += effectiveDuration;
+                let topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
+                if (topic.includes('System:') || topic.includes('Navigating:')) topic = 'System Navigation';
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'tool' };
                 topicMap[topic].ms += effectiveDuration;
             } else if (category === 'external') {
-                let topic = seg.activity.replace(/^(External:\s*|Violation:\s*)/, '').trim();
-                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' }; // Default to neutral
+                let topic = seg.activity.replace(/^(External:\s*|Violation:\s*)/i, '').trim();
+                const isViolation = seg.activity.toLowerCase().includes('violation');
                 
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: isViolation ? 'violation' : 'external' }; 
                 if (effectiveDuration > TOLERANCE) {
                     // LENIENT MODE: Forgive the first X minutes (TOLERANCE) as "Transition/Setup"
-                    studyMs += TOLERANCE;
+                    toolMs += TOLERANCE;
                     extMs += (effectiveDuration - TOLERANCE);
-                    topicMap[topic].type = 'external'; // Flag as concern
+                    topicMap[topic].type = isViolation ? 'violation' : 'external';
                 } else {
-                    studyMs += effectiveDuration; // Tolerated
+                    toolMs += effectiveDuration; // Tolerated
                 }
                 topicMap[topic].ms += effectiveDuration;
             } else {
@@ -1370,10 +1427,10 @@ function renderActivitySummary(container) {
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'idle' };
 
                 if (effectiveDuration > TOLERANCE) {
-                    studyMs += TOLERANCE; // Thinking time
+                    toolMs += TOLERANCE; // Thinking time
                     idleMs += (effectiveDuration - TOLERANCE);
                 }
-                else studyMs += effectiveDuration; // Thinking time
+                else toolMs += effectiveDuration; // Thinking time
                 topicMap[topic].ms += effectiveDuration;
             }
         });
@@ -1381,48 +1438,56 @@ function renderActivitySummary(container) {
         // 2. Calculate Stats
         // FIX: Handle 0ms (e.g. before 8am) to show N/A instead of 0% Fail
         let focusScore = 0;
+        let materialScore = 0;
         let scoreText = 'N/A';
+        let matText = 'N/A';
         let scoreColor = 'var(--text-muted)'; // Default Grey
 
         if (totalMs > 0) {
-            focusScore = Math.round((studyMs / totalMs) * 100);
+            focusScore = Math.round(((materialMs + toolMs) / totalMs) * 100);
+            materialScore = Math.round((materialMs / totalMs) * 100);
             scoreText = focusScore + '%';
-            if (focusScore < 50) scoreColor = '#ff5252';
-            else if (focusScore < 80) scoreColor = '#f1c40f';
-            else scoreColor = '#2ecc71';
+            matText = materialScore + '%';
+            
+            if (materialScore < 30) scoreColor = '#ff5252'; 
+            else if (materialScore < 60) scoreColor = '#f1c40f';
+            else scoreColor = '#3498db'; 
         }
 
-        const studyTimeStr = Math.round(studyMs / 60000) + 'm';
+        const matTimeStr = Math.round(materialMs / 60000) + 'm';
+        const toolTimeStr = Math.round(toolMs / 60000) + 'm';
         const extTimeStr = Math.round(extMs / 60000) + 'm';
         const idleTimeStr = Math.round(idleMs / 60000) + 'm';
 
-        // 3. Top Activities Breakdown
-        // LOGIC UPDATE: Show Top Activity + Anything > 10 mins
-        const sortedTopics = Object.entries(topicMap)
-            .sort((a, b) => b[1].ms - a[1].ms)
-            
-        const topTopics = sortedTopics.filter((t, idx) => idx === 0 || t[1].ms > 600000); // Top 1 OR > 10 mins
-            
-        let breakdownHtml = '<div class="topic-breakdown">';
-        if (topTopics.length > 0) {
-            breakdownHtml += topTopics.map(([topic, data]) => {
-                const isExternal = data.type === 'external';
-                const ms = data.ms;
-                
-                const actionBtn = isExternal 
-                    ? `<button class="btn-secondary btn-sm" style="padding:0 4px; font-size:0.6rem;" onclick="StudyMonitor.classifyActivity('${topic.replace(/'/g, "\\'")}')" title="Classify Activity"><i class="fas fa-edit"></i></button>`
-                    : '';
-                
-                return `<div class="topic-row">
-                    <span class="topic-name" title="${topic}">${topic}</span>
-                    <div style="display:flex; align-items:center; gap:5px;">
-                        <span class="topic-time">${ms < 60000 ? '< 1m' : Math.round(ms/60000) + 'm'}</span>
-                        ${actionBtn}
-                    </div>
+        // 3. Precise Activity Breakdown
+        const matTopics = Object.entries(topicMap).filter(t => t[1].type === 'material').sort((a,b)=>b[1].ms - a[1].ms);
+        const toolTopics = Object.entries(topicMap).filter(t => t[1].type === 'tool').sort((a,b)=>b[1].ms - a[1].ms);
+        const extTopics = Object.entries(topicMap).filter(t => t[1].type === 'external').sort((a,b)=>b[1].ms - a[1].ms);
+        const vioTopics = Object.entries(topicMap).filter(t => t[1].type === 'violation').sort((a,b)=>b[1].ms - a[1].ms);
+
+        let breakdownHtml = '<div class="topic-breakdown" style="max-height:160px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:5px; background:var(--bg-app);">';
+        
+        const renderList = (title, items, color, icon) => {
+            if (items.length === 0) return '';
+            let html = `<div style="font-size:0.75rem; font-weight:bold; color:${color}; margin-top:5px; padding-bottom:2px; border-bottom:1px solid ${color}55;"><i class="fas ${icon}"></i> ${title}</div>`;
+            items.forEach(([topic, data]) => {
+                const timeStr = data.ms < 60000 ? '< 1m' : Math.round(data.ms/60000) + 'm';
+                const actionBtn = (data.type === 'external' || data.type === 'violation') ? `<button class="btn-secondary btn-sm" style="padding:0 4px; font-size:0.6rem; margin-left:5px;" onclick="StudyMonitor.classifyActivity('${topic.replace(/'/g, "\\'")}')" title="Classify Activity"><i class="fas fa-edit"></i></button>` : '';
+                html += `<div style="display:flex; justify-content:space-between; font-size:0.8rem; padding:2px 0;">
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:75%;" title="${topic}">${topic}</span>
+                    <span>${timeStr}${actionBtn}</span>
                 </div>`;
-            }).join('');
-        } else {
-            breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem;">No study activity recorded.</div>';
+            });
+            return html;
+        };
+
+        breakdownHtml += renderList('Training Material', matTopics, '#3498db', 'fa-book-open');
+        breakdownHtml += renderList('Support Tools', toolTopics, '#2ecc71', 'fa-tools');
+        breakdownHtml += renderList('External / Browsing', extTopics, '#f39c12', 'fa-external-link-alt');
+        breakdownHtml += renderList('Security Violations', vioTopics, '#ff5252', 'fa-exclamation-triangle');
+        
+        if (matTopics.length===0 && toolTopics.length===0 && extTopics.length===0 && vioTopics.length===0) {
+            breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; text-align:center; padding:10px;">No specific activities logged.</div>';
         }
         breakdownHtml += '</div>';
 
@@ -1499,52 +1564,82 @@ function renderActivitySummary(container) {
                 <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:15px;">
                     <div>
                         <h3 style="margin:0;">${agent}</h3>
+                        <div style="font-size:0.75rem; color:var(--primary); font-weight:bold; margin-top:2px;" title="Scheduled Task for Today"><i class="fas fa-bullseye"></i> Target: ${todaysTask}</div>
                         <div id="sum_total_${safeId}" style="font-size:0.8rem; color:var(--text-muted);"></div>
+                        <div id="sum_vio_${safeId}"></div>
                     </div>
-                    <div style="text-align:right;">
-                        <div id="sum_score_${safeId}" class="focus-score-large"></div>
-                        <div style="font-size:0.7rem; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">Focus Score</div>
+                    <div style="display:flex; gap:15px; text-align:right;">
+                        <div>
+                            <div id="sum_mat_score_${safeId}" class="focus-score-large" style="font-size:1.5rem;"></div>
+                            <div style="font-size:0.7rem; font-weight:bold; color:var(--primary); text-transform:uppercase;">Material Focus</div>
+                        </div>
+                        <div style="opacity:0.6;">
+                            <div id="sum_score_${safeId}" class="focus-score-large" style="font-size:1.1rem;"></div>
+                            <div style="font-size:0.6rem; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">Overall Productive</div>
+                        </div>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; text-align:center; font-size:0.85rem; margin-bottom:15px;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:8px; text-align:center; font-size:0.85rem; margin-bottom:15px;">
+                    <div style="background:rgba(52, 152, 219, 0.1); padding:8px; border-radius:6px; color:#3498db;">
+                        <div id="sum_mat_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
+                        <div style="font-size:0.65rem; opacity:0.8;">Material</div>
+                    </div>
                     <div style="background:rgba(46, 204, 113, 0.1); padding:8px; border-radius:6px; color:#2ecc71;">
-                        <div id="sum_study_${safeId}" style="font-weight:bold; font-size:1.1rem;"></div>
-                        <div style="font-size:0.7rem; opacity:0.8;">Study</div>
+                        <div id="sum_tool_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
+                        <div style="font-size:0.65rem; opacity:0.8;">Tools/Notes</div>
                     </div>
                     <div style="background:rgba(231, 76, 60, 0.1); padding:8px; border-radius:6px; color:#e74c3c;">
-                        <div id="sum_ext_${safeId}" style="font-weight:bold; font-size:1.1rem;"></div>
-                        <div style="font-size:0.7rem; opacity:0.8;">External</div>
+                        <div id="sum_ext_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
+                        <div style="font-size:0.65rem; opacity:0.8;">External</div>
                     </div>
                     <div style="background:var(--bg-input); padding:8px; border-radius:6px; color:var(--text-muted);">
-                        <div id="sum_idle_${safeId}" style="font-weight:bold; font-size:1.1rem;"></div>
-                        <div style="font-size:0.7rem; opacity:0.8;">Idle</div>
+                        <div id="sum_idle_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
+                        <div style="font-size:0.65rem; opacity:0.8;">Idle</div>
                     </div>
                 </div>
                 <div style="margin-bottom:15px;">
-                    <div style="font-size:0.75rem; font-weight:bold; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase;">Top Activities</div>
+                    <div style="font-size:0.75rem; font-weight:bold; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase;">Activity Breakdown</div>
                     <div id="sum_topics_${safeId}" class="topic-breakdown"></div>
                 </div>
                 <div id="sum_timeline_${safeId}" class="timeline-visual" onclick="StudyMonitor.expandTimeline('${agent.replace(/'/g, "\\'")}')" style="cursor:pointer;" title="Click to expand details"></div>
-                <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:5px;">
-                    <span>Start</span>
-                    <span>Current</span>
+                <div style="display:flex; justify-content:space-between; font-size:0.65rem; color:var(--text-muted); margin-top:4px; font-family:monospace; opacity:0.7;">
+                    <span>08:00</span>
+                    <span>10:00</span>
+                    <span>12:00</span>
+                    <span>14:00</span>
+                    <span>17:00</span>
                 </div>`;
             grid.appendChild(card);
         }
 
         // Granular Updates (No Flicker)
         document.getElementById(`sum_total_${safeId}`).innerText = `Total Tracked: ${Math.round(totalMs/60000)} mins`;
+        document.getElementById(`sum_vio_${safeId}`).innerHTML = vioTopics.length > 0 ? `<div style="background:#ff5252; color:white; font-size:0.7rem; font-weight:bold; padding:2px 8px; border-radius:12px; margin-top:5px; display:inline-block; animation: pulse 2s infinite;"><i class="fas fa-exclamation-triangle"></i> ${vioTopics.length} Violation(s) Detected</div>` : '';
+        const matScoreEl = document.getElementById(`sum_mat_score_${safeId}`);
+        if (matScoreEl) { matScoreEl.innerText = matText; matScoreEl.style.color = scoreColor; }
+        
         const scoreEl = document.getElementById(`sum_score_${safeId}`);
-        scoreEl.innerText = scoreText;
-        scoreEl.style.color = scoreColor;
+        if (scoreEl) { scoreEl.innerText = scoreText; scoreEl.style.color = 'var(--text-muted)'; }
         
-        document.getElementById(`sum_study_${safeId}`).innerText = studyTimeStr;
-        document.getElementById(`sum_ext_${safeId}`).innerText = extTimeStr;
-        document.getElementById(`sum_idle_${safeId}`).innerText = idleTimeStr;
+        const sumMat = document.getElementById(`sum_mat_${safeId}`);
+        if (sumMat) sumMat.innerText = matTimeStr;
+        const sumTool = document.getElementById(`sum_tool_${safeId}`);
+        if (sumTool) sumTool.innerText = toolTimeStr;
+        const sumExt = document.getElementById(`sum_ext_${safeId}`);
+        if (sumExt) sumExt.innerText = extTimeStr;
+        const sumIdle = document.getElementById(`sum_idle_${safeId}`);
+        if (sumIdle) sumIdle.innerText = idleTimeStr;
         
-        // InnerHTML for complex children is fine if container is stable
-        document.getElementById(`sum_topics_${safeId}`).innerHTML = breakdownHtml;
-        document.getElementById(`sum_timeline_${safeId}`).innerHTML = timelineHtml;
+        // UX SCROLL LOCK: Prevent DOM wipes from resetting scroll position while investigating
+        const topicsDiv = document.getElementById(`sum_topics_${safeId}`);
+        if (topicsDiv) {
+            const scrollPos = topicsDiv.scrollTop;
+            topicsDiv.innerHTML = breakdownHtml;
+            topicsDiv.scrollTop = scrollPos;
+        }
+        
+        const timelineDiv = document.getElementById(`sum_timeline_${safeId}`);
+        if (timelineDiv) timelineDiv.innerHTML = timelineHtml;
     });
 
     // Cleanup Stale Cards
@@ -1733,10 +1828,9 @@ StudyMonitor.toggleReviewQueue = function() {
     renderActivityMonitorContent();
 };
 
-StudyMonitor.expandTimeline = function(agentName) {
-    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    const activity = data[agentName];
-    if (!activity) return alert("No data for this agent.");
+StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
+    const todayStr = this.getLocalDateString();
+    const queryDate = targetDateStr || todayStr;
 
     let modal = document.getElementById('timelineDetailModal');
     if (!modal) {
@@ -1746,8 +1840,10 @@ StudyMonitor.expandTimeline = function(agentName) {
         modal.style.zIndex = '9999'; // Ensure it appears above the Activity Monitor
         modal.innerHTML = `
             <div class="modal-box" style="width:95%; max-width:1200px; height:85vh; display:flex; flex-direction:column;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-                    <h3 style="margin:0;">Activity Detail: <span id="tlDetailName" style="color:var(--primary);"></span></h3>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px; flex-wrap:wrap; gap:10px;">
+                    <h3 style="margin:0; display:flex; align-items:center; gap:10px;">Activity Detail: <span id="tlDetailName" style="color:var(--primary);"></span>
+                        <input type="date" id="tlDetailDate" style="padding:4px 8px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); font-size:0.9rem;" title="Select a date to view archived history">
+                    </h3>
                     <button class="btn-secondary" onclick="document.getElementById('timelineDetailModal').classList.add('hidden')"><i class="fas fa-times"></i> Close</button>
                 </div>
                 <div style="margin-bottom:20px;">
@@ -1775,6 +1871,11 @@ StudyMonitor.expandTimeline = function(agentName) {
     }
 
     document.getElementById('tlDetailName').innerText = agentName;
+    
+    const datePicker = document.getElementById('tlDetailDate');
+    datePicker.value = queryDate;
+    datePicker.onchange = (e) => { StudyMonitor.expandTimeline(agentName, e.target.value); };
+
     const visualContainer = document.getElementById('tlDetailVisual');
     const tableContainer = document.getElementById('tlDetailTable');
     
@@ -1782,15 +1883,29 @@ StudyMonitor.expandTimeline = function(agentName) {
     tableContainer.innerHTML = '';
 
     // --- RECALCULATE SEGMENTS ---
-    const allSegments = [...(activity.history || [])];
-    const currentDuration = Date.now() - activity.since;
-    if (currentDuration > 1000) {
-        allSegments.push({
-            activity: activity.current,
-            start: activity.since,
-            end: Date.now(),
-            duration: currentDuration
-        });
+    let allSegments = [];
+    
+    if (queryDate === todayStr) {
+        const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        const activity = data[agentName];
+        if (activity) {
+            allSegments = [...(activity.history || [])];
+            const currentDuration = Date.now() - activity.since;
+            if (currentDuration > 1000) {
+                allSegments.push({
+                    activity: activity.current,
+                    start: activity.since,
+                    end: Date.now(),
+                    duration: currentDuration
+                });
+            }
+        }
+    } else {
+        const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        const pastDay = historyLog.find(h => h.user === agentName && h.date === queryDate);
+        if (pastDay && pastDay.details) {
+            allSegments = [...pastDay.details];
+        }
     }
 
     allSegments.sort((a, b) => (a.start || 0) - (b.start || 0));
@@ -1824,27 +1939,30 @@ StudyMonitor.expandTimeline = function(agentName) {
          let style = '';
          let rowColor = '';
 
-         if (category === 'study') {
-             typeClass = 'seg-study';
-             catLabel = 'Study';
+         if (category === 'material') {
+             typeClass = ''; style = 'background:#3498db;';
+             catLabel = 'Material'; rowColor = 'color:#3498db; font-weight:bold;';
+         } else if (category === 'tool') {
+             typeClass = ''; style = 'background:#2ecc71;';
+             catLabel = 'Tool/Note'; rowColor = 'color:#2ecc71;';
          } else if (category === 'external') {
              if (effectiveDuration > TOLERANCE) {
-                 typeClass = 'seg-ext';
+                 typeClass = ''; style = 'background:#e74c3c;';
                  catLabel = seg.activity.toLowerCase().includes('violation') ? 'Violation' : 'External';
                  rowColor = 'color:#e74c3c; font-weight:bold;';
              } else {
                  style = `background: repeating-linear-gradient(45deg, #2ecc71, #2ecc71 5px, #f1c40f 5px, #f1c40f 10px);`;
-                 typeClass = 'seg-study'; 
+                 typeClass = ''; 
                  catLabel = seg.activity.toLowerCase().includes('violation') ? 'Violation (Tolerated)' : 'External (Tolerated)';
                  rowColor = 'color:#f39c12;';
              }
          } else {
              if (effectiveDuration > TOLERANCE) {
-                 typeClass = 'seg-idle';
+                 typeClass = ''; style = 'background:#95a5a6;';
                  catLabel = 'Idle';
              } else {
                  style = `background: repeating-linear-gradient(45deg, #2ecc71, #2ecc71 5px, #95a5a6 5px, #95a5a6 10px);`;
-                 typeClass = 'seg-study';
+                 typeClass = '';
                  catLabel = 'Idle (Thinking)';
                  rowColor = 'color:#95a5a6;';
              }
@@ -1867,16 +1985,22 @@ StudyMonitor.expandTimeline = function(agentName) {
     if (totalMs > 0) {
         processedSegs.forEach(p => {
             const pct = (p.duration / totalMs) * 100;
-            visualHtml += `<div class="timeline-seg ${p.typeClass}" style="width:${pct}%; ${p.style}" title="${p.activity} (${Math.round(p.duration/1000)}s)"></div>`;
+            visualHtml += `<div class="timeline-seg" style="width:${pct}%; ${p.style}" title="${p.activity} (${Math.round(p.duration/1000)}s)"></div>`;
             
             const timeStr = new Date(p.start).toLocaleTimeString();
             const mins = (p.duration / 60000).toFixed(1) + 'm';
             
+            let displayActivity = p.activity;
+            if (displayActivity.includes('sharepoint.com') || displayActivity.includes('microsoftonline.com')) {
+                 if (displayActivity.includes('.mp4') || displayActivity.includes('stream.aspx')) displayActivity = 'Studying: Training Video (SharePoint)';
+                 else displayActivity = 'Studying: Training Document (SharePoint)';
+            }
+
             tableHtml += `
                 <tr style="${p.rowColor}">
                     <td>${timeStr}</td>
                     <td>${mins}</td>
-                    <td>${p.activity}</td>
+                    <td title="${p.activity.replace(/"/g, '&quot;')}">${displayActivity}</td>
                     <td>${p.catLabel}</td>
                 </tr>
             `;

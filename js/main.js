@@ -1794,6 +1794,16 @@ if (typeof require !== 'undefined') {
 
         // 1. IF LOGGED IN: INTRUSIVE MODAL
         if (CURRENT_USER) {
+            // ASSESSMENT PROTECTION LOCK: Do not interrupt active tests
+            const isTakingTest = (
+                document.getElementById('test-take-view')?.classList.contains('active') ||
+                document.getElementById('vetting-arena')?.classList.contains('active') ||
+                (document.getElementById('live-execution')?.classList.contains('active') && CURRENT_USER.role === 'trainee')
+            );
+
+            if (isTakingTest) {
+                if (typeof showToast === 'function') showToast("System update downloaded. Please restart after completing your assessment.", "warning");
+            } else {
             const modal = document.createElement('div');
             modal.className = 'modal-overlay';
             modal.style.zIndex = '10000';
@@ -1819,6 +1829,7 @@ if (typeof require !== 'undefined') {
                 </div>
             `;
             document.body.appendChild(modal);
+            }
         } 
         // 2. IF LOGIN SCREEN: BLOCK LOGIN
         else {
@@ -1840,7 +1851,13 @@ if (typeof require !== 'undefined') {
         // Check if this was a Forced Update from Admin (Legacy check)
         if (sessionStorage.getItem('force_update_active') === 'true') {
             sessionStorage.removeItem('force_update_active');
-            performUpdateRestart();
+            const isTakingTest = CURRENT_USER && (document.getElementById('test-take-view')?.classList.contains('active') || document.getElementById('vetting-arena')?.classList.contains('active') || (document.getElementById('live-execution')?.classList.contains('active') && CURRENT_USER.role === 'trainee'));
+            
+            if (!isTakingTest) {
+                performUpdateRestart();
+            } else if (typeof showToast === 'function') {
+                showToast("Admin requested an update. It will apply automatically after your assessment.", "warning");
+            }
         }
     });
 }

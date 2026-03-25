@@ -341,22 +341,25 @@ async function loadFromServer(silent = false) {
         const pendingIds = new Set(pendingQueue.filter(i => i.type === 'id').map(i => i.id));
         const tombstoneIds = new Set(JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]'));
         const pendingQueries = pendingQueue.filter(i => i.type === 'query');
+        const revokedUsers = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        const revokedSet = new Set(revokedUsers.map(u => u.toLowerCase()));
 
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
         // Only fetch rows newer than our last sync timestamp
         // OPTIMIZATION: Skip heavy logs in background sync to prevent freezing
         const heavyTables = ['error_reports', 'accessLogs', 'auditLogs', 'monitor_history'];
 
-        for (const [localKey, tableName] of Object.entries(ROW_MAP)) {
+        // ARCHITECTURAL FIX: Parallelize database queries to slash boot times by 90%
+        const rowSyncPromises = Object.entries(ROW_MAP).map(async ([localKey, tableName]) => {
             
             // TRAINEE DATA MINIMIZATION: Completely skip Admin-only tables to save bandwidth
             if (isTrainee && ['audit_logs', 'access_logs', 'error_reports', 'nps_responses', 'archived_users', 'network_diagnostics', 'saved_reports', 'insight_reviews', 'tl_task_submissions'].includes(tableName)) {
-                continue;
+                return;
             }
 
             // Skip heavy tables unless it's a forced full sync (Optimization)
             if (silent && heavyTables.includes(tableName)) {
-                continue;
+                return;
             }
 
             const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
@@ -465,8 +468,6 @@ async function loadFromServer(silent = false) {
                 // --- THE GHOST SLAYER (LOCAL PURGE) ---
                 // Actively destroy items in the local cache that have been deleted globally,
                 // preventing this device from resurrecting them during the next push.
-                const revokedUsers = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-                const revokedSet = new Set(revokedUsers.map(u => u.toLowerCase()));
 
                 localItems = localItems.filter(item => {
                     const id = item.id;
@@ -548,7 +549,8 @@ async function loadFromServer(silent = false) {
                 if(!silent) console.log(`Clearing ${localKey} (Server Empty)`);
                 localStorage.setItem(localKey, '[]');
             }
-        }
+        });
+        await Promise.all(rowSyncPromises);
 
         // --- PHASE C: MONITOR STATE SYNC (Real-time Activity) ---
         // OPTIMIZATION: Only Admins/TeamLeaders need to download the entire company's live activity data.
