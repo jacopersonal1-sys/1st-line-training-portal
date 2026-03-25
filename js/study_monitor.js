@@ -162,9 +162,25 @@ const StudyMonitor = {
                         }
                     }
 
-                    // Only trigger the warning if it's strictly an external, non-permitted app
+                    // Only trigger the warning & violation if it's strictly an external, non-permitted app
                     if (!isPermitted && activeWindow) {
-                        this.triggerExternalAppWarning();
+                        const now = new Date();
+                        const hour = now.getHours();
+                        let isViolation = false;
+                        
+                        // Check Working Hours & Exclusions
+                        if (hour >= 8 && hour < 17 && hour !== 12) {
+                            const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+                            const myLive = liveSessions.find(s => s.trainee === CURRENT_USER.user && s.active);
+                            const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+                            const inVetting = vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user];
+                            if (!myLive && !inVetting) isViolation = true;
+                        }
+                        
+                        if (isViolation) {
+                            activityLabel = `Violation: ${activeWindow}`;
+                            this.triggerExternalAppWarning();
+                        }
                     }
 
                     // Track the state change
@@ -190,28 +206,9 @@ const StudyMonitor = {
             return;
         }
 
-        // Check time
-        const now = new Date();
-        const hour = now.getHours();
+        // Validation is now handled upstream in startActivityPoller
         
-        // Check if within working hours (8 AM to 5 PM)
-        if (hour < 8 || hour >= 17) return;
-
-        // Check if lunch time (12 PM)
-        if (hour === 12) return;
-
-        // Check if in a live assessment
-        const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-        const myLive = liveSessions.find(s => s.trainee === CURRENT_USER.user && s.active);
-        if (myLive) return;
-
-        // DEFUSAL 4: Suppress warnings if user is in an active Vetting Session (Vetting Arena handles its own security)
-        const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-        if (vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user]) return;
-
-        // All conditions met, show the warning
         sessionStorage.setItem('last_ext_warn', Date.now().toString());
-        this.track("Violation: External App Usage");
 
         const modalHtml = `
             <div id="external-app-warning-modal">
@@ -275,8 +272,8 @@ const StudyMonitor = {
         let changed = false;
         
         const applyWhitelist = (activityString) => {
-            if (activityString.startsWith('External: ') && !activityString.includes('(Reclassified)')) {
-                const raw = activityString.replace('External: ', '').trim();
+            if ((activityString.startsWith('External: ') || activityString.startsWith('Violation: ')) && !activityString.includes('(Reclassified)')) {
+                const raw = activityString.replace(/^(External|Violation):\s*/, '').trim();
                 if (this.cachedWhitelist.some(w => raw.toLowerCase().includes(w.toLowerCase()))) {
                     return `Studying: ${raw} (Reclassified)`;
                 }
@@ -623,13 +620,13 @@ const StudyMonitor = {
                         <div id="study-tabs-list"></div>
                     </div>
                     <div class="study-header-actions">
-                        <button id="study-bookmark-btn" class="btn-secondary" onclick="StudyMonitor.startMarkForClarity()" title="Drag a box to mark a spot for clarity" style="padding: 8px 15px; font-weight:bold; border-color:#f1c40f; color:#f1c40f;"><i class="fas fa-crop-alt"></i> Mark for Clarity</button>
-                        <button id="study-min-btn" class="btn-primary" onclick="StudyMonitor.minimizeStudyWindow()" title="Keep tabs open and return to Dashboard" style="padding: 8px 15px; font-weight:bold;"><i class="fas fa-desktop"></i> Dashboard</button>
+                    <button id="study-bookmark-btn" class="btn-secondary" onmousedown="StudyMonitor.startMarkForClarity()" title="Drag a box to mark a spot for clarity" style="padding: 8px 15px; font-weight:bold; border-color:#f1c40f; color:#f1c40f;"><i class="fas fa-crop-alt"></i> Mark for Clarity</button>
+                    <button id="study-min-btn" class="btn-primary" onmousedown="StudyMonitor.minimizeStudyWindow()" title="Keep tabs open and return to Dashboard" style="padding: 8px 15px; font-weight:bold;"><i class="fas fa-desktop"></i> Dashboard</button>
                         <select id="study-quick-links" onchange="StudyMonitor.navigateQuickLink(this.value)">
                             <option value="">Program Links</option>
                             ${quickLinks.map(l => `<option value="${l.url}">${l.name}</option>`).join('')}
                         </select>
-                        <button id="study-close-btn" onclick="StudyMonitor.closeStudyWindow()" title="Close all tabs and exit"><i class="fas fa-times"></i> Exit</button>
+                    <button id="study-close-btn" onmousedown="StudyMonitor.closeStudyWindow()" title="Close all tabs and exit"><i class="fas fa-times"></i> Exit</button>
                     </div>
                 </div>
                 <div id="study-webview-container"></div>
@@ -638,10 +635,10 @@ const StudyMonitor = {
     },
 
     attachNavEvents: function() {
-        document.getElementById('study-nav-back').onclick = () => this.getActiveWebview()?.goBack();
-        document.getElementById('study-nav-forward').onclick = () => this.getActiveWebview()?.goForward();
-        document.getElementById('study-nav-reload').onclick = () => this.getActiveWebview()?.reload();
-        document.getElementById('study-nav-home').onclick = () => this.getActiveWebview()?.loadURL(this.browserState.homeUrl);
+        document.getElementById('study-nav-back').onmousedown = () => this.getActiveWebview()?.goBack();
+        document.getElementById('study-nav-forward').onmousedown = () => this.getActiveWebview()?.goForward();
+        document.getElementById('study-nav-reload').onmousedown = () => this.getActiveWebview()?.reload();
+        document.getElementById('study-nav-home').onmousedown = () => this.getActiveWebview()?.loadURL(this.browserState.homeUrl);
     },
 
     navigateQuickLink: function(url) {
@@ -883,9 +880,9 @@ const StudyMonitor = {
         tabsList.innerHTML = this.browserState.tabs.map(tab => {
             const isActive = tab.id === this.browserState.activeTabId;
             return `
-                <div class="study-tab ${isActive ? 'active' : ''}" onclick="StudyMonitor.switchTab('${tab.id}')">
+                <div class="study-tab ${isActive ? 'active' : ''}" onmousedown="StudyMonitor.switchTab('${tab.id}')">
                     <span class="study-tab-title">${tab.title}</span>
-                    <button class="study-tab-close" onclick="event.stopPropagation(); StudyMonitor.closeTab('${tab.id}')"><i class="fas fa-times"></i></button>
+                    <button class="study-tab-close" onmousedown="event.stopPropagation(); StudyMonitor.closeTab('${tab.id}')"><i class="fas fa-times"></i></button>
                 </div>
             `;
         }).join('');
@@ -1091,6 +1088,7 @@ function renderActivityMonitorContent() {
         // Status Indicator
         let statusBadge = '<span class="status-badge status-fail">Offline/Idle</span>';
         if (activity.isStudyOpen) statusBadge = '<span class="status-badge status-pass">Studying</span>';
+        else if (activity.current.startsWith('Violation')) statusBadge = '<span class="status-badge" style="background:#ff5252; color:white; font-weight:bold; padding:2px 8px;"><i class="fas fa-exclamation-triangle"></i> Violation</span>';
         else if (!activity.current.includes('Idle') && activity.current !== 'No Data') statusBadge = '<span class="status-badge status-improve">Navigating App</span>';
 
         // Timestamp
@@ -1139,6 +1137,7 @@ function renderActivityMonitorContent() {
 
         // Dynamic Border Color update
         if (activity.isStudyOpen) card.style.borderLeftColor = '#2ecc71';
+        else if (activity.current.includes('Violation')) card.style.borderLeftColor = '#ff0000';
         else if (activity.current.includes('Idle')) card.style.borderLeftColor = '#95a5a6';
         else if (activity.current.includes('External')) card.style.borderLeftColor = '#ff5252';
         else card.style.borderLeftColor = '#f1c40f';
@@ -1157,8 +1156,9 @@ function renderActivityMonitorContent() {
                     const dur = Math.round(h.duration / 1000) + 's';
                     const time = new Date(h.start).toLocaleTimeString();
                     const clickInfo = h.clicks ? ` | <i class="fas fa-mouse-pointer" style="font-size:0.7rem;"></i> ${h.clicks}` : '';
-                    return `<li style="border-bottom:1px solid var(--border-color); padding:4px 0; display:flex; justify-content:space-between;">
-                        <span>${h.activity}</span>
+                    const isVio = h.activity.startsWith('Violation');
+                    return `<li style="border-bottom:1px solid var(--border-color); padding:4px 0; display:flex; justify-content:space-between; ${isVio ? 'color:#ff5252; font-weight:bold;' : ''}">
+                        <span>${isVio ? '<i class="fas fa-exclamation-triangle"></i> ' : ''}${h.activity}</span>
                         <span style="color:var(--text-muted); font-family:monospace;">${time} (${dur}${clickInfo})</span>
                     </li>`;
                 }).join('')}
@@ -1196,8 +1196,8 @@ function renderReviewQueue(container) {
     
     Object.values(data).forEach(userActivity => {
         const processItem = (act) => {
-            if (act.startsWith('External: ') && !act.includes('(Reclassified)')) {
-                const raw = act.replace('External: ', '').trim();
+            if ((act.startsWith('External: ') || act.startsWith('Violation: ')) && !act.includes('(Reclassified)')) {
+                const raw = act.replace(/^(External:\s*|Violation:\s*)/, '').trim();
                 
                 // Check if already whitelisted (Partial match)
                 if (whitelist.some(w => raw.toLowerCase().includes(w.trim().toLowerCase()))) return;
@@ -1352,7 +1352,7 @@ function renderActivitySummary(container) {
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' };
                 topicMap[topic].ms += effectiveDuration;
             } else if (category === 'external') {
-                let topic = seg.activity.replace('External: ', '').trim();
+                let topic = seg.activity.replace(/^(External:\s*|Violation:\s*)/, '').trim();
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'study' }; // Default to neutral
                 
                 if (effectiveDuration > TOLERANCE) {
@@ -1581,8 +1581,8 @@ StudyMonitor.classifyActivity = async function(fullActivityString) {
     // Smart Suggestion Logic
     let suggestion = fullActivityString;
     
-    // 1. Strip "External: " prefix if present
-    suggestion = suggestion.replace(/^External:\s*/, '');
+    // 1. Strip "External: " or "Violation: " prefix if present
+    suggestion = suggestion.replace(/^(External:\s*|Violation:\s*)/, '');
     
     // 2. Check for Process ID [proc]
     const procMatch = suggestion.match(/\[(.*?)\]$/);
@@ -1830,12 +1830,12 @@ StudyMonitor.expandTimeline = function(agentName) {
          } else if (category === 'external') {
              if (effectiveDuration > TOLERANCE) {
                  typeClass = 'seg-ext';
-                 catLabel = 'External';
+                 catLabel = seg.activity.toLowerCase().includes('violation') ? 'Violation' : 'External';
                  rowColor = 'color:#e74c3c; font-weight:bold;';
              } else {
                  style = `background: repeating-linear-gradient(45deg, #2ecc71, #2ecc71 5px, #f1c40f 5px, #f1c40f 10px);`;
                  typeClass = 'seg-study'; 
-                 catLabel = 'External (Tolerated)';
+                 catLabel = seg.activity.toLowerCase().includes('violation') ? 'Violation (Tolerated)' : 'External (Tolerated)';
                  rowColor = 'color:#f39c12;';
              }
          } else {

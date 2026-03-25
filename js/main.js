@@ -1957,6 +1957,19 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.67": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Study Browser:</strong> Fixed an issue where PDF viewers would steal focus and prevent the top navigation buttons (Dashboard, Exit, Mark for Clarity) from working on the first click.</li>
+                <li style="margin-bottom: 8px;"><strong>Activity Monitor:</strong> Unauthorized external applications are now explicitly flagged as 'Violations' during working hours, with bold red highlighting in the Detailed Timeline and Review Queue.</li>
+            </ul>`,
+        "2.4.66": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Deep Architectural Hardening:</strong> Defused critical race conditions, state desynchronization bugs, and memory leaks across the platform.</li>
+                <li style="margin-bottom: 8px;"><strong>Storage Optimization:</strong> Implemented aggressive client-side Canvas Compression for image uploads to completely eliminate "Quota Exceeded" crashes in LocalStorage.</li>
+                <li style="margin-bottom: 8px;"><strong>Time & Attendance:</strong> Added a dynamic Lunch Timer UI and patched double-execution vulnerabilities in the clock-in/out and cancellation workflows.</li>
+                <li style="margin-bottom: 8px;"><strong>Exploit Prevention:</strong> Fixed the "Time-Stop" cheat in assessments where users could indefinitely pause the clock by switching tabs.</li>
+                <li style="margin-bottom: 8px;"><strong>Live Arena Stability:</strong> Intercepted background question pushes to force an instant save of trainee keystrokes before the screen re-renders, preventing answer loss.</li>
+            </ul>`,
         "2.4.65": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Network Resilience:</strong> Hardened the Zero-Latency Real-Time tunnel. The app now silently falls back to high-speed 30-second polling if corporate firewalls block WebSockets, and continuously attempts to rebuild dropped connections to keep your UI instantly synced.</li>
