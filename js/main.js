@@ -1030,7 +1030,7 @@ window.openReferenceViewer = function(url) {
     if (url.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
         content = `<img src="${url}" style="width:100%; height:100%; object-fit:contain;">`;
     } else {
-        content = `<webview src="${url}" style="width:100%; height:100%; border:none;" allowpopups></webview>`;
+            content = `<webview src="${url}" style="width:100%; height:100%; border:none;" partition="persist:study_session" allowpopups></webview>`;
     }
 
     win.innerHTML = `
@@ -1974,6 +1974,21 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.70": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Fixed a scrolling reset issue in the Activity Monitor's Detailed Breakdown and Recent History views caused by real-time background updates.</li>
+            </ul>`,
+        "2.4.69": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a dashboard rendering crash caused by variable assignment strictness in the new Activity Monitor URL cleaner.</li>
+            </ul>`,
+        "2.4.68": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Activity Monitor 3.0:</strong> Completely redesigned the Activity Summary with a 4-tier breakdown (Material, Tools, External, Idle). Added SharePoint URL cleaner, fixed time-scales for the timeline, added an archive date-picker, and locked scroll position during live updates.</li>
+                <li style="margin-bottom: 8px;"><strong>Study Browser Firewall:</strong> Sealed the "Trojan Horse" loophole. Trainees can no longer bypass tracking by clicking external links (like YouTube) embedded inside PDF documents.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance Optimization:</strong> Parallelized the bootloader sync engine, slashing application startup time by up to 90%.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessment Protection:</strong> Incoming system updates will no longer interrupt active assessments with intrusive popups or restarts.</li>
+            </ul>`,
         "2.4.67": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Study Browser:</strong> Fixed an issue where PDF viewers would steal focus and prevent the top navigation buttons (Dashboard, Exit, Mark for Clarity) from working on the first click.</li>

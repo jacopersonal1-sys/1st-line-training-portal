@@ -1195,6 +1195,12 @@ function openSuperAdminConfig() {
                             </div>
                             <label>Whitelist</label><input type="text" id="sa_sec_whitelist" value="${whitelist.join(', ')}">
                         </div>
+
+                    <div class="card" style="margin-top:15px; border-left: 4px solid #ff5252;">
+                        <h4><i class="fas fa-user-slash"></i> Blacklisted Users (Identity Revoked)</h4>
+                        <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Users who were Archived or Graduated are placed on this blacklist so the system can destroy their old data. <strong>Remove their name from this list</strong> to allow them to be recreated or log in again.</div>
+                        <input type="text" id="sa_sec_revoked" value="${JSON.parse(localStorage.getItem('revokedUsers') || '[]').join(', ')}" style="width:100%;" placeholder="username1, username2...">
+                    </div>
                     </div>
 
                     <!-- TAB: DATA (NEW) -->
@@ -1941,6 +1947,14 @@ async function saveSuperAdminConfig() {
     // STANDARD SAVE (To currently connected server)
     if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
     
+    // Save Revoked Users Blacklist
+    const revokedInput = document.getElementById('sa_sec_revoked');
+    if (revokedInput) {
+        const newRevoked = revokedInput.value.split(',').map(s => s.trim()).filter(s => s);
+        localStorage.setItem('revokedUsers', JSON.stringify(newRevoked));
+        if (typeof saveToServer === 'function') await saveToServer(['revokedUsers'], true);
+    }
+
     // DUAL-WRITE: If switching servers, try to update the CLOUD config specifically
     // This ensures that even if we are on Local, the Cloud knows we are on Local (or vice versa).
     // This acts as the "Master Signal" for all clients.

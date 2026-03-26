@@ -9,6 +9,23 @@ let DRAG_SRC_INDEX = null; // Track item being dragged
 let CALENDAR_MONTH = new Date();
 window.IS_DRAGGING_LIVE = false; // Global lock for drag operations
 
+// --- NEW: URL CLEANER FOR SHAREPOINT ---
+function cleanSharePointUrl(url) {
+    if (!url || !url.includes('sharepoint.com')) return url;
+    try {
+        const u = new URL(url);
+        // Common expiring tokens and tracking params
+        u.searchParams.delete('e');
+        u.searchParams.delete('d');
+        u.searchParams.delete('tempauth');
+        u.searchParams.delete('ga');
+        u.searchParams.delete('p');
+        return u.toString();
+    } catch (e) {
+        return url; // Return original if URL is malformed
+    }
+}
+
 // --- SA PUBLIC HOLIDAYS (2026 Reference) ---
 // Used to skip these dates in the Live Assessment Schedule
 const SA_HOLIDAYS = [
@@ -1764,10 +1781,10 @@ async function saveScheduleItem() {
 
     item.dateRange = document.getElementById('editDateRange').value;
     item.courseName = document.getElementById('editCourseName').value;
-    item.materialLink = document.getElementById('editMaterialLink').value;
+    item.materialLink = cleanSharePointUrl(document.getElementById('editMaterialLink').value);
     item.materialAlways = document.getElementById('editMaterialAlways').checked;
     item.dueDate = document.getElementById('editDueDate').value;
-    item.assessmentLink = document.getElementById('editAssessmentLink').value;
+    item.assessmentLink = cleanSharePointUrl(document.getElementById('editAssessmentLink').value);
     item.openTime = document.getElementById('editStartTime').value;
     item.closeTime = document.getElementById('editEndTime').value;
     item.ignoreTime = document.getElementById('editIgnoreTime').checked;

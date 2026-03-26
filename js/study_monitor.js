@@ -50,8 +50,8 @@ const StudyMonitor = {
         this.syncInterval = setInterval(() => this.sync(), 10000);
         this.track("System: App Loaded");
 
-        // --- DAILY ARCHIVE CHECK ---
-        this.checkDailyReset();
+        // --- DAILY ARCHIVE CHECK (Delayed to prevent bootloader race conditions) ---
+        setTimeout(() => this.checkDailyReset(), 15000);
 
         // --- START BULLETPROOF OS-LEVEL ACTIVITY POLLER ---
         if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
@@ -1179,7 +1179,7 @@ function renderActivityMonitorContent() {
         const histContainer = document.getElementById(`mon_hist_${safeId}`);
         if (activity.history && activity.history.length > 0) {
             const recent = activity.history.slice().reverse(); // Show all history
-            let histHtml = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            histContainer.innerHTML = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
                 ${recent.map(h => {
                     const dur = Math.round(h.duration / 1000) + 's';
                     const time = new Date(h.start).toLocaleTimeString();
@@ -1191,13 +1191,8 @@ function renderActivityMonitorContent() {
                     </li>`;
                 }).join('')}
             </ul>`;
-            if (histContainer) {
-                const scrollPos = histContainer.scrollTop;
-                histContainer.innerHTML = histHtml;
-                histContainer.scrollTop = scrollPos;
-            }
         } else {
-            if (histContainer) histContainer.innerHTML = '<div style="font-style:italic; color:var(--text-muted);">No history recorded yet.</div>';
+            histContainer.innerHTML = '<div style="font-style:italic; color:var(--text-muted);">No history recorded yet.</div>';
         }
     });
 
@@ -1398,12 +1393,7 @@ function renderActivitySummary(container) {
             
             if (category === 'material') {
                 materialMs += effectiveDuration;
-                let topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
-                // URL CLEANUP
-                if (topic.includes('sharepoint.com') || topic.includes('microsoftonline.com')) {
-                    if (topic.includes('.mp4') || topic.includes('stream.aspx')) topic = 'Training Video (SharePoint)';
-                    else topic = 'Training Document (SharePoint)';
-                }
+                const topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'material' };
                 topicMap[topic].ms += effectiveDuration;
             } else if (category === 'tool') {
@@ -1470,7 +1460,7 @@ function renderActivitySummary(container) {
         const extTopics = Object.entries(topicMap).filter(t => t[1].type === 'external').sort((a,b)=>b[1].ms - a[1].ms);
         const vioTopics = Object.entries(topicMap).filter(t => t[1].type === 'violation').sort((a,b)=>b[1].ms - a[1].ms);
 
-        let breakdownHtml = '';
+        let breakdownHtml = '<div class="topic-breakdown" style="max-height:160px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:5px; background:var(--bg-app);">';
         
         const renderList = (title, items, color, icon) => {
             if (items.length === 0) return '';
@@ -1494,6 +1484,7 @@ function renderActivitySummary(container) {
         if (matTopics.length===0 && toolTopics.length===0 && extTopics.length===0 && vioTopics.length===0) {
             breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; text-align:center; padding:10px;">No specific activities logged.</div>';
         }
+        breakdownHtml += '</div>';
 
         // 4. Build Timeline Bar
         // Normalize segments to percentages
@@ -1603,7 +1594,7 @@ function renderActivitySummary(container) {
                 </div>
                 <div style="margin-bottom:15px;">
                     <div style="font-size:0.75rem; font-weight:bold; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase;">Activity Breakdown</div>
-                    <div id="sum_topics_${safeId}" class="topic-breakdown" style="max-height:160px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:5px; background:var(--bg-app);"></div>
+                    <div id="sum_topics_${safeId}" class="topic-breakdown"></div>
                 </div>
                 <div id="sum_timeline_${safeId}" class="timeline-visual" onclick="StudyMonitor.expandTimeline('${agent.replace(/'/g, "\\'")}')" style="cursor:pointer;" title="Click to expand details"></div>
                 <div style="display:flex; justify-content:space-between; font-size:0.65rem; color:var(--text-muted); margin-top:4px; font-family:monospace; opacity:0.7;">
@@ -1634,16 +1625,9 @@ function renderActivitySummary(container) {
         const sumIdle = document.getElementById(`sum_idle_${safeId}`);
         if (sumIdle) sumIdle.innerText = idleTimeStr;
         
-        // UX SCROLL LOCK: Prevent DOM wipes from resetting scroll position while investigating
-        const topicsDiv = document.getElementById(`sum_topics_${safeId}`);
-        if (topicsDiv) {
-            const scrollPos = topicsDiv.scrollTop;
-            topicsDiv.innerHTML = breakdownHtml;
-            topicsDiv.scrollTop = scrollPos;
-        }
-        
-        const timelineDiv = document.getElementById(`sum_timeline_${safeId}`);
-        if (timelineDiv) timelineDiv.innerHTML = timelineHtml;
+        // InnerHTML for complex children is fine if container is stable
+        document.getElementById(`sum_topics_${safeId}`).innerHTML = breakdownHtml;
+        document.getElementById(`sum_timeline_${safeId}`).innerHTML = timelineHtml;
     });
 
     // Cleanup Stale Cards
@@ -1832,9 +1816,10 @@ StudyMonitor.toggleReviewQueue = function() {
     renderActivityMonitorContent();
 };
 
-StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
-    const todayStr = this.getLocalDateString();
-    const queryDate = targetDateStr || todayStr;
+StudyMonitor.expandTimeline = function(agentName) {
+    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const activity = data[agentName];
+    if (!activity) return alert("No data for this agent.");
 
     let modal = document.getElementById('timelineDetailModal');
     if (!modal) {
@@ -1875,18 +1860,13 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
     }
 
     document.getElementById('tlDetailName').innerText = agentName;
-    
-    const datePicker = document.getElementById('tlDetailDate');
-    datePicker.value = queryDate;
-    datePicker.onchange = (e) => { StudyMonitor.expandTimeline(agentName, e.target.value); };
-
     const visualContainer = document.getElementById('tlDetailVisual');
     const tableContainer = document.getElementById('tlDetailTable');
     
     visualContainer.innerHTML = '';
     tableContainer.innerHTML = '';
 
-    // --- RECALCULATE SEGMENTS ---
+    // --- RECALCULATE SEGMENTS (with Archive support) ---
     let allSegments = [];
     
     if (queryDate === todayStr) {
@@ -1909,6 +1889,11 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
         const pastDay = historyLog.find(h => h.user === agentName && h.date === queryDate);
         if (pastDay && pastDay.details) {
             allSegments = [...pastDay.details];
+        } else if (pastDay && !pastDay.details) {
+            visualContainer.innerHTML = '<div style="text-align:center; width:100%; color:#f1c40f; padding-top:10px;"><i class="fas fa-compress"></i> Detailed timeline was optimized to save space. Summary data is still available.</div>';
+            tableContainer.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Detailed logs purged for optimization.</td></tr>';
+            modal.classList.remove('hidden');
+            return;
         }
     }
 
@@ -1994,17 +1979,11 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
             const timeStr = new Date(p.start).toLocaleTimeString();
             const mins = (p.duration / 60000).toFixed(1) + 'm';
             
-            let displayActivity = p.activity;
-            if (displayActivity.includes('sharepoint.com') || displayActivity.includes('microsoftonline.com')) {
-                 if (displayActivity.includes('.mp4') || displayActivity.includes('stream.aspx')) displayActivity = 'Studying: Training Video (SharePoint)';
-                 else displayActivity = 'Studying: Training Document (SharePoint)';
-            }
-
             tableHtml += `
                 <tr style="${p.rowColor}">
                     <td>${timeStr}</td>
                     <td>${mins}</td>
-                    <td title="${p.activity.replace(/"/g, '&quot;')}">${displayActivity}</td>
+                    <td>${p.activity}</td>
                     <td>${p.catLabel}</td>
                 </tr>
             `;

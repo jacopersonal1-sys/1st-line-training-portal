@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.70**: **Hotfix**: Fixed scroll-reset issue in the Activity Monitor breakdown views.
  - **v2.4.69**: **Hotfix**: Resolved Activity Monitor rendering crash related to URL cleaner strictness.
  - **v2.4.68**: **Activity Monitor 3.0 & Performance**: Implemented 4-tier activity breakdown, Study Browser Sandbox Firewall, Date-Picker for archives, and parallelized boot sequence for instant startup. Added Assessment Protection for system updates.
  - **v2.4.67**: **Activity Monitor & Browser**: Added strict Violation tracking for external apps. Fixed study browser navigation button focus issues when viewing PDFs.
