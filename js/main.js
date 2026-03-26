@@ -601,8 +601,13 @@ window.onload = async function() {
                 const cacheData = await window.electronAPI.disk.loadCache();
                 if (cacheData) {
                     const parsed = JSON.parse(cacheData);
-                    Object.keys(parsed).forEach(k => localStorage.setItem(k, parsed[k]));
-                    console.log("Successfully restored data from Native Disk Cache.");
+                    if (parsed.DEMO_MODE === 'true' || parsed.IS_SANDBOX_DB === 'true') {
+                        console.warn("Disk cache contains Sandbox Data. Discarding to protect production.");
+                        window.electronAPI.disk.saveCache('{}');
+                    } else {
+                        Object.keys(parsed).forEach(k => localStorage.setItem(k, parsed[k]));
+                        console.log("Successfully restored data from Native Disk Cache.");
+                    }
                 }
             } catch(e) { console.error("Disk Recovery failed:", e); }
         }
@@ -660,6 +665,14 @@ window.onload = async function() {
             location.reload();
         };
         document.body.prepend(banner);
+    }
+
+    // --- DEMO BUBBLE BANNER ---
+    if (sessionStorage.getItem('DEMO_MODE') === 'true') {
+        const demoBanner = document.createElement('div');
+        demoBanner.style.cssText = "position:fixed; bottom:20px; right:20px; background:#f1c40f; color:#000; padding:10px 20px; border-radius:30px; font-weight:bold; z-index:99999; box-shadow:0 10px 25px rgba(0,0,0,0.5); pointer-events:none; border:2px solid #fff; animation: pulse 2s infinite;";
+        demoBanner.innerHTML = '<i class="fas fa-flask"></i> DEMO SANDBOX ACTIVE';
+        document.body.appendChild(demoBanner);
     }
 
     // 0. EARLY RENDER: Show Skeleton Dashboard if session exists
@@ -977,6 +990,12 @@ window.onload = async function() {
     // --- LUNCH TIMER LOGIC ---
     setInterval(updateLunchTimer, 1000);
     updateLunchTimer();
+
+    // --- DEMO SEED TRIGGER ---
+    if (sessionStorage.getItem('SEED_DEMO') === 'true') {
+        sessionStorage.removeItem('SEED_DEMO');
+        setTimeout(() => { if (typeof saveToServer === 'function') saveToServer(null, true); }, 2500);
+    }
 };
 
 function updateLunchTimer() {
@@ -1625,12 +1644,6 @@ function toggleTheme() {
     localStorage.setItem('theme', isLight ? 'light' : 'dark');
 }
 
-function logout() {
-    sessionStorage.removeItem('currentUser');
-    window.location.reload();
-}
-
-
 /* ================= NOTIFICATIONS ================= */
 function toggleNotifications() {
     const drop = document.getElementById('notificationDropdown');
@@ -1896,6 +1909,8 @@ window.performUpdateRestart = function() {
 window.cacheAndLogout = async function() {
     console.log("Inactivity detected. Caching and logging out...");
     
+    const isDemo = localStorage.getItem('DEMO_MODE') === 'true';
+
     if (CURRENT_USER && typeof logAccessEvent === 'function') {
         await logAccessEvent(CURRENT_USER.user, 'Timeout');
     }
@@ -1915,7 +1930,9 @@ window.cacheAndLogout = async function() {
     const limit = (CURRENT_USER && CURRENT_USER.idleTimeout) ? CURRENT_USER.idleTimeout : 15;
     alert(`You have been logged out due to inactivity (${limit} mins).\n\nYour current work has been cached locally and will be restored when you log back in.`);
     
-    sessionStorage.removeItem('currentUser');
+    sessionStorage.clear();
+    if (isDemo) localStorage.clear();
+    
     window.location.reload();
 };
 
@@ -1974,6 +1991,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.71": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Schedule Links:</strong> Added an automatic URL Sanitizer to strip expiring temporary tokens from SharePoint links, preventing study materials from becoming stale over time.</li>
+                <li style="margin-bottom: 8px;"><strong>Activity Monitor:</strong> Fixed a wake-from-sleep race condition that occasionally caused the previous day's detailed timeline data to be lost during the morning sync.</li>
+            </ul>`,
         "2.4.70": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Fixed a scrolling reset issue in the Activity Monitor's Detailed Breakdown and Recent History views caused by real-time background updates.</li>

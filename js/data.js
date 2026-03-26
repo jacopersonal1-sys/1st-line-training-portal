@@ -95,6 +95,22 @@ const ROW_MAP = {
     'tl_task_submissions': 'tl_task_submissions'
 };
 
+// --- DEMO SANDBOX BUBBLE ---
+let IS_DEMO_MODE = localStorage.getItem('DEMO_MODE') === 'true';
+
+// --- ORPHAN SANDBOX DETECTION (APP CLOSE LEAK FIX) ---
+// If the app was closed during a demo, the session dies. We detect this on boot.
+const isDemoSessionActive = !!sessionStorage.getItem('currentUser');
+if (!isDemoSessionActive && IS_DEMO_MODE) {
+    console.warn("⚠️ Detected orphaned Sandbox data from a closed session. Wiping database to protect production.");
+    localStorage.clear();
+    IS_DEMO_MODE = false;
+}
+
+if (IS_DEMO_MODE) {
+    Object.keys(ROW_MAP).forEach(k => delete ROW_MAP[k]); // Force ALL data into isolated blobs
+}
+
 // --- SERVER AUTHORITY CONFIGURATION ---
 // Tables that must always reflect the exact state of the server (No Merging, Full Overwrite).
 // This fixes "Ghost Data" and synchronization lag for critical shared resources.
@@ -275,9 +291,11 @@ async function loadFromServer(silent = false) {
         }
         
         // --- PHASE A: BLOB SYNC (Settings, Rosters, Users) ---
-        const { data: meta, error } = await window.supabaseClient
-            .from('app_documents')
-            .select('key, updated_at');
+        let metaQuery = window.supabaseClient.from('app_documents').select('key, updated_at');
+        if (IS_DEMO_MODE) metaQuery = metaQuery.like('key', 'demo_%');
+        else metaQuery = metaQuery.not('key', 'like', 'demo_%');
+        
+        const { data: meta, error } = await metaQuery;
         window.CURRENT_LATENCY = Date.now() - start; // Measure RTT
         
         if (error) throw error;
@@ -285,10 +303,11 @@ async function loadFromServer(silent = false) {
         // Identify Stale Blobs
         const keysToFetch = [];
         meta.forEach(row => {
+            const localKey = IS_DEMO_MODE ? row.key.replace('demo_', '') : row.key;
             // SECURITY & MINIMIZATION: Skip admin-only blobs for trainees
-            if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(row.key)) return;
+            if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(localKey)) return;
             
-            const localTs = localStorage.getItem('sync_ts_' + row.key);
+            const localTs = localStorage.getItem('sync_ts_' + localKey);
             // If we don't have it, or server is newer, fetch it
             if (!localTs || new Date(row.updated_at) > new Date(localTs)) {
                 keysToFetch.push(row.key);
@@ -307,30 +326,32 @@ async function loadFromServer(silent = false) {
             if (fetchErr) throw fetchErr;
 
             for (const doc of docs) {
+                const localKey = IS_DEMO_MODE ? doc.key.replace('demo_', '') : doc.key;
                 // SMART PULL: Always try to merge JSON data to prevent overwriting local unsaved drafts
                 // We use 'server_wins' strategy here: If an item exists in both, Server version is the truth.
-                const localVal = JSON.parse(localStorage.getItem(doc.key));
+                const localVal = JSON.parse(localStorage.getItem(localKey));
                 
                 // FIX: For specific Admin keys (Rosters, Schedules, Tests), do NOT merge. 
                 // Merging restores deleted items if the server hasn't updated yet or if we are out of sync.
                 // We trust the Server's snapshot if it is newer, or our local overwrite if we just saved.
                 const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
                 
-                if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(doc.key)) {
+                if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(localKey)) {
                     let strategy = 'server_wins';
                     
-                    const serverObj = { [doc.key]: doc.content };
-                    const localObj = { [doc.key]: localVal };
+                    const serverObj = { [localKey]: doc.content };
+                    const localObj = { [localKey]: localVal };
                     const merged = performSmartMerge(serverObj, localObj, strategy);
-                    localStorage.setItem(doc.key, JSON.stringify(merged[doc.key]));
+                    localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
                 } else {
                     // Fallback for primitives OR no-merge keys (Direct Overwrite)
-                    localStorage.setItem(doc.key, JSON.stringify(doc.content));
+                    localStorage.setItem(localKey, JSON.stringify(doc.content));
                 }
-                localStorage.setItem('sync_ts_' + doc.key, doc.updated_at);
+                localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
             }
             
-            if (keysToFetch.includes('system_config')) applySystemConfig();
+            const configKey = IS_DEMO_MODE ? 'demo_system_config' : 'system_config';
+            if (keysToFetch.includes(configKey)) applySystemConfig();
             criticalSuccess = true; // Config loaded
         } else {
             criticalSuccess = true; // Nothing new, but we have local cache
@@ -596,7 +617,7 @@ async function loadFromServer(silent = false) {
         updateSyncUI('success');
         
         // NATIVE DISK CACHE BACKUP
-        if (window.electronAPI && window.electronAPI.disk) {
+        if (!IS_DEMO_MODE && window.electronAPI && window.electronAPI.disk) {
             window.electronAPI.disk.saveCache(JSON.stringify(localStorage)).catch(()=>{});
         }
         return true; // Signal Success
@@ -1184,13 +1205,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             // --- STRATEGY C: BLOB SYNC (Config, Rosters, Users) ---
             else {
                 let finalContent = localContent;
+                const remoteKey = IS_DEMO_MODE ? `demo_${key}` : key;
 
                 // Optimistic Merge (Fetch -> Merge -> Push)
                 if (!force) {
                     const { data: remoteRow } = await window.supabaseClient
                         .from('app_documents')
                         .select('content')
-                        .eq('key', key)
+                        .eq('key', remoteKey)
                         .maybeSingle();
                     
                     if (remoteRow && remoteRow.content) {
@@ -1204,7 +1226,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 const { data: savedData, error: saveErr } = await window.supabaseClient
                     .from('app_documents')
                     .upsert({ 
-                        key: key, 
+                        key: remoteKey, 
                         content: finalContent,
                         updated_at: new Date().toISOString()
                     })
@@ -1226,7 +1248,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
         
         // NATIVE DISK CACHE BACKUP
-        if (window.electronAPI && window.electronAPI.disk) {
+        if (!IS_DEMO_MODE && window.electronAPI && window.electronAPI.disk) {
             window.electronAPI.disk.saveCache(JSON.stringify(localStorage)).catch(()=>{});
         }
         return true;
@@ -2152,6 +2174,9 @@ function setupRealtimeListeners() {
         .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
             const table = payload.table;
             
+            // ISOLATION: Demo mode ONLY listens to app_documents
+            if (IS_DEMO_MODE && table !== 'app_documents') return;
+
             // Route to specific handlers
             if (table === 'monitor_state') handleMonitorRealtime(payload);
             else if (table === 'attendance') handleAttendanceRealtime(payload);
@@ -2360,7 +2385,13 @@ function processIncomingDataQueue() {
     if (batches.app_documents.length > 0) {
         batches.app_documents.forEach(p => {
             if (p.eventType === 'UPDATE' || p.eventType === 'INSERT') {
-                const key = p.new.key;
+                const rawKey = p.new.key;
+                
+                // ISOLATION BARRIER
+                if (IS_DEMO_MODE && !rawKey.startsWith('demo_')) return;
+                if (!IS_DEMO_MODE && rawKey.startsWith('demo_')) return;
+                
+                const key = IS_DEMO_MODE ? rawKey.replace('demo_', '') : rawKey;
                 const content = p.new.content;
                 
                 // Trainee Data Minimization (Security)

@@ -102,6 +102,183 @@ async function attemptLogin() {
   
   if(!u) { document.getElementById('loginError').innerText = "Enter username."; return; }
 
+  // --- SANDBOX LEAK PREVENTION ---
+  // If the user is NOT a demo user, but the DEMO_MODE flag is set from a
+  // previous session (e.g. improper logout, app crash), it's a leak.
+  // We must clear the flag and local storage to force a clean, production login.
+  const isAttemptingDemoLogin = ['demo_admin', 'demo_tl', 'demo_trainee'].includes(u.toLowerCase());
+  const hasOrphanedSandbox = localStorage.getItem('IS_SANDBOX_DB') === 'true';
+  if (!isAttemptingDemoLogin && (localStorage.getItem('DEMO_MODE') === 'true' || hasOrphanedSandbox)) {
+      console.warn("[Sandbox Leak] Detected and corrected a leaked DEMO_MODE flag for a real user login.");
+      localStorage.removeItem('DEMO_MODE');
+      localStorage.clear(); // Wipe any leftover demo data to ensure a fresh pull from production
+      
+      if (window.electronAPI && window.electronAPI.disk) window.electronAPI.disk.saveCache('{}');
+      document.getElementById('loginError').innerText = "Cleaning sandbox data... Reloading.";
+      setTimeout(() => window.location.reload(), 500);
+      return;
+  }
+  // --- END LEAK PREVENTION ---
+
+  // --- DEMO BUBBLE INTERCEPT ---
+  const isDemoAccount = ['demo_admin', 'demo_tl', 'demo_trainee'].includes(u.toLowerCase());
+  if (isDemoAccount) {
+      if (p !== 'demo123') {
+          document.getElementById('loginError').innerText = "Password for demo accounts is 'demo123'";
+          return;
+      }
+      
+      // Sever ties with Prod data to prevent cross-contamination
+      if (localStorage.getItem('DEMO_MODE') !== 'true') {
+          localStorage.clear();
+          localStorage.setItem('DEMO_MODE', 'true');
+          sessionStorage.setItem('DEMO_MODE', 'true');
+          localStorage.setItem('IS_SANDBOX_DB', 'true');
+      }
+      
+      const roleMap = { 'demo_admin': 'super_admin', 'demo_tl': 'teamleader', 'demo_trainee': 'trainee' };
+      CURRENT_USER = { user: u.toLowerCase(), role: roleMap[u.toLowerCase()], pass: 'demo123', traineeData: { email: "demo@herotel.com" } };
+      sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
+      
+      // Generate a perfect demo state if the bubble is empty
+      if (!localStorage.getItem('users')) {
+          const t = new Date();
+          const td = t.toISOString().split('T')[0];
+          const yd = new Date(t.getTime() - 86400000).toISOString().split('T')[0];
+          const tm = new Date(t.getTime() + 86400000).toISOString().split('T')[0];
+
+          const mockUsers = [
+              { user: 'demo_admin', role: 'super_admin', pass: 'demo123', theme: { primaryColor: '#F37021', wallpaper: '' } },
+              { user: 'demo_tl', role: 'teamleader', pass: 'demo123', theme: { primaryColor: '#3498db', wallpaper: '' } },
+              { user: 'demo_trainee', role: 'trainee', pass: 'demo123', theme: { primaryColor: '#2ecc71', wallpaper: '' }, traineeData: { email: "demo@herotel.com", phone: "0820000000", contact: "0820000000", knowledge: "Networking Basics", completedDate: yd + "T08:00:00.000Z" }, hasFilledQuestionnaire: true, boundClientId: "CL-DEMO" }
+          ];
+          
+          localStorage.setItem('users', JSON.stringify(mockUsers));
+          localStorage.setItem('rosters', JSON.stringify({ "Demo Cohort": ["demo_trainee"] }));
+          
+          // --- REALISTIC DEMO DATA BASED ON PRODUCTION SCHEMA ---
+          const demoTests = [
+              {
+                  id: "t_std_1", type: "standard", title: "Course 1 - Terms", duration: null,
+                  questions: [
+                      { id: "q1", text: "There are 2 types of twisted pair cables , name them as well when they are most commonly used.", type: "text", points: 4, modelAnswer: "STP : Outdoor use\nUTP : Indoor use" },
+                      { id: "q2", text: "What is the differance between TCP and UDP ?", type: "multi_select", points: 4, options: ["TCP is connection orreinted", "Both TCP & UDP is ideal for VoIP traffic", "UDP send & receives packets without acknowledgements", "TCP adjusts the packets size", "UDP is ideal for sending a email", "TCP provides error checking."], correct: [0, 2, 3, 5] },
+                      { id: "q3", text: "Match the function to the equipment that performs it.", type: "matching", pairs: [{ left: "PTMP", right: "A device where multiple other devices can connect to wirelessly" }, { left: "ONT / ONU", right: "The equipment that convers a fibre signal into a copper signal" }], points: 2 }
+                  ]
+              },
+              {
+                  id: "t_liv_1", type: "live", title: "Course 2 - Programs & Websites - Q-Contact", shuffle: false, duration: null,
+                  questions: [
+                      { id: "q4", text: "Scenario: You are working in the field and you need to contact previous customers... Perform the task on check your current open tickets.", type: "live_practical", points: 1, adminNotes: "Agent navigated from overview page to Tickets" },
+                      { id: "q5", text: "Create a outbound whatsapp to the customer provided by the trainer", type: "live_practical", points: 2, adminNotes: "1. Created whatsapp from open ticket 2. Used correct snippet" },
+                      { id: "q6", text: "True or False: When you are on a paused Status you will not be able to receive any type of interaction in any circumstances.", type: "text", points: 2, modelAnswer: "False - unless its an internal transfer" }
+                  ]
+              },
+              {
+                  id: "t_vet_1", type: "vetting", title: "1st Vetting - No internet 1st Vetting test", duration: "60",
+                  questions: [
+                      { id: "q7", text: "Scenario : A customer contacts in to the first line support department. How must the agent answer the communication ?", type: "multiple_choice", points: 1, options: ["Hello , whats wrong ?", "Good day , support here.", "Hi , yes ?", "Thank you for calling Herotel Technical Support , (Name) speaking."], correct: 3 },
+                      { id: "q8", text: "What is the aim of showing empathy towards the customer ?", type: "text", points: 1, adminNotes: "builds trust and rapport with the customer" },
+                      { id: "q9", text: "A customer contacts in stating that they do not have internet access. The cables and power for the fibre connection is correct, equipment is powered on, red light flashing on ONT. ONT status on preseem is wire down. What is the next step?", type: "text", points: 2, adminNotes: "Confirm if its a singular customer affected on the PON. Escalate to FO if singular, escalate to C & A if multiple." }
+                  ]
+              }
+          ];
+          localStorage.setItem('tests', JSON.stringify(demoTests));
+          
+          const demoSchedules = {
+              "A": {
+                  assigned: "Demo Cohort",
+                  items: [
+                      { dateRange: yd, courseName: "Training Rules", materialLink: "https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQCJkVn4sWZGRZndikSP8mozAeaEk9Kxr4Gq_SbHKZgq3nU?e=Oj2lZl", materialAlways: true, ignoreTime: true },
+                      { dateRange: td, dueDate: tm, courseName: "Course 1 - Terms", linkedTestId: "t_std_1", openTime: "08:00", closeTime: "17:00", ignoreTime: false, materialLink: "https://view.genially.com/692d76dce9bbbf3795725d38" },
+                      { dateRange: td, courseName: "Course 2 - Programs & Websites - Q-Contact", isLive: true, ignoreTime: false },
+                      { dateRange: tm, dueDate: tm, courseName: "1st Vetting - No internet 1st Vetting test", linkedTestId: "t_vet_1", isVetting: true, ignoreTime: true, openTime: "08:00", closeTime: "17:00" }
+                  ]
+              }
+          };
+          localStorage.setItem('schedules', JSON.stringify(demoSchedules));
+          
+          const demoLiveSchedules = {
+              "A": { assigned: "Demo Cohort", startDate: yd, days: 14, activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"], trainers: ["Darren", "Netta", "Jaco"], dailyTrainers: {} }
+          };
+          localStorage.setItem('liveSchedules', JSON.stringify(demoLiveSchedules));
+          
+          const demoLiveBookings = [
+              { id: "b1", date: yd, time: "1:00 PM", status: "Completed", trainee: "demo_trainee", trainer: "Darren", assessment: "Course 2 - Programs & Websites - Q-Contact", score: 85 },
+              { id: "b2", date: td, time: "2:00 PM", status: "Booked", trainee: "demo_trainee", trainer: "Netta", assessment: "Course 2 - Programs & Websites - Corteza" },
+              { id: "b3", date: td, time: "3:00 PM", status: "Cancelled", trainee: "demo_trainee", trainer: "Jaco", assessment: "Course 2 - Programs & Websites - Radius Server", cancelledAt: new Date().toISOString(), cancelledBy: "demo_trainee" }
+          ];
+          localStorage.setItem('liveBookings', JSON.stringify(demoLiveBookings));
+          
+          const demoRecords = [
+              { id: "r1", date: yd, phase: "Assessment", cycle: "New Onboard", score: 92, groupID: "Demo Cohort", trainee: "demo_trainee", assessment: "Course 1 - Terms", docSaved: true, link: "Digital-Assessment", submissionId: "s1" },
+              { id: "r2", date: yd, phase: "Assessment", cycle: "Live", score: 85, groupID: "Demo Cohort", trainee: "demo_trainee", assessment: "Course 2 - Programs & Websites - Q-Contact", docSaved: true, link: "Live-Session", bookingId: "b1" },
+              { id: "r3", date: yd, phase: "Assessment", cycle: "New Onboard", score: 45, groupID: "Demo Cohort", trainee: "demo_trainee", assessment: "Course 3 - Networking", docSaved: true, link: "Digital-Assessment" }
+          ];
+          localStorage.setItem('records', JSON.stringify(demoRecords));
+          
+          const demoSubmissions = [
+              { 
+                  id: "s1", testId: "t_std_1", testTitle: "Course 1 - Terms", trainee: "demo_trainee", date: yd, status: "completed", score: 92, 
+                  answers: { "0": "STP is for outdoor, UTP is for indoor", "1": [0, 2, 3], "2": {"0": "0", "1": "1"} }, 
+                  marker: "demo_admin", scores: { "0": 4, "1": 4, "2": 2 }, comments: { "0": "Good", "1": "", "2": "" },
+                  testSnapshot: demoTests[0] 
+              },
+              {
+                  id: "s2", testId: "t_liv_1", testTitle: "Course 2 - Programs & Websites - Q-Contact", trainee: "demo_trainee", date: yd, status: "completed", score: 85,
+                  marker: "Darren", scores: { "0": 1, "1": 2, "2": 2 },
+                  answers: { "0": "Completed", "1": "Completed", "2": "False, unless it's an internal transfer" },
+                  comments: { "0": "", "1": "Used correct snippet", "2": "" },
+                  testSnapshot: demoTests[1]
+              },
+              {
+                  id: "s3", testId: "t_vet_1", testTitle: "1st Vetting - No internet 1st Vetting test", trainee: "demo_trainee", date: td, status: "pending", score: 0,
+                  answers: { "0": 3, "1": "To build rapport.", "2": "Escalate to C & A." },
+                  testSnapshot: demoTests[2]
+              }
+          ];
+          localStorage.setItem('submissions', JSON.stringify(demoSubmissions));
+          
+          const demoAttendance = [
+              { id: "a1", user: "demo_trainee", date: yd, clockIn: "07:51:20 AM", clockOut: "4:55:00 PM", isLate: false, lateData: null, lateConfirmed: false, adminComment: "" },
+              { id: "a2", user: "demo_trainee", date: td, clockIn: "08:15:12 AM", clockOut: null, isLate: true, lateData: { reason: "Traffic", contact: "demo_tl", informed: true, platform: "WhatsApp" }, lateConfirmed: false, adminComment: "" }
+          ];
+          localStorage.setItem('attendance_records', JSON.stringify(demoAttendance));
+          
+          const demoMonitorData = {
+              "demo_trainee": { current: "Studying: Course 1 - Terms (SharePoint)", since: t.getTime() - 3600000, isStudyOpen: true, history: [] }
+          };
+          localStorage.setItem('monitor_data', JSON.stringify(demoMonitorData));
+          
+          const demoMonitorHistory = [
+              { 
+                  date: yd, user: "demo_trainee", 
+                  summary: { study: 18000000, tool: 3600000, external: 180000, idle: 600000, total: 22380000 }, 
+                  details: [
+                      { activity: "Studying: Q-Contact (Work System)", start: new Date(`${yd}T08:00:00`).getTime(), duration: 18000000, end: new Date(`${yd}T13:00:00`).getTime() },
+                      { activity: "System: Task Manager", start: new Date(`${yd}T14:00:00`).getTime(), duration: 3600000, end: new Date(`${yd}T15:00:00`).getTime() },
+                      { activity: "Violation: YouTube", start: new Date(`${yd}T15:00:00`).getTime(), duration: 180000, end: new Date(`${yd}T15:03:00`).getTime() },
+                      { activity: "Idle", start: new Date(`${yd}T15:03:00`).getTime(), duration: 600000, end: new Date(`${yd}T15:13:00`).getTime() }
+                  ] 
+              }
+          ];
+          localStorage.setItem('monitor_history', JSON.stringify(demoMonitorHistory));
+          
+          localStorage.setItem('notices', JSON.stringify([
+              { id: "n1", message: "Welcome to the Demo Sandbox Environment! All data generated here is isolated and mimics a realistic production state.", targetRole: "all", type: "info", active: true, date: td, acks: [] }
+          ]));
+          
+          localStorage.setItem('SEED_DEMO', 'true');
+      }
+      
+      // CRITICAL ARCHITECTURAL FIX: 
+      // We MUST hard-reload the window to guarantee data.js evaluates the IS_DEMO_MODE flag 
+      // correctly on boot. Using setTimeout ensures disk writes complete before the renderer tears down.
+      setTimeout(() => window.location.reload(), 150);
+      return;
+  }
+  // -----------------------------
+
   // --- SECURITY CHECK 1: REVOKED ACCESS (Blacklist) ---
   const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
   if (revoked.includes(u)) {
@@ -623,6 +800,8 @@ function applyRolePermissions() {
 }
 
 async function logout() { 
+  const isDemo = localStorage.getItem('DEMO_MODE') === 'true';
+
   // ARCHITECTURAL FIX: KIOSK MODE TRAP
   // Ensure we drop OS lockdown shields before logging out, otherwise 
   // the user gets trapped on the login screen in full-screen Kiosk mode.
@@ -637,8 +816,10 @@ async function logout() {
   if (CURRENT_USER && typeof logAccessEvent === 'function') {
       await logAccessEvent(CURRENT_USER.user, 'Logout');
   }
-  sessionStorage.removeItem('currentUser');
-  // localStorage.removeItem('rememberedUser'); // Keep credentials for pre-fill
+  
+  sessionStorage.clear();
+  if (isDemo) localStorage.clear();
+
   location.reload(); 
 }
 

@@ -50,8 +50,8 @@ const StudyMonitor = {
         this.syncInterval = setInterval(() => this.sync(), 10000);
         this.track("System: App Loaded");
 
-        // --- DAILY ARCHIVE CHECK (Delayed to prevent bootloader race conditions) ---
-        setTimeout(() => this.checkDailyReset(), 15000);
+        // --- DAILY ARCHIVE CHECK ---
+        this.checkDailyReset();
 
         // --- START BULLETPROOF OS-LEVEL ACTIVITY POLLER ---
         if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
@@ -135,12 +135,16 @@ const StudyMonitor = {
                             const defaultSites = [
                                 'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
                                 'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
-                                'cp1.herotel.com', 'cp2.herotel.com'
+                                'cp1.herotel.com', 'cp2.herotel.com', 'odoo.herotel.com'
                             ];
                             const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
 
+                            // Ensure all training and program keywords are permitted OS-level
+                            const trainingKeywords = ['sharepoint', '.pdf', 'training', 'course', 'document', 'word', 'excel', 'powerpoint', 'onenote', 'odoo', 'genially', 'macvendor'];
+                            const allPermitted = [...workSites, ...trainingKeywords];
+
                             // Check if window title contains any of the work sites
-                            const matchedSite = workSites.find(site => site && activeWindow.toLowerCase().includes(site.toLowerCase()));
+                            const matchedSite = allPermitted.find(site => site && activeWindow.toLowerCase().includes(site.toLowerCase()));
                             
                             if (matchedSite) {
                                 // Classify as "Studying" (or Work) so it counts towards Focus Score
@@ -373,6 +377,9 @@ const StudyMonitor = {
             if (raw.includes('sharepoint') || raw.includes('training')) return 'material';
             return 'tool';
         }
+        
+        const toolsKeywords = ['qcontact', 'crm', 'radius', 'preseem', 'acs', 'hosting', 'odoo', 'cp1', 'cp2', 'teams', 'outlook', 'mail', 'notepad', 'onenote', 'macvendor'];
+        if (toolsKeywords.some(t => act.includes(t))) return 'tool';
 
         // 2. STRICT MODE CHECK
         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
@@ -833,6 +840,8 @@ const StudyMonitor = {
         webview.setAttribute('allowpopups', 'true');
         // DEFUSAL 2: Strict Microsoft Edge Spoofing to bypass SSO Conditional Access blocks
         webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
+        // UX ENHANCEMENT: Force persistent session for cookies to survive app restarts
+        webview.setAttribute('partition', 'persist:study_session');
         webview.classList.add('study-webview');
         if (!activate) webview.classList.add('hidden');
 
@@ -921,6 +930,18 @@ const StudyMonitor = {
             }
         });
 
+        // ARCHITECTURAL FIX: SPAs (Single Page Apps like Q-Contact, CRM, SharePoint)
+        // change titles dynamically without triggering 'did-navigate'.
+        // We must track 'page-title-updated' to capture what they are actually doing inside the app.
+        webview.addEventListener('page-title-updated', (e) => {
+            tab.title = e.title.substring(0, 20);
+            this.renderTabs();
+            
+            if (this.browserState.activeTabId === tab.id) {
+                this.track(`Studying: ${e.title.substring(0, 50)}`);
+            }
+        });
+
         webview.addEventListener('did-navigate', (e) => {
             tab.url = e.url;
             
@@ -929,7 +950,12 @@ const StudyMonitor = {
             try {
                 const urlObj = new URL(e.url);
                 // List of permitted root domains for the internal browser
-                const safeDomains = ['herotel.com', 'sharepoint.com', 'microsoftonline.com', 'qcontact.com', 'preseem.com', 'herotel.systems', 'office.com'];
+                const safeDomains = [
+                    'herotel.com', 'sharepoint.com', 'microsoftonline.com', 'microsoft.com', 
+                    'cloud.microsoft', 'live.com', 'office.com', 'office.net', 'msauth.net', 
+                    'qcontact.com', 'preseem.com', 'herotel.systems', 'genially.com',
+                    'macvendors.com', 'macvendorlookup.com'
+                ];
                 
                 if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
                     const isSafe = safeDomains.some(d => urlObj.hostname.toLowerCase().includes(d));
@@ -1179,7 +1205,7 @@ function renderActivityMonitorContent() {
         const histContainer = document.getElementById(`mon_hist_${safeId}`);
         if (activity.history && activity.history.length > 0) {
             const recent = activity.history.slice().reverse(); // Show all history
-            histContainer.innerHTML = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            let histHtml = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
                 ${recent.map(h => {
                     const dur = Math.round(h.duration / 1000) + 's';
                     const time = new Date(h.start).toLocaleTimeString();
@@ -1191,8 +1217,13 @@ function renderActivityMonitorContent() {
                     </li>`;
                 }).join('')}
             </ul>`;
+            if (histContainer) {
+                const scrollPos = histContainer.scrollTop;
+                histContainer.innerHTML = histHtml;
+                histContainer.scrollTop = scrollPos;
+            }
         } else {
-            histContainer.innerHTML = '<div style="font-style:italic; color:var(--text-muted);">No history recorded yet.</div>';
+            if (histContainer) histContainer.innerHTML = '<div style="font-style:italic; color:var(--text-muted);">No history recorded yet.</div>';
         }
     });
 
@@ -1393,7 +1424,12 @@ function renderActivitySummary(container) {
             
             if (category === 'material') {
                 materialMs += effectiveDuration;
-                const topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
+                let topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
+                // URL CLEANUP
+                if (topic.includes('sharepoint.com') || topic.includes('microsoftonline.com')) {
+                    if (topic.includes('.mp4') || topic.includes('stream.aspx')) topic = 'Training Video (SharePoint)';
+                    else topic = 'Training Document (SharePoint)';
+                }
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'material' };
                 topicMap[topic].ms += effectiveDuration;
             } else if (category === 'tool') {
@@ -1460,7 +1496,7 @@ function renderActivitySummary(container) {
         const extTopics = Object.entries(topicMap).filter(t => t[1].type === 'external').sort((a,b)=>b[1].ms - a[1].ms);
         const vioTopics = Object.entries(topicMap).filter(t => t[1].type === 'violation').sort((a,b)=>b[1].ms - a[1].ms);
 
-        let breakdownHtml = '<div class="topic-breakdown" style="max-height:160px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:5px; background:var(--bg-app);">';
+        let breakdownHtml = '';
         
         const renderList = (title, items, color, icon) => {
             if (items.length === 0) return '';
@@ -1484,7 +1520,6 @@ function renderActivitySummary(container) {
         if (matTopics.length===0 && toolTopics.length===0 && extTopics.length===0 && vioTopics.length===0) {
             breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; text-align:center; padding:10px;">No specific activities logged.</div>';
         }
-        breakdownHtml += '</div>';
 
         // 4. Build Timeline Bar
         // Normalize segments to percentages
@@ -1594,7 +1629,7 @@ function renderActivitySummary(container) {
                 </div>
                 <div style="margin-bottom:15px;">
                     <div style="font-size:0.75rem; font-weight:bold; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase;">Activity Breakdown</div>
-                    <div id="sum_topics_${safeId}" class="topic-breakdown"></div>
+                    <div id="sum_topics_${safeId}" class="topic-breakdown" style="max-height:160px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:5px; background:var(--bg-app);"></div>
                 </div>
                 <div id="sum_timeline_${safeId}" class="timeline-visual" onclick="StudyMonitor.expandTimeline('${agent.replace(/'/g, "\\'")}')" style="cursor:pointer;" title="Click to expand details"></div>
                 <div style="display:flex; justify-content:space-between; font-size:0.65rem; color:var(--text-muted); margin-top:4px; font-family:monospace; opacity:0.7;">
@@ -1625,9 +1660,16 @@ function renderActivitySummary(container) {
         const sumIdle = document.getElementById(`sum_idle_${safeId}`);
         if (sumIdle) sumIdle.innerText = idleTimeStr;
         
-        // InnerHTML for complex children is fine if container is stable
-        document.getElementById(`sum_topics_${safeId}`).innerHTML = breakdownHtml;
-        document.getElementById(`sum_timeline_${safeId}`).innerHTML = timelineHtml;
+        // UX SCROLL LOCK: Prevent DOM wipes from resetting scroll position while investigating
+        const topicsDiv = document.getElementById(`sum_topics_${safeId}`);
+        if (topicsDiv) {
+            const scrollPos = topicsDiv.scrollTop;
+            topicsDiv.innerHTML = breakdownHtml;
+            topicsDiv.scrollTop = scrollPos;
+        }
+        
+        const timelineDiv = document.getElementById(`sum_timeline_${safeId}`);
+        if (timelineDiv) timelineDiv.innerHTML = timelineHtml;
     });
 
     // Cleanup Stale Cards
@@ -1816,10 +1858,9 @@ StudyMonitor.toggleReviewQueue = function() {
     renderActivityMonitorContent();
 };
 
-StudyMonitor.expandTimeline = function(agentName) {
-    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    const activity = data[agentName];
-    if (!activity) return alert("No data for this agent.");
+StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
+    const todayStr = this.getLocalDateString();
+    const queryDate = targetDateStr || todayStr;
 
     let modal = document.getElementById('timelineDetailModal');
     if (!modal) {
@@ -1860,13 +1901,18 @@ StudyMonitor.expandTimeline = function(agentName) {
     }
 
     document.getElementById('tlDetailName').innerText = agentName;
+    
+    const datePicker = document.getElementById('tlDetailDate');
+    datePicker.value = queryDate;
+    datePicker.onchange = (e) => { StudyMonitor.expandTimeline(agentName, e.target.value); };
+
     const visualContainer = document.getElementById('tlDetailVisual');
     const tableContainer = document.getElementById('tlDetailTable');
     
     visualContainer.innerHTML = '';
     tableContainer.innerHTML = '';
 
-    // --- RECALCULATE SEGMENTS (with Archive support) ---
+    // --- RECALCULATE SEGMENTS ---
     let allSegments = [];
     
     if (queryDate === todayStr) {
@@ -1889,11 +1935,6 @@ StudyMonitor.expandTimeline = function(agentName) {
         const pastDay = historyLog.find(h => h.user === agentName && h.date === queryDate);
         if (pastDay && pastDay.details) {
             allSegments = [...pastDay.details];
-        } else if (pastDay && !pastDay.details) {
-            visualContainer.innerHTML = '<div style="text-align:center; width:100%; color:#f1c40f; padding-top:10px;"><i class="fas fa-compress"></i> Detailed timeline was optimized to save space. Summary data is still available.</div>';
-            tableContainer.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Detailed logs purged for optimization.</td></tr>';
-            modal.classList.remove('hidden');
-            return;
         }
     }
 
@@ -1979,11 +2020,17 @@ StudyMonitor.expandTimeline = function(agentName) {
             const timeStr = new Date(p.start).toLocaleTimeString();
             const mins = (p.duration / 60000).toFixed(1) + 'm';
             
+            let displayActivity = p.activity;
+            if (displayActivity.includes('sharepoint.com') || displayActivity.includes('microsoftonline.com')) {
+                 if (displayActivity.includes('.mp4') || displayActivity.includes('stream.aspx')) displayActivity = 'Studying: Training Video (SharePoint)';
+                 else displayActivity = 'Studying: Training Document (SharePoint)';
+            }
+
             tableHtml += `
                 <tr style="${p.rowColor}">
                     <td>${timeStr}</td>
                     <td>${mins}</td>
-                    <td>${p.activity}</td>
+                    <td title="${p.activity.replace(/"/g, '&quot;')}">${displayActivity}</td>
                     <td>${p.catLabel}</td>
                 </tr>
             `;
