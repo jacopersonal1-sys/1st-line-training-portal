@@ -944,33 +944,6 @@ const StudyMonitor = {
 
         webview.addEventListener('did-navigate', (e) => {
             tab.url = e.url;
-            
-            // ARCHITECTURAL FIX: SANDBOX FIREWALL (The Trojan Horse Fix)
-            // Prevent agents from surfing the web inside the study browser via PDF hyperlinks.
-            try {
-                const urlObj = new URL(e.url);
-                // List of permitted root domains for the internal browser
-                const safeDomains = [
-                    'herotel.com', 'sharepoint.com', 'microsoftonline.com', 'microsoft.com', 
-                    'cloud.microsoft', 'live.com', 'office.com', 'office.net', 'msauth.net', 
-                    'qcontact.com', 'preseem.com', 'herotel.systems', 'genially.com',
-                    'macvendors.com', 'macvendorlookup.com'
-                ];
-                
-                if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
-                    const isSafe = safeDomains.some(d => urlObj.hostname.toLowerCase().includes(d));
-                    
-                    if (!isSafe) {
-                        console.warn(`[Firewall] Blocked unauthorized navigation to: ${urlObj.hostname}`);
-                        this.track(`Violation: Unauthorized Webview Escape (${urlObj.hostname})`);
-                        this.triggerExternalAppWarning();
-                        
-                        // Instantly terminate the unauthorized tab
-                        this.closeTab(tab.id);
-                        return;
-                    }
-                }
-            } catch(err) { /* Ignore invalid URLs (blob/data) */ }
 
             this.track(`Studying: ${webview.getTitle().substring(0, 50)}`);
         });

@@ -1991,6 +1991,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.72": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Demo Sandbox:</strong> Added a fully isolated, interactive presentation environment. Logging in with 'demo_admin' instantly generates a rich, realistic mock database that never touches your production cloud.</li>
+                <li style="margin-bottom: 8px;"><strong>State Protection:</strong> Implemented a 5-layer memory and network isolation shield (including Hard Reloads, Poison Pills, and Native Disk Firewalls) to guarantee sandbox data can never leak into the live environment.</li>
+            </ul>`,
         "2.4.71": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Schedule Links:</strong> Added an automatic URL Sanitizer to strip expiring temporary tokens from SharePoint links, preventing study materials from becoming stale over time.</li>

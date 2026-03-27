@@ -223,6 +223,7 @@ Maps local `localStorage` keys to Supabase tables.
 - **Responsibility:** Tracks active window titles and idle time.
 - **Key Functions:**
     - `startActivityPoller()`: **No Frontend Timers.** Listens to `activity-update` from the `electron-main.js` background thread.
+    - **Security Model:** The internal study browser (`<webview>`) allows all navigation, as there is no URL bar. Violations are only triggered by the OS-level `startActivityPoller` when the user switches to an unauthorized external application.
     - `startMarkForClarity()`: Interactive drawing engine overlay injected into the `<webview>` for precision bounding-box screenshots/bookmarks.
     - `track(activity)`: Logs current activity.
     - `sync()`: Pushes `monitor_data` to server.
@@ -280,6 +281,10 @@ Maps local `localStorage` keys to Supabase tables.
 ---
 
 ## 4. Critical Workflows
+### H. The Demo Sandbox (Data Isolation)
+1.  **Intercept:** `auth.js` intercepts logins for `demo_admin`/`demo_tl`/`demo_trainee`, sets `DEMO_MODE` in `localStorage`, generates mock data, and forces a hard reload.
+2.  **Shielding:** `data.js` detects `DEMO_MODE` on boot, deletes the `ROW_MAP`, preventing row-level sync to live tables, and prepends `demo_` to all blob keys (e.g. `demo_system_config`).
+3.  **Destruction:** On logout or timeout, `sessionStorage` and `localStorage` are completely wiped. A 'Poison Pill' (`IS_SANDBOX_DB`) ensures orphaned data is destroyed on the next boot if the app was forced closed.
 
 ### A. The Boot Sequence (`main.js`)
 1.  **Init:** Load `config.js` to set `supabaseClient`.
