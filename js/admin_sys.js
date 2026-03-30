@@ -1031,6 +1031,14 @@ function openSuperAdminConfig() {
                             <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
                                 <label style="margin:0;"><input type="checkbox" id="sa_ai_enabled" ${ai.enabled ? 'checked' : ''}> Enable AI</label>
                                 <input type="password" id="sa_ai_key" value="${ai.apiKey || ''}" placeholder="Gemini API Key" style="flex:1;">
+                                <select id="sa_ai_model" style="margin:0; width:150px;" title="AI Model">
+                                    <option value="gemini-2.5-flash" ${ai.model === 'gemini-2.5-flash' ? 'selected' : ''}>2.5 Flash (Newest)</option>
+                                    <option value="gemini-2.0-flash" ${ai.model === 'gemini-2.0-flash' ? 'selected' : ''}>2.0 Flash</option>
+                                    <option value="gemini-1.5-flash-latest" ${ai.model === 'gemini-1.5-flash-latest' ? 'selected' : ''}>1.5 Flash (Latest)</option>
+                                    <option value="gemini-1.5-pro-latest" ${ai.model === 'gemini-1.5-pro-latest' ? 'selected' : ''}>1.5 Pro (Latest)</option>
+                                    <option value="gemini-1.0-pro-latest" ${ai.model === 'gemini-1.0-pro-latest' ? 'selected' : ''}>1.0 Pro (Legacy)</option>
+                                </select>
+                                <button class="btn-secondary btn-sm" onclick="testGeminiConnection()" title="Test API Key & List Available Models"><i class="fas fa-plug"></i></button>
                             </div>
                             <div style="display:flex; gap:10px;">
                                 <button class="btn-secondary btn-sm" onclick="AICore.openConsole()"><i class="fas fa-terminal"></i> Launch Console</button>
@@ -1917,9 +1925,14 @@ async function saveSuperAdminConfig() {
     
     config.announcement = { active: getCheck('sa_ann_active'), message: getVal('sa_ann_msg', ''), type: getVal('sa_ann_type', 'info') };
 
-    config.ai = { ...config.ai,
+    // FIX: Ensure default AI properties (endpoint, model) are preserved if local config is stale.
+    const defaultAiConfig = (typeof DB_SCHEMA !== 'undefined' && DB_SCHEMA.system_config && DB_SCHEMA.system_config.ai) ? DB_SCHEMA.system_config.ai : {};
+    config.ai = { 
+        ...defaultAiConfig,
+        ...(config.ai || {}),
         enabled: getCheck('sa_ai_enabled'),
-        apiKey: getVal('sa_ai_key', '').trim()
+        apiKey: getVal('sa_ai_key', '').trim(),
+        model: getVal('sa_ai_model', 'gemini-2.5-flash')
     };
 
     config.server_settings = {
@@ -1976,6 +1989,31 @@ async function saveSuperAdminConfig() {
     document.getElementById('superAdminModal').remove();
     if(typeof applySystemConfig === 'function') applySystemConfig();
 }
+
+// --- NEW: AI DIAGNOSTICS TOOL ---
+window.testGeminiConnection = async function() {
+    const key = document.getElementById('sa_ai_key').value.trim();
+    if (!key) return alert("Please enter an API key first.");
+    
+    const btn = document.activeElement;
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message);
+        
+        const models = data.models.map(m => m.name.replace('models/', '')).filter(m => m.includes('gemini'));
+        alert(`✅ Connection Successful!\n\nYour API Key supports these models:\n\n${models.join('\n')}\n\nPlease select one of these exact names from the dropdown.`);
+    } catch (e) {
+        alert(`❌ API Key Error:\n\n${e.message}`);
+    } finally {
+        btn.innerHTML = orig;
+        btn.disabled = false;
+    }
+};
 
 window.toggleLockdown = async function() {
     const config = JSON.parse(localStorage.getItem('system_config') || '{}');

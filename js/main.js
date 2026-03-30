@@ -1991,6 +1991,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.73": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Study Browser Fix:</strong> Removed the internal domain-blocking firewall. The browser now allows all navigation from trusted training materials, fixing complex login redirects (e.g., Microsoft SSO).</li>
+                <li style="margin-bottom: 8px;"><strong>Security Model:</strong> Simplified security to rely on the OS-level Activity Monitor for flagging unauthorized external applications, as the internal browser has no URL bar for manual navigation.</li>
+            </ul>`,
         "2.4.72": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Demo Sandbox:</strong> Added a fully isolated, interactive presentation environment. Logging in with 'demo_admin' instantly generates a rich, realistic mock database that never touches your production cloud.</li>

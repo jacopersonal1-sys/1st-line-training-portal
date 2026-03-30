@@ -299,6 +299,34 @@ ipcMain.handle('get-system-idle-time', () => {
     return powerMonitor.getSystemIdleTime();
 });
 
+// --- AI API PROXY (CORS FIX) ---
+ipcMain.handle('invoke-gemini-api', async (event, { endpoint, apiKey, promptText }) => {
+    try {
+        // Use global fetch available in Electron's main process
+        const response = await fetch(`${endpoint}?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: promptText }] }],
+                generationConfig: { temperature: 0.2 }
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: { message: `API request failed with status: ${response.status}` } }));
+            return { error: errorData.error.message };
+        }
+
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No insights generated.";
+        return { text };
+
+    } catch (e) {
+        console.error("Main Process AI Fetch Error:", e);
+        return { error: e.message || "A network error occurred in the main process." };
+    }
+});
+
 // --- AUTO-UPDATER EVENTS ---
 // Send status updates to the renderer to show in Toasts
 

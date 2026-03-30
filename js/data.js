@@ -42,7 +42,7 @@ const DB_SCHEMA = {
         monitoring: { tolerance_ms: 180000, whitelist_strict: false },
         announcement: { active: false, message: "", type: "info" },
         broadcast: { id: 0, message: "" },
-        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-1.5-flash", endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent" },
+        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-1.5-flash", endpoint: "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent" },
         // NEW: Server Failover Settings
         server_settings: { active: 'cloud', local_url: '', local_key: '' }
     },

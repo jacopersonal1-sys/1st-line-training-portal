@@ -1847,8 +1847,12 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
                     <h3 style="margin:0; display:flex; align-items:center; gap:10px;">Activity Detail: <span id="tlDetailName" style="color:var(--primary);"></span>
                         <input type="date" id="tlDetailDate" style="padding:4px 8px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-input); color:var(--text-main); font-size:0.9rem;" title="Select a date to view archived history">
                     </h3>
-                    <button class="btn-secondary" onclick="document.getElementById('timelineDetailModal').classList.add('hidden')"><i class="fas fa-times"></i> Close</button>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-primary" id="btn-ai-analyze"><i class="fas fa-robot"></i> AI Analyze</button>
+                        <button class="btn-secondary" onclick="document.getElementById('timelineDetailModal').classList.add('hidden')"><i class="fas fa-times"></i> Close</button>
+                    </div>
                 </div>
+                <div id="ai-analysis-result" class="hidden" style="margin-bottom: 20px; padding: 15px; background: var(--bg-input); border-left: 4px solid var(--primary); border-radius: 4px; font-size: 0.9rem; line-height: 1.5; max-height: 250px; overflow-y: auto;"></div>
                 <div style="margin-bottom:20px;">
                     <div id="tlDetailVisual" class="timeline-visual" style="height:40px; border-radius:4px; overflow:hidden; display:flex;"></div>
                     <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:var(--text-muted); margin-top:5px;">
@@ -1878,6 +1882,15 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
     const datePicker = document.getElementById('tlDetailDate');
     datePicker.value = queryDate;
     datePicker.onchange = (e) => { StudyMonitor.expandTimeline(agentName, e.target.value); };
+
+    const aiBtn = document.getElementById('btn-ai-analyze');
+    if (aiBtn) aiBtn.onclick = () => StudyMonitor.analyzeWithAI(agentName, queryDate);
+    
+    const aiResult = document.getElementById('ai-analysis-result');
+    if (aiResult) {
+        aiResult.classList.add('hidden');
+        aiResult.innerHTML = '';
+    }
 
     const visualContainer = document.getElementById('tlDetailVisual');
     const tableContainer = document.getElementById('tlDetailTable');
@@ -2017,6 +2030,92 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
     tableContainer.innerHTML = tableHtml;
     
     modal.classList.remove('hidden');
+};
+
+// --- AI TIMELINE ANALYST ---
+StudyMonitor.analyzeWithAI = async function(agentName, dateStr) {
+    const resultDiv = document.getElementById('ai-analysis-result');
+    const btn = document.getElementById('btn-ai-analyze');
+    if (!resultDiv || !btn) return;
+
+    const configStr = localStorage.getItem('system_config');
+    const config = configStr ? JSON.parse(configStr) : {};
+    if (!config.ai || !config.ai.enabled || !config.ai.apiKey) {
+        alert("AI is not configured or enabled in System Settings. Please ask a Super Admin to configure the AI connection.");
+        return;
+    }
+
+    // 1. Gather Data
+    const todayStr = this.getLocalDateString();
+    let allSegments = [];
+    if (dateStr === todayStr) {
+        const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        const activity = data[agentName];
+        if (activity) {
+            allSegments = [...(activity.history || [])];
+            const currentDuration = Date.now() - activity.since;
+            if (currentDuration > 1000) {
+                allSegments.push({ activity: activity.current, start: activity.since, end: Date.now(), duration: currentDuration });
+            }
+        }
+    } else {
+        const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        const pastDay = historyLog.find(h => h.user === agentName && h.date === dateStr);
+        if (pastDay && pastDay.details) allSegments = [...pastDay.details];
+    }
+
+    if (allSegments.length === 0) {
+        alert("No activity data to analyze for this date.");
+        return;
+    }
+
+    // 2. Format Data for Prompt
+    let promptData = `Activity Log for ${agentName} on ${dateStr}:\n`;
+    allSegments.sort((a, b) => (a.start || 0) - (b.start || 0)).forEach(seg => {
+        const time = new Date(seg.start || (seg.end - seg.duration)).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const mins = (seg.duration / 60000).toFixed(1);
+        promptData += `- [${time}] ${seg.activity} (${mins} mins)\n`;
+    });
+
+    const promptText = `Analyze the following activity log for an employee named ${agentName}. Provide a concise, professional summary breakdown of their day, highlighting their main focus, any potential security/compliance violations, excessive idle times, and an overall productivity assessment. Be brief but insightful. Format with clear headings and bullet points.\n\n${promptData}`;
+
+    // 3. UI Loading State
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+    btn.disabled = true;
+    resultDiv.classList.remove('hidden');
+    resultDiv.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> AI is reviewing the timeline data...';
+
+    // 4. Fetch from Gemini
+    try {
+        if (!window.electronAPI || !window.electronAPI.ipcRenderer) {
+            throw new Error("Electron API bridge not available. Cannot make secure API call.");
+        }
+
+        // Dynamically build the endpoint using v1beta and the selected model to ensure maximum region compatibility
+        const aiModel = config.ai.model || "gemini-2.5-flash";
+        const actualEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent`;
+
+        const result = await window.electronAPI.ipcRenderer.invoke('invoke-gemini-api', {
+            endpoint: actualEndpoint,
+            apiKey: config.ai.apiKey,
+            promptText: promptText
+        });
+
+        if (result.error) {
+            throw new Error(result.error);
+        }
+
+        const text = result.text || "No insights generated.";
+        const formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/\n/g, '<br>');
+        resultDiv.innerHTML = `<strong><i class="fas fa-robot" style="color:var(--primary);"></i> AI Insight:</strong><br><br>${formattedText}`;
+    } catch (e) {
+        console.error("AI Analysis Error:", e);
+        // More descriptive error for the user
+        resultDiv.innerHTML = `<span style="color:#ff5252;"><i class="fas fa-exclamation-triangle"></i> AI Analysis Failed: ${e.message}.<br><small>Please check your API Key in System Settings and your network connection.</small></span>`;
+    } finally {
+        btn.innerHTML = '<i class="fas fa-robot"></i> AI Analyze';
+        btn.disabled = false;
+    }
 };
 
 // Hook for dashboard.js to trigger updates if modal is open

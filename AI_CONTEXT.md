@@ -193,7 +193,7 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/ai_core.js` (AI System Analyst)
 - **Responsibility:** Gemini Integration (`gemini-1.5-flash`). Handles natural language commands, system diagnostics, and error analysis.
 - **Key Functions:**
-    - `processRequest(text)`: Sends prompts to Gemini API, checking a local `tools` registry first for direct execution (e.g., `system_status`, `read_errors`, `repair_database`).
+    - `processRequest(text)`: Sends prompts to the Gemini API via an IPC call (`invoke-gemini-api`) to the main process. This bypasses browser CORS restrictions. It also checks a local `tools` registry for direct command execution.
     - `analyzeError(msg)`: Auto-diagnoses system errors.
     - `runSelfRepair()`: Fixes data integrity issues.
     - `analyzeForImprovements()`: Background task that analyzes logs and suggests system improvements.
@@ -359,6 +359,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 - `perform-network-test`: Pings a target IP/Host and returns latency in ms.
 - `get-system-stats`: Returns CPU load, RAM usage, Disk usage (C:), and Connection Type (Ethernet/Wireless).
 - `open-devtools`: Opens the Chromium Developer Tools.
+- `invoke-gemini-api`: Proxies a fetch request to the Gemini API from the main process to bypass CORS.
 
 ---
 

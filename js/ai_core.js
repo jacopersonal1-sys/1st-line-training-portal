@@ -407,8 +407,8 @@ const AICore = {
 
         try {
             // Call Gemini API (Google Generative Language)
-            // FIX: Use gemini-1.5-flash as default if model is missing or set to legacy gemini-pro
-            const model = (config.ai.model && config.ai.model !== 'gemini-pro') ? config.ai.model : 'gemini-1.5-flash';
+            // Use v1beta and -latest tags to bypass regional model availability restrictions
+            const model = config.ai.model || 'gemini-2.5-flash';
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.ai.apiKey}`;
             const payload = {
                 contents: [{
