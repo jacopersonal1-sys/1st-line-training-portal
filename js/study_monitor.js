@@ -22,7 +22,7 @@ const StudyMonitor = {
         homeUrl: null,
     },
     
-    init: function() {
+    init: async function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
 
         // 1. RESTORE HISTORY (Persist across reloads)
@@ -46,12 +46,12 @@ const StudyMonitor = {
             } catch(e) { console.error("History Restore Error", e); }
         }
         
+        // --- DAILY ARCHIVE CHECK ---
+        await this.checkDailyReset(); // Await this before starting pollers
+
         // Start periodic sync (every 10s)
         this.syncInterval = setInterval(() => this.sync(), 10000);
         this.track("System: App Loaded");
-
-        // --- DAILY ARCHIVE CHECK ---
-        this.checkDailyReset();
 
         // --- START BULLETPROOF OS-LEVEL ACTIVITY POLLER ---
         if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
@@ -371,28 +371,35 @@ const StudyMonitor = {
         // 0. Violation is always external
         if (act.startsWith('violation:')) return 'external';
 
-        // 1. Dynamic Whitelist Check
-        const raw = act.replace(/^(external:\s*|violation:\s*|studying:\s*)/i, '').trim();
-        if (this.cachedWhitelist.some(w => raw.includes(w.toLowerCase()))) {
-            if (raw.includes('sharepoint') || raw.includes('training')) return 'material';
+        // Define keywords
+        const materialKeywords = ['.pdf', '.mp4', 'genially', 'sharepoint', 'course', 'document', 'standards', 'training', 'vetting', 'navigating portal'];
+        const toolKeywords = ['qcontact', 'crm', 'radius', 'preseem', 'acs', 'hosting', 'odoo', 'cp1', 'cp2', 'teams', 'outlook', 'mail', 'notepad', 'onenote', 'macvendor', 'genieacs', 'devices - genieacs'];
+
+        // 1. Check for specific material keywords
+        if (materialKeywords.some(m => act.includes(m))) {
+            return 'material';
+        }
+
+        // 2. Check for specific tool keywords
+        if (toolKeywords.some(t => act.includes(t))) {
             return 'tool';
         }
-        
-        const toolsKeywords = ['qcontact', 'crm', 'radius', 'preseem', 'acs', 'hosting', 'odoo', 'cp1', 'cp2', 'teams', 'outlook', 'mail', 'notepad', 'onenote', 'macvendor'];
-        if (toolsKeywords.some(t => act.includes(t))) return 'tool';
 
-        // 2. STRICT MODE CHECK
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-        if (config.monitoring && config.monitoring.whitelist_strict) {
-            if (!act.startsWith('idle:')) return 'external';
+        // 3. Check for generic prefixes
+        if (act.startsWith('studying:')) {
+            // If it's marked as studying but didn't match above, it's likely a tool or misc work.
+            return 'tool';
         }
-        
-        // Distinguish between actual course material and supportive tools
-        if (act.includes('sharepoint') || act.includes('course') || act.includes('navigating portal') || act.includes('vetting:')) return 'material';
-        if (act.startsWith('studying:') || act.includes('system:') || act.includes('navigating:')) return 'tool';
+        if (act.startsWith('system:')) return 'tool';
+
+        // 4. Fallback for whitelisted items that didn't match keywords
+        const raw = act.replace(/^(external:\s*|violation:\s*|studying:\s*)/i, '').trim();
+        if (this.cachedWhitelist.some(w => raw.includes(w.toLowerCase()))) {
+            return 'tool';
+        }
 
         if (act.startsWith('external:') || act.includes('external') || act.includes('background')) return 'external';
-        if (act.startsWith('idle:')) return 'idle';
+        if (act.startsWith('idle')) return 'idle'; // Match "Idle" and "Idle / Away"
         return 'idle'; // Default
     },
 
@@ -2077,7 +2084,27 @@ StudyMonitor.analyzeWithAI = async function(agentName, dateStr) {
         promptData += `- [${time}] ${seg.activity} (${mins} mins)\n`;
     });
 
-    const promptText = `Analyze the following activity log for an employee named ${agentName}. Provide a concise, professional summary breakdown of their day, highlighting their main focus, any potential security/compliance violations, excessive idle times, and an overall productivity assessment. Be brief but insightful. Format with clear headings and bullet points.\n\n${promptData}`;
+    // Pre-calculate stats
+    const stats = this.calculateDailyStats(allSegments);
+    const toMins = (ms) => Math.round(ms / 60000);
+
+    const promptText = `
+As an analyst, provide a narrative summary of the employee's workday based on the activity log below.
+
+**Instructions:**
+1.  **Narrative Flow:** Start by describing the beginning of the day and walk through the main activities chronologically. Tell a story of their day.
+2.  **Time Summary:** Explicitly state the total time spent on:
+    - Training Material: ${toMins(stats.material)} minutes
+    - Work Tools: ${toMins(stats.tool)} minutes
+    - External/Distractions: ${toMins(stats.external)} minutes
+    - Idle: ${toMins(stats.idle)} minutes
+3.  **Idle Time Explanation:** If there is idle time, explain that "Idle time is tracked when there is no mouse or keyboard input for over 60 seconds. Short idle periods are considered 'thinking time' and are counted as productive."
+4.  **Violations Explanation:** If there are 'Violation' entries, explain that "Violations are logged when non-work-related external applications are used during working hours (8 AM - 5 PM, excluding lunch)." Mention the specific applications if they are in the log.
+5.  **Tone:** Be objective and base the summary strictly on the provided log data. Do not make assumptions or judgments.
+
+**Log Data:**
+${promptData}
+    `;
 
     // 3. UI Loading State
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';

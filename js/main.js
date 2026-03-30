@@ -889,7 +889,7 @@ window.onload = async function() {
                     
                     // --- START ACTIVITY MONITOR ---
                     if (typeof StudyMonitor !== 'undefined') {
-                        StudyMonitor.init();
+                        await StudyMonitor.init();
                     }
                     
                     // --- START VETTING ENFORCER ---
@@ -913,7 +913,7 @@ window.onload = async function() {
              
              // --- START ACTIVITY MONITOR ---
              if (typeof StudyMonitor !== 'undefined') {
-                 StudyMonitor.init();
+                 await StudyMonitor.init();
              }
              
              // --- START VETTING ENFORCER ---
