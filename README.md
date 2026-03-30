@@ -157,6 +157,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 ## Recent Major Updates (AI Context)
  - **v2.4.72**: **Presentation Tools**: Built a 100% isolated Demo Sandbox (`demo_admin`/`demo_trainee`) with rich mock data generation. Implemented a 5-layer isolation shield to guarantee live production data is completely protected from sandbox leaks during unexpected app closures or browser cache restorations.
  - **v2.4.73**: **Security & UX**: Simplified the Study Browser security model by removing the internal firewall, fixing complex SSO login crashes. Violation tracking now relies solely on the OS-level monitor for external applications.
+ - **v2.4.74**: **AI Stability**: Hardened the Gemini API integration to resolve connection errors related to CORS, API versions, and regional model availability. Added a "Test Connection" diagnostic tool and a model selector dropdown to the Super Admin console.
  - **v2.4.71**: **Stability & UX**: Added SharePoint URL Sanitizer to the Schedule to prevent stale links. Fixed Activity Monitor wake-from-sleep race condition.
  - **v2.4.70**: **Hotfix**: Fixed scroll-reset issue in the Activity Monitor breakdown views.
  - **v2.4.69**: **Hotfix**: Resolved Activity Monitor rendering crash related to URL cleaner strictness.

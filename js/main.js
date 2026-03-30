@@ -1991,6 +1991,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.74": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>AI Analyst Fix:</strong> Hardened the Gemini API integration to resolve connection errors related to CORS, API versions (v1/v1beta), and regional model availability.</li>
+                <li style="margin-bottom: 8px;"><strong>AI Diagnostics:</strong> Added a "Test Connection" tool and a model selector dropdown to the Super Admin console, allowing for dynamic model selection to bypass regional restrictions.</li>
+                <li style="margin-bottom: 8px;"><strong>AI Configuration:</strong> Implemented auto-correction for legacy endpoint URLs to prevent configuration-related failures.</li>
+            </ul>`,
         "2.4.73": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Study Browser Fix:</strong> Removed the internal domain-blocking firewall. The browser now allows all navigation from trusted training materials, fixing complex login redirects (e.g., Microsoft SSO).</li>
