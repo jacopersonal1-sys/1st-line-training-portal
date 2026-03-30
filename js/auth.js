@@ -546,7 +546,7 @@ async function autoLogin() {
 
   // --- START ACTIVITY MONITOR (Fresh Login) ---
   if (typeof StudyMonitor !== 'undefined') {
-      StudyMonitor.init();
+      await StudyMonitor.init();
   }
   
   // --- START VETTING ENFORCER ---

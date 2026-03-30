@@ -367,11 +367,13 @@ async function loadFromServer(silent = false) {
 
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
         // Only fetch rows newer than our last sync timestamp
-        // OPTIMIZATION: Skip heavy logs in background sync to prevent freezing
-        const heavyTables = ['error_reports', 'accessLogs', 'auditLogs', 'monitor_history'];
+        // OPTIMIZATION: Use accurate table names and isolate heavy JSON payloads to prevent V8 memory crashes
+        const heavyTables = ['error_reports', 'access_logs', 'audit_logs', 'monitor_history', 'network_diagnostics'];
 
-        // ARCHITECTURAL FIX: Parallelize database queries to slash boot times by 90%
-        const rowSyncPromises = Object.entries(ROW_MAP).map(async ([localKey, tableName]) => {
+        const fastTasks = [];
+        const heavyTasks = [];
+
+        Object.entries(ROW_MAP).forEach(([localKey, tableName]) => {
             
             // TRAINEE DATA MINIMIZATION: Completely skip Admin-only tables to save bandwidth
             if (isTrainee && ['audit_logs', 'access_logs', 'error_reports', 'nps_responses', 'archived_users', 'network_diagnostics', 'saved_reports', 'insight_reviews', 'tl_task_submissions'].includes(tableName)) {
@@ -383,7 +385,8 @@ async function loadFromServer(silent = false) {
                 return;
             }
 
-            const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
+            const syncTask = async () => {
+                const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
             
             // CLOCK SKEW FIX: Subtract 10 minutes from lastSync to catch items from clients with lagging clocks
             const safeSyncTime = new Date(new Date(lastSync).getTime() - 600000).toISOString();
@@ -420,8 +423,8 @@ async function loadFromServer(silent = false) {
                 }
             }
             
-            // Limit batch size (Increased to 2000 to ensure fast catch-up without skipping data)
-            const fetchLimit = 2000;
+                // ARCHITECTURAL FIX: Throttle row limits for heavy JSON tables to prevent OOM crashes
+                const fetchLimit = tableName === 'monitor_history' ? 100 : (heavyTables.includes(tableName) ? 500 : 2000);
             const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
 
             if (rowErr) {
@@ -570,8 +573,22 @@ async function loadFromServer(silent = false) {
                 if(!silent) console.log(`Clearing ${localKey} (Server Empty)`);
                 localStorage.setItem(localKey, '[]');
             }
+            };
+
+            if (heavyTables.includes(tableName)) {
+                heavyTasks.push(syncTask);
+            } else {
+                fastTasks.push(syncTask());
+            }
         });
-        await Promise.all(rowSyncPromises);
+
+        // 1. Run lightweight tables in parallel for instant boot
+        await Promise.all(fastTasks);
+
+        // 2. Run heavy JSON tables sequentially to prevent network timeout & UI freezing
+        for (const task of heavyTasks) {
+            await task();
+        }
 
         // --- PHASE C: MONITOR STATE SYNC (Real-time Activity) ---
         // OPTIMIZATION: Only Admins/TeamLeaders need to download the entire company's live activity data.

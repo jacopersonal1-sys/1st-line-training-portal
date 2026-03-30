@@ -873,7 +873,7 @@ window.onload = async function() {
     if(savedSession) {
         // Verify IP again on refresh to prevent session hijacking across locations
         if (typeof checkAccessControl === 'function') {
-            checkAccessControl().then(allowed => {
+            checkAccessControl().then(async allowed => {
                 if(allowed) {
                     CURRENT_USER = JSON.parse(savedSession);
                     // --- NEW: Apply User Specific Theme Immediately ---
@@ -1991,6 +1991,17 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.76": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a fatal SyntaxError during application startup by correctly awaiting the Activity Monitor's initialization sequence.</li>
+                <li style="margin-bottom: 8px;"><strong>Log Integrity:</strong> Ensured fresh logins strictly await the completion of the daily log archiving process before recording new data.</li>
+            </ul>`,
+        "2.4.75": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Log Integrity:</strong> Fixed a startup race condition that caused logs from the previous day to bleed into the current day's timeline.</li>
+                <li style="margin-bottom: 8px;"><strong>Activity Classification:</strong> Improved the logic for categorizing activities, correctly identifying training materials (.mp4, .pdf) and preventing them from being misclassified as "Tools".</li>
+                <li style="margin-bottom: 8px;"><strong>AI Analysis:</strong> Overhauled the AI prompt to provide a structured, narrative summary of the day's events, including specific explanations for idle time and violations, rather than a generic assessment.</li>
+            </ul>`,
         "2.4.74": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>AI Analyst Fix:</strong> Hardened the Gemini API integration to resolve connection errors related to CORS, API versions (v1/v1beta), and regional model availability.</li>
