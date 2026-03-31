@@ -86,6 +86,7 @@ Maps local `localStorage` keys to Supabase tables.
 - **Responsibility:** App initialization, version checks, failover recovery, global event listeners, and Native OS bridging (`preload.js`).
 - **Key Functions:**
     - `window.onload`: Main entry point. Checks `last_connected_server` for server migration logic. Calls `loadFromServer`.
+    - `performSilentServerSwitch(newTarget)`: Hot failover helper. **Awaits the full local-to-target migration before pulling**, and rolls back to the previous target if the migration fails.
     - `loadFromServer()`: **CRITICAL**. Orchestrates the sync process. Returns `true` on partial/full success.
     - `startRealtimeSync()`: Starts the background polling loops for Data Sync and Heartbeat.
     - `applySystemConfig()`: Applies hot-reload settings (Announcements, Sync Rates).
@@ -103,11 +104,12 @@ Maps local `localStorage` keys to Supabase tables.
         - **Local Edits Shield:** Rejects incoming server data if a local, unsynced edit exists for the same item, preventing overwrites.
     - `saveToServer(keys, force)`: Pushes data.
         - **Fast-Save Mutex:** Uses `_IS_PROCESSING_SAVE` lock to allow hyper-fast 500ms saves without overlapping network race conditions.
+        - **Failure Re-Queue:** If an upload fails, the current and remaining keys are pushed back into `SAVE_QUEUE` so unsynced local edits are never silently abandoned.
         - **Safe Quit Flush:** Using target `FLUSH`, it awaits the mutex and pushes all remaining data before allowing the OS to kill the app.
     - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name/Composite Key.
     - `setupRealtimeListeners()`: Subscribes to the entire `public` schema. Routes changes instantly to the `INCOMING_DATA_QUEUE`.
     - `handle...Realtime(payload)`: Pushes incoming realtime events into a temporary `INCOMING_DATA_QUEUE`.
-    - `processIncomingDataQueue()`: Processes the queue. Uses `isUserTyping()` to prevent UI re-renders from stealing cursor focus.
+    - `processIncomingDataQueue()`: Processes the queue. Uses `isUserTyping()` to prevent UI re-renders from stealing cursor focus, and re-queues the batch if processing throws so realtime updates are never lost.
     - `sendHeartbeat()`: Uses `window.PRESENCE_CHANNEL.track()` to track active users with 0 database impact.
 
 #### `js/auth.js` (Authentication)
@@ -326,7 +328,7 @@ Maps local `localStorage` keys to Supabase tables.
 3.  **Migration:** On reboot, `main.js` detects the switch and pushes local data to the new server.
 
 ### E. Global Realtime Sync & UI Protection
-1.  **The Global Net:** `data.js` -> `setupRealtimeListeners()` subscribes to the entire `public` database schema. Any change by any user triggers a push. **Includes a Dynamic Fallback Engine** that actively monitors tunnel health, instantly accelerating to 30-second polling if corporate firewalls block WebSockets, and automatically attempts to rebuild dropped connections.
+1.  **The Global Net:** `data.js` -> `setupRealtimeListeners()` subscribes to the entire `public` database schema. Any change by any user triggers a push. **Includes a Dynamic Fallback Engine** that disables data polling while the realtime tunnel is healthy, falls back to the role-based sync cadence if the tunnel drops, and automatically attempts to rebuild dropped connections.
 2.  **Queueing:** Incoming events are pushed into `INCOMING_DATA_QUEUE`.
 3.  **Protection:** `processIncomingDataQueue()` checks `isUserTyping()`. If an Admin is actively typing in a field, the UI refresh is paused to prevent cursor stealing or text wiping, while the data is silently updated in the background cache.
 

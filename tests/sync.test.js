@@ -23,18 +23,44 @@ describe('Data Sync Module', () => {
         const mockMeta = [{ key: 'users', updated_at: '2026-01-02T00:00:00.000Z' }];
         const mockContent = [{ key: 'users', content: [{ user: 'admin' }], updated_at: '2026-01-02T00:00:00.000Z' }];
 
-        // Setup mocks
-        const selectMock = jest.fn();
-        const fromMock = jest.fn(() => ({ select: selectMock }));
-        
+        const buildRowQuery = (rows = []) => {
+            const chain = {
+                gt: jest.fn(() => chain),
+                order: jest.fn(() => chain),
+                eq: jest.fn(() => chain),
+                limit: jest.fn().mockResolvedValue({ data: rows, error: null })
+            };
+            return chain;
+        };
+
+        const appDocumentsSelect = jest.fn((columns) => {
+            if (columns === 'key, updated_at') {
+                return {
+                    not: jest.fn().mockResolvedValue({ data: mockMeta, error: null }),
+                    like: jest.fn().mockResolvedValue({ data: mockMeta, error: null })
+                };
+            }
+
+            if (columns === 'key, content, updated_at') {
+                return {
+                    in: jest.fn().mockResolvedValue({ data: mockContent, error: null })
+                };
+            }
+
+            throw new Error(`Unexpected app_documents select: ${columns}`);
+        });
+
+        const fromMock = jest.fn((table) => {
+            if (table === 'app_documents') {
+                return { select: appDocumentsSelect };
+            }
+
+            return {
+                select: jest.fn(() => buildRowQuery())
+            };
+        });
+
         global.window.supabaseClient.from = fromMock;
-        
-        // 1. Metadata fetch
-        selectMock.mockReturnValueOnce({ data: mockMeta, error: null });
-        
-        // 2. Content fetch (chained .in())
-        const inMock = jest.fn().mockResolvedValue({ data: mockContent, error: null });
-        selectMock.mockReturnValueOnce({ in: inMock });
 
         // Set local state to stale
         localStorage.setItem('sync_ts_users', '2025-01-01T00:00:00.000Z');

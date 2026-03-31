@@ -817,6 +817,11 @@ async function logout() {
       await logAccessEvent(CURRENT_USER.user, 'Logout');
   }
   
+  // --- NEW: CLEANUP BACKGROUND PROCESSES ---
+  if (typeof window.cleanupVettingEnforcer === 'function') {
+      window.cleanupVettingEnforcer();
+  }
+
   sessionStorage.clear();
   if (isDemo) localStorage.clear();
 

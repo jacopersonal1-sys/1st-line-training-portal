@@ -100,7 +100,7 @@ let IS_DEMO_MODE = localStorage.getItem('DEMO_MODE') === 'true';
 
 // --- ORPHAN SANDBOX DETECTION (APP CLOSE LEAK FIX) ---
 // If the app was closed during a demo, the session dies. We detect this on boot.
-const isDemoSessionActive = !!sessionStorage.getItem('currentUser');
+const isDemoSessionActive = typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem('currentUser');
 if (!isDemoSessionActive && IS_DEMO_MODE) {
     console.warn("⚠️ Detected orphaned Sandbox data from a closed session. Wiping database to protect production.");
     localStorage.clear();
@@ -138,6 +138,8 @@ window.ACTIVE_USERS_CACHE = {}; // Realtime Presence Cache
 window.GLOBAL_CHANGES_CHANNEL = null;
 window.REALTIME_RECONNECT_TIMER = null;
 window.CURRENT_FALLBACK_RATE = 600000;
+window.NORMAL_FALLBACK_RATE = 0;
+window.REALTIME_FAILURE_RATE = 30000;
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -898,18 +900,6 @@ async function forceFullSync(localKey) {
     }
 }
 
-// Export for Jest testing (Node.js environment)
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        DB_SCHEMA,
-        loadFromServer,
-        saveToServer,
-        performSmartMerge,
-        hardDelete,
-        hardDeleteByQuery
-    };
-}
-
 // MIGRATION: One-time move from 'app_data' (Blob) to 'app_documents' (Split)
 async function migrateToSplitSchema() {
     console.log("Migrating to Split Schema...");
@@ -1067,6 +1057,9 @@ let _IS_PROCESSING_SAVE = false;
 let _RETRIGGER_SAVE = false;
 
 async function _processSaveQueue(force = false, silent = false, retryCount = 0) {
+    let keysToSave = [];
+    let currentKeyIndex = 0;
+
     if (_IS_PROCESSING_SAVE && retryCount === 0) {
         _RETRIGGER_SAVE = true;
         return true;
@@ -1107,7 +1100,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             return;
         }
 
-        const keysToSave = Array.from(SAVE_QUEUE);
+        keysToSave = Array.from(SAVE_QUEUE);
         if (keysToSave.length === 0) return true; // Nothing to do
         SAVE_QUEUE.clear(); // Clear queue immediately
         if(!silent) updateSyncUI('busy');
@@ -1115,7 +1108,8 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         // 0. Process Deletes First (Ensure server is clean before we push)
         await processPendingDeletes();
 
-        for (const key of keysToSave) {
+        for (currentKeyIndex = 0; currentKeyIndex < keysToSave.length; currentKeyIndex++) {
+            const key = keysToSave[currentKeyIndex];
             try {
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
             
@@ -1186,8 +1180,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                             // NETWORK/SERVER ERROR: Pause sync if server is vomiting HTML or 5xx
                             if (e.message && (e.message.includes('<!DOCTYPE') || e.message.includes('521') || e.message.includes('503'))) {
                                 console.warn(`Save aborted: Server unavailable (${tableName}).`);
-                                if(!silent) updateSyncUI('error');
-                                return false; // Stop processing queue
+                                throw e;
                             }
                             // If table doesn't exist, warn and skip, don't crash the whole sync.
                             if (e.code === 'PGRST205' || (e.message && e.message.includes('does not exist'))) {
@@ -1261,6 +1254,8 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             }
         }
 
+        currentKeyIndex = keysToSave.length;
+
         if(!silent) updateSyncUI('success');
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
         
@@ -1271,6 +1266,8 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         return true;
 
     } catch (err) {
+        keysToSave.slice(currentKeyIndex).forEach(k => SAVE_QUEUE.add(k));
+
         // RETRY LOGIC: Try once more if it failed (Network blip)
         if (retryCount < 1) {
             console.warn("Sync failed, retrying...", err);
@@ -2080,16 +2077,24 @@ function subscribeToDocKey(docKey, onContent) {
 
 // --- DYNAMIC FALLBACK POLLER ---
 function setFallbackPollingRate(ms) {
-    window.CURRENT_FALLBACK_RATE = ms;
+    const rate = Number(ms) || 0;
+    window.CURRENT_FALLBACK_RATE = rate;
     if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);
+    SYNC_INTERVAL = null;
+
+    if (rate <= 0) {
+        console.log("[Sync Engine] Fallback polling disabled while realtime tunnel is healthy.");
+        return;
+    }
+
     SYNC_INTERVAL = setInterval(async () => {
         await loadFromServer(true); 
         if (typeof performOrphanCleanup === 'function') {
             const lastRun = parseInt(localStorage.getItem('last_orphan_cleanup_ts') || '0');
             if (Date.now() - lastRun > 86400000) { performOrphanCleanup(true); }
         }
-    }, ms);
-    console.log(`[Sync Engine] Fallback polling rate adjusted to ${ms / 1000}s`);
+    }, rate);
+    console.log(`[Sync Engine] Fallback polling rate adjusted to ${rate / 1000}s`);
 }
 
 function startRealtimeSync() {
@@ -2124,13 +2129,16 @@ function startRealtimeSync() {
         }
     }
 
+    window.NORMAL_FALLBACK_RATE = 0;
+    window.REALTIME_FAILURE_RATE = Math.max(1000, syncRate);
+
     // Start the Incoming Queue Processor (Checks every 2 seconds)
     startQueueProcessor();
 
-    console.log(`Starting Sync Engine. Realtime WebSockets Active. Fallback Polling: 10m, Heartbeat: ${beatRate/1000}s`);
+    console.log(`Starting Sync Engine. Realtime WebSockets Active. Fallback Polling: off when healthy, ${window.REALTIME_FAILURE_RATE / 1000}s on tunnel failure, Heartbeat: ${beatRate/1000}s`);
     
-    // 1. DATA SYNC: Initialize dynamic fallback polling (defaults to 10 mins)
-    setFallbackPollingRate(600000);
+    // 1. DATA SYNC: Poll until the realtime tunnel confirms it is healthy.
+    setFallbackPollingRate(window.REALTIME_FAILURE_RATE);
 
     // 2. HEARTBEAT: Poll every 15 seconds
     // Fast updates for "Active User" dashboard status
@@ -2216,8 +2224,8 @@ function setupRealtimeListeners() {
             if (status === 'SUBSCRIBED') {
                 if (window.REALTIME_RECONNECT_TIMER) { clearInterval(window.REALTIME_RECONNECT_TIMER); window.REALTIME_RECONNECT_TIMER = null; }
                 
-                // Throttle fallback polling back to 10 mins since tunnel is healthy
-                if (window.CURRENT_FALLBACK_RATE !== 600000) setFallbackPollingRate(600000);
+                // Zero-polling when the realtime tunnel is healthy.
+                if (window.CURRENT_FALLBACK_RATE !== window.NORMAL_FALLBACK_RATE) setFallbackPollingRate(window.NORMAL_FALLBACK_RATE);
                 
                 if (indicator && indicator.innerHTML.includes('Dropped')) {
                     indicator.style.opacity = '1';
@@ -2225,8 +2233,8 @@ function setupRealtimeListeners() {
                     setTimeout(() => { if (indicator.innerHTML.includes('Restored')) indicator.style.opacity = '0'; }, 3000);
                 }
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                // Tunnel collapsed. Accelerate fallback polling to 30s to maintain near-realtime UI
-                if (window.CURRENT_FALLBACK_RATE !== 30000) setFallbackPollingRate(30000);
+                // Tunnel collapsed. Fall back to the role-based sync cadence.
+                if (window.CURRENT_FALLBACK_RATE !== window.REALTIME_FAILURE_RATE) setFallbackPollingRate(window.REALTIME_FAILURE_RATE);
                 
                 if (indicator) {
                     indicator.style.opacity = '1';
@@ -2321,172 +2329,179 @@ function processIncomingDataQueue() {
         el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing: ${queue.length}`;
     }
 
-    // Batch updates by type to prevent multiple writes/renders
-    const batches = {
-        monitor: [],
-        attendance: [],
-        bookings: [],
-        app_documents: [],
-        generic_rows: []
-    };
+    try {
+        // Batch updates by type to prevent multiple writes/renders
+        const batches = {
+            monitor: [],
+            attendance: [],
+            bookings: [],
+            app_documents: [],
+            generic_rows: []
+        };
 
-    queue.forEach(item => {
-        if (batches[item.type]) batches[item.type].push(item.payload);
-    });
-
-    // 1. Process Monitor
-    if (batches.monitor.length > 0) {
-        let data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-        batches.monitor.forEach(p => {
-            if (p.eventType === 'DELETE') {
-                if (p.old && p.old.user_id) delete data[p.old.user_id];
-            } else {
-                if (p.new && p.new.data !== undefined && p.new.user_id) data[p.new.user_id] = p.new.data;
-            }
-        });
-        localStorage.setItem('monitor_data', JSON.stringify(data));
-        if (typeof StudyMonitor !== 'undefined' && typeof StudyMonitor.updateWidget === 'function') {
-            StudyMonitor.updateWidget();
-        }
-    }
-
-    // 2. Process Attendance
-    if (batches.attendance.length > 0) {
-        let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-        batches.attendance.forEach(p => {
-            if (p.eventType === 'DELETE') {
-                records = records.filter(r => r.id !== p.old.id);
-            } else {
-                const newRow = p.new;
-                if (!newRow.data) return; // Ignore Postgres WAL partial updates
-
-                const item = newRow.data;
-                item.id = newRow.id;
-                item.user = newRow.user_id;
-                
-                // Trainee Minimization
-                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee' && item.user !== CURRENT_USER.user) return;
-
-                const idx = records.findIndex(r => r.id === item.id);
-                if (idx > -1) records[idx] = item;
-                else records.push(item);
-            }
-        });
-        localStorage.setItem('attendance_records', JSON.stringify(records));
-        if (typeof updateAttendanceUI === 'function') updateAttendanceUI();
-    }
-
-    // 3. Process Bookings
-    if (batches.bookings.length > 0) {
-        let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-        batches.bookings.forEach(p => {
-            if (p.eventType === 'DELETE') {
-                bookings = bookings.filter(b => b.id !== p.old.id);
-            } else {
-                const newRow = p.new;
-                if (!newRow.data) return; // Ignore Postgres WAL partial updates
-
-                const item = newRow.data;
-                item.id = newRow.id;
-                const idx = bookings.findIndex(b => b.id === item.id);
-                if (idx > -1) bookings[idx] = item;
-                else bookings.push(item);
-            }
-        });
-        localStorage.setItem('liveBookings', JSON.stringify(bookings));
-        if (typeof renderLiveTable === 'function') renderLiveTable();
-        if (typeof updateNotifications === 'function') updateNotifications();
-    }
-
-    // 4. Process App Documents (Settings, Rosters, Users)
-    if (batches.app_documents.length > 0) {
-        batches.app_documents.forEach(p => {
-            if (p.eventType === 'UPDATE' || p.eventType === 'INSERT') {
-                const rawKey = p.new.key;
-                
-                // ISOLATION BARRIER
-                if (IS_DEMO_MODE && !rawKey.startsWith('demo_')) return;
-                if (!IS_DEMO_MODE && rawKey.startsWith('demo_')) return;
-                
-                const key = IS_DEMO_MODE ? rawKey.replace('demo_', '') : rawKey;
-                const content = p.new.content;
-                
-                // Trainee Data Minimization (Security)
-                const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
-                if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(key)) return;
-
-                const localVal = JSON.parse(localStorage.getItem(key));
-                const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
-                
-                if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(key)) {
-                    const merged = performSmartMerge({[key]: content}, {[key]: localVal}, 'server_wins');
-                    localStorage.setItem(key, JSON.stringify(merged[key]));
-                } else {
-                    localStorage.setItem(key, JSON.stringify(content));
-                }
-                if (key === 'system_config') applySystemConfig();
-            }
-        });
-        
-        // UI PROTECTION: Block schedule list re-renders if an Admin is actively editing a schedule item.
-        // This prevents array index shifting from corrupting data upon save.
-        const isEditingSchedule = document.getElementById('scheduleModal') && !document.getElementById('scheduleModal').classList.contains('hidden');
-        if (typeof refreshAllDropdowns === 'function' && !isEditingSchedule) {
-            refreshAllDropdowns();
-        }
-    }
-
-    // 5. Process Generic Rows (Records, Submissions, Logs)
-    if (batches.generic_rows.length > 0) {
-        const tableUpdates = {};
-        batches.generic_rows.forEach(p => {
-            if (!tableUpdates[p.table]) tableUpdates[p.table] = [];
-            tableUpdates[p.table].push(p);
+        queue.forEach(item => {
+            if (batches[item.type]) batches[item.type].push(item.payload);
         });
 
-        Object.keys(tableUpdates).forEach(table => {
-            const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
-            if (!localKey) return;
-            let items = JSON.parse(localStorage.getItem(localKey) || '[]');
-            const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
-
-            tableUpdates[table].forEach(p => {
+        // 1. Process Monitor
+        if (batches.monitor.length > 0) {
+            let data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+            batches.monitor.forEach(p => {
                 if (p.eventType === 'DELETE') {
-                    items = items.filter(i => (i.id && i.id.toString()) !== p.old.id.toString());
+                    if (p.old && p.old.user_id) delete data[p.old.user_id];
                 } else {
-                    if (!p.new.data) return;
-                    const newItem = p.new.data;
-                    if (!newItem.id) newItem.id = p.new.id;
-                    
-                    if (isTrainee && ['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
-                        if (newItem.trainee !== CURRENT_USER.user && newItem.user !== CURRENT_USER.user) return;
-                    }
-
-                    const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
-                    if (idx > -1) {
-                        // Local Edit Shield: Don't overwrite if local item is waiting in the save queue
-                        const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
-                        const currentLocalHash = generateChecksum(JSON.stringify(items[idx]));
-                        const syncedHash = hashMap[newItem.id];
-                        if (syncedHash && currentLocalHash !== syncedHash) return; 
-                        items[idx] = newItem;
-                    } else {
-                        items.push(newItem);
-                    }
+                    if (p.new && p.new.data !== undefined && p.new.user_id) data[p.new.user_id] = p.new.data;
                 }
             });
-            localStorage.setItem(localKey, JSON.stringify(items));
-        });
-        
-        // Soft UI Refreshes based on active view
-        if (typeof loadAdminDatabase === 'function' && document.getElementById('admin-view-data')?.classList.contains('active')) loadAdminDatabase();
-        if (typeof renderMonthly === 'function' && document.getElementById('monthly')?.classList.contains('active')) renderMonthly();
-        if (typeof loadTestRecords === 'function' && document.getElementById('test-records')?.classList.contains('active')) loadTestRecords();
-        if (typeof loadManageTests === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadManageTests();
-    }
+            localStorage.setItem('monitor_data', JSON.stringify(data));
+            if (typeof StudyMonitor !== 'undefined' && typeof StudyMonitor.updateWidget === 'function') {
+                StudyMonitor.updateWidget();
+            }
+        }
 
-    // After processing, update the indicator with the current queue state.
-    updateQueueIndicator();
+        // 2. Process Attendance
+        if (batches.attendance.length > 0) {
+            let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+            batches.attendance.forEach(p => {
+                if (p.eventType === 'DELETE') {
+                    records = records.filter(r => r.id !== p.old.id);
+                } else {
+                    const newRow = p.new;
+                    if (!newRow.data) return; // Ignore Postgres WAL partial updates
+
+                    const item = newRow.data;
+                    item.id = newRow.id;
+                    item.user = newRow.user_id;
+                    
+                    // Trainee Minimization
+                    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee' && item.user !== CURRENT_USER.user) return;
+
+                    const idx = records.findIndex(r => r.id === item.id);
+                    if (idx > -1) records[idx] = item;
+                    else records.push(item);
+                }
+            });
+            localStorage.setItem('attendance_records', JSON.stringify(records));
+            if (typeof updateAttendanceUI === 'function') updateAttendanceUI();
+        }
+
+        // 3. Process Bookings
+        if (batches.bookings.length > 0) {
+            let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+            batches.bookings.forEach(p => {
+                if (p.eventType === 'DELETE') {
+                    bookings = bookings.filter(b => b.id !== p.old.id);
+                } else {
+                    const newRow = p.new;
+                    if (!newRow.data) return; // Ignore Postgres WAL partial updates
+
+                    const item = newRow.data;
+                    item.id = newRow.id;
+                    const idx = bookings.findIndex(b => b.id === item.id);
+                    if (idx > -1) bookings[idx] = item;
+                    else bookings.push(item);
+                }
+            });
+            localStorage.setItem('liveBookings', JSON.stringify(bookings));
+            if (typeof renderLiveTable === 'function') renderLiveTable();
+            if (typeof updateNotifications === 'function') updateNotifications();
+        }
+
+        // 4. Process App Documents (Settings, Rosters, Users)
+        if (batches.app_documents.length > 0) {
+            batches.app_documents.forEach(p => {
+                if (p.eventType === 'UPDATE' || p.eventType === 'INSERT') {
+                    const rawKey = p.new.key;
+                    
+                    // ISOLATION BARRIER
+                    if (IS_DEMO_MODE && !rawKey.startsWith('demo_')) return;
+                    if (!IS_DEMO_MODE && rawKey.startsWith('demo_')) return;
+                    
+                    const key = IS_DEMO_MODE ? rawKey.replace('demo_', '') : rawKey;
+                    const content = p.new.content;
+                    
+                    // Trainee Data Minimization (Security)
+                    const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+                    if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(key)) return;
+
+                    const localVal = JSON.parse(localStorage.getItem(key));
+                    const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
+                    
+                    if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(key)) {
+                        const merged = performSmartMerge({[key]: content}, {[key]: localVal}, 'server_wins');
+                        localStorage.setItem(key, JSON.stringify(merged[key]));
+                    } else {
+                        localStorage.setItem(key, JSON.stringify(content));
+                    }
+                    if (key === 'system_config') applySystemConfig();
+                }
+            });
+            
+            // UI PROTECTION: Block schedule list re-renders if an Admin is actively editing a schedule item.
+            // This prevents array index shifting from corrupting data upon save.
+            const isEditingSchedule = document.getElementById('scheduleModal') && !document.getElementById('scheduleModal').classList.contains('hidden');
+            if (typeof refreshAllDropdowns === 'function' && !isEditingSchedule) {
+                refreshAllDropdowns();
+            }
+        }
+
+        // 5. Process Generic Rows (Records, Submissions, Logs)
+        if (batches.generic_rows.length > 0) {
+            const tableUpdates = {};
+            batches.generic_rows.forEach(p => {
+                if (!tableUpdates[p.table]) tableUpdates[p.table] = [];
+                tableUpdates[p.table].push(p);
+            });
+
+            Object.keys(tableUpdates).forEach(table => {
+                const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
+                if (!localKey) return;
+                let items = JSON.parse(localStorage.getItem(localKey) || '[]');
+                const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+
+                tableUpdates[table].forEach(p => {
+                    if (p.eventType === 'DELETE') {
+                        items = items.filter(i => (i.id && i.id.toString()) !== p.old.id.toString());
+                    } else {
+                        if (!p.new.data) return;
+                        const newItem = p.new.data;
+                        if (!newItem.id) newItem.id = p.new.id;
+                        
+                        if (isTrainee && ['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
+                            if (newItem.trainee !== CURRENT_USER.user && newItem.user !== CURRENT_USER.user) return;
+                        }
+
+                        const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
+                        if (idx > -1) {
+                            // Local Edit Shield: Don't overwrite if local item is waiting in the save queue
+                            const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
+                            const currentLocalHash = generateChecksum(JSON.stringify(items[idx]));
+                            const syncedHash = hashMap[newItem.id];
+                            if (syncedHash && currentLocalHash !== syncedHash) return; 
+                            items[idx] = newItem;
+                        } else {
+                            items.push(newItem);
+                        }
+                    }
+                });
+                localStorage.setItem(localKey, JSON.stringify(items));
+            });
+            
+            // Soft UI Refreshes based on active view
+            if (typeof loadAdminDatabase === 'function' && document.getElementById('admin-view-data')?.classList.contains('active')) loadAdminDatabase();
+            if (typeof renderMonthly === 'function' && document.getElementById('monthly')?.classList.contains('active')) renderMonthly();
+            if (typeof loadTestRecords === 'function' && document.getElementById('test-records')?.classList.contains('active')) loadTestRecords();
+            if (typeof loadManageTests === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadManageTests();
+        }
+
+        // After processing, update the indicator with the current queue state.
+        updateQueueIndicator();
+    } catch (err) {
+        INCOMING_DATA_QUEUE = queue.concat(INCOMING_DATA_QUEUE);
+        console.error("Incoming realtime queue processing failed:", err);
+        updateSyncUI('error');
+        updateQueueIndicator();
+    }
 }
 
 // --- UPDATED HANDLERS: PUSH TO QUEUE INSTEAD OF PROCESS ---
@@ -2714,8 +2729,11 @@ if (typeof module !== 'undefined' && module.exports) {
         loadFromServer,
         saveToServer,
         performSmartMerge,
+        hardDelete,
+        hardDeleteByQuery,
         notifyUnsavedChanges,
         logAuditAction,
-        reportSystemError
+        reportSystemError,
+        forceFullSync
     };
 }

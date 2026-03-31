@@ -39,8 +39,8 @@ const StudyMonitor = {
                 } else {
                     // Normal restore
                     const md = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-                    if (md[CURRENT_USER.user] && Array.isArray(md[CURRENT_USER.user].history)) {
-                        this.history = md[CURRENT_USER.user].history;
+                    if (md[CURRENT_USER?.user] && Array.isArray(md[CURRENT_USER?.user]?.history)) {
+                        this.history = md[CURRENT_USER?.user]?.history;
                     }
                 }
             } catch(e) { console.error("History Restore Error", e); }
@@ -60,8 +60,8 @@ const StudyMonitor = {
 
         // --- NEW: CAPTURE EXIT ---
         window.addEventListener('beforeunload', () => {
-            if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
-                if (window.electronAPI) window.electronAPI.ipcRenderer.send('stop-activity-monitor');
+            if (CURRENT_USER?.role === 'trainee') {
+                if (window.electronAPI?.ipcRenderer) window.electronAPI.ipcRenderer.send('stop-activity-monitor');
                 this.track("App Closed / Refreshed");
                 // Attempt synchronous local save to ensure data isn't lost
                 const payload = {
@@ -76,7 +76,7 @@ const StudyMonitor = {
                 localStorage.setItem('monitor_unsynced', JSON.stringify(payload));
                 // Also try standard save just in case
                 let md = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-                md[CURRENT_USER.user] = payload;
+                md[CURRENT_USER?.user] = payload;
                 localStorage.setItem('monitor_data', JSON.stringify(md));
             }
         });
@@ -206,7 +206,7 @@ const StudyMonitor = {
 
         // Throttle: show once every 5 minutes max
         const lastWarning = sessionStorage.getItem('last_ext_warn');
-        if (lastWarning && (Date.now() - parseInt(lastWarning) < 300000)) {
+        if (lastWarning && (Date.now() - Number.parseInt(lastWarning) < 300000)) {
             return;
         }
 

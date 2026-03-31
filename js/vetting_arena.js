@@ -1308,3 +1308,9 @@ async function checkAndEnforceVetting() {
         }
     } catch(e) { console.error("Vetting Enforcer Error:", e); }
 }
+
+// --- NEW: GLOBAL CLEANUP ---
+window.cleanupVettingEnforcer = function() {
+    if (VETTING_ENFORCER_INTERVAL) clearInterval(VETTING_ENFORCER_INTERVAL);
+    VETTING_ENFORCER_INTERVAL = null;
+};

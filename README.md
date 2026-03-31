@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.4.77**: **Sync Reliability & Cleanup**: Silent server switches now await migration before pulling fresh data, failed save keys are re-queued instead of being stranded, realtime fallback polling now stays off while the tunnel is healthy, and unused legacy files were safely removed from the repo.
  - **v2.4.72**: **Presentation Tools**: Built a 100% isolated Demo Sandbox (`demo_admin`/`demo_trainee`) with rich mock data generation. Implemented a 5-layer isolation shield to guarantee live production data is completely protected from sandbox leaks during unexpected app closures or browser cache restorations.
  - **v2.4.73**: **Security & UX**: Simplified the Study Browser security model by removing the internal firewall, fixing complex SSO login crashes. Violation tracking now relies solely on the OS-level monitor for external applications.
  - **v2.4.76**: **Hotfix**: Resolved a startup crash (`SyntaxError`) preventing the application from loading by correctly handling asynchronous calls in the Activity Monitor initialization.

@@ -95,15 +95,53 @@ window.onerror = function(msg, url, line, col, error) {
 // Lock to prevent concurrent failovers destroying the boot cycle
 window._isSwitchingServers = false;
 
+async function migrateLocalStateToActiveServer(options = {}) {
+    const { silent = false, loaderText = null } = options;
+
+    if (typeof saveToServer !== 'function') return true;
+
+    if (loaderText) {
+        const txt = document.getElementById('loader-text');
+        if (txt) txt.innerText = loaderText;
+    }
+
+    const configKeys = ['system_config'];
+    const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
+    const saveResult = await saveToServer(safeKeys, true, silent);
+
+    if (!saveResult) {
+        throw new Error("Migration save failed.");
+    }
+
+    if (window.supabaseClient) {
+        const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
+        for (const table of tables) {
+            const { data: serverIds } = await window.supabaseClient.from(table).select('id');
+            if (serverIds) {
+                const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
+                if (localKey) {
+                    const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+                    const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
+                    const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
+                    if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
 // --- NEW: SILENT BACKGROUND SERVER FAILOVER ---
 window.performSilentServerSwitch = async function(newTarget) {
     if (window._isSwitchingServers) return;
     window._isSwitchingServers = true;
+    const previousTarget = localStorage.getItem('last_connected_server') || localStorage.getItem('active_server_target') || 'cloud';
     try {
         console.warn(`[Silent Failover] Initiating transition to ${newTarget.toUpperCase()}`);
         if (typeof showToast === 'function') showToast(`Switching to ${newTarget.toUpperCase()} Server...`, 'info');
 
-        const lastTarget = localStorage.getItem('last_connected_server') || localStorage.getItem('active_server_target') || 'cloud';
+        const lastTarget = previousTarget;
         localStorage.setItem('active_server_target', newTarget);
 
         // 1. Clear old Realtime Channels
@@ -127,29 +165,7 @@ window.performSilentServerSwitch = async function(newTarget) {
                 if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
             });
 
-            if (typeof saveToServer === 'function') {
-                let configKeys = ['system_config'];
-                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
-                
-                // Force push local state & perform Mirror Cleanup to destroy server-side ghost data
-                saveToServer(safeKeys, true, true).then(async () => {
-                    if (window.supabaseClient) {
-                        const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
-                        for (const table of tables) {
-                            const { data: serverIds } = await window.supabaseClient.from(table).select('id');
-                            if (serverIds) {
-                                const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
-                                if (localKey) {
-                                    const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
-                                    const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
-                                    const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
-                                    if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
-                                }
-                            }
-                        }
-                    }
-                }).catch(()=>{}); 
-            }
+            await migrateLocalStateToActiveServer({ silent: true });
             localStorage.setItem('last_connected_server', newTarget);
         }
 
@@ -162,6 +178,12 @@ window.performSilentServerSwitch = async function(newTarget) {
         if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
 
         if (typeof showToast === 'function') showToast(`Successfully connected to ${newTarget.toUpperCase()}.`, 'success');
+    } catch (e) {
+        console.error(`[Silent Failover] Failed to switch to ${newTarget.toUpperCase()}:`, e);
+        localStorage.setItem('active_server_target', previousTarget);
+        if (typeof initSupabaseClient === 'function') initSupabaseClient();
+        if (typeof setupRealtimeListeners === 'function') setupRealtimeListeners();
+        if (typeof showToast === 'function') showToast(`Switch to ${newTarget.toUpperCase()} failed. Staying on ${previousTarget.toUpperCase()}.`, 'error');
     } finally {
         window._isSwitchingServers = false;
     }
@@ -712,35 +734,11 @@ window.onload = async function() {
 
         // MASTER AUTHORITY: The local device retains all offline work.
         // Push the complete local state to the new server and destroy server-side ghost data.
-        if (typeof saveToServer === 'function') {
-            try {
-                const txt = document.getElementById('loader-text');
-                if(txt) txt.innerText = "Synchronizing Data to New Server...";
-
-                let configKeys = ['system_config'];
-                const safeKeys = Object.keys(DB_SCHEMA || {}).filter(k => !configKeys.includes(k));
-                
-                await saveToServer(safeKeys, true); 
-                
-                if (window.supabaseClient) {
-                    const tables = ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews', 'link_requests'];
-                    for (const table of tables) {
-                        const { data: serverIds } = await window.supabaseClient.from(table).select('id');
-                        if (serverIds) {
-                            const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
-                            if (localKey) {
-                                const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
-                                const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
-                                const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
-                                if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
-                            }
-                        }
-                    }
-                }
+        try {
+            await migrateLocalStateToActiveServer({ loaderText: "Synchronizing Data to New Server..." });
                 console.log("Migration: Target server synchronized with local state.");
-            } catch(e) { 
-                console.error("Migration Push Failed:", e); 
-            }
+        } catch(e) { 
+            console.error("Migration Push Failed:", e); 
         }
         // CRITICAL FIX: Update this AFTER attempt, regardless of success, to stop the loop.
         localStorage.setItem('last_connected_server', currentTarget);
@@ -1991,6 +1989,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.4.77": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Sync Reliability:</strong> Silent server switches now await the full migration push before pulling fresh data, and automatically roll back to the previous target if the migration fails.</li>
+                <li style="margin-bottom: 8px;"><strong>Save Safety:</strong> Hardened the mutex save queue so failed uploads are re-queued instead of silently dropping unsynced keys during network or server errors.</li>
+                <li style="margin-bottom: 8px;"><strong>Realtime Engine:</strong> Fallback polling is now disabled while the realtime tunnel is healthy, re-enabled at the role-based sync cadence when the tunnel drops, and the incoming queue now re-queues failed realtime batches instead of losing them.</li>
+            </ul>`,
         "2.4.76": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a fatal SyntaxError during application startup by correctly awaiting the Activity Monitor's initialization sequence.</li>

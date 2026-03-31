@@ -18,6 +18,7 @@ const localStorageMock = (function() {
 })();
 
 global.localStorage = localStorageMock;
+global.sessionStorage = localStorageMock;
 
 // Mock other browser globals if necessary
 
