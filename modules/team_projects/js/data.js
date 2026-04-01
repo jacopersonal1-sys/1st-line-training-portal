@@ -9,17 +9,19 @@ const DataService = {
         console.log("[Team Hub] Fetching initial data from cloud...");
         
         // Fetch all required data blobs in parallel
-        const [users, taskSubs, personalLists, backendData] = await Promise.all([
+        const [users, taskSubs, personalLists, backendData, agentFeedback] = await Promise.all([
             AppContext.supabase.from('app_documents').select('content').eq('key', 'users').single(),
             AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_task_submissions').single(),
             AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_personal_lists').single(),
-            AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_backend_data').single()
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_backend_data').single(),
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'tl_agent_feedback').single()
         ]);
 
         if (users.data) localStorage.setItem('users', JSON.stringify(users.data.content || []));
         if (taskSubs.data) localStorage.setItem('tl_task_submissions', JSON.stringify(taskSubs.data.content || []));
         if (personalLists.data) localStorage.setItem('tl_personal_lists', JSON.stringify(personalLists.data.content || {}));
         if (backendData.data) localStorage.setItem('tl_backend_data', JSON.stringify(backendData.data.content || {}));
+        if (agentFeedback.data) localStorage.setItem('tl_agent_feedback', JSON.stringify(agentFeedback.data.content || []));
     },
     
     // Get Submission for specific date
@@ -71,7 +73,7 @@ const DataService = {
 
     // --- BACKEND DATA (CONFIG) ---
     getBackendData: function() {
-        return JSON.parse(localStorage.getItem('tl_backend_data') || '{"outage_areas":[]}');
+        return JSON.parse(localStorage.getItem('tl_backend_data') || '{"outage_areas":[], "bottleneck_types":[], "feedback_categories":{}}');
     },
 
     saveBackendData: function(data) {
@@ -80,15 +82,15 @@ const DataService = {
         this.syncTable('tl_backend_data', data);
     },
 
-    // --- BACKEND DATA (CONFIG) ---
-    getBackendData: function() {
-        return JSON.parse(localStorage.getItem('tl_backend_data') || '{"outage_areas":[]}');
+    // --- AGENT FEEDBACK LOGS ---
+    getAgentFeedback: function() {
+        return JSON.parse(localStorage.getItem('tl_agent_feedback') || '[]');
     },
 
-    saveBackendData: function(data) {
+    saveAgentFeedback: function(data) {
         if (!AppContext.user) return;
-        localStorage.setItem('tl_backend_data', JSON.stringify(data));
-        this.syncTable('tl_backend_data', data);
+        localStorage.setItem('tl_agent_feedback', JSON.stringify(data));
+        this.syncTable('tl_agent_feedback', data);
     },
 
     // --- INTERNAL SYNC HELPER ---

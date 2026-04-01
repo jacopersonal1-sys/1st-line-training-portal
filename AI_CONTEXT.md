@@ -30,7 +30,7 @@
 | `rosters` | Object | Blob | Group definitions `{ "GroupA": ["User1", "User2"] }`. |
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
-| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`. |
+| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`. |
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
@@ -270,15 +270,17 @@ Maps local `localStorage` keys to Supabase tables.
 - **Architecture:** "Program within a Program". Runs inside a `<webview>` for complete isolation.
 - **Entry Point:** `index.html` loaded by `js/tl_tasks.js` with encoded credentials in URL.
 - **Files:**
-    - `js/main.js`: Core controller. Handles routing (Timeline, My Team, Backend Data).
-    - `js/data.js`: Independent data layer. Fetches blobs directly from Supabase (`tl_task_submissions`, `tl_backend_data`).
+    - `js/main.js`: Core controller. Handles routing (Timeline, My Team, Feedback, Review, etc.).
+    - `js/data.js`: Independent data layer. Fetches blobs directly from Supabase (`tl_task_submissions`, `tl_backend_data`, `tl_agent_feedback`).
     - `js/ui_timeline.js`: Renders the Operations Timeline. Supports custom inputs:
         - `outage_form`: Auto-fills areas from backend config. Supports multiple entries.
         - `ticket_backlog`: Tracks total/oldest tickets.
         - `handover_notes`: Structured handover tracking with multiple problem tickets.
         - `bottleneck_form`: Identifies operational bottlenecks with file/link uploads.
     - `js/ui_team.js`: Renders Roster and Calendar views. Supports role assignment (FLA/ESA).
-    - `js/ui_backend.js`: Configuration UI for dropdowns (Outage Areas).
+    - `js/ui_backend.js`: Configuration UI for dropdowns (Outage Areas, Bottlenecks, Feedback Categories).
+    - `js/ui_feedback.js`: Renders the multi-question "Agent Production Feedback" capture form.
+    - `js/ui_feedback_review.js`: Renders the "Feedback Review Dashboard" with Roster, History, and Analytics views.
 
 ---
 
@@ -368,6 +370,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 6. Release & Update Protocol (AI Instructions)
 
+> **AI INSTRUCTION:** When the user asks to "Push this update" or "Release version X.X.X", follow this strict protocol:
 > **AI INSTRUCTION:** When the user asks to "Push this update" or "Release version X.X.X", follow this strict protocol:
 
 1.  **Update Version Numbers:**

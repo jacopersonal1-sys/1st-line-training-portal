@@ -25,6 +25,8 @@ const App = {
                     <button class="sub-tab-btn ${this.currentView === 'timeline' ? 'active' : ''}" onclick="App.setView('timeline')">Operations Timeline</button>
                     <button class="sub-tab-btn ${this.currentView === 'my_team' ? 'active' : ''}" onclick="App.setView('my_team')">My Team</button>
                     <button class="sub-tab-btn ${this.currentView === 'overview' ? 'active' : ''}" onclick="App.setView('overview')">Insight/Overview</button>
+                    <button class="sub-tab-btn ${this.currentView === 'agent_feedback' ? 'active' : ''}" onclick="App.setView('agent_feedback')">Agent Production Feedback</button>
+                    <button class="sub-tab-btn ${this.currentView === 'feedback_review' ? 'active' : ''}" onclick="App.setView('feedback_review')">Feedback Review Dashboard</button>
                     <button class="sub-tab-btn ${this.currentView === 'roster' ? 'active' : ''}" onclick="App.setView('roster')">Add Team</button>
                     <button class="sub-tab-btn ${this.currentView === 'backend_data' ? 'active' : ''}" onclick="App.setView('backend_data')">Backend Data</button>
                 </div>
@@ -44,11 +46,15 @@ const App = {
             html += TimelineUI.render(this.timelineMode, this.activeTab, this.currentDate, submission.data || {}, shift);
         } else if (this.currentView === 'my_team') {
             html += TeamUI.renderCalendar(this.currentDate);
+        } else if (this.currentView === 'agent_feedback') {
+            html += FeedbackUI.render();
+        } else if (this.currentView === 'feedback_review') {
+            html += FeedbackReviewUI.render();
         } else if (this.currentView === 'roster') {
             html += TeamUI.renderRoster();
         } else if (this.currentView === 'backend_data') {
             html += BackendUI.render();
-        } else {
+        } else { // Default/Fallback for 'overview' and any other new tabs
             html += `<div style="text-align:center; padding:50px; color:var(--text-muted);">
                 <i class="fas fa-hard-hat" style="font-size:4rem; margin-bottom:20px;"></i>
                 <h2>Under Construction</h2>
