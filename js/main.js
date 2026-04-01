@@ -1993,7 +1993,7 @@ function getChangelog(version) {
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature: Agent Feedback System.</strong> Added a comprehensive "Agent Production Feedback" form to the Teamleader Hub for capturing detailed performance notes.</li>
                 <li style="margin-bottom: 8px;"><strong>Feature: Feedback Review Dashboard.</strong> Added a new dashboard for reviewing, analyzing, and exporting all captured agent feedback, complete with historical logs and performance summaries.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> The new feedback system saves all data to a dedicated cloud record (`tl_agent_feedback`) and includes robust error handling to prevent data loss.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> The new feedback system saves all data to a dedicated cloud record ('tl_agent_feedback') and includes robust error handling to prevent data loss.</li>
                 <li style="margin-bottom: 8px;"><strong>UX/UI:</strong> The feedback form dropdowns are now configurable on a per-question basis from the "Backend Data" tab for maximum flexibility.</li>
             </ul>`,
         "2.4.77": `
