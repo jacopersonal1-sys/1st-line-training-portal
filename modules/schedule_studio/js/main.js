@@ -64,7 +64,6 @@ const App = {
                     <div class="studio-header">
                         <div>
                             <h1 class="studio-title">Schedule Studio</h1>
-                            <p class="studio-subtitle">An isolated timeline manager for group schedules. This keeps the schedule engine separated from the rest of the app while preserving the current data structure used by trainees and the test engine.</p>
                         </div>
                         <div class="studio-pill-row">
                             <span class="studio-pill"><i class="fas fa-user"></i> ${TimelineUI.escape(currentUser?.user || 'Guest')}</span>

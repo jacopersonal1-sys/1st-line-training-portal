@@ -10,6 +10,7 @@ const StudyMonitor = {
     isStudyOpen: false,
     activeWebview: null,
     viewMode: 'list', // 'list' or 'summary'
+    monitorScope: 'scheduled', // 'scheduled' or 'all'
     pendingTopic: null, // For classification modal
     activityPoller: null, // Track the interval for global activity monitoring
     queueSelection: new Set(), // Persist selections across refreshes
@@ -46,9 +47,31 @@ const StudyMonitor = {
         window.open(url, '_blank', 'noopener');
     },
 
+    isWebviewReady: function(webview) {
+        return Boolean(webview && webview.isConnected && webview.dataset && webview.dataset.navReady === '1');
+    },
+
+    getSafeWebviewNavState: function(webview) {
+        if (!this.isWebviewReady(webview)) {
+            return { ready: false, canGoBack: false, canGoForward: false };
+        }
+
+        try {
+            return {
+                ready: true,
+                canGoBack: Boolean(webview.canGoBack()),
+                canGoForward: Boolean(webview.canGoForward())
+            };
+        } catch (error) {
+            console.warn('Study webview navigation state unavailable yet:', error);
+            return { ready: false, canGoBack: false, canGoForward: false };
+        }
+    },
+
     updateBrowserChrome: function() {
         const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId) || null;
         this.activeWebview = activeTab ? activeTab.webview : null;
+        const navState = this.getSafeWebviewNavState(this.activeWebview);
 
         const titleEl = document.getElementById('study-current-title');
         if (titleEl) {
@@ -62,9 +85,9 @@ const StudyMonitor = {
         const homeBtn = document.getElementById('study-nav-home');
         const hasWebview = Boolean(this.activeWebview);
 
-        if (backBtn) backBtn.disabled = !hasWebview || !this.activeWebview.canGoBack();
-        if (forwardBtn) forwardBtn.disabled = !hasWebview || !this.activeWebview.canGoForward();
-        if (reloadBtn) reloadBtn.disabled = !hasWebview;
+        if (backBtn) backBtn.disabled = !navState.ready || !navState.canGoBack;
+        if (forwardBtn) forwardBtn.disabled = !navState.ready || !navState.canGoForward;
+        if (reloadBtn) reloadBtn.disabled = !navState.ready;
         if (homeBtn) homeBtn.disabled = !hasWebview || !this.browserState.homeUrl;
     },
     
@@ -901,6 +924,8 @@ const StudyMonitor = {
         const webview = document.createElement('webview');
         webview.id = `webview-${tabId}`;
         webview.src = cleanUrl;
+        webview.dataset.domReady = '0';
+        webview.dataset.navReady = '0';
         webview.style.width = '100%';
         webview.style.height = '100%';
         // REQUIRED: Allows target="_blank" links to fire the 'new-window' event so we can intercept them.
@@ -983,13 +1008,20 @@ const StudyMonitor = {
         const webview = tab.webview;
         
         webview.addEventListener('did-start-loading', () => {
+            webview.dataset.navReady = '0';
             tab.title = 'Loading...';
             this.renderTabs();
             this.updateBrowserChrome();
         });
 
         webview.addEventListener('did-stop-loading', () => {
-            const newTitle = (webview.getTitle() || tab.title || 'Study Tab').substring(0, 20);
+            webview.dataset.navReady = '1';
+            let newTitle = tab.title || 'Study Tab';
+            try {
+                newTitle = (webview.getTitle() || tab.title || 'Study Tab').substring(0, 20);
+            } catch (error) {
+                console.warn('Study webview title unavailable yet:', error);
+            }
             tab.title = newTitle;
             this.renderTabs();
             this.updateBrowserChrome();
@@ -1054,6 +1086,7 @@ const StudyMonitor = {
         });
 
         webview.addEventListener('dom-ready', () => {
+            webview.dataset.domReady = '1';
             webview.executeJavaScript(`
                 document.addEventListener('click', () => { console.log('__STUDY_CLICK__'); });
             `);
@@ -1121,6 +1154,175 @@ const StudyMonitor = {
             }
         });
         return Array.from(scheduledAgents);
+    },
+
+    getAllTrainees: function() {
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        return users
+            .filter(u => u && u.role === 'trainee' && u.user)
+            .map(u => u.user)
+            .sort((a, b) => a.localeCompare(b));
+    },
+
+    getVisibleAgents: function() {
+        return this.monitorScope === 'all' ? this.getAllTrainees() : this.getScheduledAgents();
+    },
+
+    setMonitorScope: function(scope) {
+        this.monitorScope = scope === 'all' ? 'all' : 'scheduled';
+        this.forceRefresh = true;
+        renderActivityMonitorContent();
+    },
+
+    escapeHtml: function(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    formatDuration: function(ms) {
+        const safeMs = Math.max(0, Number(ms) || 0);
+        const totalSeconds = Math.floor(safeMs / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        if (minutes > 0) return `${minutes}m ${seconds}s`;
+        return `${seconds}s`;
+    },
+
+    isProductiveCategory: function(category) {
+        return category === 'material' || category === 'tool';
+    },
+
+    getCurrentTaskForAgent: function(agentName) {
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        let myGroupId = null;
+
+        for (const [gid, members] of Object.entries(rosters)) {
+            if (Array.isArray(members) && members.some(m => String(m).toLowerCase() === String(agentName).toLowerCase())) {
+                myGroupId = gid;
+                break;
+            }
+        }
+
+        if (!myGroupId) return 'No group assigned';
+
+        const schedKey = Object.keys(schedules).find(k => schedules[k]?.assigned === myGroupId);
+        if (!schedKey || !Array.isArray(schedules[schedKey]?.items)) return `Group ${myGroupId}`;
+
+        const todayStr = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+        const task = schedules[schedKey].items.find(i => {
+            if (typeof isDateInRange === 'function') return isDateInRange(i.dateRange, i.dueDate, todayStr);
+            return i.dateRange <= todayStr && (i.dueDate ? i.dueDate >= todayStr : i.dateRange >= todayStr);
+        });
+
+        return task?.courseName || `Group ${myGroupId}`;
+    },
+
+    simplifyActivityName: function(activityString) {
+        const raw = String(activityString || '').replace(/^(Studying:\s*|External:\s*|Violation:\s*|Idle:\s*|System:\s*|Navigating:\s*)/i, '').trim();
+        if (!raw) return 'No activity reported';
+
+        if (raw.includes('sharepoint.com') || raw.includes('microsoftonline.com')) {
+            if (raw.includes('.mp4') || raw.toLowerCase().includes('stream.aspx')) return 'SharePoint training video';
+            return 'SharePoint training document';
+        }
+        if (raw.toLowerCase().includes('qcontact')) return 'Q-Contact';
+        if (raw.toLowerCase().includes('crm')) return 'CRM';
+        if (raw.toLowerCase().includes('radius')) return 'Radius';
+        if (raw.toLowerCase().includes('preseem')) return 'Preseem';
+        if (raw.toLowerCase().includes('odoo')) return 'Odoo';
+        if (raw.toLowerCase().includes('teams')) return 'Microsoft Teams';
+        if (raw.toLowerCase().includes('outlook') || raw.toLowerCase().includes('mail')) return 'Email';
+        return raw.replace(/\s*\[(.*?)\]\s*$/, '').trim();
+    },
+
+    getReadableActivity: function(activity) {
+        const current = activity?.current || 'No Data';
+        const category = this.getCategory(current);
+        const pretty = this.simplifyActivityName(current);
+
+        if (current === 'No Data') {
+            return {
+                headline: 'No live activity reported yet',
+                detail: 'This device has not sent a current activity update yet.'
+            };
+        }
+        if (current.startsWith('Violation')) {
+            return {
+                headline: `Attention needed: ${pretty}`,
+                detail: 'This is being treated as outside the approved training or work tools.'
+            };
+        }
+        if (current.startsWith('External')) {
+            return {
+                headline: `Outside work tools: ${pretty}`,
+                detail: 'The active app or window is not currently classified as training or work related.'
+            };
+        }
+        if (category === 'material') {
+            return {
+                headline: `Learning material: ${pretty}`,
+                detail: 'Working in study content or training material.'
+            };
+        }
+        if (category === 'tool') {
+            return {
+                headline: `Work tool: ${pretty}`,
+                detail: 'Working inside an approved support or communication tool.'
+            };
+        }
+        if (current.toLowerCase().includes('idle')) {
+            return {
+                headline: 'Away from desk',
+                detail: 'No recent keyboard or mouse activity was detected.'
+            };
+        }
+        return {
+            headline: pretty,
+            detail: 'Current activity is being tracked normally.'
+        };
+    },
+
+    getStatusMeta: function(activity) {
+        const current = activity?.current || 'No Data';
+        const category = this.getCategory(current);
+
+        if (current === 'No Data') return { label: 'No Data Yet', className: 'status-fail', accent: '#95a5a6' };
+        if (current.startsWith('Violation')) return { label: 'Attention Needed', className: 'status-fail', accent: '#ff5252' };
+        if (current.startsWith('External')) return { label: 'Outside Work', className: 'status-improve', accent: '#f39c12' };
+        if (this.isProductiveCategory(category) || activity?.isStudyOpen) return { label: 'On Task', className: 'status-pass', accent: '#2ecc71' };
+        if (current.toLowerCase().includes('idle')) return { label: 'Away / Idle', className: 'status-fail', accent: '#95a5a6' };
+        return { label: 'In Portal', className: 'status-improve', accent: '#f1c40f' };
+    },
+
+    getScopeSummaryStats: function(agentNames, data) {
+        return agentNames.reduce((acc, agent) => {
+            const activity = data[agent] || { current: 'No Data' };
+            const current = activity.current || 'No Data';
+            const category = this.getCategory(current);
+
+            acc.total += 1;
+            if (current === 'No Data') acc.noData += 1;
+            else if (current.startsWith('Violation') || current.startsWith('External')) acc.attention += 1;
+            else if (this.isProductiveCategory(category) || activity.isStudyOpen) acc.onTask += 1;
+            else acc.idle += 1;
+            return acc;
+        }, { total: 0, onTask: 0, attention: 0, idle: 0, noData: 0 });
+    },
+
+    renderScopeControls: function() {
+        return `
+            <div class="btn-group">
+                <button class="${this.monitorScope === 'scheduled' ? 'active' : ''}" onclick="StudyMonitor.setMonitorScope('scheduled')">Scheduled Today</button>
+                <button class="${this.monitorScope === 'all' ? 'active' : ''}" onclick="StudyMonitor.setMonitorScope('all')">All Trainees</button>
+            </div>
+        `;
     }
 };
 
@@ -1167,52 +1369,85 @@ function renderActivityMonitorContent() {
         return;
     }
 
-    // 1. Fetch Data
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    const targetAgents = StudyMonitor.getScheduledAgents();
-    
-    if(targetAgents.length === 0) {
-        // Clear grid if it exists
-        if (container.querySelector('.monitor-grid')) {
-            container.querySelector('.monitor-grid').innerHTML = '';
-        }
+    const targetAgents = StudyMonitor.getVisibleAgents();
+    const stats = StudyMonitor.getScopeSummaryStats(targetAgents, data);
+
+    if (!container.querySelector('.activity-monitor-shell')) {
         container.innerHTML = `
-            <div style="text-align:center; padding:20px; color:var(--text-muted);">
-                <i class="fas fa-calendar-times" style="font-size:2rem; margin-bottom:10px;"></i><br>
-                No agents scheduled for today.<br>
-                <button class="btn-secondary btn-sm" style="margin-top:10px;" onclick="StudyMonitor.forceShowAll()">Show All Agents Anyway</button>
-            </div>`;
-        return;
+            <div class="activity-monitor-shell">
+                <div class="activity-monitor-toolbar">
+                    <div>
+                        <h4 class="activity-monitor-title">Live Activity View</h4>
+                        <p class="activity-monitor-subtitle">Green means the agent is inside approved learning or work tools. Orange means outside approved tools. Grey means away or not reporting yet.</p>
+                    </div>
+                    <div class="activity-monitor-toolbar-actions">
+                        ${StudyMonitor.renderScopeControls()}
+                    </div>
+                </div>
+                <div class="activity-monitor-stats" id="activity-monitor-stats"></div>
+                <div class="monitor-grid"></div>
+            </div>
+        `;
+    } else {
+        const actions = container.querySelector('.activity-monitor-toolbar-actions');
+        if (actions) actions.innerHTML = StudyMonitor.renderScopeControls();
     }
 
-    // Ensure container has a grid wrapper if empty
-    if (!container.querySelector('.monitor-grid')) {
-        container.innerHTML = '<div class="monitor-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:20px;"></div>';
+    const statsEl = document.getElementById('activity-monitor-stats');
+    if (statsEl) {
+        statsEl.innerHTML = `
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">Visible Agents</span>
+                <strong class="activity-monitor-stat-value">${stats.total}</strong>
+            </div>
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">On Task</span>
+                <strong class="activity-monitor-stat-value" style="color:#2ecc71;">${stats.onTask}</strong>
+            </div>
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">Attention Needed</span>
+                <strong class="activity-monitor-stat-value" style="color:#f39c12;">${stats.attention}</strong>
+            </div>
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">Away or No Data</span>
+                <strong class="activity-monitor-stat-value" style="color:#95a5a6;">${stats.idle + stats.noData}</strong>
+            </div>
+        `;
     }
+
     const grid = container.querySelector('.monitor-grid');
+
+    if(targetAgents.length === 0) {
+        grid.innerHTML = StudyMonitor.monitorScope === 'scheduled'
+            ? `
+                <div class="activity-monitor-empty">
+                    <i class="fas fa-calendar-times"></i>
+                    <div>No agents are scheduled for today.</div>
+                    <button class="btn-secondary btn-sm" onclick="StudyMonitor.setMonitorScope('all')">Show All Trainees</button>
+                </div>`
+            : `
+                <div class="activity-monitor-empty">
+                    <i class="fas fa-users-slash"></i>
+                    <div>No trainee accounts were found.</div>
+                </div>`;
+        return;
+    }
 
     const activeIds = new Set();
 
     targetAgents.sort().forEach(agent => {
         const activity = data[agent] || { current: 'No Data', since: Date.now(), isStudyOpen: false, history: [] };
-        const durationMs = Date.now() - activity.since;
-        const durationStr = Math.floor(durationMs / 60000) + 'm ' + Math.floor((durationMs % 60000) / 1000) + 's';
+        const durationMs = activity.since ? (Date.now() - activity.since) : 0;
+        const durationStr = StudyMonitor.formatDuration(durationMs);
+        const startedAt = activity.since ? new Date(activity.since).toLocaleTimeString() : 'Unknown';
+        const taskLabel = StudyMonitor.getCurrentTaskForAgent(agent);
+        const readable = StudyMonitor.getReadableActivity(activity);
+        const status = StudyMonitor.getStatusMeta(activity);
         
         // Safe ID for DOM elements
         const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
         activeIds.add(`mon_card_${safeId}`);
-
-        // Status Indicator
-        let statusBadge = '<span class="status-badge status-fail">Offline/Idle</span>';
-        if (activity.isStudyOpen) statusBadge = '<span class="status-badge status-pass">Studying</span>';
-        else if (activity.current.startsWith('Violation')) statusBadge = '<span class="status-badge" style="background:#ff5252; color:white; font-weight:bold; padding:2px 8px;"><i class="fas fa-exclamation-triangle"></i> Violation</span>';
-        else if (!activity.current.includes('Idle') && activity.current !== 'No Data') statusBadge = '<span class="status-badge status-improve">Navigating App</span>';
-
-        // Timestamp
-        const startTime = new Date(activity.since).toLocaleTimeString();
-
-        // Clicks (Current)
-        const clicks = StudyMonitor.clickCount || 0;
 
         // Check if card exists to update IN PLACE (prevents blinking)
         let card = document.getElementById(`mon_card_${safeId}`);
@@ -1221,62 +1456,70 @@ function renderActivityMonitorContent() {
             // Create new card structure
             card = document.createElement('div');
             card.id = `mon_card_${safeId}`;
-            card.className = 'card monitor-card';
+            card.className = 'card monitor-card activity-monitor-card';
             card.style.marginBottom = '0'; // Grid handles gap
             card.style.padding = '20px';
             card.style.borderLeft = '4px solid transparent';
             card.style.transition = 'all 0.3s ease';
 
             card.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:15px;">
+                <div class="activity-monitor-card-top">
                     <div style="display:flex; align-items:center; gap:10px;">
-                        <div style="width:35px; height:35px; background:var(--bg-input); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; color:var(--text-muted);">${agent.charAt(0)}</div>
-                        <h4 style="margin:0; font-size:1.1rem;">${agent}</h4>
+                        <div class="activity-monitor-avatar">${StudyMonitor.escapeHtml(agent.charAt(0).toUpperCase())}</div>
+                        <div>
+                            <h4 style="margin:0; font-size:1.05rem;">${StudyMonitor.escapeHtml(agent)}</h4>
+                            <div class="activity-monitor-task"><i class="fas fa-bullseye"></i> ${StudyMonitor.escapeHtml(taskLabel)}</div>
+                        </div>
                     </div>
                     <div id="mon_badge_${safeId}"></div>
                 </div>
                 
-                <div style="background:var(--bg-input); padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid var(--border-color);">
-                    <div id="mon_curr_${safeId}" style="font-size:0.9rem; line-height:1.5;"></div>
+                <div class="activity-monitor-current-box">
+                    <div class="activity-monitor-current-label">Right now</div>
+                    <div id="mon_curr_${safeId}" class="activity-monitor-current-text"></div>
+                    <div id="mon_help_${safeId}" class="activity-monitor-help-text"></div>
                 </div>
 
-                <button class="btn-secondary btn-sm" style="width:100%;" onclick="event.stopPropagation(); document.getElementById('mon_det_${safeId}').classList.toggle('hidden')">
-                    <i class="fas fa-history"></i> View History
+                <div class="activity-monitor-meta">
+                    <div><strong>Started:</strong> <span id="mon_start_${safeId}"></span></div>
+                    <div><strong>Duration:</strong> <span id="mon_duration_${safeId}"></span></div>
+                </div>
+
+                <button class="btn-secondary btn-sm" id="mon_toggle_${safeId}" style="width:100%;" onclick="StudyMonitor.toggleAgentHistory('${safeId}')">
+                    <i class="fas fa-history"></i> Show Recent Activity
                 </button>
                 
-                <div id="mon_det_${safeId}" class="hidden" style="margin-top:15px; padding-top:10px; border-top:1px dashed var(--border-color);">
-                    <strong style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; display:block; margin-bottom:8px;">Recent Activity</strong>
-                    <div id="mon_hist_${safeId}" style="max-height:150px; overflow-y:auto; padding-right:5px;"></div>
+                <div id="mon_det_${safeId}" class="hidden activity-monitor-history">
+                    <strong class="activity-monitor-history-title">Recent Activity</strong>
+                    <div id="mon_hist_${safeId}" style="max-height:180px; overflow-y:auto; padding-right:5px;"></div>
                 </div>
             `;
             grid.appendChild(card);
         }
 
         // Dynamic Border Color update
-        if (activity.isStudyOpen) card.style.borderLeftColor = '#2ecc71';
-        else if (activity.current.includes('Violation')) card.style.borderLeftColor = '#ff0000';
-        else if (activity.current.includes('Idle')) card.style.borderLeftColor = '#95a5a6';
-        else if (activity.current.includes('External')) card.style.borderLeftColor = '#ff5252';
-        else card.style.borderLeftColor = '#f1c40f';
+        card.style.borderLeftColor = status.accent;
 
         // Update Content
-        document.getElementById(`mon_curr_${safeId}`).innerHTML = `Current: <strong>${activity.current}</strong> <span style="opacity:0.7;">(Since ${startTime})</span> for ${durationStr}`;
-        document.getElementById(`mon_badge_${safeId}`).innerHTML = statusBadge;
+        document.getElementById(`mon_curr_${safeId}`).innerHTML = `<strong>${StudyMonitor.escapeHtml(readable.headline)}</strong>`;
+        document.getElementById(`mon_help_${safeId}`).innerText = readable.detail;
+        document.getElementById(`mon_start_${safeId}`).innerText = startedAt;
+        document.getElementById(`mon_duration_${safeId}`).innerText = durationStr;
+        document.getElementById(`mon_badge_${safeId}`).innerHTML = `<span class="status-badge ${status.className}">${StudyMonitor.escapeHtml(status.label)}</span>`;
 
         // Update History (Only if details are visible to save DOM ops, or always?)
         // Let's update always for now so it's ready when expanded
         const histContainer = document.getElementById(`mon_hist_${safeId}`);
         if (activity.history && activity.history.length > 0) {
-            const recent = activity.history.slice().reverse(); // Show all history
+            const recent = activity.history.slice().reverse().slice(0, 8);
             let histHtml = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
                 ${recent.map(h => {
-                    const dur = Math.round(h.duration / 1000) + 's';
+                    const dur = StudyMonitor.formatDuration(h.duration);
                     const time = new Date(h.start).toLocaleTimeString();
-                    const clickInfo = h.clicks ? ` | <i class="fas fa-mouse-pointer" style="font-size:0.7rem;"></i> ${h.clicks}` : '';
                     const isVio = h.activity.startsWith('Violation');
-                    return `<li style="border-bottom:1px solid var(--border-color); padding:4px 0; display:flex; justify-content:space-between; ${isVio ? 'color:#ff5252; font-weight:bold;' : ''}">
-                        <span>${isVio ? '<i class="fas fa-exclamation-triangle"></i> ' : ''}${h.activity}</span>
-                        <span style="color:var(--text-muted); font-family:monospace;">${time} (${dur}${clickInfo})</span>
+                    return `<li class="activity-monitor-history-row ${isVio ? 'activity-monitor-history-row-warn' : ''}">
+                        <span>${isVio ? '<i class="fas fa-exclamation-triangle"></i> ' : ''}${StudyMonitor.escapeHtml(StudyMonitor.simplifyActivityName(h.activity))}</span>
+                        <span style="color:var(--text-muted); font-family:monospace;">${time} (${dur})</span>
                     </li>`;
                 }).join('')}
             </ul>`;
