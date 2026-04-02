@@ -2032,6 +2032,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.5.4": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Study Browser Controls:</strong> Reworked the in-app study browser toolbar so Back, Forward, Reload, Home, Mark for Clarity, Dashboard, Program Links, and Exit remain usable after opening study links in new tabs.</li>
+                    <li style="margin-bottom: 8px;"><strong>Browser UX:</strong> Redesigned the browser shell with a dedicated control deck and stronger tab handling so the controls are easier to click and more stable during normal training use.</li>
+                </ul>`,
             "2.5.3": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Study Browser Hardening:</strong> Fixed the secure in-app browser bridge so Schedule study material stays inside the Electron study overlay instead of falling back to an external browser.</li>
