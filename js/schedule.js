@@ -1656,6 +1656,40 @@ function switchScheduleTab(id) {
     renderSchedule();
 }
 
+function stampScheduleEntity(target, touch = false) {
+    if (!target || typeof target !== 'object') return target;
+    if (typeof applyDataTimestamps === 'function') {
+        applyDataTimestamps(target, { touch });
+        return target;
+    }
+
+    const now = new Date().toISOString();
+    if (!target.createdAt) target.createdAt = now;
+    if (!target.lastModified) target.lastModified = target.createdAt;
+    if (!target.modifiedBy) target.modifiedBy = (CURRENT_USER && (CURRENT_USER.user || CURRENT_USER.role)) || 'system';
+    if (touch) {
+        target.lastModified = now;
+        target.modifiedBy = (CURRENT_USER && (CURRENT_USER.user || CURRENT_USER.role)) || 'system';
+    }
+    return target;
+}
+
+function stampScheduleGroup(group, options = {}) {
+    if (!group || typeof group !== 'object') return;
+
+    stampScheduleEntity(group, Boolean(options.touchGroup));
+    if (!Array.isArray(group.items)) return;
+
+    if (options.touchAllItems) {
+        group.items.forEach(item => stampScheduleEntity(item, true));
+        return;
+    }
+
+    if (typeof options.itemIndex === 'number' && group.items[options.itemIndex]) {
+        stampScheduleEntity(group.items[options.itemIndex], true);
+    }
+}
+
 async function createNewSchedule() {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     const keys = Object.keys(schedules).sort();
@@ -1664,6 +1698,7 @@ async function createNewSchedule() {
     
     if (confirm(`Create new Schedule Group '${nextKey}'?`)) {
         schedules[nextKey] = { items: [], assigned: null };
+        stampScheduleGroup(schedules[nextKey], { touchGroup: true });
         localStorage.setItem('schedules', JSON.stringify(schedules));
         await secureScheduleSave();
         ACTIVE_SCHED_ID = nextKey;
@@ -1680,10 +1715,12 @@ async function assignRosterToSchedule(schedId) {
     const conflict = Object.keys(schedules).find(k => schedules[k].assigned === groupId);
     if (conflict) {
         if (!confirm(`Group '${groupId}' is already assigned to Schedule ${conflict}. Move it here?`)) return;
-        schedules[conflict].assigned = null; 
+        schedules[conflict].assigned = null;
+        stampScheduleGroup(schedules[conflict], { touchGroup: true });
     }
 
     schedules[schedId].assigned = groupId;
+    stampScheduleGroup(schedules[schedId], { touchGroup: true });
     localStorage.setItem('schedules', JSON.stringify(schedules));
     await secureScheduleSave();
     renderSchedule();
@@ -1693,6 +1730,7 @@ async function clearAssignment(schedId) {
     if(!confirm("Clear assignment?")) return;
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     schedules[schedId].assigned = null;
+    stampScheduleGroup(schedules[schedId], { touchGroup: true });
     localStorage.setItem('schedules', JSON.stringify(schedules));
     await secureScheduleSave();
     renderSchedule();
@@ -1726,6 +1764,10 @@ async function addTimelineItem() {
         dateRange: new Date().toISOString().split('T')[0].replace(/-/g, '/'),
         courseName: "New Item", materialLink: "", dueDate: "", openTime: "08:00", closeTime: "17:00"
     });
+    stampScheduleGroup(schedules[ACTIVE_SCHED_ID], {
+        touchGroup: true,
+        itemIndex: schedules[ACTIVE_SCHED_ID].items.length - 1
+    });
     localStorage.setItem('schedules', JSON.stringify(schedules));
     // Force save new item
     if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
@@ -1737,6 +1779,7 @@ async function deleteTimelineItem(index) {
     if(!confirm("Delete this item?")) return;
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     schedules[ACTIVE_SCHED_ID].items.splice(index, 1);
+    stampScheduleGroup(schedules[ACTIVE_SCHED_ID], { touchGroup: true });
     localStorage.setItem('schedules', JSON.stringify(schedules));
     // FIX: Use force=true to prevent ghost data (merge restoring deleted item)
     if(typeof saveToServer === 'function') await saveToServer(['schedules'], true);
@@ -1796,6 +1839,7 @@ async function saveScheduleItem() {
     const linked = document.getElementById('editLinkedTest').value;
     if (linked) item.linkedTestId = linked; else delete item.linkedTestId;
 
+    stampScheduleGroup(schedules[schedId], { touchGroup: true, itemIndex: Number(index) });
     localStorage.setItem('schedules', JSON.stringify(schedules));
     await secureScheduleSave();
     document.getElementById('scheduleModal').classList.add('hidden');
@@ -1811,6 +1855,7 @@ async function cloneSchedule(targetId) {
 
     if(confirm(`Overwrite Schedule ${targetId} with content from Schedule ${sourceId}?`)) {
         schedules[targetId].items = JSON.parse(JSON.stringify(schedules[sourceId].items));
+        stampScheduleGroup(schedules[targetId], { touchGroup: true, touchAllItems: true });
         localStorage.setItem('schedules', JSON.stringify(schedules));
         await secureScheduleSave();
         renderSchedule();
@@ -1826,6 +1871,7 @@ async function duplicateCurrentSchedule() {
 
     if(confirm(`Duplicate Schedule ${ACTIVE_SCHED_ID} to new Schedule ${nextKey}?`)) {
         schedules[nextKey] = { items: JSON.parse(JSON.stringify(schedules[ACTIVE_SCHED_ID].items)), assigned: null };
+        stampScheduleGroup(schedules[nextKey], { touchGroup: true, touchAllItems: true });
         localStorage.setItem('schedules', JSON.stringify(schedules));
         await secureScheduleSave();
         switchScheduleTab(nextKey);
@@ -1941,30 +1987,34 @@ function goToTest(testId) {
 async function deleteSchedule(id) {
     if (!confirm(`Are you sure you want to delete Schedule ${id} and all its items? This cannot be undone.`)) return;
     
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const previousSchedulesJson = localStorage.getItem('schedules');
+    const schedules = JSON.parse(previousSchedulesJson);
     delete schedules[id];
     
     const oldKeys = Object.keys(schedules).sort();
     const newSchedules = {};
     if (oldKeys.length === 0) {
         newSchedules["A"] = { items: [], assigned: null };
+        stampScheduleGroup(newSchedules["A"], { touchGroup: true });
     } else {
         oldKeys.forEach((oldKey, index) => {
             const newKey = String.fromCharCode(65 + index); // 65 = 'A'
             newSchedules[newKey] = schedules[oldKey];
+            if (oldKey !== newKey) stampScheduleGroup(newSchedules[newKey], { touchGroup: true });
         });
     }
     
-    // AUTHORITATIVE DELETE: Save to server first.
+    localStorage.setItem('schedules', JSON.stringify(newSchedules));
+
+    // AUTHORITATIVE DELETE: Push the new snapshot, and roll back local state if the save fails.
     if(typeof saveToServer === 'function') {
         const success = await saveToServer(['schedules'], true);
         if (!success) {
+            if (previousSchedulesJson) localStorage.setItem('schedules', previousSchedulesJson);
             alert("Failed to delete schedule from server. Please check connection.");
             return; // Abort on failure
         }
     }
-
-    localStorage.setItem('schedules', JSON.stringify(newSchedules));
     
     // Switch to first available
     ACTIVE_SCHED_ID = Object.keys(newSchedules).sort()[0];
@@ -1992,6 +2042,7 @@ async function schedDrop(e, targetIndex) {
         const item = items[DRAG_SRC_INDEX];
         items.splice(DRAG_SRC_INDEX, 1); // Remove from old
         items.splice(targetIndex, 0, item); // Insert at new
+        stampScheduleGroup(schedules[ACTIVE_SCHED_ID], { touchGroup: true });
         localStorage.setItem('schedules', JSON.stringify(schedules));
         await secureScheduleSave();
         renderSchedule();

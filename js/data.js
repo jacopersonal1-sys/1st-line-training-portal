@@ -350,6 +350,7 @@ async function loadFromServer(silent = false) {
                     localStorage.setItem(localKey, JSON.stringify(doc.content));
                 }
                 localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
+                emitDataChange(localKey, 'load_from_server');
             }
             
             const configKey = IS_DEMO_MODE ? 'demo_system_config' : 'system_config';
@@ -1014,6 +1015,41 @@ function updateSyncUI(status) {
     }
 }
 
+function emitDataChange(localKey, source = 'unknown') {
+    if (!localKey || typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+
+    try {
+        window.dispatchEvent(new CustomEvent('buildzone:data-changed', {
+            detail: { key: localKey, source, timestamp: Date.now() }
+        }));
+    } catch (error) {
+        console.warn('Failed to dispatch data change event:', error);
+    }
+}
+
+function applyDataTimestamps(item, options = {}) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+
+    const now = options.now || new Date().toISOString();
+    const fallbackUser = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER)
+        ? (CURRENT_USER.user || CURRENT_USER.email || CURRENT_USER.role || 'system')
+        : 'system';
+    const modifiedBy = options.modifiedBy || fallbackUser;
+
+    if (!item.createdAt) item.createdAt = item.timestamp || now;
+    if (!item.lastModified) item.lastModified = item.createdAt || now;
+    if (!item.modifiedBy) item.modifiedBy = modifiedBy;
+
+    if (options.touch) {
+        item.lastModified = now;
+        item.modifiedBy = modifiedBy;
+    }
+
+    return item;
+}
+
+window.applyDataTimestamps = applyDataTimestamps;
+
 // --- HELPER: LIGHTWEIGHT CHECKSUM ---
 // Reduces hash_map size by 99% (Stores 8-char string instead of full JSON)
 function generateChecksum(str) {
@@ -1122,9 +1158,12 @@ function getTimestampPreferenceValue(item) {
 
     const candidates = [
         item.lastModified,
+        item.updatedAt,
         item.lastEditedDate,
+        item.modifiedAt,
         item.updated_at,
         item.createdAt,
+        item.created_at,
         item.timestamp
     ];
 
@@ -1143,10 +1182,10 @@ function getTimestampPreferenceValue(item) {
 }
 
 function resolveDuplicateArrayItem(key, existingItem, incomingItem, strategy = 'server_wins') {
-    if (['records', 'submissions'].includes(key)) {
-        const existingTs = getTimestampPreferenceValue(existingItem);
-        const incomingTs = getTimestampPreferenceValue(incomingItem);
+    const existingTs = getTimestampPreferenceValue(existingItem);
+    const incomingTs = getTimestampPreferenceValue(incomingItem);
 
+    if (existingTs || incomingTs) {
         if (existingTs && incomingTs && existingTs !== incomingTs) {
             return incomingTs > existingTs ? incomingItem : existingItem;
         }
@@ -1300,18 +1339,33 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 const hashMapKey = `hash_map_${key}`;
                 const hashMap = JSON.parse(localStorage.getItem(hashMapKey) || '{}');
                 const itemsToUpload = [];
+                const batchTimestamp = new Date().toISOString();
+                const modifiedBy = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER)
+                    ? (CURRENT_USER.user || CURRENT_USER.email || CURRENT_USER.role || 'system')
+                    : 'system';
                 
                 // 1. Identify Changed Items (Delta)
                 if (Array.isArray(localContent)) {
                     localContent.forEach(item => {
                         // Ensure ID exists
                         if (!item.id) item.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-                        
-                        const currentHash = generateChecksum(JSON.stringify(item));
-                        // SAFETY: If force=true, ignore hash map and upload everything (Authoritative)
-                        const lastHash = force ? null : hashMap[item.id];
-                        
-                        if (currentHash !== lastHash) {
+
+                        const persistedHash = hashMap[item.id];
+                        let currentHash = generateChecksum(JSON.stringify(item));
+                        const shouldTouch = currentHash !== persistedHash;
+                        const needsBaselineTimestamps = item && typeof item === 'object' && !Array.isArray(item)
+                            && (!item.createdAt || !item.lastModified || !item.modifiedBy);
+
+                        if (needsBaselineTimestamps || shouldTouch) {
+                            applyDataTimestamps(item, {
+                                now: batchTimestamp,
+                                modifiedBy,
+                                touch: shouldTouch
+                            });
+                            currentHash = generateChecksum(JSON.stringify(item));
+                        }
+
+                        if (force || currentHash !== persistedHash) {
                             itemsToUpload.push(item);
                             hashMap[item.id] = currentHash; // Update hash immediately (Optimistic)
                         }
@@ -1427,6 +1481,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 
                 localStorage.setItem(key, JSON.stringify(finalContent));
                 if(savedData && savedData[0]) localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
+                emitDataChange(key, 'save_to_server');
             }
             } catch (keyErr) {
                 console.warn(`[Sync Sandbox] Failed to process key '${key}':`, keyErr.message || keyErr);
@@ -2549,6 +2604,8 @@ function processIncomingDataQueue() {
                     } else {
                         localStorage.setItem(key, JSON.stringify(content));
                     }
+                    if (p.new.updated_at) localStorage.setItem('sync_ts_' + key, p.new.updated_at);
+                    emitDataChange(key, 'realtime');
                     if (key === 'system_config') applySystemConfig();
                 }
             });

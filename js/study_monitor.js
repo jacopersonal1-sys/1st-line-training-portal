@@ -527,6 +527,86 @@ const StudyMonitor = {
         this.cachedWhitelist = (JSON.parse(localStorage.getItem('monitor_whitelist') || '[]')).filter(w => w && w.trim().length > 0);
     },
 
+    buildInAppStudyLabel: function(label) {
+        const safeLabel = String(label || 'Study Material').trim();
+        return `In-App Study: ${safeLabel}`;
+    },
+
+    getSegmentStartMs: function(seg) {
+        if (!seg) return 0;
+        if (typeof seg.start === 'number') return seg.start;
+        if (typeof seg.end === 'number' && typeof seg.duration === 'number') return seg.end - seg.duration;
+        return 0;
+    },
+
+    getSegmentEndMs: function(seg) {
+        if (!seg) return 0;
+        if (typeof seg.end === 'number') return seg.end;
+        const start = this.getSegmentStartMs(seg);
+        if (start && typeof seg.duration === 'number') return start + seg.duration;
+        return start;
+    },
+
+    getDateStringFromTimestamp: function(timestamp) {
+        const d = new Date(timestamp || Date.now());
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    },
+
+    getSegmentDateString: function(seg) {
+        return this.getDateStringFromTimestamp(this.getSegmentStartMs(seg));
+    },
+
+    filterSegmentsByDate: function(segments, dateStr) {
+        return (segments || []).filter(seg => this.getSegmentDateString(seg) === dateStr);
+    },
+
+    getWorkingWindowBounds: function(dateStr) {
+        return {
+            workStart: new Date(`${dateStr}T08:00:00`).getTime(),
+            meetingStart: new Date(`${dateStr}T11:00:00`).getTime(),
+            meetingEnd: new Date(`${dateStr}T12:00:00`).getTime(),
+            lunchStart: new Date(`${dateStr}T12:00:00`).getTime(),
+            lunchEnd: new Date(`${dateStr}T13:00:00`).getTime(),
+            workEnd: new Date(`${dateStr}T17:00:00`).getTime()
+        };
+    },
+
+    getEffectiveDurationForDate: function(seg, dateStr) {
+        const segStart = this.getSegmentStartMs(seg);
+        const segEnd = this.getSegmentEndMs(seg);
+        if (!segStart || !segEnd) return 0;
+
+        const bounds = this.getWorkingWindowBounds(dateStr);
+        const morningOverlap = Math.max(0, Math.min(segEnd, bounds.lunchStart) - Math.max(segStart, bounds.workStart));
+        const afternoonOverlap = Math.max(0, Math.min(segEnd, bounds.workEnd) - Math.max(segStart, bounds.lunchEnd));
+        return morningOverlap + afternoonOverlap;
+    },
+
+    getCurrentSegmentForDate: function(activity, dateStr) {
+        if (!activity || !activity.since) return null;
+        const currentDuration = Date.now() - activity.since;
+        if (currentDuration <= 1000) return null;
+
+        const currentSeg = {
+            activity: activity.current,
+            start: activity.since,
+            end: Date.now(),
+            duration: currentDuration
+        };
+
+        return this.getSegmentDateString(currentSeg) === dateStr ? currentSeg : null;
+    },
+
+    getLiveSegmentsForDate: function(activity, dateStr) {
+        const dateSegments = this.filterSegmentsByDate(activity?.history || [], dateStr);
+        const currentSeg = this.getCurrentSegmentForDate(activity, dateStr);
+        if (currentSeg) dateSegments.push(currentSeg);
+        return dateSegments.sort((a, b) => this.getSegmentStartMs(a) - this.getSegmentStartMs(b));
+    },
+
     // --- HELPER: LOCAL DATE STRING (YYYY-MM-DD) ---
     getLocalDateString: function() {
         const now = new Date();
@@ -543,9 +623,10 @@ const StudyMonitor = {
         
         // 0. Violation is always external
         if (act.startsWith('violation:')) return 'external';
+        if (act.startsWith('in-app study:')) return 'material';
 
         // Define keywords
-        const materialKeywords = ['.pdf', '.mp4', 'genially', 'sharepoint', 'course', 'document', 'standards', 'training', 'vetting', 'navigating portal'];
+        const materialKeywords = ['.pdf', '.mp4', 'genially', 'sharepoint', 'course', 'document', 'standards', 'training', 'vetting', 'study material', 'assessment overview'];
         const toolKeywords = ['qcontact', 'crm', 'radius', 'preseem', 'acs', 'hosting', 'odoo', 'cp1', 'cp2', 'teams', 'outlook', 'mail', 'notepad', 'onenote', 'macvendor', 'genieacs', 'devices - genieacs'];
 
         // 1. Check for specific material keywords
@@ -563,6 +644,7 @@ const StudyMonitor = {
             // If it's marked as studying but didn't match above, it's likely a tool or misc work.
             return 'tool';
         }
+        if (act.startsWith('navigating:')) return 'tool';
         if (act.startsWith('system:')) return 'tool';
 
         // 4. Fallback for whitelisted items that didn't match keywords
@@ -581,24 +663,8 @@ const StudyMonitor = {
         let totalMs = 0, materialMs = 0, toolMs = 0, extMs = 0, idleMs = 0;
         
         historySegments.forEach(seg => {
-             const segStart = seg.start || (seg.end - seg.duration);
-             const segEnd = seg.end || (segStart + seg.duration);
-             
-             // Local Date Construction for Boundaries
-             const d = new Date(segStart);
-             const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-             
-             const workStart = new Date(`${dateStr}T08:00:00`).getTime();
-             const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
-             const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
-             const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
-
-             // 1. Morning Session (08:00 - 12:00)
-             const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
-             // 2. Afternoon Session (13:00 - 17:00)
-             const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
-             
-             const effectiveDuration = morningOverlap + afternoonOverlap;
+             const dateStr = this.getSegmentDateString(seg);
+             const effectiveDuration = this.getEffectiveDurationForDate(seg, dateStr);
              
              if (effectiveDuration <= 0) return;
 
@@ -658,7 +724,8 @@ const StudyMonitor = {
                 let history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
                 
                 // Use memory history if available (most recent), else fallback to storage
-                const segments = this.history.length > 0 ? this.history : (myData.history || []);
+                const rawSegments = this.history.length > 0 ? this.history : (myData.history || []);
+                const segments = this.filterSegmentsByDate(rawSegments, lastDate);
                 const stats = this.calculateDailyStats(segments);
 
                 history.push({
@@ -715,7 +782,7 @@ const StudyMonitor = {
         if (restoreBtn) restoreBtn.remove();
 
         this.isStudyOpen = true;
-        this.track(`Studying: ${title}`);
+        this.track(this.buildInAppStudyLabel(title));
         this.browserState.homeUrl = this.cleanUrl(url);
 
         // Build browser shell if it doesn't exist
@@ -1175,7 +1242,7 @@ const StudyMonitor = {
             this.updateBrowserChrome();
             
             if (this.browserState.activeTabId === tab.id) {
-                this.track(`Studying: ${e.title.substring(0, 50)}`);
+                this.track(this.buildInAppStudyLabel(e.title.substring(0, 80)));
             }
         });
 
@@ -1183,7 +1250,7 @@ const StudyMonitor = {
             tab.url = e.url;
             this.refreshTabNavigationState(tab);
             this.updateBrowserChrome();
-            this.track(`Studying: ${(webview.getTitle() || tab.title).substring(0, 50)}`);
+            this.track(this.buildInAppStudyLabel((webview.getTitle() || tab.title).substring(0, 80)));
         });
 
         webview.addEventListener('did-navigate-in-page', (e) => {
@@ -1348,7 +1415,7 @@ const StudyMonitor = {
         const schedKey = Object.keys(schedules).find(k => schedules[k]?.assigned === myGroupId);
         if (!schedKey || !Array.isArray(schedules[schedKey]?.items)) return `Group ${myGroupId}`;
 
-        const todayStr = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+        const todayStr = this.getLocalDateString().replace(/-/g, '/');
         const task = schedules[schedKey].items.find(i => {
             if (typeof isDateInRange === 'function') return isDateInRange(i.dateRange, i.dueDate, todayStr);
             return i.dateRange <= todayStr && (i.dueDate ? i.dueDate >= todayStr : i.dateRange >= todayStr);
@@ -1364,6 +1431,9 @@ const StudyMonitor = {
         if (raw.includes('sharepoint.com') || raw.includes('microsoftonline.com')) {
             if (raw.includes('.mp4') || raw.toLowerCase().includes('stream.aspx')) return 'SharePoint training video';
             return 'SharePoint training document';
+        }
+        if (String(activityString || '').toLowerCase().startsWith('in-app study:')) {
+            return raw.replace(/\s*\[(.*?)\]\s*$/, '').trim();
         }
         if (raw.toLowerCase().includes('qcontact')) return 'Q-Contact';
         if (raw.toLowerCase().includes('crm')) return 'CRM';
@@ -1396,6 +1466,12 @@ const StudyMonitor = {
             return {
                 headline: `Outside work tools: ${pretty}`,
                 detail: 'The active app or window is not currently classified as training or work related.'
+            };
+        }
+        if (current.toLowerCase().startsWith('in-app study:')) {
+            return {
+                headline: `Trusted study: ${pretty}`,
+                detail: 'This activity happened inside the secured in-app study browser and is treated as valid study time.'
             };
         }
         if (category === 'material') {
@@ -1489,16 +1565,9 @@ function renderActivityMonitorContent() {
     const container = document.getElementById('activityMonitorContent');
     if(!container) return;
 
-    // STOP AUTO-REFRESH if in Queue Mode to prevent losing selections
-    if (StudyMonitor.viewMode === 'queue' && !StudyMonitor.forceRefresh) return;
-
     // Redirect to Summary View if active
     if (StudyMonitor.viewMode === 'summary') {
         renderActivitySummary(container);
-        return;
-    }
-    if (StudyMonitor.viewMode === 'queue') {
-        renderReviewQueue(container);
         return;
     }
 
@@ -1512,7 +1581,7 @@ function renderActivityMonitorContent() {
                 <div class="activity-monitor-toolbar">
                     <div>
                         <h4 class="activity-monitor-title">Live Activity View</h4>
-                        <p class="activity-monitor-subtitle">Green means the agent is inside approved learning or work tools. Orange means outside approved tools. Grey means away or not reporting yet.</p>
+                        <p class="activity-monitor-subtitle">Anything happening inside the secured study browser counts as trusted study time. The detailed concern path is what happens outside the app.</p>
                     </div>
                     <div class="activity-monitor-toolbar-actions">
                         ${StudyMonitor.renderScopeControls()}
@@ -1685,6 +1754,19 @@ StudyMonitor.toggleQueueItem = function(val, checked) {
     if(btn) btn.innerText = `Classify Selected (${this.queueSelection.size})`;
 };
 
+StudyMonitor.toggleAgentHistory = function(safeId) {
+    const details = document.getElementById(`mon_det_${safeId}`);
+    const btn = document.getElementById(`mon_toggle_${safeId}`);
+    if (!details || !btn) return;
+
+    const willExpand = details.classList.contains('hidden');
+    details.classList.toggle('hidden', !willExpand);
+    btn.innerHTML = willExpand
+        ? '<i class="fas fa-chevron-up"></i> Hide Recent Activity'
+        : '<i class="fas fa-history"></i> Show Recent Activity';
+    btn.setAttribute('aria-expanded', willExpand ? 'true' : 'false');
+};
+
 function renderReviewQueue(container) {
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
     const whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]').filter(s => s && s.trim());
@@ -1775,7 +1857,7 @@ function renderReviewQueue(container) {
 function renderActivitySummary(container) {
     StudyMonitor.updateWhitelistCache(); // Refresh cache before rendering
     const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    const targetAgents = StudyMonitor.getScheduledAgents();
+    const targetAgents = StudyMonitor.getVisibleAgents();
     
     // Ensure container has a grid wrapper if empty
     if (!container.querySelector('.summary-grid')) {
@@ -1792,6 +1874,7 @@ function renderActivitySummary(container) {
     
     targetAgents.sort().forEach(agent => {
         const activity = data[agent] || { history: [], current: 'No Data', since: Date.now() };
+        const todayStr = StudyMonitor.getLocalDateString();
         const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
         
         // --- ADMIN UX: FETCH TODAY'S SCHEDULED TASK ---
@@ -1805,7 +1888,7 @@ function renderActivitySummary(container) {
         if (myGroupId) {
             const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
             if (schedKey && schedules[schedKey].items) {
-                const todayStr = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+                const todayStr = StudyMonitor.getLocalDateString().replace(/-/g, '/');
                 const task = schedules[schedKey].items.find(i => {
                     if (typeof isDateInRange === 'function') return isDateInRange(i.dateRange, i.dueDate, todayStr);
                     return i.dateRange <= todayStr && (i.dueDate ? i.dueDate >= todayStr : i.dateRange >= todayStr);
@@ -1817,39 +1900,12 @@ function renderActivitySummary(container) {
         // 1. Aggregate Data
         let totalMs = 0, materialMs = 0, toolMs = 0, extMs = 0, idleMs = 0;
         const topicMap = {};
-        
-        // Combine history + current active session
-        const allSegments = [...(activity.history || [])];
-        
-        // Add current session as a segment
-        const currentDuration = Date.now() - activity.since;
-        if (currentDuration > 1000) {
-            allSegments.push({
-                activity: activity.current,
-                start: activity.since, // Need start time for working hours calc
-                end: Date.now(),
-                duration: currentDuration
-            });
-        }
+        const allSegments = StudyMonitor.getLiveSegmentsForDate(activity, todayStr);
 
         allSegments.forEach(seg => {
             // --- WORKING HOURS LOGIC (8am-5pm, Lunch 12-1) ---
             // Calculate effective duration within working hours
-            const segStart = seg.start || (seg.end - seg.duration);
-            const segEnd = seg.end || (segStart + seg.duration);
-            
-            const dateStr = new Date(segStart).toISOString().split('T')[0];
-            const workStart = new Date(`${dateStr}T08:00:00`).getTime();
-            const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
-            const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
-            const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
-
-            // 1. Morning Session (08:00 - 12:00)
-            const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
-            // 2. Afternoon Session (13:00 - 17:00)
-            const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
-            
-            const effectiveDuration = morningOverlap + afternoonOverlap;
+            const effectiveDuration = StudyMonitor.getEffectiveDurationForDate(seg, todayStr);
             
             if (effectiveDuration <= 0) return; // Skip non-working hours
 
@@ -1874,7 +1930,7 @@ function renderActivitySummary(container) {
             } else if (category === 'tool') {
                 toolMs += effectiveDuration;
                 let topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
-                if (topic.includes('System:') || topic.includes('Navigating:')) topic = 'System Navigation';
+                if (topic.includes('System:') || topic.includes('Navigating:')) topic = 'Portal Navigation';
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'tool' };
                 topicMap[topic].ms += effectiveDuration;
             } else if (category === 'external') {
@@ -1969,16 +2025,7 @@ function renderActivitySummary(container) {
                 const segStart = seg.start || (seg.end - seg.duration);
                 const segEnd = seg.end || (segStart + seg.duration);
                 
-                const dateStr = new Date(segStart).toISOString().split('T')[0];
-                const workStart = new Date(`${dateStr}T08:00:00`).getTime();
-                const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
-                const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
-                const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
-
-                const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
-                const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
-                
-                const effectiveDuration = morningOverlap + afternoonOverlap;
+                const effectiveDuration = StudyMonitor.getEffectiveDurationForDate(seg, todayStr);
                 
                 if (effectiveDuration <= 0) return;
 
@@ -1993,8 +2040,10 @@ function renderActivitySummary(container) {
                 let style = `width:${pct}%;`;
                 let title = `${seg.activity} (${Math.round(effectiveDuration/1000)}s)`;
                 
-                if (cat === 'study') {
-                    typeClass = 'seg-study';
+                if (cat === 'material') {
+                    typeClass = 'seg-material';
+                } else if (cat === 'tool') {
+                    typeClass = 'seg-tool';
                 } else if (cat === 'external') {
                     if (effectiveDuration > TOLERANCE) {
                         typeClass = 'seg-ext';
@@ -2132,13 +2181,13 @@ StudyMonitor.forceShowAll = function() {
 };
 
 StudyMonitor.archiveLog = async function() {
-    if(!confirm("Clear all activity history? This cannot be undone.")) return;
+    if(!confirm("Clear the current live activity feed? Archived history will stay intact.")) return;
     
     localStorage.setItem('monitor_data', '{}');
     if(typeof saveToServer === 'function') await saveToServer(['monitor_data'], true);
     
     renderActivityMonitorContent();
-    alert("Activity logs cleared.");
+    alert("Live activity feed cleared.");
 }
 
 StudyMonitor.classifyActivity = async function(fullActivityString) {
@@ -2288,12 +2337,7 @@ StudyMonitor.confirmClassification = async function() {
 };
 
 StudyMonitor.toggleReviewQueue = function() {
-    if (this.viewMode === 'queue') {
-        this.viewMode = 'list';
-    } else {
-        this.viewMode = 'queue';
-        this.forceRefresh = true; // Force initial render of queue
-    }
+    this.viewMode = 'summary';
     renderActivityMonitorContent();
 };
 
@@ -2371,22 +2415,13 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
         const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
         const activity = data[agentName];
         if (activity) {
-            allSegments = [...(activity.history || [])];
-            const currentDuration = Date.now() - activity.since;
-            if (currentDuration > 1000) {
-                allSegments.push({
-                    activity: activity.current,
-                    start: activity.since,
-                    end: Date.now(),
-                    duration: currentDuration
-                });
-            }
+            allSegments = StudyMonitor.getLiveSegmentsForDate(activity, queryDate);
         }
     } else {
         const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
         const pastDay = historyLog.find(h => h.user === agentName && h.date === queryDate);
         if (pastDay && pastDay.details) {
-            allSegments = [...pastDay.details];
+            allSegments = StudyMonitor.filterSegmentsByDate(pastDay.details, queryDate);
         }
     }
 
@@ -2396,18 +2431,8 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
     const processedSegs = [];
     
     allSegments.forEach(seg => {
-         const segStart = seg.start || (seg.end - seg.duration);
-         const segEnd = seg.end || (segStart + seg.duration);
-         
-         const dateStr = new Date(segStart).toISOString().split('T')[0];
-         const workStart = new Date(`${dateStr}T08:00:00`).getTime();
-         const lunchStart = new Date(`${dateStr}T12:00:00`).getTime();
-         const lunchEnd = new Date(`${dateStr}T13:00:00`).getTime();
-         const workEnd = new Date(`${dateStr}T17:00:00`).getTime();
-
-         const morningOverlap = Math.max(0, Math.min(segEnd, lunchStart) - Math.max(segStart, workStart));
-         const afternoonOverlap = Math.max(0, Math.min(segEnd, workEnd) - Math.max(segStart, lunchEnd));
-         const effectiveDuration = morningOverlap + afternoonOverlap;
+         const segStart = StudyMonitor.getSegmentStartMs(seg);
+         const effectiveDuration = StudyMonitor.getEffectiveDurationForDate(seg, queryDate);
          
          if (effectiveDuration <= 0) return;
 
@@ -2518,16 +2543,12 @@ StudyMonitor.analyzeWithAI = async function(agentName, dateStr) {
         const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
         const activity = data[agentName];
         if (activity) {
-            allSegments = [...(activity.history || [])];
-            const currentDuration = Date.now() - activity.since;
-            if (currentDuration > 1000) {
-                allSegments.push({ activity: activity.current, start: activity.since, end: Date.now(), duration: currentDuration });
-            }
+            allSegments = this.getLiveSegmentsForDate(activity, dateStr);
         }
     } else {
         const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
         const pastDay = historyLog.find(h => h.user === agentName && h.date === dateStr);
-        if (pastDay && pastDay.details) allSegments = [...pastDay.details];
+        if (pastDay && pastDay.details) allSegments = this.filterSegmentsByDate(pastDay.details, dateStr);
     }
 
     if (allSegments.length === 0) {
@@ -2552,6 +2573,7 @@ As an analyst, provide a narrative summary of the employee's workday based on th
 
 **Instructions:**
 1.  **Narrative Flow:** Start by describing the beginning of the day and walk through the main activities chronologically. Tell a story of their day.
+1.5. **Expected Daily Flow:** A normal trainee day starts after clock-in, studying begins in the morning, meetings may happen from 11:00 to 12:00 on some days, lunch is from 12:00 to 13:00, assessments usually become available after lunch, and the day ends at 17:00. Use this only as context, not as a reason to invent facts.
 2.  **Time Summary:** Explicitly state the total time spent on:
     - Training Material: ${toMins(stats.material)} minutes
     - Work Tools: ${toMins(stats.tool)} minutes

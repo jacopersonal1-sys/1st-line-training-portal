@@ -2042,6 +2042,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.5.6": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Schedule Sync Hardening:</strong> Tightened the server-truth schedule flow so failed saves restore the latest server copy, document change events refresh the isolated Schedule Studio, and stale delete snapshots no longer get pushed back to Supabase.</li>
+                    <li style="margin-bottom: 8px;"><strong>Timestamp Discipline:</strong> Added shared <code>createdAt</code>, <code>lastModified</code>, and <code>modifiedBy</code> stamping for sync-critical rows and schedule edits so the app can resolve freshness more safely across devices.</li>
+                    <li style="margin-bottom: 8px;"><strong>Activity Monitor Fix:</strong> Restored the live agent history toggle and repaired the monitor card interaction that was throwing <code>StudyMonitor.toggleAgentHistory is not a function</code>.</li>
+                </ul>`,
             "2.5.5": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Persistent Login Restore:</strong> The desktop app now restores the last valid app session across full app closes until the user explicitly logs out, instead of forcing repeated sign-ins after each restart.</li>

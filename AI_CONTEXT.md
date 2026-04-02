@@ -350,6 +350,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.5.6:** Hardened server-authoritative schedule syncing so failed saves restore the latest server copy, added lightweight shared data-change events so Schedule Studio refreshes when schedules/rosters/tests change, restored the Activity Monitor history toggle, and introduced shared `createdAt` / `lastModified` / `modifiedBy` stamping for sync-sensitive edits.
 - **v2.5.5:** Added persistent desktop session restore until explicit logout, hardened the Electron study-session handling for Microsoft/SharePoint material, and rebuilt the Team Leader Hub Agent Production Feedback flow around a new guided wizard plus linked ticket-path question creator.
 
 ---

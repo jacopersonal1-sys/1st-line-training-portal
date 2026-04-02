@@ -47,11 +47,27 @@ const ScheduleData = {
     },
 
     async saveSchedules(schedules, force = true) {
-        this.getStorage().setItem('schedules', JSON.stringify(schedules));
+        const storage = this.getStorage();
+        const previousSchedules = storage.getItem('schedules');
+        storage.setItem('schedules', JSON.stringify(schedules));
 
-        if (AppContext.host && typeof AppContext.host.saveToServer === 'function') {
-            const result = await AppContext.host.saveToServer(['schedules'], force);
-            if (result === false) throw new Error('Failed to sync schedules to the server.');
+        try {
+            if (AppContext.host && typeof AppContext.host.saveToServer === 'function') {
+                const result = await AppContext.host.saveToServer(['schedules'], force);
+                if (result === false) throw new Error('Failed to sync schedules to the server.');
+            }
+        } catch (error) {
+            if (AppContext.host && typeof AppContext.host.loadFromServer === 'function') {
+                try {
+                    await AppContext.host.loadFromServer(true);
+                } catch (reloadError) {
+                    console.warn('[Schedule Studio] Failed to restore schedules from server after save error:', reloadError);
+                    if (previousSchedules !== null) storage.setItem('schedules', previousSchedules);
+                }
+            } else if (previousSchedules !== null) {
+                storage.setItem('schedules', previousSchedules);
+            }
+            throw error;
         }
 
         return true;

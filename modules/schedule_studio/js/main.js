@@ -1,4 +1,5 @@
 const App = {
+    refreshTimer: null,
     state: {
         schedules: {},
         activeScheduleId: 'A',
@@ -18,8 +19,23 @@ const App = {
         `;
 
         await ScheduleData.init();
+        this.bindHostListeners();
         this.loadState();
         this.render();
+    },
+
+    bindHostListeners() {
+        if (!AppContext.host || typeof AppContext.host.addEventListener !== 'function' || this._boundHostDataListener) return;
+
+        this._boundHostDataListener = (event) => {
+            const changedKey = event?.detail?.key;
+            if (!['schedules', 'rosters', 'tests'].includes(changedKey)) return;
+
+            clearTimeout(this.refreshTimer);
+            this.refreshTimer = setTimeout(() => this.refresh(), 120);
+        };
+
+        AppContext.host.addEventListener('buildzone:data-changed', this._boundHostDataListener);
     },
 
     loadState() {
@@ -121,10 +137,57 @@ const App = {
         this.render();
     },
 
+    stampEntity(target, touch = false) {
+        if (!target || typeof target !== 'object') return target;
+
+        if (AppContext.host && typeof AppContext.host.applyDataTimestamps === 'function') {
+            AppContext.host.applyDataTimestamps(target, { touch });
+            return target;
+        }
+
+        const now = new Date().toISOString();
+        const modifiedBy = ScheduleData.getCurrentUser()?.user || ScheduleData.getCurrentUser()?.role || 'system';
+        if (!target.createdAt) target.createdAt = now;
+        if (!target.lastModified) target.lastModified = target.createdAt;
+        if (!target.modifiedBy) target.modifiedBy = modifiedBy;
+        if (touch) {
+            target.lastModified = now;
+            target.modifiedBy = modifiedBy;
+        }
+        return target;
+    },
+
+    stampSchedule(scheduleId, options = {}) {
+        const targetId = scheduleId || this.state.activeScheduleId;
+        const schedule = this.state.schedules[targetId];
+        if (!schedule) return;
+
+        this.stampEntity(schedule, Boolean(options.touchGroup));
+        if (!Array.isArray(schedule.items)) return;
+
+        if (options.touchAllItems) {
+            schedule.items.forEach(item => this.stampEntity(item, true));
+            return;
+        }
+
+        if (typeof options.itemIndex === 'number' && schedule.items[options.itemIndex]) {
+            this.stampEntity(schedule.items[options.itemIndex], true);
+        }
+    },
+
     async persist() {
-        await ScheduleData.saveSchedules(this.state.schedules, true);
-        this.loadState();
-        this.render();
+        try {
+            await ScheduleData.saveSchedules(this.state.schedules, true);
+            this.loadState();
+            this.render();
+            return true;
+        } catch (error) {
+            console.error('[Schedule Studio] Save failed:', error);
+            this.loadState();
+            this.render();
+            alert('Failed to sync the schedule to the server. The latest server version has been restored.');
+            return false;
+        }
     },
 
     async createSchedule() {
@@ -132,6 +195,7 @@ const App = {
         const keys = Object.keys(this.state.schedules).sort();
         const nextKey = keys.length ? String.fromCharCode(keys[keys.length - 1].charCodeAt(0) + 1) : 'A';
         this.state.schedules[nextKey] = { items: [], assigned: null };
+        this.stampSchedule(nextKey, { touchGroup: true });
         this.state.activeScheduleId = nextKey;
         await this.persist();
     },
@@ -147,9 +211,13 @@ const App = {
 
         if (!oldKeys.length) {
             nextSchedules.A = { items: [], assigned: null };
+            this.stampEntity(nextSchedules.A, true);
         } else {
             oldKeys.forEach((oldKey, index) => {
                 nextSchedules[String.fromCharCode(65 + index)] = schedules[oldKey];
+                if (oldKey !== String.fromCharCode(65 + index)) {
+                    this.stampEntity(nextSchedules[String.fromCharCode(65 + index)], true);
+                }
             });
         }
 
@@ -166,6 +234,7 @@ const App = {
             items: JSON.parse(JSON.stringify(this.getActiveSchedule().items || [])),
             assigned: null
         };
+        this.stampSchedule(nextKey, { touchGroup: true, touchAllItems: true });
         this.state.activeScheduleId = nextKey;
         await this.persist();
     },
@@ -178,6 +247,7 @@ const App = {
         if (!sourceId || !this.state.schedules[sourceId]) return;
         if (!confirm(`Overwrite Schedule ${this.state.activeScheduleId} with Schedule ${sourceId}?`)) return;
         this.getActiveSchedule().items = JSON.parse(JSON.stringify(this.state.schedules[sourceId].items || []));
+        this.stampSchedule(this.state.activeScheduleId, { touchGroup: true, touchAllItems: true });
         await this.persist();
     },
 
@@ -190,10 +260,12 @@ const App = {
         Object.keys(this.state.schedules).forEach(key => {
             if (key !== this.state.activeScheduleId && this.state.schedules[key].assigned === groupId) {
                 this.state.schedules[key].assigned = null;
+                this.stampSchedule(key, { touchGroup: true });
             }
         });
 
         this.getActiveSchedule().assigned = groupId;
+        this.stampSchedule(this.state.activeScheduleId, { touchGroup: true });
         await this.persist();
     },
 
@@ -201,6 +273,7 @@ const App = {
         if (!this.canEdit()) return;
         if (!confirm('Clear this timeline assignment?')) return;
         this.getActiveSchedule().assigned = null;
+        this.stampSchedule(this.state.activeScheduleId, { touchGroup: true });
         await this.persist();
     },
 
@@ -218,6 +291,10 @@ const App = {
             ignoreTime: false,
             isVetting: false,
             isLive: false
+        });
+        this.stampSchedule(this.state.activeScheduleId, {
+            touchGroup: true,
+            itemIndex: this.getActiveSchedule().items.length - 1
         });
         await this.persist();
         this.editItem(this.getActiveSchedule().items.length - 1);
@@ -279,6 +356,7 @@ const App = {
         if (linkedTestId) item.linkedTestId = linkedTestId;
         else delete item.linkedTestId;
 
+        this.stampSchedule(this.state.activeScheduleId, { touchGroup: true, itemIndex: index });
         await this.persist();
         this.closeEditor();
     },
@@ -287,6 +365,7 @@ const App = {
         if (!this.canEdit()) return;
         if (!confirm('Delete this timeline item?')) return;
         this.getActiveSchedule().items.splice(index, 1);
+        this.stampSchedule(this.state.activeScheduleId, { touchGroup: true });
         await this.persist();
     },
 
@@ -297,6 +376,7 @@ const App = {
         if (targetIndex < 0 || targetIndex >= items.length) return;
         const [item] = items.splice(index, 1);
         items.splice(targetIndex, 0, item);
+        this.stampSchedule(this.state.activeScheduleId, { touchGroup: true });
         await this.persist();
     },
 
