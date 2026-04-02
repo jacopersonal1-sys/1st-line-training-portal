@@ -23,10 +23,33 @@ const StudyMonitor = {
         homeUrl: null,
     },
     tabCounter: 0,
+    lastSpawnedLink: null,
 
     buildTabId: function() {
         this.tabCounter += 1;
         return `tab-${Date.now()}-${this.tabCounter}`;
+    },
+
+    handleSpawnedStudyUrl: function(url, title = "New Tab") {
+        if (!url) return;
+        const now = Date.now();
+        const normalizedUrl = String(url).trim();
+
+        if (
+            this.lastSpawnedLink &&
+            this.lastSpawnedLink.url === normalizedUrl &&
+            (now - this.lastSpawnedLink.time) < 800
+        ) {
+            return;
+        }
+
+        this.lastSpawnedLink = { url: normalizedUrl, time: now };
+
+        if (this.isStudyBrowserUrl(normalizedUrl)) {
+            this.addTab(normalizedUrl, title, true);
+        } else {
+            this.openExternalUrl(normalizedUrl);
+        }
     },
 
     isStudyBrowserUrl: function(url) {
@@ -51,7 +74,11 @@ const StudyMonitor = {
         return Boolean(webview && webview.isConnected && webview.dataset && webview.dataset.navReady === '1');
     },
 
-    getSafeWebviewNavState: function(webview) {
+    getSafeWebviewNavState: function(tabOrWebview) {
+        const webview = tabOrWebview?.webview || tabOrWebview;
+        const cachedBack = Boolean(tabOrWebview?.canGoBackCached);
+        const cachedForward = Boolean(tabOrWebview?.canGoForwardCached);
+
         if (!this.isWebviewReady(webview)) {
             return { ready: false, canGoBack: false, canGoForward: false };
         }
@@ -59,19 +86,60 @@ const StudyMonitor = {
         try {
             return {
                 ready: true,
-                canGoBack: Boolean(webview.canGoBack()),
-                canGoForward: Boolean(webview.canGoForward())
+                canGoBack: webview && typeof webview.canGoBack === 'function' ? Boolean(webview.canGoBack()) : cachedBack,
+                canGoForward: webview && typeof webview.canGoForward === 'function' ? Boolean(webview.canGoForward()) : cachedForward
             };
         } catch (error) {
-            console.warn('Study webview navigation state unavailable yet:', error);
-            return { ready: false, canGoBack: false, canGoForward: false };
+            return { ready: true, canGoBack: cachedBack, canGoForward: cachedForward };
+        }
+    },
+
+    refreshTabNavigationState: function(tab, retryCount = 0) {
+        if (!tab || !tab.webview) return;
+
+        const webview = tab.webview;
+        if (!this.isWebviewReady(webview)) return;
+
+        try {
+            tab.canGoBackCached = Boolean(webview.canGoBack());
+            tab.canGoForwardCached = Boolean(webview.canGoForward());
+            if (tab.id === this.browserState.activeTabId) {
+                this.updateBrowserChrome();
+            }
+        } catch (error) {
+            if (retryCount < 3) {
+                setTimeout(() => this.refreshTabNavigationState(tab, retryCount + 1), 150);
+            }
+        }
+    },
+
+    invokeActiveWebviewAction: function(action, options = {}) {
+        const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId);
+        const webview = activeTab?.webview;
+        if (!webview || !webview.isConnected) return;
+
+        const { fallbackUrl = null } = options;
+        try {
+            if (action === 'goBack') {
+                if (activeTab?.canGoBackCached) webview.goBack();
+            } else if (action === 'goForward') {
+                if (activeTab?.canGoForwardCached) webview.goForward();
+            } else if (action === 'reload') {
+                webview.reload();
+            } else if (action === 'home' && fallbackUrl) {
+                webview.loadURL(fallbackUrl);
+            }
+        } catch (error) {
+            console.warn(`Study browser action failed: ${action}`, error);
+        } finally {
+            setTimeout(() => this.refreshTabNavigationState(activeTab), 100);
         }
     },
 
     updateBrowserChrome: function() {
         const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId) || null;
         this.activeWebview = activeTab ? activeTab.webview : null;
-        const navState = this.getSafeWebviewNavState(this.activeWebview);
+        const navState = this.getSafeWebviewNavState(activeTab);
 
         const titleEl = document.getElementById('study-current-title');
         if (titleEl) {
@@ -87,8 +155,45 @@ const StudyMonitor = {
 
         if (backBtn) backBtn.disabled = !navState.ready || !navState.canGoBack;
         if (forwardBtn) forwardBtn.disabled = !navState.ready || !navState.canGoForward;
-        if (reloadBtn) reloadBtn.disabled = !navState.ready;
+        if (reloadBtn) reloadBtn.disabled = !hasWebview;
         if (homeBtn) homeBtn.disabled = !hasWebview || !this.browserState.homeUrl;
+    },
+
+    getActiveTab: function() {
+        if (!this.browserState.activeTabId) return null;
+        return this.browserState.tabs.find(t => t.id === this.browserState.activeTabId) || null;
+    },
+
+    goBackActiveTab: function() {
+        this.invokeActiveWebviewAction('goBack');
+    },
+
+    goForwardActiveTab: function() {
+        this.invokeActiveWebviewAction('goForward');
+    },
+
+    reloadActiveTab: function() {
+        const activeTab = this.getActiveTab();
+        const webview = activeTab?.webview;
+        if (!webview || !webview.isConnected) return;
+
+        try {
+            webview.reload();
+        } catch (error) {
+            console.warn('Study browser reload failed:', error);
+        }
+    },
+
+    goHomeActiveTab: function() {
+        const activeTab = this.getActiveTab();
+        const webview = activeTab?.webview;
+        if (!webview || !webview.isConnected || !this.browserState.homeUrl) return;
+
+        try {
+            webview.loadURL(this.browserState.homeUrl);
+        } catch (error) {
+            console.warn('Study browser home action failed:', error);
+        }
     },
     
     init: async function() {
@@ -155,11 +260,7 @@ const StudyMonitor = {
             window.electronAPI.ipcRenderer.removeAllListeners('webview-new-window');
             window.electronAPI.ipcRenderer.on('webview-new-window', (e, url) => {
                 if (this.isStudyOpen) {
-                    if (this.isStudyBrowserUrl(url)) {
-                        this.addTab(url, "New Tab", true);
-                    } else {
-                        this.openExternalUrl(url);
-                    }
+                    this.handleSpawnedStudyUrl(url, "New Tab");
                 } else {
                     this.openExternalUrl(url); // Fallback for TL Hub / other webviews
                 }
@@ -705,37 +806,57 @@ const StudyMonitor = {
 
         return `
             <div id="study-browser-shell">
-                <div class="study-header">
-                    <div class="study-nav-controls">
-                        <button id="study-nav-back" title="Back"><i class="fas fa-arrow-left"></i></button>
-                        <button id="study-nav-forward" title="Forward"><i class="fas fa-arrow-right"></i></button>
-                        <button id="study-nav-reload" title="Reload"><i class="fas fa-sync-alt"></i></button>
-                        <button id="study-nav-home" title="Home"><i class="fas fa-home"></i></button>
+                <div class="study-header study-toolbar">
+                    <div class="study-location-panel">
+                        <div class="study-browser-label"><i class="fas fa-shield-halved"></i> Secure Study Browser</div>
+                        <div id="study-current-title" class="study-current-title" title="Secure Study Browser">Secure Study Browser</div>
                     </div>
+                </div>
+                <div class="study-tabbar">
                     <div class="study-tabs-container">
                         <div id="study-tabs-list"></div>
                     </div>
+                </div>
+                <div class="study-control-deck">
+                    <div class="study-nav-controls">
+                        <button type="button" id="study-nav-back" class="study-control-btn" title="Go back"><i class="fas fa-arrow-left"></i><span>Back</span></button>
+                        <button type="button" id="study-nav-forward" class="study-control-btn" title="Go forward"><i class="fas fa-arrow-right"></i><span>Forward</span></button>
+                        <button type="button" id="study-nav-reload" class="study-control-btn" title="Reload this page"><i class="fas fa-rotate-right"></i><span>Reload</span></button>
+                        <button type="button" id="study-nav-home" class="study-control-btn" title="Return to the first study page"><i class="fas fa-house"></i><span>Home</span></button>
+                    </div>
                     <div class="study-header-actions">
-                    <div id="study-current-title" style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); font-size:0.85rem;" title="Secure Study Browser">Secure Study Browser</div>
-                    <button id="study-bookmark-btn" class="btn-secondary" onmousedown="StudyMonitor.startMarkForClarity()" title="Drag a box to mark a spot for clarity" style="padding: 8px 15px; font-weight:bold; border-color:#f1c40f; color:#f1c40f;"><i class="fas fa-crop-alt"></i> Mark for Clarity</button>
-                    <button id="study-min-btn" class="btn-primary" onmousedown="StudyMonitor.minimizeStudyWindow()" title="Keep tabs open and return to Dashboard" style="padding: 8px 15px; font-weight:bold;"><i class="fas fa-desktop"></i> Dashboard</button>
-                        <select id="study-quick-links" onchange="StudyMonitor.navigateQuickLink(this.value)">
+                        <button type="button" id="study-bookmark-btn" class="study-action-btn study-action-secondary" title="Mark a specific spot to ask for clarity later">
+                            <i class="fas fa-crop-alt"></i> Mark for Clarity
+                        </button>
+                        <button type="button" id="study-min-btn" class="study-action-btn study-action-primary" title="Keep this study session open and return to the dashboard">
+                            <i class="fas fa-desktop"></i> Dashboard
+                        </button>
+                        <label class="study-quick-links-wrap">
+                            <span class="study-quick-links-label">Program Links</span>
+                            <select id="study-quick-links" class="study-quick-links">
                             <option value="">Program Links</option>
                             ${quickLinks.map(l => `<option value="${l.url}">${l.name}</option>`).join('')}
-                        </select>
-                    <button id="study-close-btn" onmousedown="StudyMonitor.closeStudyWindow()" title="Close all tabs and exit"><i class="fas fa-times"></i> Exit</button>
+                            </select>
+                        </label>
+                        <button type="button" id="study-close-btn" class="study-action-btn study-action-danger" title="Close all study tabs and exit">
+                            <i class="fas fa-times"></i> Exit
+                        </button>
                     </div>
                 </div>
-                <div id="study-webview-container"></div>
+                <div id="study-webview-container" class="study-webview-stack"></div>
             </div>
         `;
     },
 
     attachNavEvents: function() {
-        document.getElementById('study-nav-back').onmousedown = () => this.getActiveWebview()?.goBack();
-        document.getElementById('study-nav-forward').onmousedown = () => this.getActiveWebview()?.goForward();
-        document.getElementById('study-nav-reload').onmousedown = () => this.getActiveWebview()?.reload();
-        document.getElementById('study-nav-home').onmousedown = () => this.getActiveWebview()?.loadURL(this.browserState.homeUrl);
+        document.getElementById('study-nav-back').onclick = () => this.goBackActiveTab();
+        document.getElementById('study-nav-forward').onclick = () => this.goForwardActiveTab();
+        document.getElementById('study-nav-reload').onclick = () => this.reloadActiveTab();
+        document.getElementById('study-nav-home').onclick = () => this.goHomeActiveTab();
+        document.getElementById('study-bookmark-btn').onclick = () => this.startMarkForClarity();
+        document.getElementById('study-min-btn').onclick = () => this.minimizeStudyWindow();
+        document.getElementById('study-close-btn').onclick = () => this.closeStudyWindow();
+        document.getElementById('study-quick-links').onchange = (event) => this.navigateQuickLink(event.target.value);
         this.updateBrowserChrome();
     },
 
@@ -940,7 +1061,15 @@ const StudyMonitor = {
         const container = document.getElementById('study-webview-container');
         container.appendChild(webview);
 
-        const newTab = { id: tabId, title: title.substring(0, 20), url: cleanUrl, webview: webview, targetScrollY: targetScrollY };
+        const newTab = {
+            id: tabId,
+            title: title.substring(0, 20),
+            url: cleanUrl,
+            webview: webview,
+            targetScrollY: targetScrollY,
+            canGoBackCached: false,
+            canGoForwardCached: false
+        };
         this.browserState.tabs.push(newTab);
 
         this.renderTabs();
@@ -990,10 +1119,10 @@ const StudyMonitor = {
         tabsList.innerHTML = this.browserState.tabs.map(tab => {
             const isActive = tab.id === this.browserState.activeTabId;
             return `
-                <div class="study-tab ${isActive ? 'active' : ''}" onmousedown="StudyMonitor.switchTab('${tab.id}')">
+                <button type="button" class="study-tab ${isActive ? 'active' : ''}" onclick="StudyMonitor.switchTab('${tab.id}')" title="${this.escapeHtml(tab.title)}">
                     <span class="study-tab-title">${tab.title}</span>
-                    <button class="study-tab-close" onmousedown="event.stopPropagation(); StudyMonitor.closeTab('${tab.id}')"><i class="fas fa-times"></i></button>
-                </div>
+                    <span class="study-tab-close" role="presentation" onclick="event.stopPropagation(); StudyMonitor.closeTab('${tab.id}')"><i class="fas fa-times"></i></span>
+                </button>
             `;
         }).join('');
     },
@@ -1023,6 +1152,7 @@ const StudyMonitor = {
                 console.warn('Study webview title unavailable yet:', error);
             }
             tab.title = newTitle;
+            this.refreshTabNavigationState(tab);
             this.renderTabs();
             this.updateBrowserChrome();
             
@@ -1040,6 +1170,7 @@ const StudyMonitor = {
         // We must track 'page-title-updated' to capture what they are actually doing inside the app.
         webview.addEventListener('page-title-updated', (e) => {
             tab.title = e.title.substring(0, 20);
+            this.refreshTabNavigationState(tab);
             this.renderTabs();
             this.updateBrowserChrome();
             
@@ -1050,29 +1181,30 @@ const StudyMonitor = {
 
         webview.addEventListener('did-navigate', (e) => {
             tab.url = e.url;
+            this.refreshTabNavigationState(tab);
             this.updateBrowserChrome();
             this.track(`Studying: ${(webview.getTitle() || tab.title).substring(0, 50)}`);
         });
 
         webview.addEventListener('did-navigate-in-page', (e) => {
             tab.url = e.url;
+            this.refreshTabNavigationState(tab);
             this.updateBrowserChrome();
         });
 
         webview.addEventListener('new-window', (e) => {
             e.preventDefault();
-            // DEFUSAL 2 (Part B): Catch standard links + SharePoint blobs, send Native OS triggers (mailto/ms-auth) outward
-            // Note: This is kept as a fallback, but the IPC listener above now handles the heavy lifting for PDFs.
-            if (this.isStudyBrowserUrl(e.url)) {
-                this.addTab(e.url, "New Tab", true);
-            } else {
-                this.openExternalUrl(e.url);
+            // Fallback only. Main-process interception already routes spawned windows for normal Electron runs.
+            if (!window.electronAPI?.ipcRenderer) {
+                this.handleSpawnedStudyUrl(e.url, "New Tab");
             }
         });
 
         webview.addEventListener('did-fail-load', (e) => {
             if (e.errorCode === -3) return; // user/navigation cancellation
             tab.title = 'Load Failed';
+            tab.canGoBackCached = false;
+            tab.canGoForwardCached = false;
             this.renderTabs();
             this.updateBrowserChrome();
             if (typeof showToast === 'function') {
@@ -1087,6 +1219,7 @@ const StudyMonitor = {
 
         webview.addEventListener('dom-ready', () => {
             webview.dataset.domReady = '1';
+            setTimeout(() => this.refreshTabNavigationState(tab), 100);
             webview.executeJavaScript(`
                 document.addEventListener('click', () => { console.log('__STUDY_CLICK__'); });
             `);

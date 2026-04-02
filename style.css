@@ -1265,6 +1265,284 @@ input:checked + .slider:before {
     display: none !important;
 }
 
+#study-browser-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background:
+        radial-gradient(circle at top right, rgba(243, 112, 33, 0.12), transparent 28%),
+        linear-gradient(180deg, rgba(255,255,255,0.02), transparent 20%),
+        var(--bg-app);
+}
+
+.study-toolbar,
+.study-tabbar {
+    position: relative;
+    z-index: 5;
+    flex: 0 0 auto;
+}
+
+.study-toolbar {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr);
+    gap: 16px;
+    align-items: center;
+    padding: 14px 18px 12px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.02));
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.study-nav-controls,
+.study-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.study-control-deck {
+    position: relative;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 18px 14px;
+    background: rgba(0,0,0,0.08);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.study-location-panel {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.study-browser-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary);
+}
+
+.study-current-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-main);
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.study-control-btn,
+.study-action-btn {
+    min-height: 42px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, border-color 0.18s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    pointer-events: auto;
+}
+
+.study-control-btn {
+    min-width: 108px;
+    padding: 0 14px;
+    background: var(--bg-card);
+    color: var(--text-main);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+    font-weight: 700;
+}
+
+.study-control-btn:hover:not(:disabled),
+.study-action-btn:hover:not(:disabled),
+.study-tab:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+}
+
+.study-control-btn:disabled,
+.study-action-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.study-action-btn {
+    padding: 0 14px;
+    font-weight: 700;
+    font-size: 0.92rem;
+    background: var(--bg-card);
+    color: var(--text-main);
+}
+
+.study-action-secondary {
+    border-color: rgba(241, 196, 15, 0.35);
+    color: #f1c40f;
+}
+
+.study-action-primary {
+    border-color: rgba(243, 112, 33, 0.4);
+    background: rgba(243, 112, 33, 0.14);
+    color: #fff;
+}
+
+.study-action-danger {
+    border-color: rgba(255, 82, 82, 0.35);
+    background: rgba(255, 82, 82, 0.12);
+    color: #fff;
+}
+
+.study-tabbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+    padding: 10px 18px 12px;
+    background: rgba(0,0,0,0.12);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.study-tabs-container {
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+}
+
+#study-tabs-list {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: max-content;
+}
+
+.study-tab {
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-muted);
+    border-radius: 999px;
+    min-height: 40px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    min-width: 180px;
+    max-width: 260px;
+    pointer-events: auto;
+}
+
+.study-tab.active {
+    color: #fff;
+    background: linear-gradient(135deg, rgba(243, 112, 33, 0.28), rgba(243, 112, 33, 0.16));
+    border-color: rgba(243, 112, 33, 0.45);
+}
+
+.study-tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    text-align: left;
+}
+
+.study-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    color: inherit;
+    flex: 0 0 auto;
+}
+
+.study-tab-close:hover {
+    background: rgba(255,255,255,0.12);
+}
+
+.study-quick-links-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 8px 12px;
+}
+
+.study-quick-links-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.study-quick-links {
+    min-width: 180px;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.study-webview-stack,
+#study-webview-container {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: #fff;
+    border-top: 1px solid rgba(0,0,0,0.08);
+}
+
+.study-webview {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #fff;
+}
+
+.study-webview.hidden {
+    display: none;
+}
+
+@media (max-width: 1100px) {
+    .study-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .study-tabbar {
+        grid-template-columns: 1fr;
+    }
+
+    .study-header-actions,
+    .study-nav-controls,
+    .study-tabbar-actions {
+        justify-content: flex-start;
+    }
+
+    .study-quick-links {
+        min-width: 140px;
+    }
+
+    .study-control-deck {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
 /* ================= TRAINEE DASHBOARD WIDGETS ================= */
 .notepad-area {
     width: 100%;
