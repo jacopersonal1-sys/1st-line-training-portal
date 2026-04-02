@@ -897,6 +897,13 @@ window.onload = async function() {
     }
 
     // Restore Session (With IP Security Check)
+    if (!sessionStorage.getItem('currentUser') && typeof getPersistentAppSession === 'function') {
+        const persistentSession = getPersistentAppSession();
+        if (persistentSession?.user) {
+            sessionStorage.setItem('currentUser', JSON.stringify(persistentSession.user));
+        }
+    }
+
     const savedSession = sessionStorage.getItem('currentUser');
     if(savedSession) {
         // Verify IP again on refresh to prevent session hijacking across locations
@@ -904,6 +911,7 @@ window.onload = async function() {
             checkAccessControl().then(async allowed => {
                 if(allowed) {
                     CURRENT_USER = JSON.parse(savedSession);
+                    if (typeof persistAppSession === 'function') persistAppSession(CURRENT_USER);
                     // --- NEW: Apply User Specific Theme Immediately ---
                     applyUserTheme(); 
                     
@@ -926,11 +934,13 @@ window.onload = async function() {
                     if (typeof autoLogin === 'function') autoLogin();
                 } else {
                     sessionStorage.removeItem('currentUser'); // Clear invalid session
+                    if (typeof clearPersistentAppSession === 'function') clearPersistentAppSession();
                 }
             });
         } else {
             // Fallback if IP check isn't loaded
              CURRENT_USER = JSON.parse(savedSession);
+             if (typeof persistAppSession === 'function') persistAppSession(CURRENT_USER);
              applyUserTheme();
              
              // Check for experimental theme

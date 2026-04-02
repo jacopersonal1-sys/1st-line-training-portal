@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor, Menu, MenuItem, Notification } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor, Menu, MenuItem, Notification, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { exec } = require('child_process');
@@ -26,6 +26,76 @@ const gotTheLock = app.requestSingleInstanceLock();
 let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
 let updateReady = false; // Track if update is downloaded
+let studySessionConfigured = false;
+let isFlushingStudySession = false;
+const STUDY_SESSION_PARTITION = 'persist:study_session';
+const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0';
+
+function isTrustedStudyUrl(rawUrl = '') {
+    try {
+        const parsed = new URL(rawUrl);
+        const host = parsed.hostname.toLowerCase();
+        return [
+            'sharepoint.com',
+            'microsoftonline.com',
+            'office.com',
+            'officeapps.live.com',
+            'live.com',
+            'onedrive.com',
+            'herotel.com',
+            'qcontact.com',
+            'preseem.com',
+            'genially.com'
+        ].some(domain => host === domain || host.endsWith(`.${domain}`));
+    } catch (error) {
+        return false;
+    }
+}
+
+function configureStudySession() {
+    if (studySessionConfigured) return;
+
+    const studySession = session.fromPartition(STUDY_SESSION_PARTITION);
+
+    studySession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+        if (!requestingOrigin || !isTrustedStudyUrl(requestingOrigin)) return false;
+        return ['clipboard-read', 'clipboard-sanitized-write', 'clipboard-write', 'fullscreen', 'notifications', 'media'].includes(permission);
+    });
+
+    studySession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+        const origin = details?.requestingUrl || details?.embeddingOrigin || '';
+        const isAllowed = isTrustedStudyUrl(origin) && ['clipboard-read', 'clipboard-sanitized-write', 'clipboard-write', 'fullscreen', 'notifications', 'media'].includes(permission);
+        callback(isAllowed);
+    });
+
+    studySession.webRequest.onBeforeSendHeaders((details, callback) => {
+        if (isTrustedStudyUrl(details.url)) {
+            details.requestHeaders['User-Agent'] = STUDY_BROWSER_USER_AGENT;
+        }
+        callback({ requestHeaders: details.requestHeaders });
+    });
+
+    studySessionConfigured = true;
+}
+
+async function flushStudySession() {
+    if (isFlushingStudySession) return;
+    isFlushingStudySession = true;
+
+    try {
+        const studySession = session.fromPartition(STUDY_SESSION_PARTITION);
+        if (studySession?.cookies?.flushStore) {
+            await studySession.cookies.flushStore();
+        }
+        if (studySession?.flushStorageData) {
+            studySession.flushStorageData();
+        }
+    } catch (error) {
+        console.error('Study session flush failed:', error);
+    } finally {
+        isFlushingStudySession = false;
+    }
+}
 
 function createWindow() {
     // Create the browser window.
@@ -226,6 +296,7 @@ if (!gotTheLock) {
     });
 
     app.whenReady().then(() => {
+        configureStudySession();
         createWindow();
 
         // SHIELD: Hardware Wake/Resume Triggers (The "Sleep Mode" Fix)
@@ -241,6 +312,15 @@ if (!gotTheLock) {
         });
     });
 }
+
+app.on('before-quit', (event) => {
+    if (!isFlushingStudySession) {
+        event.preventDefault();
+        flushStudySession().finally(() => {
+            app.quit();
+        });
+    }
+});
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

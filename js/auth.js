@@ -2,6 +2,43 @@
 
 // Global State
 window.LOGIN_MODE = window.LOGIN_MODE || 'admin';
+window.PERSISTENT_SESSION_KEY = window.PERSISTENT_SESSION_KEY || 'persistent_app_session';
+
+function persistAppSession(user) {
+    if (!user) return;
+    try {
+        localStorage.setItem(window.PERSISTENT_SESSION_KEY, JSON.stringify({
+            user: user,
+            savedAt: new Date().toISOString()
+        }));
+    } catch (e) {
+        console.error("Persistent session save failed:", e);
+    }
+}
+
+function clearPersistentAppSession() {
+    try {
+        localStorage.removeItem(window.PERSISTENT_SESSION_KEY);
+    } catch (e) {
+        console.error("Persistent session clear failed:", e);
+    }
+}
+
+function getPersistentAppSession() {
+    try {
+        const raw = localStorage.getItem(window.PERSISTENT_SESSION_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.user) {
+            clearPersistentAppSession();
+            return null;
+        }
+        return parsed;
+    } catch (e) {
+        clearPersistentAppSession();
+        return null;
+    }
+}
 
 // --- HELPER: ASYNC SAVE ---
 // Ensures critical user profile updates are saved before proceeding.
@@ -139,6 +176,7 @@ async function attemptLogin() {
       const roleMap = { 'demo_admin': 'super_admin', 'demo_tl': 'teamleader', 'demo_trainee': 'trainee' };
       CURRENT_USER = { user: u.toLowerCase(), role: roleMap[u.toLowerCase()], pass: 'demo123', traineeData: { email: "demo@herotel.com" } };
       sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
+      persistAppSession(CURRENT_USER);
       
       // Generate a perfect demo state if the bubble is empty
       if (!localStorage.getItem('users')) {
@@ -433,6 +471,7 @@ async function attemptLogin() {
     if (CURRENT_USER.role) CURRENT_USER.role = CURRENT_USER.role.toLowerCase().trim();
     
     sessionStorage.setItem('currentUser', JSON.stringify(validUser));
+    persistAppSession(validUser);
     
     // --- REMEMBER ME LOGIC ---
     const remember = document.getElementById('rememberMe').checked;
@@ -823,6 +862,7 @@ async function logout() {
   }
 
   sessionStorage.clear();
+  clearPersistentAppSession();
   if (isDemo) localStorage.clear();
 
   location.reload(); 

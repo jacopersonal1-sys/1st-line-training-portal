@@ -73,7 +73,25 @@ const DataService = {
 
     // --- BACKEND DATA (CONFIG) ---
     getBackendData: function() {
-        return JSON.parse(localStorage.getItem('tl_backend_data') || '{"outage_areas":[], "bottleneck_types":[], "feedback_categories":{}}');
+        const parsed = JSON.parse(localStorage.getItem('tl_backend_data') || '{}');
+        if (!Array.isArray(parsed.outage_areas)) parsed.outage_areas = [];
+        if (!Array.isArray(parsed.bottleneck_types)) parsed.bottleneck_types = [];
+        if (!Array.isArray(parsed.feedback_questions)) parsed.feedback_questions = [];
+        parsed.feedback_questions = parsed.feedback_questions.map((question, index) => {
+            if (typeof question === 'string') {
+                return {
+                    id: `fq_legacy_${index}`,
+                    text: question,
+                    linkTarget: 'All Tickets'
+                };
+            }
+            return {
+                id: question.id || `fq_${index}`,
+                text: question.text || '',
+                linkTarget: question.linkTarget || question.problemStatement || 'All Tickets'
+            };
+        });
+        return parsed;
     },
 
     saveBackendData: function(data) {
