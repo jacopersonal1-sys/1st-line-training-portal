@@ -1,0 +1,464 @@
+:root {
+    --primary: #f37021;
+    --bg-app: #121212;
+    --bg-card: #1e1e1e;
+    --bg-input: #252525;
+    --bg-header: #191919;
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --text-main: #e0e0e0;
+    --text-muted: #888888;
+    --border-color: #333333;
+    --border-radius: 12px;
+    --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.2);
+    --shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.35);
+    --transition: all 0.25s ease;
+    --studio-success: #2ecc71;
+    --studio-danger: #ff6b6b;
+    --studio-warning: #f1c40f;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg-app);
+    color: var(--text-main);
+}
+
+button,
+input,
+select {
+    font: inherit;
+}
+
+#app-container {
+    min-height: 100vh;
+    padding: 22px;
+}
+
+.studio-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.studio-panel,
+.studio-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-card);
+}
+
+.studio-panel {
+    padding: 22px;
+}
+
+.studio-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 18px;
+}
+
+.studio-title {
+    margin: 0 0 8px;
+    font-size: 1.6rem;
+}
+
+.studio-subtitle {
+    margin: 0;
+    color: var(--text-muted);
+    max-width: 760px;
+    line-height: 1.55;
+}
+
+.studio-pill-row,
+.studio-toolbar,
+.studio-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.studio-pill {
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+
+.studio-tab {
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-muted);
+    border-radius: 999px;
+    padding: 9px 14px;
+    cursor: pointer;
+}
+
+.studio-tab.active {
+    color: var(--text-main);
+    background: rgba(243, 112, 33, 0.14);
+    border-color: var(--primary);
+}
+
+.studio-btn,
+.studio-icon-btn {
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-main);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.studio-btn {
+    padding: 10px 14px;
+}
+
+.studio-btn.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.studio-btn.secondary {
+    background: var(--bg-input);
+}
+
+.studio-icon-btn {
+    width: 38px;
+    height: 38px;
+}
+
+.studio-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 18px;
+}
+
+.studio-sidebar {
+    padding: 18px;
+}
+
+.studio-main {
+    min-width: 0;
+}
+
+.studio-schedule-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.studio-schedule-tab {
+    width: 100%;
+    text-align: left;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    border-radius: 8px;
+    padding: 14px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.studio-schedule-tab.active {
+    border-color: var(--primary);
+    background: var(--bg-input);
+}
+
+.studio-tab-meta {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    margin-top: 6px;
+}
+
+.studio-main-card {
+    padding: 18px;
+}
+
+.studio-toolbar {
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.studio-toolbar-left,
+.studio-toolbar-right {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.studio-banner {
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+}
+
+.studio-banner.assigned {
+    background: rgba(46, 204, 113, 0.12);
+    border-color: rgba(46, 204, 113, 0.36);
+}
+
+.studio-banner.unassigned {
+    background: rgba(241, 196, 15, 0.08);
+    border-color: rgba(241, 196, 15, 0.22);
+}
+
+.studio-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.studio-grid.two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.studio-grid.three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.studio-field,
+label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+label span,
+.studio-label {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+input,
+select {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-main);
+    padding: 11px 12px;
+}
+
+.studio-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.studio-item {
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.studio-item-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.studio-item-date {
+    color: var(--primary);
+    font-weight: 700;
+    font-size: 0.86rem;
+}
+
+.studio-item-title {
+    margin: 4px 0 0;
+    font-size: 1.05rem;
+}
+
+.studio-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.studio-chip {
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.studio-item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.studio-status {
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.studio-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 36px 18px;
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+}
+
+.studio-calendar {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.studio-calendar-head {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.studio-day {
+    min-height: 108px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    padding: 10px;
+}
+
+.studio-day.today {
+    border-color: var(--primary);
+    box-shadow: inset 0 0 0 1px rgba(243, 112, 33, 0.22);
+}
+
+.studio-day-number {
+    text-align: right;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    margin-bottom: 6px;
+}
+
+.studio-day-event {
+    font-size: 0.74rem;
+    border-radius: 10px;
+    padding: 4px 6px;
+    margin-top: 5px;
+    color: #fff;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.studio-callout,
+.studio-flags {
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px dashed var(--primary);
+    background: var(--bg-input);
+    margin-top: 12px;
+}
+
+.studio-callout-title {
+    color: var(--primary);
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.studio-check {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-main);
+    margin-top: 10px;
+}
+
+.studio-check input {
+    width: auto;
+    margin: 0;
+}
+
+.studio-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 22px;
+    z-index: 10;
+}
+
+.studio-modal.hidden {
+    display: none;
+}
+
+.studio-modal-card {
+    width: min(720px, 100%);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+}
+
+.studio-modal-header,
+.studio-modal-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.studio-modal-header {
+    margin-bottom: 14px;
+}
+
+.studio-modal-header h3 {
+    margin: 0;
+}
+
+.studio-modal-actions {
+    margin-top: 18px;
+    justify-content: flex-end;
+}
+
+@media (max-width: 980px) {
+    .studio-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    #app-container {
+        padding: 14px;
+    }
+
+    .studio-grid.two,
+    .studio-grid.three,
+    .studio-calendar {
+        grid-template-columns: 1fr;
+    }
+
+    .studio-item-top,
+    .studio-header,
+    .studio-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

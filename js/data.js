@@ -419,9 +419,9 @@ async function loadFromServer(silent = false) {
             // TRAINEE DATA MINIMIZATION: Only query my own rows for massive tables
             if (isTrainee) {
                 if (['records', 'submissions', 'exemptions', 'link_requests'].includes(tableName)) {
-                    query = query.eq('trainee', CURRENT_USER.user);
+                    query = query.ilike('trainee', CURRENT_USER.user);
                 } else if (['attendance', 'monitor_history'].includes(tableName)) {
-                    query = query.eq('user_id', CURRENT_USER.user);
+                    query = query.ilike('user_id', CURRENT_USER.user);
                 }
             }
             
@@ -482,9 +482,9 @@ async function loadFromServer(silent = false) {
                 // --- TRAINEE LOCAL CACHE PURGE (Free up memory from past global syncs) ---
                 if (isTrainee) {
                     if (['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
-                        localItems = localItems.filter(i => i.trainee === CURRENT_USER.user || i.user === CURRENT_USER.user);
+                        localItems = localItems.filter(i => (i.trainee || '').toLowerCase() === CURRENT_USER.user.toLowerCase() || (i.user || '').toLowerCase() === CURRENT_USER.user.toLowerCase());
                     } else if (['attendance_records', 'monitor_history'].includes(localKey)) {
-                        localItems = localItems.filter(i => i.user === CURRENT_USER.user || i.user_id === CURRENT_USER.user);
+                        localItems = localItems.filter(i => (i.user || '').toLowerCase() === CURRENT_USER.user.toLowerCase() || (i.user_id || '').toLowerCase() === CURRENT_USER.user.toLowerCase());
                     }
                 }
                 
@@ -528,6 +528,31 @@ async function loadFromServer(silent = false) {
                 const serverObj = { [localKey]: safeServerItems };
                 const localObj = { [localKey]: localItems };
                 const merged = performSmartMerge(serverObj, localObj, 'server_wins');
+
+                if (['records', 'submissions'].includes(localKey)) {
+                    merged[localKey] = dedupeArrayByIdentity(localKey, merged[localKey], 'server_wins');
+
+                    // Reconcile against current server IDs on full/interactive pulls so stale machine-local rows are purged.
+                    if (!silent) {
+                        try {
+                            const { data: serverIndexRows, error: serverIndexErr } = await window.supabaseClient
+                                .from(tableName)
+                                .select('id')
+                                .limit(10000);
+
+                            if (!serverIndexErr && serverIndexRows) {
+                                merged[localKey] = reconcileServerIndexedRows(
+                                    localKey,
+                                    merged[localKey],
+                                    hashMap,
+                                    serverIndexRows.map(row => row.id)
+                                );
+                            }
+                        } catch (reconcileErr) {
+                            console.warn(`Server index reconciliation failed for ${localKey}:`, reconcileErr);
+                        }
+                    }
+                }
                 
                 // CRITICAL FIX: Aggressively prune logs to prevent quota errors
                 if (localKey === 'monitor_history') {
@@ -997,6 +1022,162 @@ function generateChecksum(str) {
     return (hash >>> 0).toString(16);
 }
 
+function normalizeIdentityValue(value) {
+    if (value === undefined || value === null) return '';
+    return String(value).trim().toLowerCase();
+}
+
+function getArrayItemIdentity(key, item) {
+    if (item === undefined || item === null) return null;
+
+    if ((key === 'vettingTopics' || key === 'monitor_whitelist' || key === 'monitor_reviewed' || key === 'system_tombstones') && typeof item === 'string') {
+        const normalized = normalizeIdentityValue(item);
+        return normalized ? `${key}:${normalized}` : null;
+    }
+
+    if (key === 'users' && item.user) {
+        return `user:${normalizeIdentityValue(item.user)}`;
+    }
+
+    if (key === 'assessments' && item.name) {
+        return `assessment:${normalizeIdentityValue(item.name)}`;
+    }
+
+    if (key === 'records') {
+        if (item.submissionId) return `record-submission:${normalizeIdentityValue(item.submissionId)}`;
+
+        const trainee = normalizeIdentityValue(item.trainee);
+        const assessment = normalizeIdentityValue(item.assessment);
+        const groupId = normalizeIdentityValue(item.groupID);
+        const phase = normalizeIdentityValue(item.phase);
+        if (trainee && assessment) {
+            return `record:${trainee}|${assessment}|${groupId}|${phase}`;
+        }
+    }
+
+    if (key === 'submissions') {
+        if (item.id !== undefined && item.id !== null) {
+            return `submission-id:${normalizeIdentityValue(item.id)}`;
+        }
+
+        const trainee = normalizeIdentityValue(item.trainee);
+        const testId = normalizeIdentityValue(item.testId);
+        const date = normalizeIdentityValue(item.date);
+        if (trainee && testId && date) {
+            return `submission:${trainee}|${testId}|${date}`;
+        }
+    }
+
+    if (key === 'liveSessions' && item.sessionId) {
+        return `live-session:${normalizeIdentityValue(item.sessionId)}`;
+    }
+
+    if (key === 'graduated_agents' && item.user) {
+        return `graduated:${normalizeIdentityValue(item.user)}`;
+    }
+
+    if (key === 'linkRequests' && item.recordId) {
+        return `link-request:${normalizeIdentityValue(item.recordId)}`;
+    }
+
+    if (key === 'monitor_history' && item.user && item.date) {
+        return `monitor-history:${normalizeIdentityValue(item.user)}|${normalizeIdentityValue(item.date)}`;
+    }
+
+    if (item.id !== undefined && item.id !== null) {
+        return `id:${normalizeIdentityValue(item.id)}`;
+    }
+
+    return null;
+}
+
+function dedupeArrayByIdentity(key, items, strategy = 'server_wins') {
+    if (!Array.isArray(items) || items.length < 2) return items;
+
+    const deduped = [];
+    const seen = new Map();
+
+    items.forEach(item => {
+        const identity = getArrayItemIdentity(key, item);
+        if (!identity) {
+            deduped.push(item);
+            return;
+        }
+
+        const existingIndex = seen.get(identity);
+        if (existingIndex === undefined) {
+            seen.set(identity, deduped.length);
+            deduped.push(item);
+            return;
+        }
+
+        deduped[existingIndex] = resolveDuplicateArrayItem(key, deduped[existingIndex], item, strategy);
+    });
+
+    return deduped;
+}
+
+function getTimestampPreferenceValue(item) {
+    if (!item || typeof item !== 'object') return 0;
+
+    const candidates = [
+        item.lastModified,
+        item.lastEditedDate,
+        item.updated_at,
+        item.createdAt,
+        item.timestamp
+    ];
+
+    for (const candidate of candidates) {
+        if (candidate === undefined || candidate === null || candidate === '') continue;
+
+        if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+            return candidate;
+        }
+
+        const parsed = new Date(candidate).getTime();
+        if (Number.isFinite(parsed)) return parsed;
+    }
+
+    return 0;
+}
+
+function resolveDuplicateArrayItem(key, existingItem, incomingItem, strategy = 'server_wins') {
+    if (['records', 'submissions'].includes(key)) {
+        const existingTs = getTimestampPreferenceValue(existingItem);
+        const incomingTs = getTimestampPreferenceValue(incomingItem);
+
+        if (existingTs && incomingTs && existingTs !== incomingTs) {
+            return incomingTs > existingTs ? incomingItem : existingItem;
+        }
+
+        if (incomingTs && !existingTs) return incomingItem;
+        if (existingTs && !incomingTs) return existingItem;
+    }
+
+    return strategy === 'local_wins' ? incomingItem : existingItem;
+}
+
+function reconcileServerIndexedRows(localKey, items, hashMap, serverIds) {
+    if (!['records', 'submissions'].includes(localKey) || !Array.isArray(items)) {
+        return items;
+    }
+
+    const serverIdSet = new Set((serverIds || []).map(id => String(id)));
+
+    return items.filter(item => {
+        if (!item) return false;
+        if (!item.id) return true;
+
+        const itemId = String(item.id);
+        if (serverIdSet.has(itemId)) return true;
+
+        const syncedHash = hashMap[item.id];
+        const currentHash = generateChecksum(JSON.stringify(item));
+        return !syncedHash || currentHash !== syncedHash;
+    });
+}
+
 // 3. SAVE CONTROLLER (Public Function)
 // Queues save operations and processes them after a debounce period for performance.
 async function saveToServer(targetKeys = null, force = false, silent = false) {
@@ -1313,71 +1494,15 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
             let combined = [...sVal];
             
             lVal.forEach(localItem => {
+                const localIdentity = getArrayItemIdentity(key, localItem);
                 // Check if item exists in server data using SPECIFIC unique keys
                 // This prevents duplicates when timestamps/hidden fields differ slightly
                 const exists = combined.some(serverItem => {
-                    // 1. Objects with IDs (Records, Tests, Notices, Bookings)
-                    if (localItem.id && serverItem.id) {
-                        return localItem.id.toString() === serverItem.id.toString();
-                    }
-                    
-                    // 2. Users (Unique by username)
-                    if (key === 'users' && localItem.user && serverItem.user) {
-                        return localItem.user.toLowerCase() === serverItem.user.toLowerCase();
+                    const serverIdentity = getArrayItemIdentity(key, serverItem);
+                    if (localIdentity && serverIdentity) {
+                        return localIdentity === serverIdentity;
                     }
 
-                    // 3. Assessments (Unique by Name) - FIXES ASSESSMENTS DUPLICATION
-                    if (key === 'assessments' && localItem.name && serverItem.name) {
-                        return localItem.name.trim().toLowerCase() === serverItem.name.trim().toLowerCase();
-                    }
-
-                    // 4. Strings & Tombstones - FIXES DUPLICATION
-                    if ((key === 'vettingTopics' || key === 'monitor_whitelist' || key === 'monitor_reviewed' || key === 'system_tombstones') && typeof localItem === 'string' && typeof serverItem === 'string') {
-                        return localItem.trim().toLowerCase() === serverItem.trim().toLowerCase();
-                    }
-
-                    // 5. RECORDS (Composite Key) - FIXES SCORE DUPLICATION
-                    // Fallback for legacy records that might not have IDs yet
-                    if (key === 'records' && localItem.trainee && serverItem.trainee) {
-                        // AGGRESSIVE DEDUPE: Match only on Trainee + Assessment
-                        // This prevents duplicates if Group or Phase changes slightly
-                        return (
-                            localItem.trainee.toLowerCase() === serverItem.trainee.toLowerCase() &&
-                            (localItem.assessment||'').toLowerCase() === (serverItem.assessment||'').toLowerCase()
-                        );
-                    }
-
-                    // 5.5 SUBMISSIONS (Deduplication Fallback)
-                    // Prevents duplicates if ID is missing but the submission event is identical
-                    if (key === 'submissions' && localItem.trainee && serverItem.trainee && localItem.testId && serverItem.testId) {
-                        return (
-                            localItem.trainee === serverItem.trainee &&
-                            localItem.testId === serverItem.testId &&
-                            localItem.date === serverItem.date
-                        );
-                    }
-
-                    // 6. Live Sessions (Unique by sessionId) - FIXES LIVE ARENA CRASH
-                    if (key === 'liveSessions' && localItem.sessionId && serverItem.sessionId) {
-                        return localItem.sessionId === serverItem.sessionId;
-                    }
-
-                    // 7. Archived Agents (Unique by user) - FIXES ARCHIVE DUPLICATION
-                    if (key === 'graduated_agents' && localItem.user && serverItem.user) {
-                        return localItem.user.toLowerCase() === serverItem.user.toLowerCase();
-                    }
-
-                    // 8. Link Requests (Unique by recordId)
-                    if (key === 'linkRequests' && localItem.recordId && serverItem.recordId) {
-                        return localItem.recordId === serverItem.recordId;
-                    }
-
-                    // 9. Monitor History (Unique by User + Date) - FIXES BLOAT
-                    if (key === 'monitor_history' && localItem.user && serverItem.user && localItem.date && serverItem.date) {
-                        return localItem.user === serverItem.user && localItem.date === serverItem.date;
-                    }
-
-                    // 7. Fallback: Deep Compare
                     return JSON.stringify(localItem) === JSON.stringify(serverItem);
                 });
 
@@ -1390,19 +1515,8 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                     
                     if (strategy === 'local_wins') {
                     const index = combined.findIndex(i => {
-                        if (localItem.id && i.id) return localItem.id.toString() === i.id.toString();
-                        if (key === 'users' && localItem.user && i.user) return localItem.user.toLowerCase() === i.user.toLowerCase();
-                        if (key === 'assessments' && localItem.name && i.name) return localItem.name.toLowerCase() === i.name.toLowerCase();
-                        if ((key === 'vettingTopics' || key === 'system_tombstones' || key === 'monitor_whitelist' || key === 'monitor_reviewed') && typeof localItem === 'string' && typeof i === 'string') return localItem.toLowerCase() === i.toLowerCase();
-                        if (key === 'records') {
-                            return (
-                                localItem.trainee === i.trainee &&
-                                localItem.assessment === i.assessment &&
-                                localItem.groupID === i.groupID &&
-                                localItem.phase === i.phase
-                            );
-                        }
-                        if (key === 'liveSessions' && localItem.sessionId && i.sessionId) return localItem.sessionId === i.sessionId;
+                        const existingIdentity = getArrayItemIdentity(key, i);
+                        if (localIdentity && existingIdentity) return localIdentity === existingIdentity;
                         return JSON.stringify(i) === JSON.stringify(localItem);
                     });
                         if(index > -1) {
@@ -1448,7 +1562,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 combined = combined.filter(u => !blacklist.includes(u.user));
             }
 
-            merged[key] = combined;
+            merged[key] = dedupeArrayByIdentity(key, combined, strategy);
         } 
         // Case 2a: Vetting Session (Deep Merge Trainees)
         else if (key === 'vettingSession') {
@@ -2257,14 +2371,16 @@ function setupRealtimeListeners() {
         window.PRESENCE_CHANNEL
             .on('presence', { event: 'sync' }, () => {
                 const state = window.PRESENCE_CHANNEL.presenceState();
+                const nextPresenceCache = {};
                 for (const [userKey, presences] of Object.entries(state)) {
                     if (presences && presences.length > 0) {
-                        window.ACTIVE_USERS_CACHE[userKey] = {
+                        nextPresenceCache[userKey] = {
                             ...presences[0],
                             local_received_at: Date.now()
                         };
                     }
                 }
+                window.ACTIVE_USERS_CACHE = nextPresenceCache;
             })
             .subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
@@ -2468,7 +2584,10 @@ function processIncomingDataQueue() {
                         if (!newItem.id) newItem.id = p.new.id;
                         
                         if (isTrainee && ['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
-                            if (newItem.trainee !== CURRENT_USER.user && newItem.user !== CURRENT_USER.user) return;
+                            const nTrainee = (newItem.trainee || '').toLowerCase();
+                            const nUser = (newItem.user || '').toLowerCase();
+                            const cUser = CURRENT_USER.user.toLowerCase();
+                            if (nTrainee !== cUser && nUser !== cUser) return;
                         }
 
                         const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
@@ -2484,6 +2603,7 @@ function processIncomingDataQueue() {
                         }
                     }
                 });
+                items = dedupeArrayByIdentity(localKey, items, 'server_wins');
                 localStorage.setItem(localKey, JSON.stringify(items));
             });
             

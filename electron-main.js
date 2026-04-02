@@ -411,8 +411,15 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
             lines.forEach(name => {
                 const lowerName = name.toLowerCase();
                 
-                // EXCEPTION: Allow WebView2 (Teams) and Updaters
-                if (lowerName.includes('webview') || lowerName.includes('update') || lowerName.includes('teams') || lowerName.includes('msteams')) return;
+                // EXCEPTION: Allow WebView2 (Teams), Updaters, and the Windows Snipping Tool
+                if (
+                    lowerName.includes('webview') ||
+                    lowerName.includes('update') ||
+                    lowerName.includes('teams') ||
+                    lowerName.includes('msteams') ||
+                    lowerName.includes('snippingtool') ||
+                    lowerName.includes('screen sketch')
+                ) return;
 
                 targets.forEach(t => {
                     if (lowerName.includes(t)) {

@@ -1271,10 +1271,15 @@ async function checkAndEnforceVetting() {
         if (activeSessions.length > 0) {
             // Update Sidebar Visibility (Show/Hide tab based on active status)
             if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
+            const now = Date.now();
 
             // Find relevant session
             for (const s of activeSessions) {
                 if (!s.active) continue;
+                
+                // STALE CHECK: Ignore abandoned sessions older than 12 hours to prevent infinite yanking
+                const start = s.startTime || (s.sessionId ? parseInt(s.sessionId.split('_')[0]) : 0);
+                if (now - start > 43200000) continue;
 
                 // Check if I am target
                 let isTarget = false;

@@ -23,10 +23,12 @@ const FeedbackUI = {
         let fbMap = backendData.feedback_categories || {};
         if (Array.isArray(fbMap)) { fbMap = { 0: fbMap }; } // Legacy
 
-        // Fetch trainees from the main app's local storage
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const trainees = users.filter(u => u.role === 'trainee').sort((a,b) => a.user.localeCompare(b.user));
-        const traineeOptions = trainees.map(t => `<option value="${t.user}" ${this.selectedTrainee === t.user ? 'selected' : ''}>${t.user}</option>`).join('');
+        // ISOLATION: Fetch trainees strictly from this Team Leader's "My Team" roster
+        const myTeam = DataService.getMyTeam();
+        const trainees = myTeam.sort((a,b) => a.name.localeCompare(b.name));
+        const traineeOptions = trainees.length > 0 
+            ? trainees.map(t => `<option value="${t.name}" ${this.selectedTrainee === t.name ? 'selected' : ''}>${t.name}</option>`).join('')
+            : `<option value="">-- Add agents to 'My Team' first --</option>`;
 
         if (!this.isCapturing) {
             // --- STEP 1: INITIAL SETUP SCREEN ---

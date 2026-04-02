@@ -32,8 +32,10 @@ const FeedbackReviewUI = {
         
         // Group by trainee
         const traineeMap = {};
+        const currentUser = AppContext.user ? AppContext.user.user : '';
+        
         allFeedback.forEach(f => {
-            if (!f.trainee) return; // Skip malformed entries
+            if (!f.trainee || f.tl !== currentUser) return; // Skip malformed or other TL's data
             
             if (!traineeMap[f.trainee]) {
                 traineeMap[f.trainee] = { lastDate: f.date, fails: 0, improves: 0, count: 0 };
@@ -113,7 +115,8 @@ const FeedbackReviewUI = {
 
     _renderHistory: function() {
         const allFeedback = DataService.getAgentFeedback();
-        const myFeedback = allFeedback.filter(f => f.trainee === this.selectedTrainee).sort((a,b) => new Date(b.date) - new Date(a.date));
+        const currentUser = AppContext.user ? AppContext.user.user : '';
+        const myFeedback = allFeedback.filter(f => f.trainee === this.selectedTrainee && f.tl === currentUser).sort((a,b) => new Date(b.date) - new Date(a.date));
 
         let historyHtml = '';
         let totalFails = 0;

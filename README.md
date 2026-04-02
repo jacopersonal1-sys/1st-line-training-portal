@@ -155,6 +155,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.5.3**: **Study Browser Hardening**: Fixed the secure in-app browser bridge so Schedule study material opens inside the Electron overlay again, improved tab/navigation reliability, and added a safe Windows Snipping Tool exception to the OS-level activity monitor.
+ - **v2.5.2**: **Data Integrity & Test Engine**: Fixed a critical case-sensitivity bug in the Sync Engine preventing Trainee scores from loading correctly. Resolved the "Disappearing Test" bug caused by stale Vetting Enforcer sessions.
  - **v2.5.1**: **Hotfix & Polish**: Resolved a startup crash in the release notes viewer and finalized the stable deployment of the new Teamleader Hub Agent Feedback System.
  - **v2.4.77**: **Sync Reliability & Cleanup**: Silent server switches now await migration before pulling fresh data, failed save keys are re-queued instead of being stranded, realtime fallback polling now stays off while the tunnel is healthy, and unused legacy files were safely removed from the repo.
  - **v2.4.72**: **Presentation Tools**: Built a 100% isolated Demo Sandbox (`demo_admin`/`demo_trainee`) with rich mock data generation. Implemented a 5-layer isolation shield to guarantee live production data is completely protected from sandbox leaks during unexpected app closures or browser cache restorations.

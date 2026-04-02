@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schedule Studio</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app-container"></div>
+
+    <div id="schedule-modal" class="studio-modal hidden">
+        <div class="studio-modal-card">
+            <div class="studio-modal-header">
+                <h3>Edit Schedule Step</h3>
+                <button class="studio-icon-btn" onclick="App.closeEditor()"><i class="fas fa-times"></i></button>
+            </div>
+
+            <input type="hidden" id="edit-step-index">
+
+            <div class="studio-grid two">
+                <label>
+                    <span>Start Date</span>
+                    <input type="date" id="edit-start-date">
+                </label>
+                <label>
+                    <span>End Date</span>
+                    <input type="date" id="edit-end-date">
+                </label>
+            </div>
+
+            <label>
+                <span>Course Name</span>
+                <input type="text" id="edit-course-name" placeholder="Course name">
+            </label>
+
+            <label>
+                <span>Material Link</span>
+                <input type="text" id="edit-material-link" placeholder="https://...">
+            </label>
+
+            <div class="studio-callout">
+                <div class="studio-callout-title">Linked Assessment</div>
+                <label>
+                    <span>Option A: Select from Test Engine</span>
+                    <select id="edit-linked-test"></select>
+                </label>
+                <label>
+                    <span>Option B: External Link</span>
+                    <input type="text" id="edit-assessment-link" placeholder="https://...">
+                </label>
+            </div>
+
+            <div class="studio-grid two">
+                <label>
+                    <span>Open Time</span>
+                    <input type="time" id="edit-open-time">
+                </label>
+                <label>
+                    <span>Close Time</span>
+                    <input type="time" id="edit-close-time">
+                </label>
+            </div>
+
+            <label class="studio-check">
+                <input type="checkbox" id="edit-ignore-time">
+                <span>Disable time restrictions for the linked assessment</span>
+            </label>
+
+            <div class="studio-flags">
+                <div class="studio-callout-title">Special Flags</div>
+                <label class="studio-check">
+                    <input type="checkbox" id="edit-is-vetting">
+                    <span>Is Vetting Test</span>
+                </label>
+                <label class="studio-check">
+                    <input type="checkbox" id="edit-is-live">
+                    <span>Is Live Assessment</span>
+                </label>
+            </div>
+
+            <div class="studio-modal-actions">
+                <button class="studio-btn secondary" onclick="App.closeEditor()">Cancel</button>
+                <button class="studio-btn primary" onclick="App.saveEditor()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/ui_timeline.js"></script>
+    <script src="js/ui_calendar.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

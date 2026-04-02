@@ -183,6 +183,10 @@ async function approveSubmission(subId) {
     // 1. Mark as Completed
     sub.status = 'completed';
     sub.archived = false; // Ensure it appears in History
+    sub.lastEditedBy = CURRENT_USER.user;
+    sub.lastEditedDate = new Date().toISOString();
+    sub.lastModified = sub.lastEditedDate;
+    sub.modifiedBy = CURRENT_USER.user;
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     // 2. Create Permanent Record
@@ -223,7 +227,10 @@ async function approveSubmission(subId) {
         docSaved: true,
         videoSaved: false,
         link: 'Digital-Assessment',
-        submissionId: sub.id
+        submissionId: sub.id,
+        createdAt: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+        modifiedBy: CURRENT_USER.user
     };
 
     if (existingIdx > -1) {
@@ -232,6 +239,8 @@ async function approveSubmission(subId) {
         recs[existingIdx].cycle = cycleVal;
         recs[existingIdx].docSaved = true;
         recs[existingIdx].submissionId = sub.id;
+        recs[existingIdx].lastModified = newRecord.lastModified;
+        recs[existingIdx].modifiedBy = CURRENT_USER.user;
         if(!recs[existingIdx].id) recs[existingIdx].id = newRecord.id;
     } else {
         recs.push(newRecord);
@@ -239,10 +248,6 @@ async function approveSubmission(subId) {
 
     localStorage.setItem('records', JSON.stringify(recs));
     
-    // OPTIMISTIC SYNC LOCK: Prevent a background pull from reverting this change.
-    localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
-    localStorage.setItem('row_sync_ts_records', new Date().toISOString());
-
     if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
     
     alert("Approved & Recorded.");
@@ -591,6 +596,8 @@ async function finalizeAdminMarking(subId) {
     
     sub.lastEditedBy = CURRENT_USER.user;
     sub.lastEditedDate = new Date().toISOString();
+    sub.lastModified = sub.lastEditedDate;
+    sub.modifiedBy = CURRENT_USER.user;
 
     localStorage.setItem('submissions', JSON.stringify(subs));
 
@@ -627,24 +634,26 @@ async function finalizeAdminMarking(subId) {
         cycle: cycleVal,
         link: 'Digital-Assessment',
         docSaved: true,
-        submissionId: sub.id // Link to submission
+        submissionId: sub.id, // Link to submission
+        createdAt: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+        modifiedBy: CURRENT_USER.user
     };
 
     if (existingIdx > -1) {
         records[existingIdx].score = percentage;
+        records[existingIdx].date = sub.date;
         records[existingIdx].cycle = cycleVal;
         records[existingIdx].docSaved = true;
         records[existingIdx].submissionId = sub.id; // Ensure link is updated
+        records[existingIdx].lastModified = newRecord.lastModified;
+        records[existingIdx].modifiedBy = CURRENT_USER.user;
         if(!records[existingIdx].id) records[existingIdx].id = newRecord.id;
     } else {
         records.push(newRecord);
     }
     
     localStorage.setItem('records', JSON.stringify(records));
-
-    // OPTIMISTIC SYNC LOCK: Prevent a background pull from reverting this change.
-    localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
-    localStorage.setItem('row_sync_ts_records', new Date().toISOString());
 
     if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
 

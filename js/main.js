@@ -132,6 +132,32 @@ async function migrateLocalStateToActiveServer(options = {}) {
     return true;
 }
 
+function applyRecordSubmissionSyncSafetyPatch() {
+    const patchKey = 'v252_sync_safety_patch_records_submissions';
+    if (localStorage.getItem(patchKey)) return;
+
+    try {
+        ['records', 'submissions'].forEach((key) => {
+            const raw = JSON.parse(localStorage.getItem(key) || '[]');
+            const safeArray = Array.isArray(raw) ? raw : [];
+
+            // Preserve local offline work, but remove obvious duplicate identities before the fresh pull.
+            const deduped = (typeof dedupeArrayByIdentity === 'function')
+                ? dedupeArrayByIdentity(key, safeArray, 'local_wins')
+                : safeArray;
+
+            localStorage.setItem(key, JSON.stringify(deduped));
+            localStorage.removeItem(`row_sync_ts_${key}`);
+            localStorage.removeItem(`hash_map_${key}`);
+        });
+
+        localStorage.setItem(patchKey, 'true');
+        console.log("Applied sync safety patch for records/submissions. Fresh reconciliation will run on next load.");
+    } catch (error) {
+        console.error("Sync safety patch failed:", error);
+    }
+}
+
 // --- NEW: SILENT BACKGROUND SERVER FAILOVER ---
 window.performSilentServerSwitch = async function(newTarget) {
     if (window._isSwitchingServers) return;
@@ -754,6 +780,10 @@ window.onload = async function() {
         localStorage.setItem('v2460_sync_patch', 'true');
     }
 
+    // --- RECORD/SUBMISSION SAFETY PATCH (v2.5.x) ---
+    // Preserve local data, but wipe stale sync metadata so upgraded clients perform a clean reconciliation.
+    applyRecordSubmissionSyncSafetyPatch();
+
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
@@ -1311,8 +1341,8 @@ function updateSidebarVisibility() {
             return;
         }
 
-        // Hide Vetting Rework from everyone except Super Admin
-        if (targetTab === 'vetting-rework' && role !== 'super_admin') {
+        // Hide isolated super admin tools from everyone except Super Admin
+        if ((targetTab === 'vetting-rework' || targetTab === 'superadmin-studio') && role !== 'super_admin') {
             btn.classList.add('hidden');
             return;
         }
@@ -1320,7 +1350,7 @@ function updateSidebarVisibility() {
         // Rules
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
-            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework'];
+            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework', 'superadmin-studio'];
             const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly', 'test-records'];
             
             // Special Check for Arena
@@ -1335,7 +1365,7 @@ function updateSidebarVisibility() {
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub', 'vetting-rework'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -1366,10 +1396,14 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework'];
+      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework', 'superadmin-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role !== 'super_admin' && id === 'superadmin-studio') {
+      return;
   }
   
   // --- ROGUE TIMER PREVENTION ---
@@ -1570,6 +1604,15 @@ function showTab(id, btn) {
               VettingReworkLoader.renderUI();
           } else {
               console.error("VettingReworkLoader module not loaded.");
+          }
+      }
+
+      if(id === 'superadmin-studio') {
+          console.log("[Router] Super Admin Data Studio tab clicked.");
+          if(typeof SuperAdminDataStudioLoader !== 'undefined' && typeof SuperAdminDataStudioLoader.renderUI === 'function') {
+              SuperAdminDataStudioLoader.renderUI();
+          } else {
+              console.error("SuperAdminDataStudioLoader module not loaded.");
           }
       }
   };
@@ -1989,6 +2032,21 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.5.3": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Study Browser Hardening:</strong> Fixed the secure in-app browser bridge so Schedule study material stays inside the Electron study overlay instead of falling back to an external browser.</li>
+                    <li style="margin-bottom: 8px;"><strong>Browser Reliability:</strong> Improved study tab navigation, reload handling, title updates, and failed-load feedback to make the internal browser more stable during normal use.</li>
+                    <li style="margin-bottom: 8px;"><strong>Security Rules:</strong> Preserved the existing OS-level monitoring model while adding a safe exception for the Windows Snipping Tool so it no longer triggers false-positive external app violations.</li>
+                </ul>`,
+            "2.5.2": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed a critical case-sensitivity bug in the Sync Engine that caused Trainee records and scores to randomly disappear or fail to load.</li>
+                    <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Defused a bug where stale or abandoned Vetting Sessions would violently pull trainees out of their active standard assessments.</li>
+                </ul>`,
+            "2.5.1": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Hotfix & Polish:</strong> Resolved a startup crash (SyntaxError) in the release notes viewer and finalized the stable deployment of the new Teamleader Hub Agent Feedback System.</li>
+                </ul>`,
         "2.5.0": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature: Agent Feedback System.</strong> Added a comprehensive "Agent Production Feedback" form to the Teamleader Hub for capturing detailed performance notes.</li>

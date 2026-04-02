@@ -21,6 +21,52 @@ const StudyMonitor = {
         activeTabId: null,
         homeUrl: null,
     },
+    tabCounter: 0,
+
+    buildTabId: function() {
+        this.tabCounter += 1;
+        return `tab-${Date.now()}-${this.tabCounter}`;
+    },
+
+    isStudyBrowserUrl: function(url) {
+        try {
+            const parsed = new URL(url, window.location.href);
+            return ['http:', 'https:', 'blob:', 'data:'].includes(parsed.protocol);
+        } catch (e) {
+            return false;
+        }
+    },
+
+    openExternalUrl: function(url) {
+        if (!url) return;
+        if (window.electronAPI?.shell?.openExternal) {
+            window.electronAPI.shell.openExternal(url).catch((e) => console.warn("External open failed:", e));
+            return;
+        }
+        window.open(url, '_blank', 'noopener');
+    },
+
+    updateBrowserChrome: function() {
+        const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId) || null;
+        this.activeWebview = activeTab ? activeTab.webview : null;
+
+        const titleEl = document.getElementById('study-current-title');
+        if (titleEl) {
+            titleEl.textContent = activeTab?.title || 'Secure Study Browser';
+            titleEl.title = activeTab?.url || 'Secure Study Browser';
+        }
+
+        const backBtn = document.getElementById('study-nav-back');
+        const forwardBtn = document.getElementById('study-nav-forward');
+        const reloadBtn = document.getElementById('study-nav-reload');
+        const homeBtn = document.getElementById('study-nav-home');
+        const hasWebview = Boolean(this.activeWebview);
+
+        if (backBtn) backBtn.disabled = !hasWebview || !this.activeWebview.canGoBack();
+        if (forwardBtn) forwardBtn.disabled = !hasWebview || !this.activeWebview.canGoForward();
+        if (reloadBtn) reloadBtn.disabled = !hasWebview;
+        if (homeBtn) homeBtn.disabled = !hasWebview || !this.browserState.homeUrl;
+    },
     
     init: async function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
@@ -82,18 +128,17 @@ const StudyMonitor = {
         });
 
         // --- NEW: IPC Listener for OS-Level Webview Links (PDF Fix) ---
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            ipcRenderer.removeAllListeners('webview-new-window');
-            ipcRenderer.on('webview-new-window', (e, url) => {
+        if (window.electronAPI?.ipcRenderer) {
+            window.electronAPI.ipcRenderer.removeAllListeners('webview-new-window');
+            window.electronAPI.ipcRenderer.on('webview-new-window', (e, url) => {
                 if (this.isStudyOpen) {
-                    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) {
+                    if (this.isStudyBrowserUrl(url)) {
                         this.addTab(url, "New Tab", true);
                     } else {
-                        require('electron').shell.openExternal(url);
+                        this.openExternalUrl(url);
                     }
                 } else {
-                    require('electron').shell.openExternal(url); // Fallback for TL Hub / other webviews
+                    this.openExternalUrl(url); // Fallback for TL Hub / other webviews
                 }
             });
         }
@@ -127,6 +172,7 @@ const StudyMonitor = {
                     let isPermitted = false;
 
                     if (activeWindow) {
+                        const normalizedWindow = activeWindow.toLowerCase();
                         if (activeWindow.includes('1st Line Training Portal')) {
                             isPermitted = true;
                             if (this.isStudyOpen) return; // Specific activity handled by webview events
@@ -144,22 +190,25 @@ const StudyMonitor = {
                             const allPermitted = [...workSites, ...trainingKeywords];
 
                             // Check if window title contains any of the work sites
-                            const matchedSite = allPermitted.find(site => site && activeWindow.toLowerCase().includes(site.toLowerCase()));
+                            const matchedSite = allPermitted.find(site => site && normalizedWindow.includes(site.toLowerCase()));
                             
                             if (matchedSite) {
                                 // Classify as "Studying" (or Work) so it counts towards Focus Score
                                 activityLabel = `Studying: ${matchedSite} (Work System)`;
                                 isPermitted = true;
-                            } else if (activeWindow.toLowerCase().includes('teams') || activeWindow.toLowerCase().includes('microsoft teams')) {
+                            } else if (normalizedWindow.includes('teams') || normalizedWindow.includes('microsoft teams')) {
                                 activityLabel = `Studying: MS Teams (Communication)`;
                                 isPermitted = true;
-                            } else if (activeWindow.toLowerCase().includes('outlook') || activeWindow.toLowerCase().includes('mail')) {
+                            } else if (normalizedWindow.includes('outlook') || normalizedWindow.includes('mail')) {
                                 activityLabel = `Studying: Email (Communication)`;
                                 isPermitted = true;
-                            } else if (activeWindow.toLowerCase().includes('taskmgr') || activeWindow.toLowerCase().includes('task manager')) {
+                            } else if (normalizedWindow.includes('taskmgr') || normalizedWindow.includes('task manager')) {
                                 activityLabel = `System: Task Manager`;
                                 isPermitted = true;
-                            } else if (['explorer', 'searchhost', 'shellexperiencehost', 'taskbar', 'system tray', 'notification center', 'start', 'windows input experience'].some(sysApp => activeWindow.toLowerCase().includes(sysApp))) {
+                            } else if (['snippingtool', 'snipping tool', 'screen sketch', 'snip & sketch', 'screenclip'].some(app => normalizedWindow.includes(app))) {
+                                activityLabel = `System: Snipping Tool`;
+                                isPermitted = true;
+                            } else if (['explorer', 'searchhost', 'shellexperiencehost', 'taskbar', 'system tray', 'notification center', 'start', 'windows input experience'].some(sysApp => normalizedWindow.includes(sysApp))) {
                                 activityLabel = `System: Windows Navigation`;
                                 isPermitted = true;
                             }
@@ -532,6 +581,10 @@ const StudyMonitor = {
     openStudyWindow: function(url, title, targetScrollY = null) {
         const overlay = document.getElementById('study-overlay');
         if (!overlay) return;
+        if (!this.isStudyBrowserUrl(url)) {
+            this.openExternalUrl(url);
+            return;
+        }
 
         // Remove restore button if it was floating
         const restoreBtn = document.getElementById('study-restore-btn');
@@ -562,6 +615,7 @@ const StudyMonitor = {
         }
         
         overlay.classList.remove('hidden');
+        this.updateBrowserChrome();
     },
 
     minimizeStudyWindow: function() {
@@ -639,6 +693,7 @@ const StudyMonitor = {
                         <div id="study-tabs-list"></div>
                     </div>
                     <div class="study-header-actions">
+                    <div id="study-current-title" style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); font-size:0.85rem;" title="Secure Study Browser">Secure Study Browser</div>
                     <button id="study-bookmark-btn" class="btn-secondary" onmousedown="StudyMonitor.startMarkForClarity()" title="Drag a box to mark a spot for clarity" style="padding: 8px 15px; font-weight:bold; border-color:#f1c40f; color:#f1c40f;"><i class="fas fa-crop-alt"></i> Mark for Clarity</button>
                     <button id="study-min-btn" class="btn-primary" onmousedown="StudyMonitor.minimizeStudyWindow()" title="Keep tabs open and return to Dashboard" style="padding: 8px 15px; font-weight:bold;"><i class="fas fa-desktop"></i> Dashboard</button>
                         <select id="study-quick-links" onchange="StudyMonitor.navigateQuickLink(this.value)">
@@ -658,6 +713,7 @@ const StudyMonitor = {
         document.getElementById('study-nav-forward').onmousedown = () => this.getActiveWebview()?.goForward();
         document.getElementById('study-nav-reload').onmousedown = () => this.getActiveWebview()?.reload();
         document.getElementById('study-nav-home').onmousedown = () => this.getActiveWebview()?.loadURL(this.browserState.homeUrl);
+        this.updateBrowserChrome();
     },
 
     navigateQuickLink: function(url) {
@@ -835,8 +891,12 @@ const StudyMonitor = {
     },
 
     addTab: function(url, title, activate = false, targetScrollY = null) {
-        const tabId = `tab-${Date.now()}`;
+        const tabId = this.buildTabId();
         const cleanUrl = this.cleanUrl(url);
+        if (!this.isStudyBrowserUrl(cleanUrl)) {
+            this.openExternalUrl(cleanUrl);
+            return;
+        }
 
         const webview = document.createElement('webview');
         webview.id = `webview-${tabId}`;
@@ -863,6 +923,8 @@ const StudyMonitor = {
 
         if (activate) {
             this.switchTab(tabId);
+        } else {
+            this.updateBrowserChrome();
         }
     },
 
@@ -873,6 +935,7 @@ const StudyMonitor = {
             tab.webview.classList.toggle('hidden', isHidden);
         });
         this.renderTabs();
+        this.updateBrowserChrome();
     },
 
     closeTab: function(tabId) {
@@ -892,6 +955,7 @@ const StudyMonitor = {
                 this.switchTab(this.browserState.tabs[newActiveIndex].id);
             }
             this.renderTabs();
+            this.updateBrowserChrome();
         }
     },
 
@@ -919,14 +983,16 @@ const StudyMonitor = {
         const webview = tab.webview;
         
         webview.addEventListener('did-start-loading', () => {
-            const tabEl = document.querySelector(`.study-tab[onclick*="${tab.id}"] .study-tab-title`);
-            if (tabEl) tabEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading...`;
+            tab.title = 'Loading...';
+            this.renderTabs();
+            this.updateBrowserChrome();
         });
 
         webview.addEventListener('did-stop-loading', () => {
-            const newTitle = webview.getTitle().substring(0, 20);
+            const newTitle = (webview.getTitle() || tab.title || 'Study Tab').substring(0, 20);
             tab.title = newTitle;
             this.renderTabs();
+            this.updateBrowserChrome();
             
             // Restore Scroll Position if requested
             if (tab.targetScrollY) {
@@ -943,6 +1009,7 @@ const StudyMonitor = {
         webview.addEventListener('page-title-updated', (e) => {
             tab.title = e.title.substring(0, 20);
             this.renderTabs();
+            this.updateBrowserChrome();
             
             if (this.browserState.activeTabId === tab.id) {
                 this.track(`Studying: ${e.title.substring(0, 50)}`);
@@ -951,18 +1018,33 @@ const StudyMonitor = {
 
         webview.addEventListener('did-navigate', (e) => {
             tab.url = e.url;
+            this.updateBrowserChrome();
+            this.track(`Studying: ${(webview.getTitle() || tab.title).substring(0, 50)}`);
+        });
 
-            this.track(`Studying: ${webview.getTitle().substring(0, 50)}`);
+        webview.addEventListener('did-navigate-in-page', (e) => {
+            tab.url = e.url;
+            this.updateBrowserChrome();
         });
 
         webview.addEventListener('new-window', (e) => {
             e.preventDefault();
             // DEFUSAL 2 (Part B): Catch standard links + SharePoint blobs, send Native OS triggers (mailto/ms-auth) outward
             // Note: This is kept as a fallback, but the IPC listener above now handles the heavy lifting for PDFs.
-            if (e.url.startsWith('http://') || e.url.startsWith('https://') || e.url.startsWith('blob:') || e.url.startsWith('data:')) {
+            if (this.isStudyBrowserUrl(e.url)) {
                 this.addTab(e.url, "New Tab", true);
             } else {
-                if (typeof require !== 'undefined') require('electron').shell.openExternal(e.url);
+                this.openExternalUrl(e.url);
+            }
+        });
+
+        webview.addEventListener('did-fail-load', (e) => {
+            if (e.errorCode === -3) return; // user/navigation cancellation
+            tab.title = 'Load Failed';
+            this.renderTabs();
+            this.updateBrowserChrome();
+            if (typeof showToast === 'function') {
+                showToast(`Study page failed to load: ${e.errorDescription || 'Unknown error'}`, 'error');
             }
         });
 
@@ -988,8 +1070,9 @@ const StudyMonitor = {
     },
 
     reload: function() {
-        if (this.activeWebview) {
-            this.activeWebview.reload();
+        const webview = this.getActiveWebview();
+        if (webview) {
+            webview.reload();
         }
     },
 
@@ -2155,3 +2238,5 @@ StudyMonitor.updateWidget = function() {
         }
     }
 };
+
+window.StudyMonitor = StudyMonitor;

@@ -483,7 +483,10 @@ async function submitTest(forceSubmit = false) {
         answers: remappedAnswers, 
         status: finalStatus, 
         score: finalStatus === 'completed' ? finalPercent : 0,
-        testSnapshot: originalTestDef || window.CURRENT_TEST 
+        testSnapshot: originalTestDef || window.CURRENT_TEST,
+        createdAt: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+        modifiedBy: CURRENT_USER.user
     };
 
     subs.push(submission);
@@ -522,11 +525,19 @@ async function submitTest(forceSubmit = false) {
             cycle: cycleVal,
             link: 'Digital-Assessment',
             docSaved: true,
-            submissionId: submission.id // Link to submission
+            submissionId: submission.id, // Link to submission
+            createdAt: new Date().toISOString(),
+            lastModified: new Date().toISOString(),
+            modifiedBy: CURRENT_USER.user
         };
 
         if (existingIdx > -1) {
-             records[existingIdx] = { ...records[existingIdx], ...newRecord, id: records[existingIdx].id };
+             records[existingIdx] = {
+                 ...records[existingIdx],
+                 ...newRecord,
+                 id: records[existingIdx].id,
+                 createdAt: records[existingIdx].createdAt || newRecord.createdAt
+             };
         } else {
              records.push(newRecord);
         }
@@ -534,8 +545,6 @@ async function submitTest(forceSubmit = false) {
         localStorage.setItem('records', JSON.stringify(records));
     }
 
-    localStorage.setItem('row_sync_ts_submissions', new Date().toISOString());
-    localStorage.setItem('row_sync_ts_records', new Date().toISOString());
     if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
 
     if (typeof exitArena === 'function') {
