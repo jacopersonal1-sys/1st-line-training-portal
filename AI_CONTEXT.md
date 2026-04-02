@@ -94,6 +94,15 @@ Maps local `localStorage` keys to Supabase tables.
     - `performUpdateRestart()`: Saves user state (drafts, active tab) and restarts the app after an update is downloaded.
     - **Native Overrides:** Intercepts `os-resume` to instantly re-establish WebSockets after a PC wakes from sleep. Intercepts `force-final-sync` to execute Safe Quits.
 
+#### `js/auth.js` (Authentication)
+- **Responsibility:** Login, Session Management, Security Checks.
+- **Key Functions:**
+    - `attemptLogin()`: Validates credentials against `users` array. Checks IP Whitelist, Client ID Ban, and Version.
+    - `hashPassword(text)`: SHA-256 hashing for security.
+    - `checkAccessControl()`: Verifies user IP against CIDR whitelist.
+    - `persistAppSession(user)` / `getPersistentAppSession()`: Preserve the last valid desktop session until logout so full app restarts do not force unnecessary sign-in loops.
+    - `secureAuthSave()`: Wrapper for saving user data immediately.
+
 #### `js/data.js` (Sync Engine)
  - **Responsibility:** Data synchronization logic (Pull/Push/Merge), **Global Realtime WebSockets**, and **Supabase Presence API**.
 - **Key Functions:**
@@ -111,14 +120,6 @@ Maps local `localStorage` keys to Supabase tables.
     - `handle...Realtime(payload)`: Pushes incoming realtime events into a temporary `INCOMING_DATA_QUEUE`.
     - `processIncomingDataQueue()`: Processes the queue. Uses `isUserTyping()` to prevent UI re-renders from stealing cursor focus, and re-queues the batch if processing throws so realtime updates are never lost.
     - `sendHeartbeat()`: Uses `window.PRESENCE_CHANNEL.track()` to track active users with 0 database impact.
-
-#### `js/auth.js` (Authentication)
-- **Responsibility:** Login, Session Management, Security Checks.
-- **Key Functions:**
-    - `attemptLogin()`: Validates credentials against `users` array. Checks IP Whitelist, Client ID Ban, and Version.
-    - `hashPassword(text)`: SHA-256 hashing for security.
-    - `checkAccessControl()`: Verifies user IP against CIDR whitelist.
-    - `secureAuthSave()`: Wrapper for saving user data immediately.
 
 #### `js/config.js` (Configuration)
 - **Responsibility:** Supabase Client initialization.
@@ -225,7 +226,7 @@ Maps local `localStorage` keys to Supabase tables.
 - **Responsibility:** Tracks active window titles and idle time.
 - **Key Functions:**
     - `startActivityPoller()`: **No Frontend Timers.** Listens to `activity-update` from the `electron-main.js` background thread.
-    - **Security Model:** The internal study browser (`<webview>`) allows all navigation, as there is no URL bar. Violations are only triggered by the OS-level `startActivityPoller` when the user switches to an unauthorized external application. Trainee study links must route through `window.StudyMonitor.openStudyWindow(...)` so they stay inside the secured Electron overlay instead of using raw `window.open(...)`. The browser shell now uses a dedicated control deck above the `webview` so navigation and action buttons do not compete with the embedded page for click focus.
+    - **Security Model:** The internal study browser (`<webview>`) allows all navigation, as there is no URL bar. Violations are only triggered by the OS-level `startActivityPoller` when the user switches to an unauthorized external application. Trainee study links must route through `window.StudyMonitor.openStudyWindow(...)` so they stay inside the secured Electron overlay instead of using raw `window.open(...)`. The browser shell now uses a dedicated control deck above the `webview` so navigation and action buttons do not compete with the embedded page for click focus, and the Electron `persist:study_session` partition is intentionally kept persistent to improve Microsoft/SharePoint study-session reliability across restarts.
     - `startMarkForClarity()`: Interactive drawing engine overlay injected into the `<webview>` for precision bounding-box screenshots/bookmarks.
     - `track(activity)`: Logs current activity.
     - `sync()`: Pushes `monitor_data` to server.
@@ -343,10 +344,17 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 ### G. Native OS Integrations
 1.  **Disk Cache Recovery:** On every successful sync, `data.js` sends the entire database payload to `electron-main.js` via `save-disk-cache`. If a user accidentally clears their browser cache, `main.js` intercepts the boot, loads the JSON file from the hard drive, and fully restores the system without needing the internet.
 2.  **Intercepted Safe Quit:** When a user clicks "X" to close the app, `electron-main.js` blocks the close event, commands the frontend to `FLUSH` its data queue to the cloud, waits for the Mutex lock to complete the upload, and *then* cleanly shuts down the app.
+3.  **Persistent Study Session:** The Electron `persist:study_session` partition is intentionally retained and flushed cleanly on quit so Microsoft/SharePoint training material has a better chance of preserving a stable sign-in session across app restarts.
 
 ---
 
-## 5. IPC Channels (Electron Main)
+## 5. Recent Architectural Notes
+
+- **v2.5.5:** Added persistent desktop session restore until explicit logout, hardened the Electron study-session handling for Microsoft/SharePoint material, and rebuilt the Team Leader Hub Agent Production Feedback flow around a new guided wizard plus linked ticket-path question creator.
+
+---
+
+## 6. IPC Channels (Electron Main)
 - `start-activity-monitor` / `stop-activity-monitor`: Controls background OS polling.
 - `activity-update`: Event pushed to UI containing OS-level idle time and active external window.
 - `show-notification`: Triggers Native Windows OS Toast Notifications.
@@ -368,7 +376,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 ---
 
 
-## 6. Release & Update Protocol (AI Instructions)
+## 7. Release & Update Protocol (AI Instructions)
 
 > **AI INSTRUCTION:** When the user asks to "Push this update" or "Release version X.X.X", follow this strict protocol:
 > **AI INSTRUCTION:** When the user asks to "Push this update" or "Release version X.X.X", follow this strict protocol:
@@ -389,7 +397,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
         git push origin main
         ```
 
-## 7. Anti-Regression Rules (CRITICAL FOR AI)
+## 8. Anti-Regression Rules (CRITICAL FOR AI)
 > **AI INSTRUCTION:** You MUST abide by these rules to prevent breaking the application's performance architecture.
 1. **Context Isolation**: `nodeIntegration` is FALSE. You cannot use `require('electron')` in frontend files. You must use `window.electronAPI` routed through `preload.js`.
 2. **No Polling the Database**: Do not use `setInterval` with `supabaseClient.from(...).select()`. All data reads must come from the Real-time cache (`localStorage.getItem(...)`) populated by the Global WebSocket in `data.js`.

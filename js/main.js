@@ -2042,6 +2042,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.5.5": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Persistent Login Restore:</strong> The desktop app now restores the last valid app session across full app closes until the user explicitly logs out, instead of forcing repeated sign-ins after each restart.</li>
+                    <li style="margin-bottom: 8px;"><strong>Microsoft Study Session Handling:</strong> Hardened the persistent Electron study-browser session for SharePoint and Microsoft sign-in flows so training material behaves more reliably on trainee installs.</li>
+                    <li style="margin-bottom: 8px;"><strong>Team Leader Hub Feedback Rebuild:</strong> Replaced the old production feedback flow with the new step-based capture wizard and upgraded the Question Creator to support linked ticket paths, filtering, and search.</li>
+                </ul>`,
             "2.5.4": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Study Browser Controls:</strong> Reworked the in-app study browser toolbar so Back, Forward, Reload, Home, Mark for Clarity, Dashboard, Program Links, and Exit remain usable after opening study links in new tabs.</li>
