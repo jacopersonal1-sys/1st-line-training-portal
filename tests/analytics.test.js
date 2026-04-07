@@ -83,6 +83,32 @@ describe('AnalyticsEngine', () => {
         expect(health.onTrack).toBe(100); // A is on track
     });
 
+    test('calculateDepartmentHealth ignores stale records from other groups', () => {
+        localStorage.setItem('users', JSON.stringify([{ user: 'A', role: 'trainee' }]));
+        localStorage.setItem('rosters', JSON.stringify({ G1: ['A'], G2: ['A'] }));
+        localStorage.setItem('records', JSON.stringify([
+            { trainee: 'A', groupID: 'G2', phase: 'Assessment', score: 20 },
+            { trainee: 'A', groupID: 'G1', phase: 'Assessment', score: 90 }
+        ]));
+
+        const health = AnalyticsEngine.calculateDepartmentHealth('G1');
+        expect(health.total).toBe(1);
+        expect(health.onTrack).toBe(100);
+        expect(health.critical).toBe(0);
+    });
+
+    test('filterRecordsForTrainees keeps shared buckets but excludes explicit other groups and vetting when assessmentOnly', () => {
+        const records = [
+            { trainee: 'A', groupID: 'G1', phase: 'Assessment', score: 90 },
+            { trainee: 'A', groupID: 'G2', phase: 'Assessment', score: 20 },
+            { trainee: 'A', groupID: 'Digital-Assessment', phase: 'Assessment', score: 80 },
+            { trainee: 'A', groupID: 'G1', phase: 'Vetting', score: 30 }
+        ];
+
+        const filtered = AnalyticsEngine.filterRecordsForTrainees(records, ['A'], 'G1', { assessmentOnly: true });
+        expect(filtered.map(r => r.score)).toEqual([90, 80]);
+    });
+
     test('calculateGroupGaps identifies most failed questions', () => {
         localStorage.setItem('rosters', JSON.stringify({ 'G1': ['A', 'B'] }));
         

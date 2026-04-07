@@ -2662,6 +2662,7 @@ function processIncomingDataQueue() {
                 });
                 items = dedupeArrayByIdentity(localKey, items, 'server_wins');
                 localStorage.setItem(localKey, JSON.stringify(items));
+                emitDataChange(localKey, 'realtime');
             });
             
             // Soft UI Refreshes based on active view
@@ -2669,6 +2670,8 @@ function processIncomingDataQueue() {
             if (typeof renderMonthly === 'function' && document.getElementById('monthly')?.classList.contains('active')) renderMonthly();
             if (typeof loadTestRecords === 'function' && document.getElementById('test-records')?.classList.contains('active')) loadTestRecords();
             if (typeof loadManageTests === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadManageTests();
+            if (typeof loadMarkingQueue === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadMarkingQueue();
+            if (typeof validateActiveMarkingModalLock === 'function') validateActiveMarkingModalLock();
         }
 
         // After processing, update the indicator with the current queue state.
@@ -2727,7 +2730,46 @@ function handleAppDocumentRealtime(payload) {
     updateQueueIndicator();
 }
 
+function applyGenericRowRealtimePayload(payload) {
+    const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === payload.table);
+    if (!localKey) return false;
+
+    let items = JSON.parse(localStorage.getItem(localKey) || '[]');
+    const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+
+    if (payload.eventType === 'DELETE') {
+        items = items.filter(i => (i.id && i.id.toString()) !== payload.old.id.toString());
+    } else {
+        if (!payload.new?.data) return false;
+        const newItem = payload.new.data;
+        if (!newItem.id) newItem.id = payload.new.id;
+
+        if (isTrainee && ['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
+            const nTrainee = (newItem.trainee || '').toLowerCase();
+            const nUser = (newItem.user || '').toLowerCase();
+            const cUser = CURRENT_USER.user.toLowerCase();
+            if (nTrainee !== cUser && nUser !== cUser) return false;
+        }
+
+        const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
+        if (idx > -1) items[idx] = newItem;
+        else items.push(newItem);
+    }
+
+    items = dedupeArrayByIdentity(localKey, items, 'server_wins');
+    localStorage.setItem(localKey, JSON.stringify(items));
+    emitDataChange(localKey, 'realtime');
+    return true;
+}
+
 function handleRowRealtime(payload) {
+    if (payload.table === 'submissions' && applyGenericRowRealtimePayload(payload)) {
+        if (typeof loadMarkingQueue === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadMarkingQueue();
+        if (typeof loadCompletedHistory === 'function' && !document.getElementById('engine-view-history')?.classList.contains('hidden')) loadCompletedHistory();
+        if (typeof validateActiveMarkingModalLock === 'function') validateActiveMarkingModalLock();
+        updateQueueIndicator();
+        return;
+    }
     INCOMING_DATA_QUEUE.push({ type: 'generic_rows', payload });
     updateQueueIndicator();
 }

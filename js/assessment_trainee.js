@@ -474,6 +474,7 @@ async function submitTest(forceSubmit = false) {
 
     const originalTestDef = JSON.parse(localStorage.getItem('tests') || '[]').find(t => t.id == window.CURRENT_TEST.id);
 
+    const submissionTime = new Date().toISOString();
     const submission = {
         id: Date.now().toString(),
         testId: window.CURRENT_TEST.id,
@@ -484,8 +485,8 @@ async function submitTest(forceSubmit = false) {
         status: finalStatus, 
         score: finalStatus === 'completed' ? finalPercent : 0,
         testSnapshot: originalTestDef || window.CURRENT_TEST,
-        createdAt: new Date().toISOString(),
-        lastModified: new Date().toISOString(),
+        createdAt: submissionTime,
+        lastModified: submissionTime,
         modifiedBy: CURRENT_USER.user
     };
 
@@ -506,8 +507,11 @@ async function submitTest(forceSubmit = false) {
         const phaseVal = window.CURRENT_TEST.title.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
 
         const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const recordId = `record_${submission.id}`;
         
         const existingIdx = records.findIndex(r => 
+            r.submissionId === submission.id ||
+            r.id === recordId ||
             r.trainee.toLowerCase() === CURRENT_USER.user.toLowerCase() && 
             r.assessment.toLowerCase() === window.CURRENT_TEST.title.toLowerCase() &&
             (r.groupID||'').toLowerCase() === groupId.toLowerCase() &&
@@ -515,7 +519,7 @@ async function submitTest(forceSubmit = false) {
         );
 
         const newRecord = {
-            id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+            id: recordId,
             groupID: groupId,
             trainee: CURRENT_USER.user,
             assessment: window.CURRENT_TEST.title,
@@ -526,8 +530,8 @@ async function submitTest(forceSubmit = false) {
             link: 'Digital-Assessment',
             docSaved: true,
             submissionId: submission.id, // Link to submission
-            createdAt: new Date().toISOString(),
-            lastModified: new Date().toISOString(),
+            createdAt: submissionTime,
+            lastModified: submissionTime,
             modifiedBy: CURRENT_USER.user
         };
 

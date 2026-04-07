@@ -5,6 +5,43 @@ const AnalyticsEngine = {
     
     // --- DATA AGGREGATION ---
 
+    getSharedRecordBuckets: function() {
+        return new Set(['live-session', 'digital-assessment', 'manual-upload', 'unknown']);
+    },
+
+    normalizeKey: function(value) {
+        return String(value || '').trim().toLowerCase();
+    },
+
+    isAssessmentRecord: function(record) {
+        const phase = this.normalizeKey(record?.phase || 'Assessment');
+        return phase === 'assessment';
+    },
+
+    isRecordInSelectedGroup: function(record, groupId) {
+        if (!groupId) return true;
+
+        const recordGroup = this.normalizeKey(record?.groupID);
+        if (!recordGroup) return true;
+
+        return recordGroup === this.normalizeKey(groupId) || this.getSharedRecordBuckets().has(recordGroup);
+    },
+
+    filterRecordsForTrainees: function(records, trainees, groupId, options = {}) {
+        const traineeSet = new Set((trainees || []).map(t => this.normalizeKey(t.user || t)));
+
+        return (records || []).filter(record => {
+            if (!record || !traineeSet.has(this.normalizeKey(record.trainee))) return false;
+            if (!this.isRecordInSelectedGroup(record, groupId)) return false;
+            if (options.assessmentOnly && !this.isAssessmentRecord(record)) return false;
+            return true;
+        });
+    },
+
+    getTraineeAssessmentRecords: function(records, traineeName, groupId) {
+        return this.filterRecordsForTrainees(records, [traineeName], groupId, { assessmentOnly: true });
+    },
+
     // 1. Department Health (Critical vs On-Track)
     calculateDepartmentHealth: function(groupId) {
         const users = JSON.parse(localStorage.getItem('users') || '[]');
@@ -36,7 +73,7 @@ const AnalyticsEngine = {
                 else onTrackCount++;
             } else {
                 // Auto-calc based on records (Heuristic)
-                const myRecords = records.filter(r => r.trainee === t.user);
+                const myRecords = this.filterRecordsForTrainees(records, [t.user], groupId, { assessmentOnly: true });
                 // Check for any failed assessments (< 80%)
                 const hasFailures = myRecords.some(r => r.score < 80);
                 const hasCriticalFailures = myRecords.some(r => r.score < 60);
@@ -244,18 +281,17 @@ const AnalyticsEngine = {
         }
 
         const records = JSON.parse(localStorage.getItem('records') || '[]');
-        const groupRecords = records.filter(r => trainees.some(t => t.user === r.trainee));
+        const groupRecords = this.filterRecordsForTrainees(records, trainees, groupId);
+        const groupAssessmentRecords = groupRecords.filter(r => this.isAssessmentRecord(r));
         
         const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
 
         // Calculate Average Assessment Score for Group
         let totalScore = 0;
         let scoreCount = 0;
-        groupRecords.forEach(r => {
-            if (r.phase === 'Assessment') {
-                totalScore += r.score;
-                scoreCount++;
-            }
+        groupAssessmentRecords.forEach(r => {
+            totalScore += Number(r.score || 0);
+            scoreCount++;
         });
         const avgScore = scoreCount > 0 ? Math.round(totalScore / scoreCount) : 0;
 
@@ -275,9 +311,9 @@ const AnalyticsEngine = {
             const avgFocus = days > 0 ? Math.round(totalFocus / days) : 0;
 
             // Get Performance
-            const myRecs = groupRecords.filter(r => r.trainee === t.user && r.phase === 'Assessment');
+            const myRecs = groupAssessmentRecords.filter(r => this.normalizeKey(r.trainee) === this.normalizeKey(t.user));
             let myTotal = 0;
-            myRecs.forEach(r => myTotal += r.score);
+            myRecs.forEach(r => myTotal += Number(r.score || 0));
             const myAvg = myRecs.length > 0 ? Math.round(myTotal / myRecs.length) : 0;
 
             return { user: t.user, focus: avgFocus, score: myAvg, count: myRecs.length };
@@ -312,9 +348,9 @@ const AnalyticsEngine = {
         // --- 2. GROUP STRUGGLE AREAS ---
         // Which assessments have a low average for THIS group?
         const assessmentStats = {};
-        groupRecords.forEach(r => {
+        groupAssessmentRecords.forEach(r => {
             if (!assessmentStats[r.assessment]) assessmentStats[r.assessment] = { total: 0, count: 0 };
-            assessmentStats[r.assessment].total += r.score;
+            assessmentStats[r.assessment].total += Number(r.score || 0);
             assessmentStats[r.assessment].count++;
         });
 
@@ -332,11 +368,11 @@ const AnalyticsEngine = {
 
         // --- 3. GLOBAL PAIN POINTS (Cross-Group) ---
         // Which assessments fail most often across ALL groups?
-        const allRecords = records; // Already loaded
+        const allRecords = records.filter(r => this.isAssessmentRecord(r));
         const globalStats = {};
         allRecords.forEach(r => {
             if (!globalStats[r.assessment]) globalStats[r.assessment] = { total: 0, count: 0, fails: 0 };
-            globalStats[r.assessment].total += r.score;
+            globalStats[r.assessment].total += Number(r.score || 0);
             globalStats[r.assessment].count++;
             if (r.score < 80) globalStats[r.assessment].fails++;
         });
@@ -417,16 +453,19 @@ const AnalyticsEngine = {
 
         // Calculate Top Performers
         const performerStats = trainees.map(t => {
-            const myRecords = groupRecords.filter(r => r.trainee === t.user && r.phase === 'Assessment');
+            const myRecords = groupAssessmentRecords.filter(r => this.normalizeKey(r.trainee) === this.normalizeKey(t.user));
             let total = 0;
             if (myRecords.length > 0) {
-                myRecords.forEach(r => total += r.score);
+                myRecords.forEach(r => total += Number(r.score || 0));
                 return { user: t.user, avg: Math.round(total / myRecords.length), count: myRecords.length };
             }
             return { user: t.user, avg: 0, count: 0 };
         });
 
-        performerStats.sort((a, b) => b.avg - a.avg);
+        performerStats.sort((a, b) => {
+            if (b.avg !== a.avg) return b.avg - a.avg;
+            return b.count - a.count;
+        });
         const top3 = performerStats.filter(p => p.count > 0).slice(0, 3);
 
         let topPerformersHtml = '';
@@ -439,7 +478,7 @@ const AnalyticsEngine = {
                             <span style="font-size:1.5rem;">${medal}</span>
                             <div>
                                 <div style="font-weight:bold;">${p.user}</div>
-                                <div style="font-size:0.8rem; color:var(--text-muted);">${p.count} Assessments</div>
+                                <div style="font-size:0.8rem; color:var(--text-muted);">${p.count} Assessments${p.count < 3 ? ' · limited sample' : ''}</div>
                             </div>
                         </div>
                         <div style="font-weight:bold; color:#2ecc71; font-size:1.1rem;">${p.avg}%</div>

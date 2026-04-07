@@ -430,6 +430,13 @@ async function allowRetake(subId) {
 // UPDATED: Async Delete
 async function deleteSubmission(id) {
     if(!confirm("Delete submission?")) return;
+
+    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const sub = subs.find(s => s.id == id);
+    let records = JSON.parse(localStorage.getItem('records') || '[]');
+    const targetRecord = sub ? records.find(r => r.submissionId === sub.id)
+        || records.find(r => r.id === `record_${sub.id}`)
+        || records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle) : null;
     
     // 1. AUTHORITATIVE DELETE (Server First)
     if (typeof hardDelete === 'function') {
@@ -438,12 +445,19 @@ async function deleteSubmission(id) {
             alert("Failed to delete submission from server. Please check connection.");
             return;
         }
+        if (targetRecord?.id) {
+            await hardDelete('records', targetRecord.id);
+        }
     }
 
     // 2. Update Local State
-    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     subs = subs.filter(s => s.id != id);
     localStorage.setItem('submissions', JSON.stringify(subs));
+
+    if (targetRecord?.id) {
+        records = records.filter(r => r.id !== targetRecord.id);
+        localStorage.setItem('records', JSON.stringify(records));
+    }
     
     loadTestRecords();
 }

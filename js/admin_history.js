@@ -1,6 +1,21 @@
 /* ================= ADMIN: COMPLETED ASSESSMENT HISTORY ================= */
 /* Handles the 'Completed Assessments' sub-menu in the Test Engine */
 
+function getHistorySubmissionTime(submission) {
+    return new Date(submission.lastEditedDate || submission.lastModified || submission.createdAt || submission.date || 0).getTime() || 0;
+}
+
+function getAttemptInfoForSubmission(submission, allSubmissions) {
+    const attempts = allSubmissions
+        .filter(s => s.trainee === submission.trainee && s.testTitle === submission.testTitle)
+        .sort((a, b) => getHistorySubmissionTime(a) - getHistorySubmissionTime(b));
+    const index = attempts.findIndex(s => s.id === submission.id);
+    return {
+        count: attempts.length,
+        number: index > -1 ? index + 1 : attempts.length
+    };
+}
+
 function showTestEngineSub(viewName, btn) {
     // Toggle Views
     document.getElementById('engine-view-overview').classList.add('hidden');
@@ -43,8 +58,8 @@ function loadCompletedHistory() {
     });
 
     Object.values(completedMap).forEach(attempts => {
-        // Sort by score descending to find the best (most recently graded) attempt
-        attempts.sort((a,b) => b.score - a.score || new Date(b.date) - new Date(a.date));
+        // Keep the latest marked attempt visible. Older retakes stay archived unless reopened intentionally.
+        attempts.sort((a,b) => getHistorySubmissionTime(b) - getHistorySubmissionTime(a) || (b.score || 0) - (a.score || 0));
         if (attempts[0].archived) {
             attempts[0].archived = false; // Un-archive the best attempt
             needsRepair = true;
@@ -102,8 +117,8 @@ function loadCompletedHistory() {
         );
     }
 
-    // Sort by Date Descending (Newest First)
-    completed.sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Sort by true edit/creation time Descending (Newest First)
+    completed.sort((a, b) => getHistorySubmissionTime(b) - getHistorySubmissionTime(a));
 
     if (completed.length === 0) {
         container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted);">No completed assessments found.</div>';
@@ -126,6 +141,14 @@ function loadCompletedHistory() {
     
     completed.forEach(s => {
         const editedBy = s.lastEditedBy ? `<span style="font-size:0.8rem;">${s.lastEditedBy}<br><span style="color:var(--text-muted);">${new Date(s.lastEditedDate).toLocaleDateString()}</span></span>` : '-';
+        const attempt = getAttemptInfoForSubmission(s, subs);
+        const auditCount = Array.isArray(s.markingAudit) ? s.markingAudit.length : 0;
+        const attemptHtml = attempt.count > 1
+            ? `<div class="history-attempt-pill"><i class="fas fa-history"></i> Attempt ${attempt.number} of ${attempt.count}</div>`
+            : '';
+        const auditHtml = auditCount > 0
+            ? `<div class="history-attempt-pill" title="Marker audit entries"><i class="fas fa-clipboard-list"></i> ${auditCount} audit ${auditCount === 1 ? 'entry' : 'entries'}</div>`
+            : '';
         
         // Score Color
         let scoreColor = 'var(--text-main)';
@@ -136,7 +159,7 @@ function loadCompletedHistory() {
             <tr>
                 <td>${s.date}</td>
                 <td><div style="display:flex; align-items:center;">${getAvatarHTML(s.trainee)} <strong>${s.trainee}</strong></div></td>
-                <td>${s.testTitle}</td>
+                <td><strong>${s.testTitle}</strong>${attemptHtml}${auditHtml}</td>
                 <td><span style="font-weight:bold; color:${scoreColor};">${s.score}%</span></td>
                 <td>${editedBy}</td>
                 <td>
@@ -209,7 +232,9 @@ async function deleteHistorySubmission(id) {
     
     // Identify associated record
     let records = JSON.parse(localStorage.getItem('records') || '[]');
-    const targetRecord = records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle);
+    const targetRecord = records.find(r => r.submissionId === sub.id)
+        || records.find(r => r.id === `record_${sub.id}`)
+        || records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle);
     
     // 1. AUTHORITATIVE DELETE (Server First)
     if (typeof hardDelete === 'function') {

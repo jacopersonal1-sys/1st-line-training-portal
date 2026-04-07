@@ -1,6 +1,12 @@
 /* ================= ASSESSMENT ADMIN ================= */
 /* Dashboard, Marking Queue, and Grading Logic */
 
+const MARKING_LEASE_MS = 3 * 60 * 1000;
+const MARKING_HEARTBEAT_MS = 45000;
+if (!window.MARKING_SESSION_ID) {
+    window.MARKING_SESSION_ID = (window.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`);
+}
+
 /**
  * 1. ADMIN: ASSESSMENT DASHBOARD (OVERVIEW)
  */
@@ -135,6 +141,9 @@ function loadMarkingQueue() {
 
         const rowsHtml = traineeSubs.map(s => {
             const tType = s.testSnapshot?.type || (s.testTitle.toLowerCase().includes('vetting') ? 'vetting' : 'standard');
+            const activeLock = getActiveMarkingLock(s);
+            const isLockedByOther = activeLock && !isOwnMarkingLock(activeLock);
+            const lockBadge = getMarkingLockBadgeHTML(s);
             let typeBadge = `<span style="font-size:0.75rem; background:var(--bg-input); padding:2px 6px; border-radius:4px; color:var(--text-muted); border:1px solid var(--border-color); margin-left:10px;"><i class="fas fa-file-alt"></i> Standard</span>`;
             
             if (tType === 'vetting') {
@@ -144,14 +153,14 @@ function loadMarkingQueue() {
             }
 
             return `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 15px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-app);">
+            <div class="marking-queue-row ${isLockedByOther ? 'locked' : ''}">
                 <div>
-                    <div style="font-weight:bold; margin-bottom:4px; display:flex; align-items:center;">${s.testTitle} ${typeBadge}</div>
+                    <div style="font-weight:bold; margin-bottom:4px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">${s.testTitle} ${typeBadge} ${lockBadge}</div>
                     <div style="font-size:0.8rem; color:var(--text-muted);"><i class="fas fa-calendar-alt"></i> Submitted: ${s.date} | Current Score: <span style="color:var(--text-main); font-weight:bold;">${s.score || 0}%</span></div>
                 </div>
                 <div style="display:flex; gap:8px;">
-                    <button class="btn-primary btn-sm" onclick="approveSubmission('${s.id}')" title="Quick Approve (Accept Score)"><i class="fas fa-check"></i> Approve</button>
-                    <button class="btn-secondary btn-sm" onclick="openAdminMarking('${s.id}')" title="Detailed Grade"><i class="fas fa-highlighter"></i> Grade</button>
+                    <button class="btn-primary btn-sm" onclick="approveSubmission('${s.id}')" title="Quick Approve (Accept Score)" ${isLockedByOther ? 'disabled' : ''}><i class="fas fa-check"></i> Approve</button>
+                    <button class="btn-secondary btn-sm" onclick="openAdminMarking('${s.id}')" title="Detailed Grade" ${isLockedByOther ? 'disabled' : ''}><i class="fas fa-highlighter"></i> Grade</button>
                 </div>
             </div>`;
         }).join('');
@@ -170,6 +179,300 @@ function loadMarkingQueue() {
     }).join('');
 }
 
+function getCurrentMarkerName() {
+    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
+        return CURRENT_USER.user || CURRENT_USER.name || CURRENT_USER.email || 'Unknown';
+    }
+    return 'Unknown';
+}
+
+function getSubmissionEditTime(submission) {
+    if (!submission) return 0;
+    return new Date(submission.lastEditedDate || submission.lastModified || submission.submittedAt || submission.date || 0).getTime() || 0;
+}
+
+function buildRecordIdForSubmission(submission) {
+    return submission?.id ? `record_${submission.id}` : `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function applyServerSubmissionLocally(serverSubmission) {
+    if (!serverSubmission?.id) return;
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const idx = subs.findIndex(s => s.id === serverSubmission.id);
+    if (idx > -1) {
+        subs[idx] = { ...subs[idx], ...serverSubmission };
+    } else {
+        subs.push(serverSubmission);
+    }
+    localStorage.setItem('submissions', JSON.stringify(subs));
+
+    if (typeof generateChecksum === 'function') {
+        const hashMap = JSON.parse(localStorage.getItem('hash_map_submissions') || '{}');
+        hashMap[serverSubmission.id] = generateChecksum(JSON.stringify(serverSubmission));
+        localStorage.setItem('hash_map_submissions', JSON.stringify(hashMap));
+    }
+}
+
+function getMarkerSessionKey() {
+    return `${getCurrentMarkerName()}::${window.MARKING_SESSION_ID}`;
+}
+
+function getActiveMarkingLock(submission) {
+    const lock = submission?.markingLock;
+    if (!lock?.expiresAt) return null;
+    return new Date(lock.expiresAt).getTime() > Date.now() ? lock : null;
+}
+
+function isOwnMarkingLock(lock) {
+    return lock?.markerSession === getMarkerSessionKey();
+}
+
+function getMarkingLockBadgeHTML(submission) {
+    const lock = getActiveMarkingLock(submission);
+    if (!lock) return '<span class="marking-lease-badge available"><i class="fas fa-unlock"></i> Available</span>';
+    if (isOwnMarkingLock(lock)) return '<span class="marking-lease-badge mine"><i class="fas fa-pen"></i> You are marking</span>';
+    return `<span class="marking-lease-badge locked"><i class="fas fa-lock"></i> ${lock.marker || 'Another admin'} is marking</span>`;
+}
+
+function setMarkingInputsDisabled(isDisabled) {
+    document.querySelectorAll('#markingContainer .q-mark, #markingContainer .q-comment').forEach(input => {
+        input.disabled = isDisabled;
+    });
+    const submitBtn = document.getElementById('markingSubmitBtn');
+    if (submitBtn) submitBtn.disabled = isDisabled;
+}
+
+function updateMarkingLeaseBanner(message, tone = 'info') {
+    const banner = document.getElementById('markingLeaseBanner');
+    if (!banner) return;
+    banner.className = `marking-lease-banner ${tone}`;
+    banner.innerHTML = message || '';
+    banner.classList.toggle('hidden', !message);
+}
+
+async function fetchServerSubmissionRow(subId) {
+    if (!window.supabaseClient || !subId) return null;
+    const { data, error } = await window.supabaseClient
+        .from('submissions')
+        .select('id,data,updated_at,trainee')
+        .eq('id', subId)
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+async function writeServerSubmissionFromRow(row, nextSubmission) {
+    const payload = {
+        data: nextSubmission,
+        trainee: nextSubmission.trainee || null,
+        updated_at: new Date().toISOString()
+    };
+
+    let query = window.supabaseClient
+        .from('submissions')
+        .update(payload)
+        .eq('id', row.id);
+
+    if (row.updated_at) query = query.eq('updated_at', row.updated_at);
+
+    const { data, error } = await query.select('data,updated_at').maybeSingle();
+    if (error) throw error;
+    if (!data?.data) throw new Error('Submission changed before the marking lease could be saved.');
+
+    applyServerSubmissionLocally(data.data);
+    return data.data;
+}
+
+async function claimMarkingLease(subId, mode = 'detailed') {
+    if (!window.supabaseClient || !subId) return true;
+
+    try {
+        const row = await fetchServerSubmissionRow(subId);
+        const serverSubmission = row?.data;
+        if (!serverSubmission) return true;
+
+        const activeLock = getActiveMarkingLock(serverSubmission);
+        if (activeLock && !isOwnMarkingLock(activeLock)) {
+            applyServerSubmissionLocally(serverSubmission);
+            alert(`${activeLock.marker || 'Another admin'} is already marking this submission. I refreshed your queue so we do not double-mark it.`);
+            loadMarkingQueue();
+            return false;
+        }
+
+        const now = new Date();
+        const nextSubmission = {
+            ...serverSubmission,
+            markingLock: {
+                marker: getCurrentMarkerName(),
+                markerSession: getMarkerSessionKey(),
+                mode,
+                claimedAt: activeLock?.claimedAt || now.toISOString(),
+                heartbeatAt: now.toISOString(),
+                expiresAt: new Date(now.getTime() + MARKING_LEASE_MS).toISOString()
+            }
+        };
+
+        await writeServerSubmissionFromRow(row, nextSubmission);
+        window.ACTIVE_MARKING_SUBMISSION_ID = subId;
+        startMarkingLeaseHeartbeat(subId);
+        return true;
+    } catch (error) {
+        console.warn('Unable to claim marking lease:', error);
+        alert('I could not reserve this submission on the server. Please try again after the realtime tunnel catches up.');
+        return false;
+    }
+}
+
+async function renewMarkingLease(subId = window.ACTIVE_MARKING_SUBMISSION_ID) {
+    if (!window.supabaseClient || !subId) return;
+
+    try {
+        const row = await fetchServerSubmissionRow(subId);
+        const serverSubmission = row?.data;
+        const activeLock = getActiveMarkingLock(serverSubmission);
+        if (!activeLock || !isOwnMarkingLock(activeLock) || serverSubmission?.status === 'completed') {
+            stopMarkingLeaseHeartbeat();
+            validateActiveMarkingModalLock();
+            return;
+        }
+
+        const now = new Date();
+        await writeServerSubmissionFromRow(row, {
+            ...serverSubmission,
+            markingLock: {
+                ...activeLock,
+                heartbeatAt: now.toISOString(),
+                expiresAt: new Date(now.getTime() + MARKING_LEASE_MS).toISOString()
+            }
+        });
+    } catch (error) {
+        console.warn('Marking lease heartbeat failed:', error);
+    }
+}
+
+function startMarkingLeaseHeartbeat(subId) {
+    stopMarkingLeaseHeartbeat(false);
+    window.ACTIVE_MARKING_SUBMISSION_ID = subId;
+    window.MARKING_LEASE_TIMER = setInterval(() => renewMarkingLease(subId), MARKING_HEARTBEAT_MS);
+}
+
+function stopMarkingLeaseHeartbeat(clearActive = true) {
+    if (window.MARKING_LEASE_TIMER) {
+        clearInterval(window.MARKING_LEASE_TIMER);
+        window.MARKING_LEASE_TIMER = null;
+    }
+    if (clearActive) window.ACTIVE_MARKING_SUBMISSION_ID = null;
+}
+
+async function releaseMarkingLease(subId = window.ACTIVE_MARKING_SUBMISSION_ID) {
+    if (!subId) {
+        stopMarkingLeaseHeartbeat();
+        return;
+    }
+
+    try {
+        if (window.supabaseClient) {
+            const row = await fetchServerSubmissionRow(subId);
+            const serverSubmission = row?.data;
+            const activeLock = getActiveMarkingLock(serverSubmission);
+            if (activeLock && isOwnMarkingLock(activeLock)) {
+                await writeServerSubmissionFromRow(row, {
+                    ...serverSubmission,
+                    markingLock: null
+                });
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to release marking lease:', error);
+    } finally {
+        stopMarkingLeaseHeartbeat();
+    }
+}
+
+async function closeAdminMarkingModal() {
+    await releaseMarkingLease();
+    document.getElementById('markingModal')?.classList.add('hidden');
+}
+
+function validateActiveMarkingModalLock() {
+    const activeSubId = window.ACTIVE_MARKING_SUBMISSION_ID;
+    const modal = document.getElementById('markingModal');
+    if (!activeSubId || !modal || modal.classList.contains('hidden')) return;
+
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const sub = subs.find(s => s.id === activeSubId);
+    const activeLock = getActiveMarkingLock(sub);
+    if (activeLock && !isOwnMarkingLock(activeLock)) {
+        setMarkingInputsDisabled(true);
+        updateMarkingLeaseBanner(`<i class="fas fa-lock"></i> ${activeLock.marker || 'Another admin'} took over this marking session from the server. Reopen the submission to continue safely.`, 'danger');
+    } else {
+        setMarkingInputsDisabled(false);
+        updateMarkingLeaseBanner(`<i class="fas fa-shield-alt"></i> Reserved for you. Other admins will see this submission as locked while you mark.`, 'success');
+    }
+}
+
+function addMarkingAuditEntry(submission, action, score) {
+    if (!submission) return;
+    const audit = Array.isArray(submission.markingAudit) ? submission.markingAudit : [];
+    audit.push({
+        action,
+        score,
+        marker: getCurrentMarkerName(),
+        timestamp: new Date().toISOString()
+    });
+    submission.markingAudit = audit.slice(-25);
+}
+
+function renderMarkingAuditTrail(submission) {
+    const audit = Array.isArray(submission?.markingAudit) ? submission.markingAudit.slice(-5).reverse() : [];
+    if (audit.length === 0) return '<div class="marking-audit-empty">No marking changes recorded yet.</div>';
+    return audit.map(entry => `
+        <div class="marking-audit-entry">
+            <strong>${entry.action || 'Updated'}</strong>
+            <span>${entry.marker || 'Unknown'} • ${entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'No time'} • ${entry.score ?? '-'}%</span>
+        </div>
+    `).join('');
+}
+
+async function confirmSubmissionStillFreshForMarking(localSubmission, actionLabel = 'mark this submission') {
+    if (!window.supabaseClient || !localSubmission?.id) return true;
+
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('submissions')
+            .select('data')
+            .eq('id', localSubmission.id)
+            .single();
+
+        if (error || !data?.data) return true;
+
+        const serverSubmission = data.data;
+        const activeLock = getActiveMarkingLock(serverSubmission);
+        if (activeLock && !isOwnMarkingLock(activeLock)) {
+            applyServerSubmissionLocally(serverSubmission);
+            alert(`${activeLock.marker || 'Another admin'} is already marking this submission. I refreshed the local copy instead of ${actionLabel}.`);
+            if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
+            return false;
+        }
+
+        const serverTime = getSubmissionEditTime(serverSubmission);
+        const localTime = getSubmissionEditTime(localSubmission);
+        const serverMarker = serverSubmission.lastEditedBy || serverSubmission.modifiedBy || 'another marker';
+
+        if (serverTime > localTime) {
+            applyServerSubmissionLocally(serverSubmission);
+            alert(`This submission was already changed by ${serverMarker} after your local copy loaded. I refreshed the local copy instead of ${actionLabel}. Please reopen it and review the latest server version.`);
+            if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
+            if (typeof loadCompletedHistory === 'function') loadCompletedHistory();
+            return false;
+        }
+    } catch (error) {
+        console.warn('Submission freshness check failed, continuing with local data.', error);
+    }
+
+    return true;
+}
+
 // QUICK APPROVE
 async function approveSubmission(subId) {
     // ARCHITECTURAL FIX: RACE CONDITION PREVENTION
@@ -178,15 +481,36 @@ async function approveSubmission(subId) {
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
-    if (!sub) return;
+    if (!sub) {
+        window._isApproving = null;
+        return;
+    }
+
+    const claimed = await claimMarkingLease(subId, 'quick_approve');
+    if (!claimed) {
+        window._isApproving = null;
+        return;
+    }
+
+    const isFresh = await confirmSubmissionStillFreshForMarking(sub, 'quick approving it');
+    if (!isFresh) {
+        window._isApproving = null;
+        await releaseMarkingLease(subId);
+        return;
+    }
+
+    const markerName = getCurrentMarkerName();
+    const editTime = new Date().toISOString();
 
     // 1. Mark as Completed
     sub.status = 'completed';
     sub.archived = false; // Ensure it appears in History
-    sub.lastEditedBy = CURRENT_USER.user;
-    sub.lastEditedDate = new Date().toISOString();
-    sub.lastModified = sub.lastEditedDate;
-    sub.modifiedBy = CURRENT_USER.user;
+    sub.lastEditedBy = markerName;
+    sub.lastEditedDate = editTime;
+    sub.lastModified = editTime;
+    sub.modifiedBy = markerName;
+    sub.markingLock = null;
+    addMarkingAuditEntry(sub, 'Quick approve', sub.score);
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     // 2. Create Permanent Record
@@ -207,8 +531,11 @@ async function approveSubmission(subId) {
 
     const recs = JSON.parse(localStorage.getItem('records') || '[]');
     const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+    const recordId = buildRecordIdForSubmission(sub);
 
     const existingIdx = recs.findIndex(r => 
+        r.submissionId === sub.id ||
+        r.id === recordId ||
         r.trainee.toLowerCase() === sub.trainee.toLowerCase() && 
         r.assessment.toLowerCase() === sub.testTitle.toLowerCase() &&
         (r.groupID||'').toLowerCase() === targetGroup.toLowerCase() &&
@@ -216,7 +543,7 @@ async function approveSubmission(subId) {
     );
 
     const newRecord = {
-        id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+        id: recordId,
         trainee: sub.trainee,
         assessment: sub.testTitle,
         score: sub.score,
@@ -228,9 +555,9 @@ async function approveSubmission(subId) {
         videoSaved: false,
         link: 'Digital-Assessment',
         submissionId: sub.id,
-        createdAt: new Date().toISOString(),
-        lastModified: new Date().toISOString(),
-        modifiedBy: CURRENT_USER.user
+        createdAt: editTime,
+        lastModified: editTime,
+        modifiedBy: markerName
     };
 
     if (existingIdx > -1) {
@@ -240,7 +567,7 @@ async function approveSubmission(subId) {
         recs[existingIdx].docSaved = true;
         recs[existingIdx].submissionId = sub.id;
         recs[existingIdx].lastModified = newRecord.lastModified;
-        recs[existingIdx].modifiedBy = CURRENT_USER.user;
+        recs[existingIdx].modifiedBy = markerName;
         if(!recs[existingIdx].id) recs[existingIdx].id = newRecord.id;
     } else {
         recs.push(newRecord);
@@ -248,9 +575,17 @@ async function approveSubmission(subId) {
 
     localStorage.setItem('records', JSON.stringify(recs));
     
-    if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
+    try {
+        if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], true);
+    } catch (error) {
+        console.error("Quick approve sync failed:", error);
+        window._isApproving = null;
+        alert("The approval was saved locally, but it could not sync to the server. Please check connection before approving more submissions.");
+        return;
+    }
     
     alert("Approved & Recorded.");
+    stopMarkingLeaseHeartbeat();
     loadMarkingQueue();
     if(typeof loadTestRecords === 'function') loadTestRecords();
     if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
@@ -259,10 +594,19 @@ async function approveSubmission(subId) {
 }
 
 // DETAILED MARKING (Modal)
-function openAdminMarking(subId) {
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const sub = subs.find(s => s.id === subId);
+async function openAdminMarking(subId, options = {}) {
+    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    let sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Error: Submission data not found.");
+
+    const canEdit = CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin';
+    const shouldClaim = options.claim !== false && canEdit;
+    if (shouldClaim) {
+        const claimed = await claimMarkingLease(subId, sub.status === 'completed' ? 'history_edit' : 'detailed_marking');
+        if (!claimed) return;
+        subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        sub = subs.find(s => s.id === subId) || sub;
+    }
 
     // SNAPSHOT LOGIC: STRICTLY use saved test definition if available (Historical accuracy)
     let test = sub.testSnapshot;
@@ -281,11 +625,35 @@ function openAdminMarking(subId) {
     const isLocked = sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin';
 
     container.innerHTML = `
-        <div style="margin-bottom:20px; border-bottom:2px solid var(--border-color); padding-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-            <div><h2 style="margin:0;">Marking: ${sub.trainee}</h2><p style="color:var(--primary); font-weight:bold; margin:5px 0;">${sub.testTitle}</p></div>
+        <div class="marking-workbench-header">
+            <div>
+                <div class="marking-eyebrow">Assessment Workbench</div>
+                <h2 style="margin:0;">${sub.trainee}</h2>
+                <p style="color:var(--primary); font-weight:bold; margin:5px 0;">${sub.testTitle}</p>
+                <div class="marking-meta-row">
+                    <span><i class="fas fa-calendar-alt"></i> ${sub.date || 'No date'}</span>
+                    <span><i class="fas fa-star"></i> Current score: ${sub.score || 0}%</span>
+                    ${getMarkingLockBadgeHTML(sub)}
+                </div>
+            </div>
             <button class="btn-secondary" onclick="printAssessmentView()"><i class="fas fa-print"></i> Print</button>
         </div>
+        <div id="markingLeaseBanner" class="marking-lease-banner hidden"></div>
+        <div class="marking-workbench-grid">
+            <div class="marking-question-stack" id="markingQuestionStack"></div>
+            <aside class="marking-side-panel">
+                <div class="marking-side-card">
+                    <div class="marking-side-label">Marker Safety</div>
+                    <p>Opening this review reserves it for you through the realtime tunnel. Other admins see it as locked while the lease is active.</p>
+                </div>
+                <div class="marking-side-card">
+                    <div class="marking-side-label">Audit Trail</div>
+                    <div id="markingAuditTrail">${renderMarkingAuditTrail(sub)}</div>
+                </div>
+            </aside>
+        </div>
     `;
+    const questionStack = document.getElementById('markingQuestionStack');
 
     test.questions.forEach((q, idx) => {
         // FIX: Use original index if available (handles shuffled snapshots), else loop index
@@ -479,7 +847,7 @@ function openAdminMarking(subId) {
                 </div>`;
         }
 
-        container.innerHTML += `
+        questionStack.innerHTML += `
             <div class="marking-item" style="margin-bottom:25px;">
                 <div style="font-weight:600;">Q${idx + 1}: ${q.text} ${refBtn} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
                 ${adminNoteHtml}${markHtml}
@@ -494,6 +862,7 @@ function openAdminMarking(subId) {
         submitBtn.innerText = sub.status === 'completed' ? "Save Changes" : "Finalize Score & Push to Records";
         submitBtn.onclick = () => finalizeAdminMarking(subId);
     }
+    validateActiveMarkingModalLock();
 }
 
 function viewCompletedTest(arg1, arg2, arg3) {
@@ -521,7 +890,7 @@ function viewCompletedTest(arg1, arg2, arg3) {
         return;
     }
     
-    openAdminMarking(sub.id);
+    openAdminMarking(sub.id, { claim: mode !== 'view' });
     
     setTimeout(() => {
         const btn = document.getElementById('markingSubmitBtn');
@@ -545,28 +914,19 @@ async function finalizeAdminMarking(subId) {
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const sub = subs.find(s => s.id === subId);
-    
-    // --- OPTIMISTIC CONCURRENCY CONTROL (OCC) ---
-    if (window.supabaseClient && sub.id) {
-        try {
-            const { data } = await window.supabaseClient.from('submissions').select('data').eq('id', sub.id).single();
-            if (data && data.data && data.data.lastEditedDate) {
-                const serverTime = new Date(data.data.lastEditedDate).getTime();
-                const localTime = new Date(sub.lastEditedDate || 0).getTime();
-                if (serverTime > localTime) {
-                    if (!confirm(`⚠️ CONFLICT DETECTED\n\nAdmin '${data.data.lastEditedBy || 'Unknown'}' just graded this submission.\nDo you want to forcefully overwrite their grade?`)) {
-                        return; // Abort save
-                    }
-                }
-            }
-        } catch(e) { console.warn("OCC Check failed, proceeding...", e); }
-    }
+    if (!sub) return alert("Submission data not found.");
+
+    const isFresh = await confirmSubmissionStillFreshForMarking(sub, 'finalizing your marking');
+    if (!isFresh) return;
+
+    const markerName = getCurrentMarkerName();
+    const editTime = new Date().toISOString();
 
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == sub.testId);
     let maxScore = 0;
     if(test) test.questions.forEach(q => maxScore += parseFloat(q.points || 1));
-    else maxScore = document.querySelectorAll('.q-mark').length; 
+    else maxScore = document.querySelectorAll('.q-mark').length;
 
     const markInputs = document.querySelectorAll('.q-mark');
     const commentInputs = document.querySelectorAll('.q-comment');
@@ -587,6 +947,7 @@ async function finalizeAdminMarking(subId) {
     });
 
     const percentage = maxScore > 0 ? Math.round((earnedPoints / maxScore) * 100) : 0;
+    const auditAction = sub.status === 'completed' ? 'Score updated' : 'Score finalized';
 
     sub.score = percentage;
     sub.status = 'completed';
@@ -594,10 +955,12 @@ async function finalizeAdminMarking(subId) {
     sub.scores = specificScores; 
     sub.comments = specificComments;
     
-    sub.lastEditedBy = CURRENT_USER.user;
-    sub.lastEditedDate = new Date().toISOString();
-    sub.lastModified = sub.lastEditedDate;
-    sub.modifiedBy = CURRENT_USER.user;
+    sub.lastEditedBy = markerName;
+    sub.lastEditedDate = editTime;
+    sub.lastModified = editTime;
+    sub.modifiedBy = markerName;
+    sub.markingLock = null;
+    addMarkingAuditEntry(sub, auditAction, percentage);
 
     localStorage.setItem('submissions', JSON.stringify(subs));
 
@@ -615,8 +978,11 @@ async function finalizeAdminMarking(subId) {
     const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
 
     const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const recordId = buildRecordIdForSubmission(sub);
     
     const existingIdx = records.findIndex(r => 
+        r.submissionId === sub.id ||
+        r.id === recordId ||
         r.trainee.toLowerCase() === sub.trainee.toLowerCase() && 
         r.assessment.toLowerCase() === sub.testTitle.toLowerCase() &&
         (r.groupID||'').toLowerCase() === groupId.toLowerCase() &&
@@ -624,7 +990,7 @@ async function finalizeAdminMarking(subId) {
     );
 
     const newRecord = {
-        id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+        id: recordId,
         groupID: groupId,
         trainee: sub.trainee,
         assessment: sub.testTitle,
@@ -635,9 +1001,9 @@ async function finalizeAdminMarking(subId) {
         link: 'Digital-Assessment',
         docSaved: true,
         submissionId: sub.id, // Link to submission
-        createdAt: new Date().toISOString(),
-        lastModified: new Date().toISOString(),
-        modifiedBy: CURRENT_USER.user
+        createdAt: editTime,
+        lastModified: editTime,
+        modifiedBy: markerName
     };
 
     if (existingIdx > -1) {
@@ -647,7 +1013,7 @@ async function finalizeAdminMarking(subId) {
         records[existingIdx].docSaved = true;
         records[existingIdx].submissionId = sub.id; // Ensure link is updated
         records[existingIdx].lastModified = newRecord.lastModified;
-        records[existingIdx].modifiedBy = CURRENT_USER.user;
+        records[existingIdx].modifiedBy = markerName;
         if(!records[existingIdx].id) records[existingIdx].id = newRecord.id;
     } else {
         records.push(newRecord);
@@ -655,9 +1021,16 @@ async function finalizeAdminMarking(subId) {
     
     localStorage.setItem('records', JSON.stringify(records));
 
-    if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
+    try {
+        if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], true);
+    } catch (error) {
+        console.error("Final marking sync failed:", error);
+        alert("The marking was saved locally, but it could not sync to the server. Please check connection before closing this review.");
+        return;
+    }
 
     if(typeof showToast === 'function') showToast(`Marking Finalized! Trainee scored ${percentage}%`, "success");
+    stopMarkingLeaseHeartbeat();
     document.getElementById('markingModal').classList.add('hidden');
     
     loadMarkingQueue();
