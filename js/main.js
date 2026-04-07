@@ -1214,12 +1214,316 @@ function adjustOpacity(hex, alpha) {
 // ------------------------------------
 
 // --- EXPERIMENTAL THEME LOGIC ---
+function sanitizeThemeHexColor(value, fallback) {
+    const raw = (value || '').trim();
+    if (/^#([A-Fa-f0-9]{6})$/.test(raw)) return raw.toUpperCase();
+    if (/^#([A-Fa-f0-9]{3})$/.test(raw)) {
+        const r = raw[1];
+        const g = raw[2];
+        const b = raw[3];
+        return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+    }
+    return fallback;
+}
+
+function clampThemeNumber(value, min, max, fallback) {
+    const n = parseFloat(value);
+    if (Number.isNaN(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+}
+
+function getHexRgbTuple(hex) {
+    const clean = sanitizeThemeHexColor(hex, '#F37021').replace('#', '');
+    const num = parseInt(clean, 16);
+    return {
+        r: (num >> 16) & 255,
+        g: (num >> 8) & 255,
+        b: num & 255
+    };
+}
+
+function getDefaultCustomExperimentalThemeConfig() {
+    return {
+        accent: '#5DB2FF',
+        bgApp: '#0B1726',
+        bgCard: '#14263C',
+        textMain: '#E6F3FF',
+        textMuted: '#97B4D1',
+        border: '#2F4F72',
+        mood: 'aurora',
+        motionSpeed: 1,
+        glowStrength: 0.26,
+        cornerRadius: 13
+    };
+}
+
+function sanitizeCustomExperimentalThemeConfig(rawConfig) {
+    const defaults = getDefaultCustomExperimentalThemeConfig();
+    const config = { ...defaults, ...(rawConfig || {}) };
+    const allowedMoods = ['aurora', 'sunset', 'night', 'emerald'];
+
+    config.accent = sanitizeThemeHexColor(config.accent, defaults.accent);
+    config.bgApp = sanitizeThemeHexColor(config.bgApp, defaults.bgApp);
+    config.bgCard = sanitizeThemeHexColor(config.bgCard, defaults.bgCard);
+    config.textMain = sanitizeThemeHexColor(config.textMain, defaults.textMain);
+    config.textMuted = sanitizeThemeHexColor(config.textMuted, defaults.textMuted);
+    config.border = sanitizeThemeHexColor(config.border, defaults.border);
+    config.mood = allowedMoods.includes(config.mood) ? config.mood : defaults.mood;
+    config.motionSpeed = clampThemeNumber(config.motionSpeed, 0.7, 1.5, defaults.motionSpeed);
+    config.glowStrength = clampThemeNumber(config.glowStrength, 0.1, 0.5, defaults.glowStrength);
+    config.cornerRadius = clampThemeNumber(config.cornerRadius, 8, 22, defaults.cornerRadius);
+
+    return config;
+}
+
+function buildCustomExperimentalThemeBackground(config) {
+    const accentSoft = adjustOpacity(config.accent, 0.18);
+    const accentMid = adjustOpacity(config.accent, 0.28);
+    const bgLift = lightenColor(config.bgApp, 14);
+    const cardLift = lightenColor(config.bgCard, 8);
+
+    if (config.mood === 'sunset') {
+        return `linear-gradient(145deg, ${lightenColor(config.accent, -22)} 0%, ${bgLift} 38%, ${config.bgApp} 100%)`;
+    }
+    if (config.mood === 'night') {
+        return `radial-gradient(circle at 20% 0%, ${cardLift} 0%, ${config.bgApp} 62%, #05080E 100%)`;
+    }
+    if (config.mood === 'emerald') {
+        const leaf = '#1B6F5F';
+        return `radial-gradient(circle at 80% 10%, ${adjustOpacity(leaf, 0.65)} 0%, transparent 42%), linear-gradient(140deg, ${bgLift} 0%, ${config.bgApp} 55%, ${lightenColor(config.bgApp, -6)} 100%)`;
+    }
+    return `radial-gradient(circle at 15% 5%, ${accentSoft} 0%, transparent 32%), radial-gradient(circle at 88% 18%, ${accentMid} 0%, transparent 40%), linear-gradient(140deg, ${bgLift} 0%, ${config.bgApp} 52%, ${lightenColor(config.bgApp, -8)} 100%)`;
+}
+
+function getStoredCustomExperimentalThemeConfig() {
+    let stored = {};
+    try {
+        stored = JSON.parse(localStorage.getItem('experimental_theme_custom') || '{}');
+    } catch (e) {}
+    return sanitizeCustomExperimentalThemeConfig(stored);
+}
+
+function saveCustomExperimentalThemeConfig(config) {
+    localStorage.setItem('experimental_theme_custom', JSON.stringify(sanitizeCustomExperimentalThemeConfig(config)));
+}
+
+function clearCustomExperimentalThemeVariables() {
+    const root = document.documentElement;
+    [
+        '--exp-custom-primary',
+        '--exp-custom-primary-hover',
+        '--exp-custom-primary-soft',
+        '--exp-custom-bg-app',
+        '--exp-custom-bg-header',
+        '--exp-custom-bg-card',
+        '--exp-custom-bg-input',
+        '--exp-custom-text-main',
+        '--exp-custom-text-muted',
+        '--exp-custom-border',
+        '--exp-custom-radius',
+        '--exp-custom-motion-speed',
+        '--exp-custom-glow-alpha',
+        '--exp-custom-background',
+        '--exp-accent-rgb',
+        '--exp-motion-speed',
+        '--exp-glow-alpha'
+    ].forEach(v => root.style.removeProperty(v));
+}
+
+function applyCustomExperimentalThemeVariables(config) {
+    const clean = sanitizeCustomExperimentalThemeConfig(config);
+    const root = document.documentElement;
+    const accentRgb = getHexRgbTuple(clean.accent);
+    const bgHead = adjustOpacity(clean.bgApp, 0.92);
+    const bgInput = lightenColor(clean.bgCard, 12);
+    const accentHover = lightenColor(clean.accent, -18);
+
+    root.style.setProperty('--exp-custom-primary', clean.accent);
+    root.style.setProperty('--exp-custom-primary-hover', accentHover);
+    root.style.setProperty('--exp-custom-primary-soft', adjustOpacity(clean.accent, 0.19));
+    root.style.setProperty('--exp-custom-bg-app', clean.bgApp);
+    root.style.setProperty('--exp-custom-bg-header', bgHead);
+    root.style.setProperty('--exp-custom-bg-card', adjustOpacity(clean.bgCard, 0.9));
+    root.style.setProperty('--exp-custom-bg-input', adjustOpacity(bgInput, 0.9));
+    root.style.setProperty('--exp-custom-text-main', clean.textMain);
+    root.style.setProperty('--exp-custom-text-muted', clean.textMuted);
+    root.style.setProperty('--exp-custom-border', clean.border);
+    root.style.setProperty('--exp-custom-radius', `${Math.round(clean.cornerRadius)}px`);
+    root.style.setProperty('--exp-custom-motion-speed', clean.motionSpeed.toFixed(2));
+    root.style.setProperty('--exp-custom-glow-alpha', clean.glowStrength.toFixed(2));
+    root.style.setProperty('--exp-custom-background', buildCustomExperimentalThemeBackground(clean));
+    root.style.setProperty('--exp-accent-rgb', `${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}`);
+    root.style.setProperty('--exp-motion-speed', clean.motionSpeed.toFixed(2));
+    root.style.setProperty('--exp-glow-alpha', clean.glowStrength.toFixed(2));
+}
+
+function collectCustomExperimentalThemeFromControls() {
+    const controls = {
+        accent: document.getElementById('expCustomAccent'),
+        bgApp: document.getElementById('expCustomBg'),
+        bgCard: document.getElementById('expCustomCard'),
+        textMain: document.getElementById('expCustomTextMain'),
+        textMuted: document.getElementById('expCustomTextMuted'),
+        border: document.getElementById('expCustomBorder'),
+        mood: document.getElementById('expCustomMood'),
+        motionSpeed: document.getElementById('expCustomMotion'),
+        glowStrength: document.getElementById('expCustomGlow'),
+        cornerRadius: document.getElementById('expCustomRadius')
+    };
+
+    if (!controls.accent) {
+        return getStoredCustomExperimentalThemeConfig();
+    }
+
+    return sanitizeCustomExperimentalThemeConfig({
+        accent: controls.accent.value,
+        bgApp: controls.bgApp.value,
+        bgCard: controls.bgCard.value,
+        textMain: controls.textMain.value,
+        textMuted: controls.textMuted.value,
+        border: controls.border.value,
+        mood: controls.mood.value,
+        motionSpeed: controls.motionSpeed.value,
+        glowStrength: controls.glowStrength.value,
+        cornerRadius: controls.cornerRadius.value
+    });
+}
+
+function syncCustomThemeControlUI(config) {
+    const clean = sanitizeCustomExperimentalThemeConfig(config);
+    const setValue = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+
+    setValue('expCustomAccent', clean.accent);
+    setValue('expCustomBg', clean.bgApp);
+    setValue('expCustomCard', clean.bgCard);
+    setValue('expCustomTextMain', clean.textMain);
+    setValue('expCustomTextMuted', clean.textMuted);
+    setValue('expCustomBorder', clean.border);
+    setValue('expCustomMood', clean.mood);
+    setValue('expCustomMotion', clean.motionSpeed.toFixed(2));
+    setValue('expCustomGlow', clean.glowStrength.toFixed(2));
+    setValue('expCustomRadius', Math.round(clean.cornerRadius));
+
+    const motionReadout = document.getElementById('expCustomMotionReadout');
+    if (motionReadout) motionReadout.textContent = `${clean.motionSpeed.toFixed(2)}x`;
+    const glowReadout = document.getElementById('expCustomGlowReadout');
+    if (glowReadout) glowReadout.textContent = clean.glowStrength.toFixed(2);
+    const radiusReadout = document.getElementById('expCustomRadiusReadout');
+    if (radiusReadout) radiusReadout.textContent = `${Math.round(clean.cornerRadius)}px`;
+
+    const swatchAccent = document.getElementById('expCustomSwatchAccent');
+    if (swatchAccent) swatchAccent.style.background = clean.accent;
+    const swatchBg = document.getElementById('expCustomSwatchBg');
+    if (swatchBg) swatchBg.style.background = clean.bgApp;
+    const swatchCard = document.getElementById('expCustomSwatchCard');
+    if (swatchCard) swatchCard.style.background = clean.bgCard;
+
+    const stateBadge = document.getElementById('expThemeCustomState');
+    if (stateBadge) {
+        const isActive = (localStorage.getItem('experimental_theme') === 'theme-custom-lab');
+        stateBadge.textContent = isActive ? 'Custom Active' : 'Draft';
+        stateBadge.style.color = isActive ? '#DCFCE7' : '';
+        stateBadge.style.background = isActive ? '#14532D' : '';
+        stateBadge.style.border = isActive ? '1px solid rgba(34,197,94,0.55)' : '';
+    }
+}
+
+function loadExperimentalThemeCustomizer() {
+    const hasControls = document.getElementById('expCustomAccent');
+    if (!hasControls) return;
+    syncCustomThemeControlUI(getStoredCustomExperimentalThemeConfig());
+}
+
+window.handleCustomExperimentalThemeInput = function() {
+    const config = collectCustomExperimentalThemeFromControls();
+    syncCustomThemeControlUI(config);
+
+    if (localStorage.getItem('experimental_theme') === 'theme-custom-lab') {
+        saveCustomExperimentalThemeConfig(config);
+        applyCustomExperimentalThemeVariables(config);
+        updateExperimentalThemePickerState();
+    }
+};
+
+window.previewCustomExperimentalTheme = function() {
+    const config = collectCustomExperimentalThemeFromControls();
+    saveCustomExperimentalThemeConfig(config);
+    applyExperimentalTheme('theme-custom-lab');
+    if (typeof showToast === 'function') showToast('Custom Lab preview applied.', 'info');
+};
+
+window.saveCustomExperimentalTheme = function() {
+    const config = collectCustomExperimentalThemeFromControls();
+    saveCustomExperimentalThemeConfig(config);
+    applyExperimentalTheme('theme-custom-lab');
+    if (typeof showToast === 'function') showToast('Custom Lab theme saved.', 'success');
+};
+
+window.resetCustomExperimentalTheme = function() {
+    const defaults = getDefaultCustomExperimentalThemeConfig();
+    saveCustomExperimentalThemeConfig(defaults);
+    syncCustomThemeControlUI(defaults);
+    if (localStorage.getItem('experimental_theme') === 'theme-custom-lab') {
+        applyExperimentalTheme('theme-custom-lab');
+    } else if (typeof showToast === 'function') {
+        showToast('Custom Lab preset reset to defaults.', 'info');
+    }
+};
+
+window.applyCustomExperimentalTheme = function(overrides = {}) {
+    const existing = getStoredCustomExperimentalThemeConfig();
+    const merged = sanitizeCustomExperimentalThemeConfig({ ...existing, ...(overrides || {}) });
+    saveCustomExperimentalThemeConfig(merged);
+    applyExperimentalTheme('theme-custom-lab');
+    return merged;
+};
+
+function updateExperimentalThemePickerState() {
+    const activeTheme = localStorage.getItem('experimental_theme') || '';
+    const labels = {
+        'theme-custom-lab': 'Custom Lab',
+        'theme-cyberpunk': 'Neon Nights',
+        'theme-ocean': 'Deep Sea',
+        'theme-forest': 'Enchanted Forest',
+        'theme-royal': 'Royal Amethyst'
+    };
+
+    document.querySelectorAll('.exp-theme-option[data-exp-theme]').forEach(btn => {
+        const thisTheme = btn.getAttribute('data-exp-theme');
+        const isActive = thisTheme === activeTheme;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+
+    const badge = document.getElementById('expThemeCurrentBadge');
+    if (badge) {
+        badge.textContent = activeTheme ? `Current: ${labels[activeTheme] || 'Custom Preset'}` : 'Current: Original';
+    }
+
+    syncCustomThemeControlUI(getStoredCustomExperimentalThemeConfig());
+}
+
 function applyExperimentalTheme(themeName) {
     // 1. Remove all experimental classes
-    document.body.classList.remove('theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
+    document.body.classList.remove('exp-theme-active', 'theme-custom-lab', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
+    clearCustomExperimentalThemeVariables();
     
     if (themeName) {
+        const existingOverlay = document.getElementById('bg-overlay');
+        if (existingOverlay) existingOverlay.remove();
+        document.body.style.background = '';
+        document.body.style.backgroundImage = '';
+        document.body.style.backgroundSize = '';
+        document.body.style.backgroundPosition = '';
+        document.body.style.backgroundAttachment = '';
         // 2. Apply new theme
+        document.body.classList.add('exp-theme-active');
+        if (themeName === 'theme-custom-lab') {
+            applyCustomExperimentalThemeVariables(getStoredCustomExperimentalThemeConfig());
+        }
         document.body.classList.add(themeName);
         localStorage.setItem('experimental_theme', themeName);
     } else {
@@ -1228,6 +1532,8 @@ function applyExperimentalTheme(themeName) {
         // Re-apply user theme to ensure we go back to normal
         if (typeof applyUserTheme === 'function') applyUserTheme();
     }
+
+    updateExperimentalThemePickerState();
 }
 
 // --- SIDEBAR VISIBILITY LOGIC ---
@@ -2042,6 +2348,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.5.9": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Live Booking Reliability:</strong> Added a new Booking Integrity Check + auto-repair workflow to detect and fix duplicate IDs, slot collisions, invalid statuses, and stale/duplicate trainee bookings before they break downstream views.</li>
+                    <li style="margin-bottom: 8px;"><strong>Arena Stability:</strong> Hardened booking normalization so Live Assessment Arena state remains aligned with Live Booking and Assessment Breakdown datasets after admin edits.</li>
+                    <li style="margin-bottom: 8px;"><strong>Theme Lab Upgrade:</strong> Rebuilt Experimental Themes with stronger app-wide visual impact (animated backgrounds, richer card/button/nav behavior) and added a full Custom Theme Builder with preview/save/reset controls.</li>
+                </ul>`,
             "2.5.8": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved an invisible "zombie process" bug that prevented the app from closing completely, which occasionally blocked auto-updates from installing.</li>

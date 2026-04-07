@@ -350,6 +350,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
 - **v2.5.8:** Fixed critical `before-quit` infinite loop in `electron-main.js` that caused zombie processes and blocked auto-updates.
 - **v2.5.7:** Version bump and minor maintenance.
 - **v2.5.6:** Added a completely isolated Super Admin Data Studio module (`modules/live_data_manager` or `superadmin_data_studio`) leveraging a Webview bridge for real-time visual database editing.

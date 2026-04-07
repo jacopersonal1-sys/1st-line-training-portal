@@ -79,6 +79,103 @@ async function secureScheduleSave() {
     }
 }
 
+function isLiveBookingManager() {
+    return !!(CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin'));
+}
+
+function isLiveBookingViewer() {
+    return !!(CURRENT_USER && ['admin', 'super_admin', 'teamleader', 'special_viewer'].includes(CURRENT_USER.role));
+}
+
+function normalizeScheduleText(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function isSameScheduleValue(a, b) {
+    return normalizeScheduleText(a) === normalizeScheduleText(b);
+}
+
+function createLiveBookingId() {
+    return `lb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeHtmlAttr(value) {
+    return escapeHtml(value).replace(/`/g, '&#96;');
+}
+
+function escapeInlineJs(value) {
+    return String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r?\n/g, ' ');
+}
+
+function buildLiveAssessmentCatalog() {
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const byId = new Map();
+    const byTitle = new Map();
+
+    tests.forEach(test => {
+        if (!test || test.type !== 'live') return;
+        const id = String(test.id || '');
+        const title = String(test.title || '').trim();
+        if (!title) return;
+
+        const key = normalizeScheduleText(title);
+        const entry = { id, title, key };
+        byId.set(id, entry);
+
+        if (!byTitle.has(key)) {
+            byTitle.set(key, entry);
+        }
+    });
+
+    return { byId, byTitle };
+}
+
+function getSelectedAssessmentMeta(selectEl) {
+    if (!selectEl) return { id: null, title: '' };
+    const selected = selectEl.options[selectEl.selectedIndex];
+    if (!selected) return { id: null, title: '' };
+    return {
+        id: selected.dataset.testId || null,
+        title: selected.value || selected.text || ''
+    };
+}
+
+function hydrateBookingAssessmentIds(bookings, catalog) {
+    if (!Array.isArray(bookings) || !catalog) return false;
+    let touched = false;
+    bookings.forEach(booking => {
+        if (!booking || booking.assessmentId) return;
+        const mapped = catalog.byTitle.get(normalizeScheduleText(booking.assessment));
+        if (mapped && mapped.id) {
+            booking.assessmentId = mapped.id;
+            touched = true;
+        }
+    });
+    return touched;
+}
+
+function bookingMatchesTrainee(booking, traineeName) {
+    return isSameScheduleValue(booking && booking.trainee, traineeName);
+}
+
+function bookingMatchesAssessment(booking, assessmentMeta) {
+    if (!booking || !assessmentMeta) return false;
+    if (assessmentMeta.id && booking.assessmentId && String(booking.assessmentId) === String(assessmentMeta.id)) return true;
+    return isSameScheduleValue(booking.assessment, assessmentMeta.title);
+}
+
 // --- PART A: ASSESSMENT TIMELINE (STANDARD) ---
 
 function renderSchedule() {
@@ -483,9 +580,10 @@ async function renderLiveTable() {
     }
 
     // 2. DETERMINE ACTIVE SCHEDULE
-    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader');
+    const canManageLive = isLiveBookingManager();
+    const canViewLive = isLiveBookingViewer();
     
-    if (!isAdmin) {
+    if (!canViewLive) {
         // Trainee: Auto-select assigned schedule
         const mySchedId = getTraineeLiveScheduleId(CURRENT_USER.user, liveSchedules);
         if (!mySchedId) {
@@ -506,35 +604,38 @@ async function renderLiveTable() {
     const allLiveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
     
     // 3. RENDER ADMIN CONTROLS (TABS & TOOLBAR)
-    if(isAdmin) {
+    if (canViewLive) {
         const adminPanel = document.querySelector('#live-assessment .admin-only');
         if(adminPanel) {
             adminPanel.classList.remove('hidden');
             
             // Inject Tabs & Toolbar
-            let controlsHtml = buildLiveTabs(liveSchedules) + buildLiveToolbar(currentSched, isAdmin);
+            let controlsHtml = buildLiveTabs(liveSchedules) + buildLiveToolbar(currentSched);
             
             // Inject Settings Form (Existing inputs)
             controlsHtml += `
                 <div class="card" style="margin-top:15px; background:var(--bg-input);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <h4 style="margin:0;"><i class="fas fa-cogs"></i> Schedule Configuration</h4>
-                        <button class="btn-secondary btn-sm" onclick="openLiveStatsModal()"><i class="fas fa-chart-pie"></i> View Trainee Stats Breakdown</button>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                            <button class="btn-secondary btn-sm" onclick="openLiveStatsModal()"><i class="fas fa-chart-pie"></i> View Trainee Stats Breakdown</button>
+                            ${canManageLive ? '<button class="btn-secondary btn-sm" onclick="openLiveBookingIntegrityModal()"><i class="fas fa-shield-alt"></i> Booking Integrity Check</button>' : ''}
+                        </div>
                     </div>
                     <div style="display:flex; gap:15px; align-items:end; margin-bottom:10px;">
-                        <div><label>Start Date</label><input type="date" id="liveStartDate" value="${currentSched.startDate}"></div>
-                        <div><label>Days</label><input type="number" id="liveNumDays" value="${currentSched.days}" min="1" max="30" style="width:80px;"></div>
-                        <div style="flex:1;"><label>Default Trainers</label><input type="text" id="liveTrainersInput" value="${(currentSched.trainers || ['Trainer 1', 'Trainer 2']).join(', ')}" placeholder="Trainer 1, Trainer 2..."></div>
-                        <button class="btn-primary" onclick="saveLiveScheduleSettings()" style="height:38px;">Update Settings</button>
+                        <div><label>Start Date</label><input type="date" id="liveStartDate" value="${currentSched.startDate}" ${canManageLive ? '' : 'disabled'}></div>
+                        <div><label>Days</label><input type="number" id="liveNumDays" value="${currentSched.days}" min="1" max="30" style="width:80px;" ${canManageLive ? '' : 'disabled'}></div>
+                        <div style="flex:1;"><label>Default Trainers</label><input type="text" id="liveTrainersInput" value="${(currentSched.trainers || ['Trainer 1', 'Trainer 2']).join(', ')}" placeholder="Trainer 1, Trainer 2..." ${canManageLive ? '' : 'disabled'}></div>
+                        ${canManageLive ? '<button class="btn-primary" onclick="saveLiveScheduleSettings()" style="height:38px;">Update Settings</button>' : '<span style="font-size:0.85rem; color:var(--text-muted);">Read Only</span>'}
                     </div>
                     <div id="liveSlotConfig" style="margin-top:10px; display:flex; gap:15px; flex-wrap:wrap;">
                         <label style="font-size:0.9rem; font-weight:bold;">Active Hours:</label>
                         ${["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].map(slot => `
                             <label style="cursor:pointer;">
-                                <input type="checkbox" id="slot_${slot.replace(/[: ]/g, '')}" ${currentSched.activeSlots && currentSched.activeSlots.includes(slot) ? 'checked' : ''}> ${slot}
+                                <input type="checkbox" id="slot_${slot.replace(/[: ]/g, '')}" ${currentSched.activeSlots && currentSched.activeSlots.includes(slot) ? 'checked' : ''} ${canManageLive ? '' : 'disabled'}> ${slot}
                             </label>
                         `).join('')}
-                        <button class="btn-danger btn-sm" onclick="clearLiveBookings()" style="margin-left:auto;">Reset / Clear</button>
+                        ${canManageLive ? '<button class="btn-danger btn-sm" onclick="clearLiveBookings()" style="margin-left:auto;">Reset / Clear</button>' : ''}
                     </div>
                 </div>
             `;
@@ -542,7 +643,7 @@ async function renderLiveTable() {
             adminPanel.innerHTML = controlsHtml;
             
             // Populate Dropdown if unassigned
-            if (!currentSched.assigned) {
+            if (!currentSched.assigned && canManageLive) {
                 populateScheduleDropdown('liveAssignSelect');
             }
         }
@@ -573,11 +674,9 @@ async function renderLiveTable() {
             dayTrainers = currentSched.dailyTrainers[dateKey];
         }
         
-        const trainerCountInfo = `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:5px;">${dayTrainers.length} Trainers</div>`;
-
         html += `<tr><td style="background:var(--bg-input); border-right:2px solid var(--border-color); vertical-align:middle;">
             <strong>${dayStr}</strong><br><span style="font-size:0.8rem; color:var(--text-muted);">${dateKey}</span>
-            ${isAdmin ? `<button class="btn-secondary btn-sm" style="display:block; margin-top:8px; width:100%; font-size:0.7rem;" onclick="editDailyTrainers('${dateKey}')"><i class="fas fa-user-edit"></i> Edit Trainers</button>` : ''}
+            ${canManageLive ? `<button class="btn-secondary btn-sm" style="display:block; margin-top:8px; width:100%; font-size:0.7rem;" onclick="editDailyTrainers('${dateKey}')"><i class="fas fa-user-edit"></i> Edit Trainers</button>` : ''}
         </td>`;
 
         activeSlots.forEach(time => {
@@ -592,12 +691,13 @@ async function renderLiveTable() {
             const effectiveTrainers = [...new Set([...dayTrainers, ...bookedTrainerNames])];
 
             effectiveTrainers.forEach(trainer => {
-                const slotId = `${dateKey}_${time}_${trainer.replace(' ','')}`;
+                const safeTrainerAttr = escapeHtmlAttr(trainer);
+                const safeTrainerJs = escapeInlineJs(trainer);
                 
                 // DROP ZONE WRAPPER
                 // We wrap the slot in a div that accepts drops.
                 // data attributes store the target coordinates.
-                html += `<div class="live-drop-zone" data-date="${dateKey}" data-time="${time}" data-trainer="${trainer}" 
+                html += `<div class="live-drop-zone" data-date="${dateKey}" data-time="${time}" data-trainer="${safeTrainerAttr}" 
                     ondragover="liveDragOver(event)" ondragleave="liveDragLeave(event)" ondrop="liveDrop(event)"
                     style="min-height:50px; border:2px dashed transparent; border-radius:4px; padding:4px; transition:0.2s; margin-bottom:5px;">`;
                 
@@ -606,20 +706,18 @@ async function renderLiveTable() {
                 const booking = slotBookings.find(b => b.trainer === trainer);
 
                 const isTaken = !!booking;
-                const isMine = booking && booking.trainee === CURRENT_USER.user;
+                const isMine = booking && bookingMatchesTrainee(booking, CURRENT_USER.user);
                 const isCompleted = booking && booking.status === 'Completed';
 
                 let highlightClass = '';
                 if (isTaken && searchTerm) {
-                    if (booking.trainee.toLowerCase().includes(searchTerm) || booking.assessment.toLowerCase().includes(searchTerm)) {
+                    if (normalizeScheduleText(booking.trainee).includes(searchTerm) || normalizeScheduleText(booking.assessment).includes(searchTerm)) {
                         highlightClass = 'search-match';
                     }
                 }
-
-                let slotHtml = '';
                 
                 // HEADER FOR TRAINER
-                html += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:2px; font-weight:bold; text-transform:uppercase;">${trainer}</div>`;
+                html += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:2px; font-weight:bold; text-transform:uppercase;">${escapeHtml(trainer)}</div>`;
 
                 if (isTaken) {
                     // BOOKED STATE
@@ -629,15 +727,15 @@ async function renderLiveTable() {
                     // Info Display
                     let info = '';
                     if (isMine || ['admin', 'super_admin', 'teamleader', 'special_viewer'].includes(CURRENT_USER.role)) {
-                        info = `<div style="font-weight:bold; font-size:0.85rem;">${booking.trainee}</div>
-                                <div style="font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${booking.assessment}</div>`;
+                        info = `<div style="font-weight:bold; font-size:0.85rem;">${escapeHtml(booking.trainee)}</div>
+                                <div style="font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(booking.assessment)}</div>`;
                     } else {
                         info = `<div style="font-style:italic; color:var(--text-muted);">Booked</div>`;
                     }
 
                     // Actions
                     let actions = '';
-                    if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && CURRENT_USER.role !== 'special_viewer') {
+                    if (canManageLive) {
                         // Admin: Cancel OR Mark Complete
                         const existingSession = allLiveSessions.find(s => s.bookingId === booking.id && s.active);
 
@@ -645,7 +743,7 @@ async function renderLiveTable() {
                             if (existingSession) {
                                 actions += `<button class="btn-warning btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="rejoinLiveSession('${existingSession.sessionId}')" title="Rejoin Active Session"><i class="fas fa-sign-in-alt"></i> Rejoin</button>`;
                             } else {
-                                actions += `<button class="btn-primary btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="initiateLiveSession('${booking.id}', '${booking.assessment}', '${booking.trainee}')" title="Start Live Session"><i class="fas fa-play"></i> Start</button>`;
+                                actions += `<button class="btn-primary btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="initiateLiveSession('${escapeInlineJs(booking.id)}')" title="Start Live Session"><i class="fas fa-play"></i> Start</button>`;
                                 actions += `<button class="btn-success btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="markBookingComplete('${booking.id}')" title="Mark Complete"><i class="fas fa-check"></i></button>`;
                             }
                         }
@@ -656,7 +754,7 @@ async function renderLiveTable() {
                     }
 
                     // DRAGGABLE ATTRIBUTES (Admin Only)
-                    const dragAttr = isAdmin ? `draggable="true" ondragstart="liveDragStart(event, '${booking.id}')" style="cursor:grab;"` : '';
+                    const dragAttr = canManageLive && !isCompleted ? `draggable="true" ondragstart="liveDragStart(event, '${escapeInlineJs(booking.id)}')" style="cursor:grab;"` : '';
 
                     html += `
                         <div class="slot-item ${statusClass} ${highlightClass}" ${dragAttr} style="margin-bottom:8px;">
@@ -672,7 +770,7 @@ async function renderLiveTable() {
                     const userBookedThisHour = bookings.some(b => 
                         b.date === dateKey && 
                         b.time === time && 
-                        b.trainee === CURRENT_USER.user && 
+                        bookingMatchesTrainee(b, CURRENT_USER.user) && 
                         b.status !== 'Cancelled'
                     );
 
@@ -682,11 +780,13 @@ async function renderLiveTable() {
                             html += `<div style="padding:5px; background:var(--bg-input); border-radius:4px; color:var(--text-muted); font-size:0.75rem; text-align:center; margin-bottom:8px;">Slot Limit</div>`;
                         } else {
                             // Available to book
-                            html += `<button class="btn-slot btn-book" style="margin-bottom:8px;" onclick="openBookingModal('${dateKey}', '${time}', '${trainer}')">+ Book</button>`;
+                            html += `<button class="btn-slot btn-book" style="margin-bottom:8px;" onclick="openBookingModal('${dateKey}', '${time}', '${safeTrainerJs}')">+ Book</button>`;
                         }
-                    } else {
+                    } else if (canManageLive) {
                          // Admin can manually assign a trainee
-                         html += `<button class="btn-slot" style="margin-bottom:8px; border:1px dashed var(--border-color); color:var(--text-muted); background:transparent;" onclick="openAdminBookingModal('${dateKey}', '${time}', '${trainer}')" title="Manually add a trainee to this slot">+ Assign Trainee</button>`;
+                         html += `<button class="btn-slot" style="margin-bottom:8px; border:1px dashed var(--border-color); color:var(--text-muted); background:transparent;" onclick="openAdminBookingModal('${dateKey}', '${time}', '${safeTrainerJs}')" title="Manually add a trainee to this slot">+ Assign Trainee</button>`;
+                    } else {
+                         html += `<div style="padding:5px; background:var(--bg-input); border-radius:4px; color:var(--text-muted); font-size:0.75rem; text-align:center; margin-bottom:8px;">Open Slot</div>`;
                     }
                 }
 
@@ -703,6 +803,7 @@ async function renderLiveTable() {
 
 // --- NEW: PER-DAY TRAINER EDIT ---
 window.editDailyTrainers = async function(dateKey) {
+    if (!isLiveBookingManager()) return;
     const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
     const current = liveSchedules[ACTIVE_LIVE_SCHED_ID];
     
@@ -776,25 +877,69 @@ document.addEventListener('dragend', (e) => {
 });
 
 async function moveLiveBooking(id, date, time, trainer) {
+    if (!isLiveBookingManager()) return;
+
     const originalBookingsJSON = localStorage.getItem('liveBookings') || '[]';
     const bookings = JSON.parse(originalBookingsJSON);
-    const targetBooking = bookings.find(b => b.id === id);
+    const targetBooking = bookings.find(b => String(b.id) === String(id));
     
     if (!targetBooking) return;
+    if (targetBooking.status === 'Completed' || targetBooking.status === 'Cancelled') {
+        if (typeof showToast === 'function') showToast("Only active booked slots can be moved.", "error");
+        return;
+    }
+    if (targetBooking.date === date && targetBooking.time === time && targetBooking.trainer === trainer) return;
+
+    const localConflict = bookings.some(b =>
+        String(b.id) !== String(id) &&
+        b.status !== 'Cancelled' &&
+        bookingMatchesTrainee(b, targetBooking.trainee) &&
+        b.date === date &&
+        b.time === time
+    );
+    if (localConflict) {
+        if (typeof showToast === 'function') showToast("This trainee already has another booking in that hour.", "error");
+        return;
+    }
 
     // ARCHITECTURAL FIX: ATOMIC COLLISION CHECK FOR DRAG & DROP
     // Ensure another admin didn't take this slot fractions of a second ago.
     if (window.supabaseClient) {
-        const { data: remoteConflict } = await window.supabaseClient.from('live_bookings')
+        const { data: remoteConflict, error: remoteConflictErr } = await window.supabaseClient.from('live_bookings')
             .select('id')
             .eq('data->>date', date)
             .eq('data->>time', time)
             .eq('data->>trainer', trainer)
             .neq('data->>status', 'Cancelled')
             .neq('id', id);
-            
+        if (remoteConflictErr) {
+            console.error(remoteConflictErr);
+            if (typeof showToast === 'function') showToast("Unable to validate slot right now. Please try again.", "error");
+            return;
+        }
+             
         if (remoteConflict && remoteConflict.length > 0) {
             if(typeof showToast === 'function') showToast("Target slot was just taken by another Admin.", "error");
+            if (typeof loadFromServer === 'function') await loadFromServer(true);
+            renderLiveTable();
+            return;
+        }
+
+        const { data: remoteHourConflict, error: remoteHourErr } = await window.supabaseClient.from('live_bookings')
+            .select('id')
+            .eq('data->>date', date)
+            .eq('data->>time', time)
+            .ilike('data->>trainee', targetBooking.trainee)
+            .neq('data->>status', 'Cancelled')
+            .neq('id', id);
+        if (remoteHourErr) {
+            console.error(remoteHourErr);
+            if (typeof showToast === 'function') showToast("Unable to validate trainee conflicts right now. Please try again.", "error");
+            return;
+        }
+
+        if (remoteHourConflict && remoteHourConflict.length > 0) {
+            if(typeof showToast === 'function') showToast("This trainee already has another booking in that hour.", "error");
             if (typeof loadFromServer === 'function') await loadFromServer(true);
             renderLiveTable();
             return;
@@ -804,6 +949,8 @@ async function moveLiveBooking(id, date, time, trainer) {
     targetBooking.date = date;
     targetBooking.time = time;
     targetBooking.trainer = trainer;
+    targetBooking.lastModified = new Date().toISOString();
+    targetBooking.modifiedBy = CURRENT_USER?.user || 'system';
     
     // Optimistic UI Update
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
@@ -814,7 +961,7 @@ async function moveLiveBooking(id, date, time, trainer) {
             const { error } = await window.supabaseClient
                 .from('live_bookings')
                 .update({ data: targetBooking, updated_at: new Date().toISOString() })
-                .eq('id', id);
+                .eq('id', targetBooking.id);
             if (error) throw error; // Throw to be caught by catch block
         }
     } catch (e) {
@@ -843,13 +990,13 @@ window.openLiveStatsModal = function() {
     
     // Get Data
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    
-    // Calculate Total Available Live Assessments
-    const liveNames = new Set();
-    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
-    const totalAvailable = liveNames.size;
-    const uniqueLiveTests = Array.from(liveNames);
+    const catalog = buildLiveAssessmentCatalog();
+    const liveAssessments = Array.from(catalog.byTitle.values()).sort((a, b) => a.title.localeCompare(b.title));
+    const totalAvailable = liveAssessments.length;
+
+    if (hydrateBookingAssessmentIds(bookings, catalog)) {
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+    }
 
     let rows = '';
     
@@ -857,13 +1004,16 @@ window.openLiveStatsModal = function() {
     trainees.sort().forEach(t => {
         // Filter bookings for this trainee
         // Note: We don't filter by date here, we look at ALL history for completion status
-        const myBookings = bookings.filter(b => b.trainee === t && b.status !== 'Cancelled');
+        const myBookings = bookings.filter(b => bookingMatchesTrainee(b, t) && b.status !== 'Cancelled');
         
         let completedCount = 0;
         let bookedCount = 0;
 
-        uniqueLiveTests.forEach(testName => {
-            const relatedBookings = myBookings.filter(b => b.assessment === testName);
+        liveAssessments.forEach(assessment => {
+            const relatedBookings = myBookings.filter(b => {
+                if (assessment.id && b.assessmentId) return String(b.assessmentId) === String(assessment.id);
+                return isSameScheduleValue(b.assessment, assessment.title);
+            });
             if (relatedBookings.length > 0) {
                 if (relatedBookings.some(b => b.status === 'Completed')) {
                     completedCount++;
@@ -883,7 +1033,7 @@ window.openLiveStatsModal = function() {
 
         rows += `
             <tr>
-                <td><div style="display:flex; align-items:center;">${getAvatarHTML(t, 24)} <strong>${t}</strong></div></td>
+                <td><div style="display:flex; align-items:center;">${getAvatarHTML(t, 24)} <strong>${escapeHtml(t)}</strong></div></td>
                 <td class="text-center">${bookedCount}</td>
                 <td class="text-center" style="font-weight:bold; color:#2ecc71;">${completedCount}</td>
                 <td class="text-center">${remaining}</td>
@@ -896,7 +1046,7 @@ window.openLiveStatsModal = function() {
                     </div>
                 </td>
                 <td class="text-right">
-                    <button class="btn-secondary btn-sm" onclick="viewTraineeLiveDetails('${t}')"><i class="fas fa-eye"></i> Details</button>
+                    <button class="btn-secondary btn-sm" onclick="viewTraineeLiveDetails('${escapeInlineJs(t)}')"><i class="fas fa-eye"></i> Details</button>
                 </td>
             </tr>
         `;
@@ -906,7 +1056,7 @@ window.openLiveStatsModal = function() {
         <div id="liveStatsModal" class="modal-overlay">
             <div class="modal-box" style="width:800px; max-width:95%;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-                    <h3 style="margin:0;"><i class="fas fa-chart-pie"></i> Assessment Breakdown: ${groupId}</h3>
+                    <h3 style="margin:0;"><i class="fas fa-chart-pie"></i> Assessment Breakdown: ${escapeHtml(groupId)}</h3>
                     <button class="btn-secondary" onclick="document.getElementById('liveStatsModal').remove()">&times;</button>
                 </div>
                 <div style="margin-bottom:15px; font-size:0.9rem; color:var(--text-muted);">
@@ -926,19 +1076,23 @@ window.openLiveStatsModal = function() {
 
 window.viewTraineeLiveDetails = function(trainee) {
     // Get Definitions
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const liveNames = new Set();
-    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
-    const uniqueLiveTests = Array.from(liveNames).sort();
+    const catalog = buildLiveAssessmentCatalog();
+    const liveAssessments = Array.from(catalog.byTitle.values()).sort((a, b) => a.title.localeCompare(b.title));
     
     // Get Data
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const myBookings = bookings.filter(b => b.trainee === trainee && b.status !== 'Cancelled');
+    if (hydrateBookingAssessmentIds(bookings, catalog)) {
+        localStorage.setItem('liveBookings', JSON.stringify(bookings));
+    }
+    const myBookings = bookings.filter(b => bookingMatchesTrainee(b, trainee) && b.status !== 'Cancelled');
     
     let rows = '';
     
-    uniqueLiveTests.forEach(testName => {
-        const relatedBookings = myBookings.filter(b => b.assessment === testName);
+    liveAssessments.forEach(assessment => {
+        const relatedBookings = myBookings.filter(b => {
+            if (assessment.id && b.assessmentId) return String(b.assessmentId) === String(assessment.id);
+            return isSameScheduleValue(b.assessment, assessment.title);
+        });
         let booking = null;
         if (relatedBookings.length > 0) {
             booking = relatedBookings.find(b => b.status === 'Completed') || relatedBookings.find(b => b.status === 'Booked') || relatedBookings[0];
@@ -950,16 +1104,16 @@ window.viewTraineeLiveDetails = function(trainee) {
         if (booking) {
             if (booking.status === 'Completed') {
                 statusHtml = `<span class="status-badge status-pass">Completed</span>`;
-                details = `<div style="font-size:0.8rem;">Score: <strong>${booking.score || 0}%</strong></div><div style="font-size:0.75rem; color:var(--text-muted);">${booking.date}</div>`;
+                details = `<div style="font-size:0.8rem;">Score: <strong>${booking.score || 0}%</strong></div><div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(booking.date)}</div>`;
             } else {
                 statusHtml = `<span class="status-badge status-improve">Booked</span>`;
-                details = `<div style="font-size:0.8rem;">${booking.date} @ ${booking.time}</div><div style="font-size:0.75rem; color:var(--text-muted);">Trainer: ${booking.trainer}</div>`;
+                details = `<div style="font-size:0.8rem;">${escapeHtml(booking.date)} @ ${escapeHtml(booking.time)}</div><div style="font-size:0.75rem; color:var(--text-muted);">Trainer: ${escapeHtml(booking.trainer)}</div>`;
             }
         }
         
         rows += `
             <tr>
-                <td>${testName}</td>
+                <td>${escapeHtml(assessment.title)}</td>
                 <td>${statusHtml}</td>
                 <td>${details}</td>
             </tr>
@@ -970,7 +1124,7 @@ window.viewTraineeLiveDetails = function(trainee) {
         <div id="liveDetailsModal" class="modal-overlay" style="z-index:10005;">
             <div class="modal-box" style="width:600px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-                    <h3 style="margin:0;"><i class="fas fa-list"></i> ${trainee} - Live Assessments</h3>
+                    <h3 style="margin:0;"><i class="fas fa-list"></i> ${escapeHtml(trainee)} - Live Assessments</h3>
                     <button class="btn-secondary" onclick="document.getElementById('liveDetailsModal').remove()">&times;</button>
                 </div>
                 <div class="table-responsive">
@@ -985,9 +1139,355 @@ window.viewTraineeLiveDetails = function(trainee) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+function getLiveBookingRecencyValue(booking) {
+    if (!booking || typeof booking !== 'object') return 0;
+    const candidates = [
+        booking.lastModified,
+        booking.updatedAt,
+        booking.updated_at,
+        booking.createdAt,
+        booking.cancelledAt
+    ];
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        const ts = new Date(candidate).getTime();
+        if (Number.isFinite(ts)) return ts;
+    }
+    return 0;
+}
+
+function pickPrimaryBooking(bookings) {
+    if (!Array.isArray(bookings) || bookings.length === 0) return null;
+    return bookings.slice().sort((a, b) => {
+        const aCompleted = a.status === 'Completed' ? 1 : 0;
+        const bCompleted = b.status === 'Completed' ? 1 : 0;
+        if (aCompleted !== bCompleted) return bCompleted - aCompleted;
+        return getLiveBookingRecencyValue(b) - getLiveBookingRecencyValue(a);
+    })[0];
+}
+
+function buildLiveBookingIntegrityReport(bookings) {
+    const safeBookings = Array.isArray(bookings) ? bookings : [];
+    const activeBookings = safeBookings.filter(b => b && b.status !== 'Cancelled');
+
+    const report = {
+        total: safeBookings.length,
+        active: activeBookings.length,
+        missingIds: [],
+        duplicateIds: [],
+        slotConflicts: [],
+        traineeHourConflicts: [],
+        duplicateAssessments: [],
+        unknownAssessments: [],
+        invalidStatuses: []
+    };
+
+    const validStatuses = new Set(['Booked', 'Completed', 'Cancelled']);
+    const catalog = buildLiveAssessmentCatalog();
+
+    const byId = new Map();
+    const bySlot = new Map();
+    const byTraineeHour = new Map();
+    const byAssessment = new Map();
+
+    safeBookings.forEach((booking, index) => {
+        if (!booking || typeof booking !== 'object') return;
+
+        if (!booking.id) report.missingIds.push({ index, booking });
+        if (!validStatuses.has(booking.status || '')) {
+            report.invalidStatuses.push({ index, booking, status: booking.status || '(empty)' });
+        }
+
+        const assessmentResolved = booking.assessmentId
+            ? catalog.byId.get(String(booking.assessmentId))
+            : catalog.byTitle.get(normalizeScheduleText(booking.assessment));
+        if (!assessmentResolved && booking.status !== 'Cancelled') {
+            report.unknownAssessments.push({ index, booking });
+        }
+
+        if (booking.id) {
+            const idKey = String(booking.id);
+            if (!byId.has(idKey)) byId.set(idKey, []);
+            byId.get(idKey).push(booking);
+        }
+
+        if (booking.status === 'Cancelled') return;
+
+        if (booking.date && booking.time && booking.trainer) {
+            const slotKey = `${booking.date}|${booking.time}|${normalizeScheduleText(booking.trainer)}`;
+            if (!bySlot.has(slotKey)) bySlot.set(slotKey, []);
+            bySlot.get(slotKey).push(booking);
+        }
+
+        if (booking.date && booking.time && booking.trainee) {
+            const traineeHourKey = `${normalizeScheduleText(booking.trainee)}|${booking.date}|${booking.time}`;
+            if (!byTraineeHour.has(traineeHourKey)) byTraineeHour.set(traineeHourKey, []);
+            byTraineeHour.get(traineeHourKey).push(booking);
+        }
+
+        if (booking.trainee) {
+            const assessmentKeyPart = booking.assessmentId
+                ? `id:${String(booking.assessmentId)}`
+                : `name:${normalizeScheduleText(booking.assessment)}`;
+            const assessKey = `${normalizeScheduleText(booking.trainee)}|${assessmentKeyPart}`;
+            if (!byAssessment.has(assessKey)) byAssessment.set(assessKey, []);
+            byAssessment.get(assessKey).push(booking);
+        }
+    });
+
+    byId.forEach((group, id) => { if (group.length > 1) report.duplicateIds.push({ id, group }); });
+    bySlot.forEach((group, key) => { if (group.length > 1) report.slotConflicts.push({ key, group }); });
+    byTraineeHour.forEach((group, key) => { if (group.length > 1) report.traineeHourConflicts.push({ key, group }); });
+    byAssessment.forEach((group, key) => { if (group.length > 1) report.duplicateAssessments.push({ key, group }); });
+
+    report.totalIssues =
+        report.missingIds.length +
+        report.duplicateIds.length +
+        report.slotConflicts.length +
+        report.traineeHourConflicts.length +
+        report.duplicateAssessments.length +
+        report.unknownAssessments.length +
+        report.invalidStatuses.length;
+
+    return report;
+}
+
+function renderLiveBookingIntegrityRows(report) {
+    const sections = [];
+    const pushSection = (title, count, detailsHtml) => {
+        sections.push(`
+            <div style="padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
+                <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                    <strong>${title}</strong>
+                    <span class="status-badge" style="${count > 0 ? 'background:#7f1d1d; color:#fecaca;' : 'background:#14532d; color:#bbf7d0;'}">${count}</span>
+                </div>
+                ${detailsHtml || ''}
+            </div>
+        `);
+    };
+
+    const smallList = (items, formatter) => {
+        if (!items || items.length === 0) return '';
+        const rows = items.slice(0, 4).map(formatter).join('');
+        const more = items.length > 4 ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">+${items.length - 4} more</div>` : '';
+        return `<div style="margin-top:8px; font-size:0.8rem; color:var(--text-muted);">${rows}${more}</div>`;
+    };
+
+    pushSection(
+        "Missing IDs",
+        report.missingIds.length,
+        smallList(report.missingIds, i => `<div>- ${escapeHtml(i.booking?.trainee || 'Unknown')} / ${escapeHtml(i.booking?.assessment || 'Unknown')}</div>`)
+    );
+    pushSection(
+        "Duplicate IDs",
+        report.duplicateIds.length,
+        smallList(report.duplicateIds, i => `<div>- ${escapeHtml(i.id)} (${i.group.length} entries)</div>`)
+    );
+    pushSection(
+        "Slot Collisions",
+        report.slotConflicts.length,
+        smallList(report.slotConflicts, i => `<div>- ${escapeHtml(i.key)} (${i.group.length} entries)</div>`)
+    );
+    pushSection(
+        "Trainee Hour Collisions",
+        report.traineeHourConflicts.length,
+        smallList(report.traineeHourConflicts, i => `<div>- ${escapeHtml(i.key)} (${i.group.length} entries)</div>`)
+    );
+    pushSection(
+        "Duplicate Trainee Assessments",
+        report.duplicateAssessments.length,
+        smallList(report.duplicateAssessments, i => `<div>- ${escapeHtml(i.key)} (${i.group.length} entries)</div>`)
+    );
+    pushSection(
+        "Unknown Assessments",
+        report.unknownAssessments.length,
+        smallList(report.unknownAssessments, i => `<div>- ${escapeHtml(i.booking?.trainee || 'Unknown')} / ${escapeHtml(i.booking?.assessment || 'Unknown')}</div>`)
+    );
+    pushSection(
+        "Invalid Status Values",
+        report.invalidStatuses.length,
+        smallList(report.invalidStatuses, i => `<div>- ${escapeHtml(i.status)} for ${escapeHtml(i.booking?.trainee || 'Unknown')}</div>`)
+    );
+
+    return sections.join('');
+}
+
+window.closeLiveBookingIntegrityModal = function() {
+    const modal = document.getElementById('liveBookingIntegrityModal');
+    if (modal) modal.remove();
+};
+
+window.openLiveBookingIntegrityModal = function() {
+    if (!isLiveBookingManager()) return;
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const report = buildLiveBookingIntegrityReport(bookings);
+
+    closeLiveBookingIntegrityModal();
+    const modalHtml = `
+        <div id="liveBookingIntegrityModal" class="modal-overlay" style="z-index:10020;">
+            <div class="modal-box" style="width:860px; max-width:96%;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                    <h3 style="margin:0;"><i class="fas fa-shield-alt" style="color:var(--primary);"></i> Live Booking Integrity Check</h3>
+                    <button class="btn-secondary" onclick="closeLiveBookingIntegrityModal()">&times;</button>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin-bottom:12px;">
+                    <div style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
+                        <div style="font-size:0.75rem; color:var(--text-muted);">Total Bookings</div>
+                        <div style="font-size:1.15rem; font-weight:700;">${report.total}</div>
+                    </div>
+                    <div style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
+                        <div style="font-size:0.75rem; color:var(--text-muted);">Active Bookings</div>
+                        <div style="font-size:1.15rem; font-weight:700;">${report.active}</div>
+                    </div>
+                    <div style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:${report.totalIssues > 0 ? 'rgba(127,29,29,0.18)' : 'rgba(20,83,45,0.18)'}; border-color:${report.totalIssues > 0 ? '#7f1d1d' : '#14532d'};">
+                        <div style="font-size:0.75rem; color:var(--text-muted);">Integrity Issues</div>
+                        <div style="font-size:1.15rem; font-weight:700;">${report.totalIssues}</div>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; max-height:52vh; overflow:auto; padding-right:3px;">
+                    ${renderLiveBookingIntegrityRows(report)}
+                </div>
+                <div style="display:flex; justify-content:space-between; gap:10px; margin-top:14px;">
+                    <button class="btn-secondary" onclick="openLiveBookingIntegrityModal()"><i class="fas fa-sync"></i> Refresh Scan</button>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-danger" onclick="runLiveBookingAutoRepair()"><i class="fas fa-wrench"></i> Auto-Repair Issues</button>
+                        <button class="btn-primary" onclick="closeLiveBookingIntegrityModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.runLiveBookingAutoRepair = async function() {
+    if (!isLiveBookingManager()) return;
+    if (!confirm("Run auto-repair on live bookings? This will normalize bad records and cancel conflicting duplicates.")) return;
+
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]').map((b, idx) => ({ ...(b || {}), __tmpKey: `row_${idx}` }));
+    const catalog = buildLiveAssessmentCatalog();
+    const nowIso = new Date().toISOString();
+    const validStatuses = new Set(['Booked', 'Completed', 'Cancelled']);
+    let changeCount = 0;
+
+    const markChanged = () => { changeCount++; };
+    const cancelForRepair = (booking, reason) => {
+        if (!booking || booking.status === 'Cancelled') return;
+        booking.status = 'Cancelled';
+        booking.cancelledBy = 'system_auto_repair';
+        booking.cancelledAt = nowIso;
+        booking.cancelledReason = reason;
+        booking.lastModified = nowIso;
+        booking.modifiedBy = CURRENT_USER?.user || 'system_auto_repair';
+        markChanged();
+    };
+
+    bookings.forEach(booking => {
+        if (!booking.id) {
+            booking.id = createLiveBookingId();
+            markChanged();
+        }
+        if (!validStatuses.has(booking.status || '')) {
+            booking.status = 'Booked';
+            markChanged();
+        }
+        if (!booking.assessmentId) {
+            const mapped = catalog.byTitle.get(normalizeScheduleText(booking.assessment));
+            if (mapped && mapped.id) {
+                booking.assessmentId = mapped.id;
+                markChanged();
+            }
+        }
+        booking.lastModified = booking.lastModified || nowIso;
+        booking.modifiedBy = booking.modifiedBy || (CURRENT_USER?.user || 'system_auto_repair');
+    });
+
+    // Deduplicate identical IDs by keeping strongest/latest record
+    const byId = new Map();
+    bookings.forEach(booking => {
+        const idKey = String(booking.id);
+        if (!byId.has(idKey)) byId.set(idKey, []);
+        byId.get(idKey).push(booking);
+    });
+
+    const removedKeys = new Set();
+    byId.forEach(group => {
+        if (group.length <= 1) return;
+        const keeper = pickPrimaryBooking(group);
+        group.forEach(item => {
+            if (item.__tmpKey !== keeper.__tmpKey) removedKeys.add(item.__tmpKey);
+        });
+        markChanged();
+    });
+    let repaired = bookings.filter(b => !removedKeys.has(b.__tmpKey));
+
+    // Resolve slot conflicts
+    const slotMap = new Map();
+    repaired.forEach(b => {
+        if (b.status === 'Cancelled' || !b.date || !b.time || !b.trainer) return;
+        const key = `${b.date}|${b.time}|${normalizeScheduleText(b.trainer)}`;
+        if (!slotMap.has(key)) slotMap.set(key, []);
+        slotMap.get(key).push(b);
+    });
+    slotMap.forEach(group => {
+        if (group.length <= 1) return;
+        const keeper = pickPrimaryBooking(group);
+        group.forEach(item => {
+            if (item.__tmpKey !== keeper.__tmpKey) cancelForRepair(item, 'slot-conflict-auto-repair');
+        });
+    });
+
+    // Resolve trainee-hour conflicts
+    const traineeHourMap = new Map();
+    repaired.forEach(b => {
+        if (b.status === 'Cancelled' || !b.date || !b.time || !b.trainee) return;
+        const key = `${normalizeScheduleText(b.trainee)}|${b.date}|${b.time}`;
+        if (!traineeHourMap.has(key)) traineeHourMap.set(key, []);
+        traineeHourMap.get(key).push(b);
+    });
+    traineeHourMap.forEach(group => {
+        if (group.length <= 1) return;
+        const keeper = pickPrimaryBooking(group);
+        group.forEach(item => {
+            if (item.__tmpKey !== keeper.__tmpKey) cancelForRepair(item, 'trainee-hour-conflict-auto-repair');
+        });
+    });
+
+    // Resolve duplicate trainee assessments
+    const assessmentMap = new Map();
+    repaired.forEach(b => {
+        if (b.status === 'Cancelled' || !b.trainee) return;
+        const assessmentPart = b.assessmentId ? `id:${String(b.assessmentId)}` : `name:${normalizeScheduleText(b.assessment)}`;
+        const key = `${normalizeScheduleText(b.trainee)}|${assessmentPart}`;
+        if (!assessmentMap.has(key)) assessmentMap.set(key, []);
+        assessmentMap.get(key).push(b);
+    });
+    assessmentMap.forEach(group => {
+        if (group.length <= 1) return;
+        const keeper = pickPrimaryBooking(group);
+        group.forEach(item => {
+            if (item.__tmpKey !== keeper.__tmpKey) cancelForRepair(item, 'duplicate-assessment-auto-repair');
+        });
+    });
+
+    repaired.forEach(b => delete b.__tmpKey);
+    localStorage.setItem('liveBookings', JSON.stringify(repaired));
+    renderLiveTable();
+
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['liveBookings'], true);
+    }
+
+    if (typeof showToast === 'function') {
+        showToast(changeCount > 0 ? `Auto-repair completed (${changeCount} changes).` : "No integrity issues required repair.", "success");
+    }
+    openLiveBookingIntegrityModal();
+};
+
 // --- LIVE SCHEDULE HELPERS ---
 
 function buildLiveTabs(liveSchedules) {
+    const canManage = isLiveBookingManager();
     const keys = Object.keys(liveSchedules).sort();
     let html = '<div class="sched-tabs-container" style="display:flex; gap:5px; border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:15px; overflow-x:auto;">';
     
@@ -1001,34 +1501,35 @@ function buildLiveTabs(liveSchedules) {
         return `<button class="sched-tab-btn ${isActive}" onclick="switchLiveScheduleTab('${key}')" style="padding: 8px 15px; border:1px solid var(--border-color); background:var(--bg-card); cursor:pointer; border-radius:6px; min-width:100px; text-align:left;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:bold; font-size:0.9rem;">Live Schedule ${key}</span>
-                ${CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader' ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteLiveSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
+                ${canManage ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteLiveSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
             </div>
             <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
         </button>`;
     }).join('');
 
-    if (CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader') {
+    if (canManage) {
         html += `<button onclick="createNewLiveSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Live Schedule"><i class="fas fa-plus"></i></button>`;
     }
     html += '</div>';
     return html;
 }
 
-function buildLiveToolbar(scheduleData, isAdmin) {
+function buildLiveToolbar(scheduleData) {
+    const canManage = isLiveBookingManager();
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
         return `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;">
-            <div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div>
+            <div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${escapeHtml(label)}</strong></div>
             <div>
-                <button class="btn-danger btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', null)">Unassign</button>
+                ${canManage ? `<button class="btn-danger btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', null)">Unassign</button>` : `<span style="color:var(--text-muted); font-size:0.85rem;">Read Only</span>`}
             </div>
         </div>`;
     } else {
         return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;">
             <i class="fas fa-exclamation-circle" style="color:orange;"></i>
             <span style="margin-right:auto;">This schedule is currently unassigned.</span>
-            <select id="liveAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select>
-            <button class="btn-primary btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', document.getElementById('liveAssignSelect').value)">Assign Roster</button>
+            ${canManage ? `<select id="liveAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select>
+            <button class="btn-primary btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', document.getElementById('liveAssignSelect').value)">Assign Roster</button>` : `<span style="color:var(--text-muted); font-size:0.85rem;">Read Only</span>`}
         </div>`;
     }
 }
@@ -1039,6 +1540,7 @@ function switchLiveScheduleTab(id) {
 }
 
 async function createNewLiveSchedule() {
+    if (!isLiveBookingManager()) return;
     const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
     const keys = Object.keys(liveSchedules).sort();
     const lastKey = keys[keys.length - 1];
@@ -1050,6 +1552,7 @@ async function createNewLiveSchedule() {
             days: 5,
             activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
             trainers: ["Trainer 1", "Trainer 2"],
+            dailyTrainers: {},
             assigned: null 
         };
         localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
@@ -1061,12 +1564,20 @@ async function createNewLiveSchedule() {
 }
 
 async function deleteLiveSchedule(id) {
+    if (!isLiveBookingManager()) return;
     if (!confirm(`Delete Live Schedule ${id}?`)) return;
     const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
     delete liveSchedules[id];
     
     if (Object.keys(liveSchedules).length === 0) {
-        liveSchedules["A"] = { startDate: new Date().toISOString().split('T')[0], days: 5, activeSlots: [], assigned: null };
+        liveSchedules["A"] = {
+            startDate: new Date().toISOString().split('T')[0],
+            days: 5,
+            activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+            trainers: ["Trainer 1", "Trainer 2"],
+            dailyTrainers: {},
+            assigned: null
+        };
     }
     
     localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
@@ -1076,6 +1587,7 @@ async function deleteLiveSchedule(id) {
 }
 
 async function assignRosterToLiveSchedule(schedId, groupId) {
+    if (!isLiveBookingManager()) return;
     const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
     
     // Check conflict
@@ -1106,130 +1618,6 @@ function getTraineeLiveScheduleId(username, liveSchedules) {
     return Object.keys(liveSchedules).find(key => liveSchedules[key].assigned === myGroupId) || null;
 }
 
-// --- LIVE SCHEDULE HELPERS ---
-
-function buildLiveTabs(liveSchedules) {
-    const keys = Object.keys(liveSchedules).sort();
-    let html = '<div class="sched-tabs-container" style="display:flex; gap:5px; border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:15px; overflow-x:auto;">';
-    
-    html += keys.map(key => {
-        const isActive = key === ACTIVE_LIVE_SCHED_ID ? 'active' : '';
-        const data = liveSchedules[key];
-        let subLabel = "Unassigned";
-        if (data.assigned) {
-            subLabel = (typeof getGroupLabel === 'function') ? getGroupLabel(data.assigned).split('[')[0] : data.assigned;
-        }
-        return `<button class="sched-tab-btn ${isActive}" onclick="switchLiveScheduleTab('${key}')" style="padding: 8px 15px; border:1px solid var(--border-color); background:var(--bg-card); cursor:pointer; border-radius:6px; min-width:100px; text-align:left;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:bold; font-size:0.9rem;">Live Schedule ${key}</span>
-                ${CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader' ? `<i class="fas fa-times" onclick="event.stopPropagation(); deleteLiveSchedule('${key}')" style="font-size:0.8rem; color:#ff5252; opacity:0.6; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6" title="Delete Schedule"></i>` : ''}
-            </div>
-            <div style="font-size:0.75rem; color:${data.assigned ? 'var(--primary)' : 'var(--text-muted)'};">${subLabel}</div>
-        </button>`;
-    }).join('');
-
-    if (CURRENT_USER.role !== 'special_viewer' && CURRENT_USER.role !== 'teamleader') {
-        html += `<button onclick="createNewLiveSchedule()" style="padding: 8px 12px; border:1px dashed var(--border-color); background:transparent; cursor:pointer; border-radius:6px; color:var(--primary);" title="Create New Live Schedule"><i class="fas fa-plus"></i></button>`;
-    }
-    html += '</div>';
-    return html;
-}
-
-function buildLiveToolbar(scheduleData) {
-    if (scheduleData.assigned) {
-        const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;">
-            <div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div>
-            <div><button class="btn-danger btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', null)">Unassign</button></div>
-        </div>`;
-    } else {
-        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;">
-            <i class="fas fa-exclamation-circle" style="color:orange;"></i>
-            <span style="margin-right:auto;">This schedule is currently unassigned.</span>
-            <select id="liveAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select>
-            <button class="btn-primary btn-sm" onclick="assignRosterToLiveSchedule('${ACTIVE_LIVE_SCHED_ID}', document.getElementById('liveAssignSelect').value)">Assign Roster</button>
-        </div>`;
-    }
-}
-
-function switchLiveScheduleTab(id) {
-    ACTIVE_LIVE_SCHED_ID = id;
-    renderLiveTable();
-}
-
-async function createNewLiveSchedule() {
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
-    const keys = Object.keys(liveSchedules).sort();
-    const lastKey = keys[keys.length - 1];
-    const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
-    
-    if (confirm(`Create new Live Schedule '${nextKey}'?`)) {
-        liveSchedules[nextKey] = { 
-            startDate: new Date().toISOString().split('T')[0],
-            days: 5,
-            activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
-            assigned: null 
-        };
-        localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
-        await secureScheduleSave();
-        ACTIVE_LIVE_SCHED_ID = nextKey;
-        renderLiveTable();
-    }
-}
-
-async function deleteLiveSchedule(id) {
-    if (!confirm(`Delete Live Schedule ${id}?`)) return;
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
-    delete liveSchedules[id];
-    
-    // Re-index keys to ensure continuity (A, B, C...)
-    const oldKeys = Object.keys(liveSchedules).sort();
-    const newSchedules = {};
-
-    if (oldKeys.length === 0) {
-        newSchedules["A"] = { startDate: new Date().toISOString().split('T')[0], days: 5, activeSlots: [], assigned: null };
-    } else {
-        oldKeys.forEach((oldKey, index) => {
-            const newKey = String.fromCharCode(65 + index); // 65 = 'A'
-            newSchedules[newKey] = liveSchedules[oldKey];
-        });
-    }
-    
-    localStorage.setItem('liveSchedules', JSON.stringify(newSchedules));
-    // FIX: Use force=true to prevent ghost data (merge restoring deleted schedule)
-    if(typeof saveToServer === 'function') await saveToServer(['liveSchedules'], true);
-    ACTIVE_LIVE_SCHED_ID = Object.keys(newSchedules).sort()[0];
-    renderLiveTable();
-}
-
-async function assignRosterToLiveSchedule(schedId, groupId) {
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
-    
-    // Check conflict
-    if (groupId) {
-        const conflict = Object.keys(liveSchedules).find(k => liveSchedules[k].assigned === groupId);
-        if (conflict) {
-            if (!confirm(`Group '${groupId}' is already assigned to Live Schedule ${conflict}. Move it here?`)) return;
-            liveSchedules[conflict].assigned = null;
-        }
-    }
-
-    liveSchedules[schedId].assigned = groupId;
-    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
-    await secureScheduleSave();
-    renderLiveTable();
-}
-
-function getTraineeLiveScheduleId(username, liveSchedules) {
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    let myGroupId = null;
-    for (const [gid, members] of Object.entries(rosters)) {
-        if (members.includes(username)) { myGroupId = gid; break; }
-    }
-    if (!myGroupId) return null;
-    return Object.keys(liveSchedules).find(key => liveSchedules[key].assigned === myGroupId) || null;
-}
-
 // --- BOOKING LOGIC ---
 
 let PENDING_BOOKING = null;
@@ -1239,20 +1627,13 @@ function openBookingModal(date, time, trainer) {
     const modal = document.getElementById('bookingModal');
     
     document.getElementById('bookingDetailsText').innerHTML = `
-        Booking with <strong style="color:var(--primary);">${trainer}</strong><br>
-        ${date} @ ${time}`;
+        Booking with <strong style="color:var(--primary);">${escapeHtml(trainer)}</strong><br>
+        ${escapeHtml(date)} @ ${escapeHtml(time)}`;
     
-    // Populate Assessments
-    // PULLS DYNAMICALLY FROM TEST ENGINE (Only tests with type 'live')
     const assessSelect = document.getElementById('bookingAssessment');
     assessSelect.innerHTML = '';
-    
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    
-    const liveNames = new Set();
-    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
-    
-    let availableList = Array.from(liveNames);
+    const catalog = buildLiveAssessmentCatalog();
+    let availableList = Array.from(catalog.byTitle.values()).sort((a, b) => a.title.localeCompare(b.title));
     
     // FILTER FOR TRAINEES
     if (CURRENT_USER.role === 'trainee') {
@@ -1260,22 +1641,28 @@ function openBookingModal(date, time, trainer) {
         const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
         const schedId = getTraineeLiveScheduleId(CURRENT_USER.user, liveSchedules);
         
-        if (!schedId) availableList = [];
         if (!schedId) {
             availableList = [];
         } else {
             // FILTER OUT ALREADY BOOKED/COMPLETED ASSESSMENTS
             const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-            const myTaken = bookings.filter(b => b.trainee === CURRENT_USER.user && b.status !== 'Cancelled').map(b => b.assessment);
-            availableList = availableList.filter(name => !myTaken.includes(name));
+            if (hydrateBookingAssessmentIds(bookings, catalog)) {
+                localStorage.setItem('liveBookings', JSON.stringify(bookings));
+            }
+            const myTaken = bookings.filter(b => bookingMatchesTrainee(b, CURRENT_USER.user) && b.status !== 'Cancelled');
+            availableList = availableList.filter(assessment => {
+                return !myTaken.some(booking => bookingMatchesAssessment(booking, assessment));
+            });
         }
     }
     
     if(availableList.length === 0) {
-        assessSelect.innerHTML = '<option>No Available Assessments</option>';
+        assessSelect.innerHTML = '<option value="">No Available Assessments</option>';
     } else {
-        availableList.sort().forEach(name => {
-            assessSelect.add(new Option(name, name));
+        availableList.forEach(assessment => {
+            const opt = new Option(assessment.title, assessment.title);
+            if (assessment.id) opt.dataset.testId = assessment.id;
+            assessSelect.add(opt);
         });
     }
 
@@ -1298,12 +1685,13 @@ function closeBookingModal() {
 
 // --- NEW: ADMIN MANUAL ASSIGNMENT ---
 window.openAdminBookingModal = function(date, time, trainer) {
+    if (!isLiveBookingManager()) return;
     PENDING_BOOKING = { date, time, trainer };
     const modal = document.getElementById('bookingModal');
     
     document.getElementById('bookingDetailsText').innerHTML = `
-        Assigning to <strong style="color:var(--primary);">${trainer}</strong><br>
-        ${date} @ ${time}`;
+        Assigning to <strong style="color:var(--primary);">${escapeHtml(trainer)}</strong><br>
+        ${escapeHtml(date)} @ ${escapeHtml(time)}`;
     
     const assessSelect = document.getElementById('bookingAssessment');
     assessSelect.innerHTML = '';
@@ -1323,7 +1711,7 @@ window.openAdminBookingModal = function(date, time, trainer) {
         trainees = users.filter(u => u.role === 'trainee').map(u => u.user);
     }
     
-    trainees.sort().forEach(t => { traineeSelectHtml += `<option value="${t}">${t}</option>`; });
+    trainees.sort().forEach(t => { traineeSelectHtml += `<option value="${escapeHtmlAttr(t)}">${escapeHtml(t)}</option>`; });
     traineeSelectHtml += `</select>`;
     
     let extraDiv = document.getElementById('adminBookingExtra');
@@ -1334,12 +1722,12 @@ window.openAdminBookingModal = function(date, time, trainer) {
     }
     extraDiv.innerHTML = traineeSelectHtml;
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const liveNames = new Set();
-    tests.forEach(t => { if(t.type === 'live') liveNames.add(t.title); });
-    
-    Array.from(liveNames).sort().forEach(name => {
-        assessSelect.add(new Option(name, name));
+    const catalog = buildLiveAssessmentCatalog();
+    const liveAssessments = Array.from(catalog.byTitle.values()).sort((a, b) => a.title.localeCompare(b.title));
+    liveAssessments.forEach(assessment => {
+        const opt = new Option(assessment.title, assessment.title);
+        if (assessment.id) opt.dataset.testId = assessment.id;
+        assessSelect.add(opt);
     });
 
     const confirmBtn = document.querySelector('#bookingModal .btn-primary');
@@ -1349,43 +1737,93 @@ window.openAdminBookingModal = function(date, time, trainer) {
 };
 
 window.confirmAdminBooking = async function() {
+    if (!isLiveBookingManager()) return;
     if(!PENDING_BOOKING) return;
     
     const trainee = document.getElementById('adminBookingTrainee').value;
-    const assess = document.getElementById('bookingAssessment').value;
+    const assessMeta = getSelectedAssessmentMeta(document.getElementById('bookingAssessment'));
+    const assess = assessMeta.title;
     
     if (!trainee) return alert("Select a trainee.");
     if (!assess) return alert("Select an assessment.");
 
     const btn = document.querySelector('#bookingModal .btn-primary');
     if(btn) { btn.innerText = "Assigning..."; btn.disabled = true; }
+    let optimisticSnapshot = null;
 
     try {
-        // Check for conflicts directly on the server
-        const { data: conflict } = await window.supabaseClient.from('live_bookings').select('id').eq('data->>date', PENDING_BOOKING.date).eq('data->>time', PENDING_BOOKING.time).eq('data->>trainer', PENDING_BOOKING.trainer).neq('data->>status', 'Cancelled');
-        if (conflict && conflict.length > 0) return alert("This slot is already taken.");
-        
-        // Check for duplicate assessment for this trainee directly on the server
-        const { data: dupAssess } = await window.supabaseClient.from('live_bookings')
-            .select('id')
-            .eq('data->>trainee', trainee)
-            .eq('data->>assessment', assess)
-            .neq('data->>status', 'Cancelled');
+        if (window.supabaseClient) {
+            // Check for conflicts directly on the server
+            const { data: conflict, error: conflictErr } = await window.supabaseClient.from('live_bookings').select('id').eq('data->>date', PENDING_BOOKING.date).eq('data->>time', PENDING_BOOKING.time).eq('data->>trainer', PENDING_BOOKING.trainer).neq('data->>status', 'Cancelled');
+            if (conflictErr) throw conflictErr;
+            if (conflict && conflict.length > 0) return alert("This slot is already taken.");
             
-        if (dupAssess && dupAssess.length > 0) return alert(`Agent ${trainee} already has a booking for '${assess}'.`);
+            // Check for duplicate assessment for this trainee directly on the server
+            let dupAssess = null;
+            if (assessMeta.id) {
+                const res = await window.supabaseClient.from('live_bookings')
+                    .select('id')
+                    .ilike('data->>trainee', trainee)
+                    .eq('data->>assessmentId', String(assessMeta.id))
+                    .neq('data->>status', 'Cancelled');
+                    if (res.error) throw res.error;
+                dupAssess = res.data;
+            }
+            if (!dupAssess || dupAssess.length === 0) {
+                const res = await window.supabaseClient.from('live_bookings')
+                .select('id')
+                .ilike('data->>trainee', trainee)
+                .ilike('data->>assessment', assess)
+                .neq('data->>status', 'Cancelled');
+                if (res.error) throw res.error;
+                dupAssess = res.data;
+            }
+                
+            if (dupAssess && dupAssess.length > 0) return alert(`Agent ${trainee} already has a booking for '${assess}'.`);
+        }
 
+        const existingBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const localSlotConflict = existingBookings.some(b =>
+            b.status !== 'Cancelled' &&
+            b.date === PENDING_BOOKING.date &&
+            b.time === PENDING_BOOKING.time &&
+            b.trainer === PENDING_BOOKING.trainer
+        );
+        if (localSlotConflict) return alert("This slot is already taken.");
+
+        const localHourConflict = existingBookings.some(b =>
+            b.status !== 'Cancelled' &&
+            bookingMatchesTrainee(b, trainee) &&
+            b.date === PENDING_BOOKING.date &&
+            b.time === PENDING_BOOKING.time
+        );
+        if (localHourConflict) return alert(`Agent ${trainee} already has another booking in this hour.`);
+
+        const localDupAssess = existingBookings.some(b =>
+            b.status !== 'Cancelled' &&
+            bookingMatchesTrainee(b, trainee) &&
+            bookingMatchesAssessment(b, assessMeta)
+        );
+        if (localDupAssess) return alert(`Agent ${trainee} already has a booking for '${assess}'.`);
+
+        const nowIso = new Date().toISOString();
         const newBooking = {
-            id: Date.now().toString(),
+            id: createLiveBookingId(),
             date: PENDING_BOOKING.date,
             time: PENDING_BOOKING.time,
             trainer: PENDING_BOOKING.trainer,
             trainee: trainee,
             assessment: assess,
-            status: 'Booked'
+            assessmentId: assessMeta.id || null,
+            status: 'Booked',
+            createdAt: nowIso,
+            lastModified: nowIso,
+            modifiedBy: CURRENT_USER?.user || 'system'
         };
         
         // Optimistic UI Update
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const bookings = existingBookings;
+        optimisticSnapshot = JSON.stringify(bookings);
         bookings.push(newBooking);
         localStorage.setItem('liveBookings', JSON.stringify(bookings));
         closeBookingModal();
@@ -1396,10 +1834,18 @@ window.confirmAdminBooking = async function() {
             const { error } = await window.supabaseClient.from('live_bookings').insert({ id: newBooking.id, data: newBooking, trainee: newBooking.trainee, updated_at: new Date().toISOString() });
             if (error) throw error;
         }
-        
+        if (typeof updateNotifications === 'function') updateNotifications();
 
     } catch(e) {
         console.error(e);
+        if (typeof showToast === 'function') showToast("Failed to assign trainee. Reverting local change.", "error");
+        if (optimisticSnapshot) {
+            localStorage.setItem('liveBookings', optimisticSnapshot);
+            renderLiveTable();
+        }
+        if (typeof loadFromServer === 'function') {
+            await loadFromServer(true);
+        }
         alert("Failed to assign trainee.");
     } finally {
         if(btn) { btn.innerText = "Confirm"; btn.disabled = false; }
@@ -1409,12 +1855,14 @@ window.confirmAdminBooking = async function() {
 async function confirmBooking() {
     if(!PENDING_BOOKING) return;
     
-    const assess = document.getElementById('bookingAssessment').value;
+    const assessMeta = getSelectedAssessmentMeta(document.getElementById('bookingAssessment'));
+    const assess = assessMeta.title;
     if(!assess) return alert("Select an assessment.");
 
     // UI FEEDBACK: Prevent double clicks
     const btn = document.querySelector('#bookingModal .btn-primary');
     if(btn) { btn.innerText = "Checking Availability..."; btn.disabled = true; }
+    let optimisticSnapshot = null;
 
     try {
         // 1. ATOMIC COLLISION CHECK (TIMEBOMB 3 FIX)
@@ -1427,6 +1875,7 @@ async function confirmBooking() {
                 .eq('data->>trainer', PENDING_BOOKING.trainer)
                 .neq('data->>status', 'Cancelled');
                 
+            if (error) throw error;
             if (conflict && conflict.length > 0) {
                 alert("This slot was just taken by another user. Please choose another time.");
                 closeBookingModal();
@@ -1436,11 +1885,25 @@ async function confirmBooking() {
             }
             
             // ATOMIC DUPLICATE ASSESSMENT CHECK
-            const { data: dupAssess } = await window.supabaseClient.from('live_bookings')
-                .select('id')
-                .eq('data->>trainee', CURRENT_USER.user)
-                .eq('data->>assessment', assess)
-                .neq('data->>status', 'Cancelled');
+            let dupAssess = null;
+            if (assessMeta.id) {
+                const res = await window.supabaseClient.from('live_bookings')
+                    .select('id')
+                    .ilike('data->>trainee', CURRENT_USER.user)
+                    .eq('data->>assessmentId', String(assessMeta.id))
+                    .neq('data->>status', 'Cancelled');
+                if (res.error) throw res.error;
+                dupAssess = res.data;
+            }
+            if (!dupAssess || dupAssess.length === 0) {
+                const res = await window.supabaseClient.from('live_bookings')
+                    .select('id')
+                    .ilike('data->>trainee', CURRENT_USER.user)
+                    .ilike('data->>assessment', assess)
+                    .neq('data->>status', 'Cancelled');
+                if (res.error) throw res.error;
+                dupAssess = res.data;
+            }
                 
             if (dupAssess && dupAssess.length > 0) {
                 alert(`You already have an active or completed booking for '${assess}'.`);
@@ -1456,7 +1919,7 @@ async function confirmBooking() {
         const isUserBookedThisHour = bookings.some(b => 
             b.date === PENDING_BOOKING.date && 
             b.time === PENDING_BOOKING.time && 
-            b.trainee === CURRENT_USER.user && 
+            bookingMatchesTrainee(b, CURRENT_USER.user) && 
             b.status !== 'Cancelled'
         );
         if(isUserBookedThisHour) {
@@ -1466,8 +1929,8 @@ async function confirmBooking() {
 
         // VALIDATION 3: Duplicate Assessment?
         const existingBooking = bookings.find(b => 
-            b.trainee === CURRENT_USER.user && 
-            b.assessment === assess && 
+            bookingMatchesTrainee(b, CURRENT_USER.user) &&
+            bookingMatchesAssessment(b, assessMeta) &&
             b.status !== 'Cancelled'
         );
         
@@ -1477,17 +1940,23 @@ async function confirmBooking() {
         }
 
         // CREATE BOOKING
+        const nowIso = new Date().toISOString();
         const newBooking = {
-            id: Date.now().toString(),
+            id: createLiveBookingId(),
             date: PENDING_BOOKING.date,
             time: PENDING_BOOKING.time,
             trainer: PENDING_BOOKING.trainer,
             trainee: CURRENT_USER.user,
             assessment: assess,
-            status: 'Booked'
+            assessmentId: assessMeta.id || null,
+            status: 'Booked',
+            createdAt: nowIso,
+            lastModified: nowIso,
+            modifiedBy: CURRENT_USER?.user || 'system'
         };
 
         // Optimistic UI Update
+        optimisticSnapshot = JSON.stringify(bookings);
         bookings.push(newBooking);
         localStorage.setItem('liveBookings', JSON.stringify(bookings));
         closeBookingModal();
@@ -1503,6 +1972,16 @@ async function confirmBooking() {
 
     } catch (e) {
         console.error("Booking Error:", e);
+        if (typeof showToast === 'function') showToast("Booking failed. Reverting local change.", "error");
+        if (optimisticSnapshot) {
+            localStorage.setItem('liveBookings', optimisticSnapshot);
+            renderLiveTable();
+        }
+        if (typeof loadFromServer === 'function') {
+            await loadFromServer(true);
+        } else {
+            renderLiveTable();
+        }
         alert("An error occurred while connecting to the schedule server. Please try again.");
     } finally {
         if(btn) { btn.innerText = "Confirm Booking"; btn.disabled = false; }
@@ -1513,30 +1992,39 @@ async function cancelBooking(id) {
     // ARCHITECTURAL FIX: DOUBLE-CLICK CANCELLATION RACE CONDITION
     if (window._isCancelling === id) return;
     window._isCancelling = id;
+    const lockId = id;
+    let bookingSnapshot = null;
+    try {
+        if(!confirm("Are you sure you want to cancel this booking?")) return;
 
-    if(!confirm("Are you sure you want to cancel this booking?")) return;
+        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const target = bookings.find(b => String(b.id) === String(id));
+        if (!target) return;
 
-    // CHECK CANCELLATION POLICY
-    if(CURRENT_USER.role === 'trainee') {
-        const counts = JSON.parse(localStorage.getItem('cancellationCounts') || '{}');
-        const myCount = counts[CURRENT_USER.user] || 0;
-        
-        if(myCount >= 1) {
-            alert("Cancellation Limit Reached.\n\nPlease contact your trainer to change this booking.");
-            window._isCancelling = null;
+        const canManage = isLiveBookingManager();
+        const isOwner = bookingMatchesTrainee(target, CURRENT_USER.user);
+        if (!canManage && !isOwner) {
+            alert("You do not have permission to cancel this booking.");
             return;
         }
-        
-        counts[CURRENT_USER.user] = myCount + 1;
-        localStorage.setItem('cancellationCounts', JSON.stringify(counts));
-    }
 
-    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const target = bookings.find(b => b.id === id);
-    if(target) {
+        // CHECK CANCELLATION POLICY
+        const countSnapshot = localStorage.getItem('cancellationCounts') || '{}';
+        if(CURRENT_USER.role === 'trainee' && !canManage) {
+            const counts = JSON.parse(countSnapshot);
+            const myCount = counts[CURRENT_USER.user] || 0;
+            if(myCount >= 1) {
+                alert("Cancellation Limit Reached.\n\nPlease contact your trainer to change this booking.");
+                return;
+            }
+        }
+
+        bookingSnapshot = JSON.stringify(bookings);
         target.status = 'Cancelled';
         target.cancelledBy = CURRENT_USER.user;
         target.cancelledAt = new Date().toISOString();
+        target.lastModified = new Date().toISOString();
+        target.modifiedBy = CURRENT_USER?.user || 'system';
 
         // Optimistic UI Update
         localStorage.setItem('liveBookings', JSON.stringify(bookings));
@@ -1544,52 +2032,68 @@ async function cancelBooking(id) {
 
         // Direct Supabase call
         if (window.supabaseClient) {
-            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target, updated_at: new Date().toISOString() }).eq('id', id);
-            if (error) { 
-                alert("Failed to cancel booking."); 
-                console.error(error); 
-                if(typeof loadFromServer === 'function') await loadFromServer(true); // Revert
-                renderLiveTable();
-                window._isCancelling = null;
-                return; 
-            }
+            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target, updated_at: new Date().toISOString() }).eq('id', target.id);
+            if (error) throw error;
         }
         
-        // Also save cancellation counts authoritatively
-        if(typeof saveToServer === 'function') {
-            await saveToServer(['cancellationCounts'], true);
+        // Increment cancellation count only after successful cancel write
+        if(CURRENT_USER.role === 'trainee' && !canManage) {
+            const counts = JSON.parse(countSnapshot);
+            const myCount = counts[CURRENT_USER.user] || 0;
+            counts[CURRENT_USER.user] = myCount + 1;
+            localStorage.setItem('cancellationCounts', JSON.stringify(counts));
+            if(typeof saveToServer === 'function') await saveToServer(['cancellationCounts'], true);
         }
+        if (typeof updateNotifications === 'function') updateNotifications();
+    } catch (error) {
+        console.error(error);
+        alert("Failed to cancel booking.");
+        if (typeof bookingSnapshot === 'string') {
+            localStorage.setItem('liveBookings', bookingSnapshot);
+        }
+        if (typeof loadFromServer === 'function') await loadFromServer(true);
+        renderLiveTable();
+    } finally {
+        setTimeout(() => {
+            if (window._isCancelling === lockId) window._isCancelling = null;
+        }, 300);
     }
-    setTimeout(() => { window._isCancelling = null; }, 1000);
 }
 
 async function markBookingComplete(id) {
-    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const target = bookings.find(b => b.id === id);
-    if(target) {
-        target.status = 'Completed';
-        
-        // Optimistic UI Update
-        localStorage.setItem('liveBookings', JSON.stringify(bookings));
-        renderLiveTable();
+    if (!isLiveBookingManager()) return;
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const target = bookings.find(b => String(b.id) === String(id));
+    if(!target) return;
 
-        // Direct Supabase call
+    const snapshot = JSON.stringify(bookings);
+    target.status = 'Completed';
+    target.lastModified = new Date().toISOString();
+    target.modifiedBy = CURRENT_USER?.user || 'system';
+    
+    // Optimistic UI Update
+    localStorage.setItem('liveBookings', JSON.stringify(bookings));
+    renderLiveTable();
+
+    try {
         if (window.supabaseClient) {
-            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target, updated_at: new Date().toISOString() }).eq('id', id);
-            if (error) { 
-                alert("Failed to update booking."); 
-                console.error(error); 
-                if(typeof loadFromServer === 'function') await loadFromServer(true); // Revert
-                renderLiveTable();
-                return; 
-            }
+            const { error } = await window.supabaseClient.from('live_bookings').update({ data: target, updated_at: new Date().toISOString() }).eq('id', target.id);
+            if (error) throw error;
         }
+        if (typeof updateNotifications === 'function') updateNotifications();
+    } catch (error) {
+        alert("Failed to update booking.");
+        console.error(error);
+        localStorage.setItem('liveBookings', snapshot);
+        if(typeof loadFromServer === 'function') await loadFromServer(true);
+        renderLiveTable();
     }
 }
 
 // --- ADMIN SETTINGS ---
 
 async function saveLiveScheduleSettings() {
+    if (!isLiveBookingManager()) return;
     const start = document.getElementById('liveStartDate').value;
     const days = document.getElementById('liveNumDays').value;
     const trainersStr = document.getElementById('liveTrainersInput').value;
@@ -1623,6 +2127,7 @@ async function saveLiveScheduleSettings() {
 }
 
 async function clearLiveBookings() {
+    if (!isLiveBookingManager()) return;
     if(!confirm("Are you sure? This will remove ALL booking history.")) return;
 
     const btn = document.activeElement;

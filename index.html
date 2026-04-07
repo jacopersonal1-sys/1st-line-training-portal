@@ -1148,18 +1148,159 @@
                 <button class="btn-primary" style="width:auto; margin-top:15px;" onclick="saveThemeSettings()">Apply & Save Changes</button>
             </div>
 
-            <div class="card" style="margin-top:20px; border:1px dashed var(--primary);">
-                <h3><i class="fas fa-flask" style="color:var(--primary);"></i> Experimental Themes</h3>
-                <p style="color:var(--text-muted); margin-bottom:15px;">Try out these auto-generated visual styles. Click 'Reset to Original' to revert.</p>
-                
-                <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-cyberpunk')" style="border-color:#00f3ff; color:#00f3ff;">Neon Nights</button>
-                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-ocean')" style="border-color:#4fc3f7; color:#4fc3f7;">Deep Sea</button>
-                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-forest')" style="border-color:#76c893; color:#76c893;">Enchanted Forest</button>
-                    <button class="btn-secondary" onclick="applyExperimentalTheme('theme-royal')" style="border-color:#9d4edd; color:#9d4edd;">Royal Amethyst</button>
+            <div class="card exp-theme-lab-card" style="margin-top:20px;">
+                <div class="exp-theme-headline">
+                    <h3 style="margin:0;"><i class="fas fa-flask" style="color:var(--primary);"></i> Experimental Themes</h3>
+                    <span id="expThemeCurrentBadge" class="exp-theme-current">Current: Original</span>
                 </div>
-                
-                <button class="btn-danger" style="margin-top:15px; width:auto;" onclick="applyExperimentalTheme(null)"><i class="fas fa-undo"></i> Reset to Original</button>
+                <p class="exp-theme-subtitle">Quick visual presets for this terminal. These are reversible and do not delete your saved profile theme.</p>
+
+                <div class="exp-theme-grid">
+                    <button class="exp-theme-option" data-exp-theme="theme-custom-lab" onclick="applyExperimentalTheme('theme-custom-lab')">
+                        <div class="exp-theme-option-top">
+                            <strong>Custom Lab</strong>
+                            <span class="exp-theme-active-tag">Active</span>
+                        </div>
+                        <div class="exp-theme-swatch-row">
+                            <span id="expCustomSwatchAccent" style="background:#5db2ff;"></span>
+                            <span id="expCustomSwatchBg" style="background:#0b1726;"></span>
+                            <span id="expCustomSwatchCard" style="background:#14263c;"></span>
+                        </div>
+                        <p>Your own visual profile with adjustable motion, glow, and styling.</p>
+                    </button>
+
+                    <button class="exp-theme-option" data-exp-theme="theme-cyberpunk" onclick="applyExperimentalTheme('theme-cyberpunk')">
+                        <div class="exp-theme-option-top">
+                            <strong>Neon Nights</strong>
+                            <span class="exp-theme-active-tag">Active</span>
+                        </div>
+                        <div class="exp-theme-swatch-row">
+                            <span style="background:#00f3ff;"></span>
+                            <span style="background:#0b0f1a;"></span>
+                            <span style="background:#1a0b2e;"></span>
+                        </div>
+                        <p>Electric contrast with sharp focus accents.</p>
+                    </button>
+
+                    <button class="exp-theme-option" data-exp-theme="theme-ocean" onclick="applyExperimentalTheme('theme-ocean')">
+                        <div class="exp-theme-option-top">
+                            <strong>Deep Sea</strong>
+                            <span class="exp-theme-active-tag">Active</span>
+                        </div>
+                        <div class="exp-theme-swatch-row">
+                            <span style="background:#4fc3f7;"></span>
+                            <span style="background:#0d1b2a;"></span>
+                            <span style="background:#1b263b;"></span>
+                        </div>
+                        <p>Cool layered blues with a calm dashboard feel.</p>
+                    </button>
+
+                    <button class="exp-theme-option" data-exp-theme="theme-forest" onclick="applyExperimentalTheme('theme-forest')">
+                        <div class="exp-theme-option-top">
+                            <strong>Enchanted Forest</strong>
+                            <span class="exp-theme-active-tag">Active</span>
+                        </div>
+                        <div class="exp-theme-swatch-row">
+                            <span style="background:#95d5b2;"></span>
+                            <span style="background:#1b4332;"></span>
+                            <span style="background:#081c15;"></span>
+                        </div>
+                        <p>Nature-inspired tones with softer reading contrast.</p>
+                    </button>
+
+                    <button class="exp-theme-option" data-exp-theme="theme-royal" onclick="applyExperimentalTheme('theme-royal')">
+                        <div class="exp-theme-option-top">
+                            <strong>Royal Amethyst</strong>
+                            <span class="exp-theme-active-tag">Active</span>
+                        </div>
+                        <div class="exp-theme-swatch-row">
+                            <span style="background:#ffd700;"></span>
+                            <span style="background:#3c096c;"></span>
+                            <span style="background:#10002b;"></span>
+                        </div>
+                        <p>Premium dark purple palette with gold accents.</p>
+                    </button>
+                </div>
+
+                <div class="exp-theme-customizer">
+                    <h4>
+                        <span><i class="fas fa-sliders-h"></i> Custom Theme Builder</span>
+                        <span id="expThemeCustomState" class="exp-theme-current" style="font-size:0.68rem; padding:3px 8px;">Draft</span>
+                    </h4>
+                    <p>Adjust these controls, then preview or save to your Custom Lab preset. This remains local and reversible.</p>
+
+                    <div class="exp-theme-custom-grid">
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomAccent">Accent Color</label>
+                            <input type="color" id="expCustomAccent" value="#5db2ff" oninput="handleCustomExperimentalThemeInput()">
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomBg">Background Base</label>
+                            <input type="color" id="expCustomBg" value="#0b1726" oninput="handleCustomExperimentalThemeInput()">
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomCard">Card Surface</label>
+                            <input type="color" id="expCustomCard" value="#14263c" oninput="handleCustomExperimentalThemeInput()">
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomTextMain">Main Text</label>
+                            <input type="color" id="expCustomTextMain" value="#e6f3ff" oninput="handleCustomExperimentalThemeInput()">
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomTextMuted">Muted Text</label>
+                            <input type="color" id="expCustomTextMuted" value="#97b4d1" oninput="handleCustomExperimentalThemeInput()">
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomBorder">Border Color</label>
+                            <input type="color" id="expCustomBorder" value="#2f4f72" oninput="handleCustomExperimentalThemeInput()">
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomMood">Background Mood</label>
+                            <select id="expCustomMood" onchange="handleCustomExperimentalThemeInput()">
+                                <option value="aurora">Aurora</option>
+                                <option value="sunset">Sunset</option>
+                                <option value="night">Night Pulse</option>
+                                <option value="emerald">Emerald Mist</option>
+                            </select>
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomMotion">Animation Speed</label>
+                            <div class="exp-theme-slider-wrap">
+                                <input type="range" id="expCustomMotion" min="0.7" max="1.5" step="0.05" value="1" oninput="handleCustomExperimentalThemeInput()">
+                                <span id="expCustomMotionReadout" class="exp-theme-readout">1.00x</span>
+                            </div>
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomGlow">Glow Strength</label>
+                            <div class="exp-theme-slider-wrap">
+                                <input type="range" id="expCustomGlow" min="0.1" max="0.5" step="0.01" value="0.26" oninput="handleCustomExperimentalThemeInput()">
+                                <span id="expCustomGlowReadout" class="exp-theme-readout">0.26</span>
+                            </div>
+                        </div>
+                        <div class="exp-theme-custom-field">
+                            <label for="expCustomRadius">Corner Radius</label>
+                            <div class="exp-theme-slider-wrap">
+                                <input type="range" id="expCustomRadius" min="8" max="22" step="1" value="13" oninput="handleCustomExperimentalThemeInput()">
+                                <span id="expCustomRadiusReadout" class="exp-theme-readout">13px</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="exp-theme-custom-actions">
+                        <button class="btn-primary" style="width:auto;" onclick="saveCustomExperimentalTheme()"><i class="fas fa-magic"></i> Save + Apply Custom</button>
+                        <button class="btn-secondary" style="width:auto;" onclick="previewCustomExperimentalTheme()"><i class="fas fa-eye"></i> Preview Custom</button>
+                        <button class="btn-danger" style="width:auto;" onclick="resetCustomExperimentalTheme()"><i class="fas fa-undo"></i> Reset Custom Defaults</button>
+                    </div>
+                </div>
+
+                <div class="exp-theme-actions">
+                    <button class="btn-secondary" style="width:auto;" onclick="applyExperimentalTheme(localStorage.getItem('experimental_theme') || null)">
+                        <i class="fas fa-eye"></i> Reapply Current
+                    </button>
+                    <button class="btn-danger" style="width:auto;" onclick="applyExperimentalTheme(null)">
+                        <i class="fas fa-undo"></i> Revert to Original
+                    </button>
+                </div>
             </div>
         </div>
 

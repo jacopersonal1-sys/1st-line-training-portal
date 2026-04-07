@@ -6,6 +6,30 @@ let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
 let LIVE_CONN_INTERVAL = null;
 let LIVE_TIMER_INTERVAL = null;
 
+function normalizeLiveText(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function getLiveBookingById(bookingId) {
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    return bookings.find(b => String(b.id) === String(bookingId)) || null;
+}
+
+function resolveLiveTestDefinition(tests, assessmentName, assessmentId) {
+    if (!Array.isArray(tests)) return null;
+    if (assessmentId) {
+        const byId = tests.find(t => t.type === 'live' && String(t.id) === String(assessmentId));
+        if (byId) return byId;
+    }
+    if (assessmentName) {
+        const byExactTitle = tests.find(t => t.type === 'live' && t.title === assessmentName);
+        if (byExactTitle) return byExactTitle;
+        const wanted = normalizeLiveText(assessmentName);
+        return tests.find(t => t.type === 'live' && normalizeLiveText(t.title) === wanted) || null;
+    }
+    return null;
+}
+
 function loadLiveExecution() {
     if (window.LIVE_POLLER) clearInterval(window.LIVE_POLLER);
     if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
@@ -758,8 +782,30 @@ function handleRealtimeInput(qIdx) {
 
 // --- ACTIONS ---
 
-async function initiateLiveSession(bookingId, assessmentName, traineeName) {
-    if (!confirm(`Start live session for ${traineeName}?`)) return;
+async function initiateLiveSession(bookingId, assessmentName, traineeName, assessmentId) {
+    let resolvedAssessment = assessmentName;
+    let resolvedTrainee = traineeName;
+    let resolvedAssessmentId = assessmentId || null;
+
+    if (bookingId && (!resolvedAssessment || !resolvedTrainee)) {
+        const booking = getLiveBookingById(bookingId);
+        if (booking) {
+            if (booking.status === 'Cancelled') {
+                alert("This booking was cancelled and cannot be started.");
+                return;
+            }
+            resolvedAssessment = booking.assessment;
+            resolvedTrainee = booking.trainee;
+            resolvedAssessmentId = booking.assessmentId || null;
+        }
+    }
+
+    if (!resolvedTrainee || !resolvedAssessment) {
+        alert("Unable to start session. Booking details are missing.");
+        return;
+    }
+
+    if (!confirm(`Start live session for ${resolvedTrainee}?`)) return;
 
     // --- ROBUSTNESS FIX: Clean up ALL previous sessions for this TRAINEE ---
     // This prevents loading a completed-but-not-ended session when starting a new one.
@@ -767,12 +813,12 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
         const { error: deleteError } = await window.supabaseClient
             .from('live_sessions')
             .delete()
-            .eq('data->>trainee', traineeName); // Target ALL sessions for this trainee
+            .eq('data->>trainee', resolvedTrainee); // Target ALL sessions for this trainee
         
         if (deleteError) {
             console.warn("Stale session cleanup failed:", deleteError.message);
         } else {
-            console.log(`Cleaned up all previous sessions for trainee: ${traineeName}.`);
+            console.log(`Cleaned up all previous sessions for trainee: ${resolvedTrainee}.`);
         }
     }
     // --- END FIX ---
@@ -780,7 +826,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     // RACE CONDITION CHECK: Ensure session doesn't already exist
     // (Prevents double-clicks or two admins starting same slot)
     const allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    const existing = allSessions.find(s => s.bookingId === bookingId && s.active);
+    const existing = allSessions.find(s => String(s.bookingId) === String(bookingId) && s.active);
     if (existing) {
         alert("A session is already active for this booking. Joining existing session...");
         localStorage.setItem('currentLiveSessionId', existing.sessionId);
@@ -792,10 +838,10 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     // Find the Test Definition
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     // Match by title (assuming Admin named them identically as per instructions)
-    const test = tests.find(t => t.title === assessmentName && t.type === 'live');
+    const test = resolveLiveTestDefinition(tests, resolvedAssessment, resolvedAssessmentId);
     
     if (!test) {
-        alert(`Error: No 'Live Assessment' test found with title '${assessmentName}'.\nPlease create it in the Test Builder first.`);
+        alert(`Error: No 'Live Assessment' test found with title '${resolvedAssessment}'.\nPlease create it in the Test Builder first.`);
         return;
     }
 
@@ -804,8 +850,9 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
         active: true,
         bookingId: bookingId,
         testId: test.id,
+        assessmentId: test.id,
         startTime: Date.now(), // NEW: Track start time for staleness checks
-        trainee: traineeName,
+        trainee: resolvedTrainee,
         trainer: CURRENT_USER.user,
         currentQ: -1,
         answers: {},
@@ -819,13 +866,13 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName) {
     
     // 1.5. Clean Local Array Immediately (Prevent Ghosting in UI before sync)
     let currentGlobal = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    currentGlobal = currentGlobal.filter(s => s.trainee !== traineeName); // Remove old trainee sessions
+    currentGlobal = currentGlobal.filter(s => normalizeLiveText(s.trainee) !== normalizeLiveText(resolvedTrainee)); // Remove old trainee sessions
     currentGlobal.push(session); // Add new one
     localStorage.setItem('liveSessions', JSON.stringify(currentGlobal));
     
     // 2. Update Global Array
     await updateGlobalSessionArray(session, false); // Safe Merge to prevent wiping other admins
-    console.log(`Live Session Initiated for ${traineeName} (ID: ${session.sessionId})`);
+    console.log(`Live Session Initiated for ${resolvedTrainee} (ID: ${session.sessionId})`);
 
     showTab('live-execution');
     loadLiveExecution();
@@ -1049,7 +1096,7 @@ async function confirmAndSaveLiveSession() {
     
     // DEDUPLICATION: Check if this booking/session already has a submission
     const existingSubIdx = submissions.findIndex(s => 
-        (session.bookingId && s.bookingId === session.bookingId) || 
+        (session.bookingId && String(s.bookingId) === String(session.bookingId)) || 
         (s.testId == test.id && s.trainee === session.trainee && s.date === new Date().toISOString().split('T')[0] && s.type === 'live')
     );
 
@@ -1068,7 +1115,8 @@ async function confirmAndSaveLiveSession() {
         type: 'live',
         marker: session.trainer,
         comments: session.comments, // Save comments
-        scores: session.scores      // Save individual scores
+        scores: session.scores,     // Save individual scores
+        assessmentId: test.id
     };
 
     if (existingSubIdx > -1) {
@@ -1080,10 +1128,13 @@ async function confirmAndSaveLiveSession() {
 
     // 2. Update Booking Status
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const booking = bookings.find(b => b.id === session.bookingId);
+    const booking = bookings.find(b => String(b.id) === String(session.bookingId));
     if (booking && booking.status !== 'Cancelled') {
         booking.status = 'Completed';
         booking.score = percentage;
+        booking.assessmentId = booking.assessmentId || test.id;
+        booking.lastModified = new Date().toISOString();
+        booking.modifiedBy = CURRENT_USER?.user || 'system';
     }
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
 
@@ -1105,8 +1156,11 @@ async function confirmAndSaveLiveSession() {
     
     // DEDUPLICATION: Check if record exists
     const existingRecIdx = records.findIndex(r => 
-        r.trainee === session.trainee && 
-        r.assessment === test.title
+        normalizeLiveText(r.trainee) === normalizeLiveText(session.trainee) &&
+        (
+            (r.assessmentId && String(r.assessmentId) === String(test.id)) ||
+            normalizeLiveText(r.assessment) === normalizeLiveText(test.title)
+        )
     );
 
     const newRecord = {
@@ -1120,7 +1174,8 @@ async function confirmAndSaveLiveSession() {
         cycle: 'Live',
         link: 'Live-Session',
         docSaved: true,
-        submissionId: newSub.id // Link to specific submission
+        submissionId: newSub.id, // Link to specific submission
+        assessmentId: test.id
     };
 
     if (existingRecIdx > -1) {
@@ -1136,7 +1191,7 @@ async function confirmAndSaveLiveSession() {
 
     // 5. Sync All
     await updateGlobalSessionArray(session, false); // Sync session state first
-    if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], false);
+    if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], true);
     
     // HARD DELETE: Remove completed session from real-time table to prevent bloat
     if (window.supabaseClient && session.sessionId) {

@@ -743,6 +743,13 @@ function loadAdminTheme() {
 
     const cb = document.getElementById('autoBackupToggle');
     if(cb) cb.checked = (localStorage.getItem('autoBackup') === 'true');
+
+    if (typeof updateExperimentalThemePickerState === 'function') {
+        updateExperimentalThemePickerState();
+    }
+    if (typeof loadExperimentalThemeCustomizer === 'function') {
+        loadExperimentalThemeCustomizer();
+    }
 }
 
 // Helper functions for zoom

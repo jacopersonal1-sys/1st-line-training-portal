@@ -394,7 +394,7 @@ async function loadFromServer(silent = false) {
             // CLOCK SKEW FIX: Subtract 10 minutes from lastSync to catch items from clients with lagging clocks
             const safeSyncTime = new Date(new Date(lastSync).getTime() - 600000).toISOString();
 
-            let query = window.supabaseClient.from(tableName).select('data, updated_at');
+            let query = window.supabaseClient.from(tableName).select('id, data, updated_at');
             
             const isAuthoritative = AUTHORITATIVE_TABLES.includes(tableName);
             const isFullAuthoritativePull = isAuthoritative && !silent;
@@ -450,7 +450,15 @@ async function loadFromServer(silent = false) {
                 
                 if (isFullAuthoritativePull) {
                     // AUTHORITATIVE SYNC: Server is Truth. Overwrite local.
-                    const serverItems = newRows.map(r => r.data);
+                    const serverItems = newRows
+                        .filter(r => r && r.data)
+                        .map(r => {
+                            const item = (r.data && typeof r.data === 'object') ? { ...r.data } : r.data;
+                            if (item && typeof item === 'object' && (item.id === undefined || item.id === null) && r.id !== undefined && r.id !== null) {
+                                item.id = r.id;
+                            }
+                            return item;
+                        });
                     localStorage.setItem(localKey, JSON.stringify(serverItems));
                     // Update timestamp to now (though unused for full sync, good for debug)
                     localStorage.setItem(`row_sync_ts_${localKey}`, new Date().toISOString());
@@ -458,7 +466,9 @@ async function loadFromServer(silent = false) {
                 // Extract data objects
                 // GHOST DATA FIX: Filter out items that are pending deletion locally
                 const serverItems = newRows.filter(r => {
-                    const id = r.data.id || r.id;
+                    if (!r || !r.data) return false;
+                    const rowData = r.data;
+                    const id = rowData.id || r.id;
                     // 1. Check ID-based deletes
                     if (pendingIds.has(id)) return false; 
                     if (tombstoneIds.has(id)) return false; // Check Tombstones
@@ -471,12 +481,18 @@ async function loadFromServer(silent = false) {
                         if (q.col === 'user_id') localProp = 'user';
                         if (q.col === 'trainee') localProp = 'trainee';
                         
-                        const val = r.data[localProp] || r.data[q.col];
+                        const val = rowData[localProp] || rowData[q.col];
                         return val === q.val;
                     });
                     if (isQueryDeleted) return false;
                     return true;
-                }).map(r => r.data);
+                }).map(r => {
+                    const item = (r.data && typeof r.data === 'object') ? { ...r.data } : r.data;
+                    if (item && typeof item === 'object' && (item.id === undefined || item.id === null) && r.id !== undefined && r.id !== null) {
+                        item.id = r.id;
+                    }
+                    return item;
+                });
 
                 let localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
                 
@@ -2561,18 +2577,20 @@ function processIncomingDataQueue() {
             let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
             batches.bookings.forEach(p => {
                 if (p.eventType === 'DELETE') {
-                    bookings = bookings.filter(b => b.id !== p.old.id);
+                    bookings = bookings.filter(b => String(b.id) !== String(p.old.id));
                 } else {
                     const newRow = p.new;
                     if (!newRow.data) return; // Ignore Postgres WAL partial updates
 
-                    const item = newRow.data;
-                    item.id = newRow.id;
-                    const idx = bookings.findIndex(b => b.id === item.id);
+                    const item = (newRow.data && typeof newRow.data === 'object') ? { ...newRow.data } : newRow.data;
+                    if (!item || typeof item !== 'object') return;
+                    item.id = (item.id !== undefined && item.id !== null) ? item.id : newRow.id;
+                    const idx = bookings.findIndex(b => String(b.id) === String(item.id));
                     if (idx > -1) bookings[idx] = item;
                     else bookings.push(item);
                 }
             });
+            bookings = dedupeArrayByIdentity('liveBookings', bookings, 'server_wins');
             localStorage.setItem('liveBookings', JSON.stringify(bookings));
             if (typeof renderLiveTable === 'function') renderLiveTable();
             if (typeof updateNotifications === 'function') updateNotifications();
