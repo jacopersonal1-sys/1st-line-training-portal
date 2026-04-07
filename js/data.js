@@ -133,6 +133,9 @@ const SAVE_DEBOUNCE_MS = 500; // 500ms (High-Speed Server Authority)
 // --- NEW: INCOMING DATA QUEUE (STABILITY) ---
 let INCOMING_DATA_QUEUE = [];
 let QUEUE_PROCESSOR_INTERVAL = null;
+let IS_PROCESSING_INCOMING_QUEUE = false;
+const INCOMING_QUEUE_BATCH_SIZE = 120;
+const INCOMING_QUEUE_CONTINUE_DELAY_MS = 120;
 window.ACTIVE_USERS_CACHE = {}; // Realtime Presence Cache
 
 window.GLOBAL_CHANGES_CHANNEL = null;
@@ -366,7 +369,7 @@ async function loadFromServer(silent = false) {
         const tombstoneIds = new Set(JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]'));
         const pendingQueries = pendingQueue.filter(i => i.type === 'query');
         const revokedUsers = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-        const revokedSet = new Set(revokedUsers.map(u => u.toLowerCase()));
+        const revokedSet = new Set(revokedUsers.map(u => String(u || '').toLowerCase()));
 
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
         // Only fetch rows newer than our last sync timestamp
@@ -1553,8 +1556,20 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
 function performSmartMerge(server, local, strategy = 'local_wins') {
     const merged = { ...server }; 
     
-    // Safety check for revoked users (Blacklist)
-    const blacklist = local.revokedUsers || [];
+    // Safety check for revoked users (Blacklist, case-insensitive union)
+    const serverBlacklist = Array.isArray(server.revokedUsers) ? server.revokedUsers : [];
+    const localBlacklist = Array.isArray(local.revokedUsers) ? local.revokedUsers : [];
+    const blacklist = [];
+    const blacklistSet = new Set();
+    [...serverBlacklist, ...localBlacklist].forEach((name) => {
+        const raw = String(name || '').trim();
+        if (!raw) return;
+        const normalized = raw.toLowerCase();
+        if (!blacklistSet.has(normalized)) {
+            blacklistSet.add(normalized);
+            blacklist.push(raw);
+        }
+    });
 
     Object.keys(DB_SCHEMA).forEach(key => {
         const sVal = server[key];
@@ -1629,8 +1644,8 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
             });
 
             // --- DELETION FIX: Users ---
-            if (key === 'users' && blacklist.length > 0) {
-                combined = combined.filter(u => !blacklist.includes(u.user));
+            if (key === 'users' && blacklistSet.size > 0) {
+                combined = combined.filter(u => !blacklistSet.has(String((u && u.user) || '').toLowerCase()));
             }
 
             merged[key] = dedupeArrayByIdentity(key, combined, strategy);
@@ -2485,6 +2500,8 @@ function startQueueProcessor() {
 }
 
 function processIncomingDataQueue() {
+    if (IS_PROCESSING_INCOMING_QUEUE) return;
+
     if (INCOMING_DATA_QUEUE.length === 0) {
         const el = document.getElementById('sync-indicator');
         if (el && (el.innerHTML.includes('Queued:') || el.innerHTML.includes('Processing'))) {
@@ -2506,14 +2523,21 @@ function processIncomingDataQueue() {
         return;
     }
 
-    // Take snapshot of current queue and clear global
-    const queue = [...INCOMING_DATA_QUEUE];
-    INCOMING_DATA_QUEUE = []; 
+    IS_PROCESSING_INCOMING_QUEUE = true;
+
+    // Process in chunks to avoid long main-thread stalls that can freeze typing.
+    const processingCount = Math.min(INCOMING_QUEUE_BATCH_SIZE, INCOMING_DATA_QUEUE.length);
+    const queue = INCOMING_DATA_QUEUE.splice(0, processingCount);
+    const queuedRemaining = INCOMING_DATA_QUEUE.length;
 
     // Show processing status
     const el = document.getElementById('sync-indicator');
     if (el) {
-        el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing: ${queue.length}`;
+        if (queuedRemaining > 0) {
+            el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing: ${queue.length} (+${queuedRemaining} queued)`;
+        } else {
+            el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing: ${queue.length}`;
+        }
     }
 
     try {
@@ -2699,6 +2723,11 @@ function processIncomingDataQueue() {
         console.error("Incoming realtime queue processing failed:", err);
         updateSyncUI('error');
         updateQueueIndicator();
+    } finally {
+        IS_PROCESSING_INCOMING_QUEUE = false;
+        if (INCOMING_DATA_QUEUE.length > 0) {
+            setTimeout(() => processIncomingDataQueue(), INCOMING_QUEUE_CONTINUE_DELAY_MS);
+        }
     }
 }
 

@@ -22,12 +22,173 @@ const StudyMonitor = {
         activeTabId: null,
         homeUrl: null,
     },
+    localPageCacheKey: 'study_page_cache_v1',
+    maxLocalPageCacheEntries: 60,
     tabCounter: 0,
     lastSpawnedLink: null,
 
     buildTabId: function() {
         this.tabCounter += 1;
         return `tab-${Date.now()}-${this.tabCounter}`;
+    },
+
+    loadLocalPageCache: function() {
+        try {
+            const cache = JSON.parse(localStorage.getItem(this.localPageCacheKey) || '{}');
+            if (cache && typeof cache === 'object') return cache;
+            return {};
+        } catch (e) {
+            return {};
+        }
+    },
+
+    saveLocalPageCache: function(cache) {
+        try {
+            localStorage.setItem(this.localPageCacheKey, JSON.stringify(cache || {}));
+        } catch (e) {
+            console.warn('Study page cache save skipped:', e);
+        }
+    },
+
+    getStudyCacheKey: function(url) {
+        try {
+            const normalized = this.cleanUrl(url);
+            const parsed = new URL(normalized, window.location.href);
+            if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+            return `${parsed.origin}${parsed.pathname}`.toLowerCase();
+        } catch (e) {
+            return String(url || '').trim().toLowerCase();
+        }
+    },
+
+    getCachedStudyPage: function(url) {
+        const cache = this.loadLocalPageCache();
+        const key = this.getStudyCacheKey(url);
+        if (key && cache[key]) return cache[key];
+
+        const normalizedUrl = String(url || '').trim().toLowerCase();
+        if (!normalizedUrl) return null;
+        const fallback = Object.values(cache).find(entry => String((entry && entry.sourceUrl) || '').toLowerCase() === normalizedUrl);
+        return fallback || null;
+    },
+
+    buildCachedStudyDocument: function(cachedPage, failedUrl, errorDescription) {
+        const pageTitle = this.escapeHtml((cachedPage && cachedPage.title) || 'Cached Study Page');
+        const sourceUrl = this.escapeHtml((cachedPage && cachedPage.sourceUrl) || failedUrl || '');
+        const reason = this.escapeHtml(errorDescription || 'Network unavailable');
+        const updatedAt = (cachedPage && cachedPage.updatedAt)
+            ? this.escapeHtml(new Date(cachedPage.updatedAt).toLocaleString())
+            : 'Unknown';
+        const snippet = this.escapeHtml((cachedPage && cachedPage.snippet) || 'No cached preview text is available for this page yet.');
+
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${pageTitle} (Cached)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      line-height: 1.55;
+      padding: 28px 20px;
+    }
+    .card {
+      max-width: 980px;
+      margin: 0 auto;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 22px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    h1 { margin: 0 0 10px 0; font-size: 1.3rem; }
+    .meta { color: #9fb0c1; font-size: 0.9rem; margin-bottom: 14px; }
+    .warn {
+      border-left: 4px solid #f59e0b;
+      background: rgba(245, 158, 11, 0.12);
+      color: #fde68a;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin: 0 0 16px 0;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
+    .source {
+      margin-top: 14px;
+      color: #9fb0c1;
+      font-size: 0.85rem;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>${pageTitle} (Cached Copy)</h1>
+    <div class="meta">Cached locally: ${updatedAt}</div>
+    <div class="warn">Live page could not load (${reason}). You are viewing the latest local cached copy.</div>
+    <pre>${snippet}</pre>
+    <div class="source">Source URL: ${sourceUrl}</div>
+  </div>
+</body>
+</html>`;
+    },
+
+    cacheStudyPageLocally: function(tab) {
+        const webview = tab?.webview;
+        const liveUrl = (webview && typeof webview.getURL === 'function') ? webview.getURL() : tab?.url;
+        const pageUrl = String(liveUrl || tab?.url || '').trim();
+        if (!webview || !webview.isConnected || !pageUrl) return;
+        if (pageUrl.startsWith('data:')) return;
+        const cacheKey = this.getStudyCacheKey(pageUrl);
+        if (!cacheKey) return;
+
+        // Keep the payload compact to avoid localStorage bloat.
+        const snapshotScript = `
+            (function() {
+                try {
+                    const title = (document.title || '').trim().slice(0, 200);
+                    const text = ((document.body && document.body.innerText) || '')
+                        .replace(/\\s+/g, ' ')
+                        .trim()
+                        .slice(0, 12000);
+                    return { title: title, text: text };
+                } catch (e) {
+                    return { title: '', text: '' };
+                }
+            })();
+        `;
+
+        webview.executeJavaScript(snapshotScript, true).then((snapshot) => {
+            const cache = this.loadLocalPageCache();
+            cache[cacheKey] = {
+                key: cacheKey,
+                sourceUrl: pageUrl,
+                title: (snapshot && snapshot.title) ? snapshot.title : (tab.title || 'Study Page'),
+                snippet: (snapshot && snapshot.text) ? snapshot.text : '',
+                updatedAt: new Date().toISOString()
+            };
+
+            const entries = Object.entries(cache).sort((a, b) => {
+                const aTime = new Date((a[1] && a[1].updatedAt) || 0).getTime();
+                const bTime = new Date((b[1] && b[1].updatedAt) || 0).getTime();
+                return bTime - aTime;
+            });
+            const trimmed = entries.slice(0, this.maxLocalPageCacheEntries);
+            const compact = {};
+            trimmed.forEach(([urlKey, payload]) => { compact[urlKey] = payload; });
+            this.saveLocalPageCache(compact);
+        }).catch(() => {
+            // Ignore capture failures for protected pages.
+        });
     },
 
     handleSpawnedStudyUrl: function(url, title = "New Tab") {
@@ -1135,7 +1296,8 @@ const StudyMonitor = {
             webview: webview,
             targetScrollY: targetScrollY,
             canGoBackCached: false,
-            canGoForwardCached: false
+            canGoForwardCached: false,
+            usedCachedFallback: false
         };
         this.browserState.tabs.push(newTab);
 
@@ -1205,6 +1367,7 @@ const StudyMonitor = {
         
         webview.addEventListener('did-start-loading', () => {
             webview.dataset.navReady = '0';
+            tab.usedCachedFallback = false;
             tab.title = 'Loading...';
             this.renderTabs();
             this.updateBrowserChrome();
@@ -1212,6 +1375,10 @@ const StudyMonitor = {
 
         webview.addEventListener('did-stop-loading', () => {
             webview.dataset.navReady = '1';
+            try {
+                const currentUrl = webview.getURL();
+                if (currentUrl) tab.url = currentUrl;
+            } catch (e) {}
             let newTitle = tab.title || 'Study Tab';
             try {
                 newTitle = (webview.getTitle() || tab.title || 'Study Tab').substring(0, 20);
@@ -1222,6 +1389,9 @@ const StudyMonitor = {
             this.refreshTabNavigationState(tab);
             this.renderTabs();
             this.updateBrowserChrome();
+            if (!String(tab.url || '').startsWith('data:')) {
+                this.cacheStudyPageLocally(tab);
+            }
             
             // Restore Scroll Position if requested
             if (tab.targetScrollY) {
@@ -1248,6 +1418,7 @@ const StudyMonitor = {
 
         webview.addEventListener('did-navigate', (e) => {
             tab.url = e.url;
+            if (!String(e.url || '').startsWith('data:')) tab.usedCachedFallback = false;
             this.refreshTabNavigationState(tab);
             this.updateBrowserChrome();
             this.track(this.buildInAppStudyLabel((webview.getTitle() || tab.title).substring(0, 80)));
@@ -1255,6 +1426,7 @@ const StudyMonitor = {
 
         webview.addEventListener('did-navigate-in-page', (e) => {
             tab.url = e.url;
+            if (!String(e.url || '').startsWith('data:')) tab.usedCachedFallback = false;
             this.refreshTabNavigationState(tab);
             this.updateBrowserChrome();
         });
@@ -1269,6 +1441,24 @@ const StudyMonitor = {
 
         webview.addEventListener('did-fail-load', (e) => {
             if (e.errorCode === -3) return; // user/navigation cancellation
+            const failedUrl = String(e.validatedURL || tab.url || '').trim();
+            const canUseFallback = failedUrl && !failedUrl.startsWith('data:') && !tab.usedCachedFallback;
+            if (canUseFallback) {
+                const cachedPage = this.getCachedStudyPage(failedUrl);
+                if (cachedPage) {
+                    const cachedHtml = this.buildCachedStudyDocument(cachedPage, failedUrl, e.errorDescription || 'Unknown error');
+                    const dataUrl = `data:text/html;charset=UTF-8,${encodeURIComponent(cachedHtml)}`;
+                    tab.usedCachedFallback = true;
+                    tab.title = 'Cached Copy';
+                    this.renderTabs();
+                    this.updateBrowserChrome();
+                    webview.loadURL(dataUrl).catch(() => {});
+                    if (typeof showToast === 'function') {
+                        showToast('Loaded local cached copy for this study page.', 'warning');
+                    }
+                    return;
+                }
+            }
             tab.title = 'Load Failed';
             tab.canGoBackCached = false;
             tab.canGoForwardCached = false;
@@ -1311,22 +1501,48 @@ const StudyMonitor = {
 
     // --- URL CLEANER (SharePoint & PDF) ---
     cleanUrl: function(url) {
+        let working = String(url || '').trim().replace(/^<|>$/g, '');
+        if (!working) return '';
+
         try {
-            // 1. SharePoint: Remove ?web=1 to force raw view (Extract PDF)
-            if (url.includes('sharepoint.com') || url.includes('onedrive.com')) {
-                const u = new URL(url);
-                // STRICTER CHECK: Only strip web=1 if it ends in .pdf. Do not touch .aspx or other pages.
-                if (u.pathname.toLowerCase().endsWith('.pdf') && u.searchParams.get('web') === '1') {
-                     u.searchParams.delete('web');
-                     url = u.toString();
+            let parsed = new URL(working, window.location.href);
+            const originalHost = parsed.hostname.toLowerCase();
+
+            // 0. Unwrap Outlook SafeLinks when users paste links from emails/chats.
+            if (originalHost.includes('safelinks.protection.outlook.com')) {
+                const wrapped = parsed.searchParams.get('url');
+                if (wrapped) {
+                    working = decodeURIComponent(wrapped);
+                    parsed = new URL(working, window.location.href);
                 }
             }
-            // 2. PDF Tools: Hide sidebar/toolbar
-            if (url.toLowerCase().includes('.pdf') && !url.includes('#')) {
-                url += '#toolbar=0&navpanes=0&view=FitH';
+
+            const host = parsed.hostname.toLowerCase();
+            const isSharepointLike = host.includes('sharepoint.com') || host.includes('onedrive.com') || host === '1drv.ms';
+
+            // 1. Conservative cleanup for SharePoint/OneDrive.
+            if (isSharepointLike) {
+                // Keep auth/share tokens intact (e, d, p, tempauth).
+                ['ga', 'email', 'CID', 'OR', 'CT', 'wdOrigin'].forEach(key => parsed.searchParams.delete(key));
+
+                // Download mode often forces a binary response path in embedded views.
+                if (parsed.searchParams.get('download') === '1') {
+                    parsed.searchParams.delete('download');
+                }
             }
-        } catch (e) { /* Ignore invalid URLs */ }
-        return url;
+
+            // 2. PDF tools: hide browser UI chrome when we can confidently detect PDF content.
+            const pathLower = parsed.pathname.toLowerCase();
+            const fileParam = (parsed.searchParams.get('file') || '').toLowerCase();
+            const sourceParam = decodeURIComponent(parsed.searchParams.get('sourceurl') || '').toLowerCase();
+            const looksLikePdf = pathLower.endsWith('.pdf') || fileParam.endsWith('.pdf') || sourceParam.includes('.pdf');
+            if (looksLikePdf && !parsed.hash) {
+                parsed.hash = 'toolbar=0&navpanes=0&view=FitH';
+            }
+            return parsed.toString();
+        } catch (e) {
+            return working; // Ignore invalid URLs; preserve original input.
+        }
     },
 
     // --- WIDGET HELPER: GET SCHEDULED AGENTS ---

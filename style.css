@@ -1183,6 +1183,7 @@ textarea.auto-expand {
     letter-spacing: 0.03em;
 }
 .exp-theme-custom-field input[type="color"],
+.exp-theme-custom-field input[type="text"],
 .exp-theme-custom-field select {
     width: 100%;
     min-height: 36px;
@@ -1194,6 +1195,10 @@ textarea.auto-expand {
 }
 .exp-theme-custom-field select {
     cursor: pointer;
+    padding: 8px 10px;
+}
+.exp-theme-custom-field input[type="text"] {
+    cursor: text;
     padding: 8px 10px;
 }
 .exp-theme-slider-wrap {
@@ -1293,6 +1298,12 @@ body.exp-theme-active .btn-danger,
 body.exp-theme-active .btn-warning,
 body.exp-theme-active .btn-success {
     border-color: rgba(var(--exp-accent-rgb), 0.3);
+}
+body.exp-theme-active.exp-theme-wallpaper {
+    animation: none !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-attachment: fixed !important;
 }
 
 /* Theme: Neon Nights (Cyberpunk) */

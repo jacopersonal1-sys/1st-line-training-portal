@@ -11,19 +11,77 @@ window.IS_DRAGGING_LIVE = false; // Global lock for drag operations
 
 // --- NEW: URL CLEANER FOR SHAREPOINT ---
 function cleanSharePointUrl(url) {
-    if (!url || !url.includes('sharepoint.com')) return url;
+    const raw = String(url || '').trim().replace(/^<|>$/g, '');
+    if (!raw) return '';
+
     try {
-        const u = new URL(url);
-        // Common expiring tokens and tracking params
-        u.searchParams.delete('e');
-        u.searchParams.delete('d');
-        u.searchParams.delete('tempauth');
-        u.searchParams.delete('ga');
-        u.searchParams.delete('p');
-        return u.toString();
+        const parsed = new URL(raw);
+        const host = parsed.hostname.toLowerCase();
+
+        // Outlook SafeLinks wrappers are common when copying links from email.
+        if (host.includes('safelinks.protection.outlook.com')) {
+            const wrapped = parsed.searchParams.get('url');
+            if (wrapped) return cleanSharePointUrl(decodeURIComponent(wrapped));
+            return raw;
+        }
+
+        // Conservative cleanup only. Keep share/auth params (e, d, p, tempauth),
+        // otherwise valid SharePoint shared links can break.
+        if (host.includes('sharepoint.com') || host.includes('onedrive.com') || host === '1drv.ms') {
+            ['ga', 'email', 'CID', 'OR', 'CT', 'wdOrigin'].forEach(key => parsed.searchParams.delete(key));
+            Array.from(parsed.searchParams.keys()).forEach(key => {
+                if (parsed.searchParams.get(key) === '') parsed.searchParams.delete(key);
+            });
+        }
+
+        // Do not force download mode in saved links. The in-app browser should render if possible.
+        if (parsed.searchParams.get('download') === '1') {
+            parsed.searchParams.delete('download');
+        }
+
+        return parsed.toString();
     } catch (e) {
-        return url; // Return original if URL is malformed
+        return raw; // Return original if URL is malformed
     }
+}
+
+function migrateLegacySharePointLinksInSchedules() {
+    try {
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        if (!schedules || typeof schedules !== 'object') return;
+
+        let touched = false;
+        Object.keys(schedules).forEach(key => {
+            const group = schedules[key];
+            if (!group || !Array.isArray(group.items)) return;
+            group.items.forEach(item => {
+                if (!item || typeof item !== 'object') return;
+                const nextMaterial = cleanSharePointUrl(item.materialLink || '');
+                const nextAssessment = cleanSharePointUrl(item.assessmentLink || '');
+                if (nextMaterial !== (item.materialLink || '')) {
+                    item.materialLink = nextMaterial;
+                    touched = true;
+                }
+                if (nextAssessment !== (item.assessmentLink || '')) {
+                    item.assessmentLink = nextAssessment;
+                    touched = true;
+                }
+            });
+        });
+
+        if (touched) {
+            localStorage.setItem('schedules', JSON.stringify(schedules));
+            if (typeof saveToServer === 'function') saveToServer(['schedules'], false);
+        }
+    } catch (e) {
+        console.warn('Schedule URL migration skipped:', e);
+    }
+}
+
+// One-time repair for links previously over-sanitized.
+if (!localStorage.getItem('v259_schedule_link_sanitizer_patch')) {
+    migrateLegacySharePointLinksInSchedules();
+    localStorage.setItem('v259_schedule_link_sanitizer_patch', 'true');
 }
 
 // --- SA PUBLIC HOLIDAYS (2026 Reference) ---

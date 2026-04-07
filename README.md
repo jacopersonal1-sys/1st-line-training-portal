@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.6.0**: **Sync + User Reliability + Study Cache**: Hardened Manage Users so deleted users and profile edits persist correctly (no random resurrection), upgraded realtime queue processing to reduce typing lockups during heavy Supabase bursts, added local in-app study page cache fallback for failed loads, and extended Custom Lab with Wallpaper URL support.
  - **v2.5.9**: **Live Booking Integrity + Theme Lab Upgrade**: Added a Booking Integrity Check with auto-repair for duplicate/invalid live bookings to protect Live Arena and trainee breakdown consistency. Reworked Experimental Themes to affect more of the app with richer motion and added a full Custom Theme Builder (preview/save/reset) while keeping one-click revert to the original profile theme.
  - **v2.5.8**: **Critical Fix**: Resolved an infinite background loop during the safe-quit sequence that created zombie processes and blocked the auto-updater from overwriting files.
  - **v2.5.7**: **System Update**: Version bump and minor maintenance.

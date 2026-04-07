@@ -4,6 +4,7 @@
 // Global State for User Operations
 let userToMove = null;
 let editTargetIndex = -1;
+let editTargetUsername = '';
 
 // --- HELPER: INSTANT SAVE ---
 // Uses force=true to skip the fetch/merge process for Admin actions.
@@ -410,8 +411,8 @@ function populateTraineeDropdown() {
 async function scanAndGenerateUsers(silent = false, emailMap = {}) { 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
-    const records = JSON.parse(localStorage.getItem('records') || '[]'); 
     const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    const revokedSet = new Set(revoked.map(r => String(r || '').trim().toLowerCase()));
 
     let allNames = new Set(); 
     
@@ -420,26 +421,17 @@ async function scanAndGenerateUsers(silent = false, emailMap = {}) {
         if(Array.isArray(g)) g.forEach(n => { if(n && n.trim()) allNames.add(n.trim()); });
     }); 
     
-    // Harvest from Records (Safety Update: Check if r.trainee exists)
-    records.forEach(r => { 
-        if(r.trainee && r.trainee.trim()) allNames.add(r.trainee.trim()); 
-    }); 
-    
     let createdCount = 0; 
-    let resurrectedCount = 0;
     
     allNames.forEach(name => { 
+        const normalized = name.toLowerCase();
+        // Do not auto-resurrect deleted users; restore must be explicit.
+        if (revokedSet.has(normalized)) return;
+
         // Case-insensitive check
-        const exists = users.find(u => u.user.toLowerCase() === name.toLowerCase());
-        const revokedIdx = revoked.findIndex(r => r.toLowerCase() === name.toLowerCase());
+        const exists = users.find(u => String(u.user || '').toLowerCase() === normalized);
 
         if(!exists) { 
-            // If user is in the roster but was previously revoked/deleted, un-revoke them
-            if (revokedIdx > -1) {
-                revoked.splice(revokedIdx, 1);
-                resurrectedCount++;
-            }
-
             // Secure native browser RNG
             const arr = new Uint16Array(1);
             window.crypto.getRandomValues(arr);
@@ -462,11 +454,10 @@ async function scanAndGenerateUsers(silent = false, emailMap = {}) {
     
     if(createdCount > 0) { 
         localStorage.setItem('users', JSON.stringify(users)); 
-        if (resurrectedCount > 0) localStorage.setItem('revokedUsers', JSON.stringify(revoked));
 
         // FIX: Ensure cloud sync happens immediately
         await secureUserSave();
-        if(!silent) alert(`Generated ${createdCount} missing accounts (${resurrectedCount} restored from deletion).`); 
+        if(!silent) alert(`Generated ${createdCount} missing accounts.`); 
         loadAdminUsers(); 
         populateTraineeDropdown(); 
     } else {
@@ -803,9 +794,10 @@ function generatePassword() {
 }
 
 async function addUser() { 
-    const u = document.getElementById('newUserName').value;
+    const u = document.getElementById('newUserName').value.trim();
     const p = document.getElementById('newUserPass').value;
     const r = document.getElementById('newUserRole').value; 
+    const normalizedUser = String(u || '').trim().toLowerCase();
     
     // SECURITY: Prevent Privilege Escalation
     if (r === 'super_admin' && CURRENT_USER.role !== 'super_admin') {
@@ -814,14 +806,14 @@ async function addUser() {
 
     if(!u || !p) return; 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
-    if(users.find(x => x.user === u)) return alert("User exists"); 
+    if(users.find(x => String(x.user || '').toLowerCase() === normalizedUser)) return alert("User exists"); 
     
     // --- TOMBSTONE CHECK ---
     // If this user was previously deleted (revoked), remove them from blacklist
     // so they can be re-created successfully.
     let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-    if(revoked.includes(u)) {
-        revoked = revoked.filter(name => name !== u);
+    if(revoked.some(name => String(name || '').toLowerCase() === normalizedUser)) {
+        revoked = revoked.filter(name => String(name || '').toLowerCase() !== normalizedUser);
         localStorage.setItem('revokedUsers', JSON.stringify(revoked));
     }
 
@@ -845,28 +837,73 @@ async function addUser() {
 // FIXED: Now uses Tombstone (Blacklist) and Instant Save
 async function remUser(username) { 
     if(confirm(`Permanently delete user '${username}'?`)) { 
-        // 1. Get User
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        // FIX: Find index by username, not table row index
-        const i = users.findIndex(u => u.user === username);
-        const targetUser = users[i];
+        const target = String(username || '').trim();
+        if (!target) return;
+        const targetNorm = target.toLowerCase();
 
-        if(!targetUser) return;
+        // 1) Remove account (case-insensitive)
+        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        users = users.filter(u => String(u.user || '').toLowerCase() !== targetNorm);
+        localStorage.setItem('users', JSON.stringify(users));
 
-        // 2. Add to Blacklist (Tombstone) to prevent merge restoration
-        const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-        if(!revoked.includes(targetUser.user)) {
-            revoked.push(targetUser.user);
-            localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+        // 2) Add to blacklist/tombstone (case-insensitive dedupe)
+        let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        if (!revoked.some(r => String(r || '').toLowerCase() === targetNorm)) {
+            revoked.push(target);
         }
+        localStorage.setItem('revokedUsers', JSON.stringify(revoked));
 
-        // 3. Remove from Local Array
-        users.splice(i,1); 
-        localStorage.setItem('users',JSON.stringify(users)); 
+        // 3) Remove from all rosters so auto-generation cannot recreate
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        Object.keys(rosters).forEach(gid => {
+            if (!Array.isArray(rosters[gid])) return;
+            rosters[gid] = rosters[gid].filter(m => String(m || '').toLowerCase() !== targetNorm);
+        });
+        localStorage.setItem('rosters', JSON.stringify(rosters));
+
+        // 4) Purge common user-linked local data to prevent resurrection side-effects
+        const purgeArray = (key, fields) => {
+            let arr = JSON.parse(localStorage.getItem(key) || '[]');
+            if (!Array.isArray(arr)) return;
+            arr = arr.filter(item => {
+                return !fields.some(field => String((item && item[field]) || '').toLowerCase() === targetNorm);
+            });
+            localStorage.setItem(key, JSON.stringify(arr));
+        };
+        purgeArray('records', ['trainee', 'user', 'user_id']);
+        purgeArray('submissions', ['trainee', 'user', 'user_id']);
+        purgeArray('attendance_records', ['user', 'user_id']);
+        purgeArray('liveBookings', ['trainee', 'user', 'user_id']);
+        purgeArray('savedReports', ['trainee', 'user', 'user_id']);
+        purgeArray('insightReviews', ['trainee', 'user', 'user_id']);
+        purgeArray('exemptions', ['trainee', 'user', 'user_id']);
+        purgeArray('linkRequests', ['trainee', 'user', 'user_id']);
+        purgeArray('tl_task_submissions', ['trainee', 'user', 'user_id']);
+
+        const purgeObjectKey = (key) => {
+            const obj = JSON.parse(localStorage.getItem(key) || '{}');
+            if (!obj || typeof obj !== 'object') return;
+            Object.keys(obj).forEach(k => {
+                if (k.toLowerCase() === targetNorm) delete obj[k];
+            });
+            localStorage.setItem(key, JSON.stringify(obj));
+        };
+        purgeObjectKey('agentNotes');
+        purgeObjectKey('monitor_data');
+        purgeObjectKey('cancellationCounts');
+        purgeObjectKey('trainee_notes');
+        purgeObjectKey('trainee_bookmarks');
         
-        // 4. SECURE SAVE (Safe Merge - relies on revokedUsers blacklist to enforce deletion)
-        // UPDATED: Use force=true for users blob to ensure the deletion sticks immediately
-        if(typeof saveToServer === 'function') await saveToServer(['users', 'revokedUsers'], true);
+        // 5) Authoritative sync
+        if(typeof saveToServer === 'function') {
+            await saveToServer([
+                'users', 'revokedUsers', 'rosters', 'records', 'submissions',
+                'attendance_records', 'liveBookings', 'savedReports', 'insightReviews',
+                'exemptions', 'linkRequests', 'tl_task_submissions',
+                'agentNotes', 'monitor_data', 'cancellationCounts',
+                'trainee_notes', 'trainee_bookmarks'
+            ], true);
+        }
 
         if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete User', `Deleted user ${username}`);
         loadAdminUsers(); 
@@ -875,18 +912,21 @@ async function remUser(username) {
 }
 
 function openUserEdit(username) {
-    const users = JSON.parse(localStorage.getItem('users')); 
+    const users = JSON.parse(localStorage.getItem('users') || '[]'); 
+    const targetNorm = String(username || '').trim().toLowerCase();
     // FIX: Find index by username
-    const index = users.findIndex(u => u.user === username);
+    const index = users.findIndex(u => String(u.user || '').toLowerCase() === targetNorm);
     if(index === -1) return;
 
     editTargetIndex = index;
+    editTargetUsername = users[index].user;
     const u = users[index];
     
     const isSuper = CURRENT_USER.role === 'super_admin';
+    const safeUser = u.user.replace(/'/g, "\\'");
 
     const bindingInfo = u.boundClientId 
-        ? `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">Bound to Client: <code>${u.boundClientId}</code> <button class="btn-danger btn-sm" onclick="unbindUserClient(${index})" style="padding:0 5px; margin-left:5px;">Unbind</button></div>` 
+        ? `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">Bound to Client: <code>${u.boundClientId}</code> <button class="btn-danger btn-sm" onclick="unbindUserClient('${safeUser}')" style="padding:0 5px; margin-left:5px;">Unbind</button></div>` 
         : `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">No Client Binding (Will bind on next login)</div>`;
 
     document.getElementById('adminEditTitle').innerHTML = `Edit User: ${u.user} <button class="btn-secondary btn-sm" onclick="renameUser('${u.user.replace(/'/g, "\\'")}')" style="font-size:0.7rem; margin-left:10px; padding:2px 8px;">Rename</button>`;
@@ -921,9 +961,12 @@ function openUserEdit(username) {
     document.getElementById('adminEditSaveBtn').onclick = saveUserEdit;
 }
 
-window.unbindUserClient = async function(index) {
+window.unbindUserClient = async function(username) {
     if(!confirm("Remove Client ID binding? This allows the user to login from a new machine.")) return;
-    const users = JSON.parse(localStorage.getItem('users'));
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const targetNorm = String(username || '').trim().toLowerCase();
+    const index = users.findIndex(u => String(u.user || '').toLowerCase() === targetNorm);
+    if (index === -1) return;
     delete users[index].boundClientId;
     localStorage.setItem('users', JSON.stringify(users));
     await secureUserSave();
@@ -1004,14 +1047,24 @@ window.renameUser = async function(oldName) {
 };
 
 async function saveUserEdit() {
-    const users = JSON.parse(localStorage.getItem('users'));
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const targetNorm = String(editTargetUsername || '').trim().toLowerCase();
+    const liveIndex = users.findIndex(u => String(u.user || '').toLowerCase() === targetNorm);
+    if (liveIndex === -1) {
+        alert("User no longer exists. The list will refresh.");
+        document.getElementById('adminEditModal').classList.add('hidden');
+        loadAdminUsers();
+        return;
+    }
+
+    editTargetIndex = liveIndex;
     const newPass = document.getElementById('editUserPass').value;
     
     if(newPass && newPass.trim() !== "") {
         if (typeof hashPassword === 'function') {
-            users[editTargetIndex].pass = await hashPassword(newPass);
+            users[liveIndex].pass = await hashPassword(newPass);
         } else {
-            users[editTargetIndex].pass = newPass;
+            users[liveIndex].pass = newPass;
         }
     }
     
@@ -1024,30 +1077,32 @@ async function saveUserEdit() {
             return;
         }
         
-        users[editTargetIndex].role = newRole;
+        users[liveIndex].role = newRole;
     }
 
     // Update Contact Info (traineeData)
-    if (!users[editTargetIndex].traineeData) users[editTargetIndex].traineeData = {};
+    if (!users[liveIndex].traineeData) users[liveIndex].traineeData = {};
     
     const newEmail = document.getElementById('editUserEmail').value.trim();
     const newPhone = document.getElementById('editUserPhone').value.trim();
     
-    users[editTargetIndex].traineeData.email = newEmail;
-    users[editTargetIndex].traineeData.phone = newPhone;
-    users[editTargetIndex].traineeData.contact = `${newEmail} | ${newPhone}`; // Legacy support
-    users[editTargetIndex].lastModified = new Date().toISOString();
-    users[editTargetIndex].modifiedBy = CURRENT_USER.user;
+    users[liveIndex].traineeData.email = newEmail;
+    users[liveIndex].traineeData.phone = newPhone;
+    users[liveIndex].traineeData.contact = `${newEmail} | ${newPhone}`; // Legacy support
+    users[liveIndex].lastModified = new Date().toISOString();
+    users[liveIndex].modifiedBy = CURRENT_USER.user;
 
     localStorage.setItem('users', JSON.stringify(users));
 
     // FIX: Update current session if editing self
-    if (CURRENT_USER && users[editTargetIndex].user === CURRENT_USER.user) {
+    if (CURRENT_USER && String(users[liveIndex].user || '').toLowerCase() === String(CURRENT_USER.user || '').toLowerCase()) {
+        CURRENT_USER = { ...CURRENT_USER, ...users[liveIndex] };
         sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
     }
     
     await secureUserSave();
     
+    editTargetUsername = users[liveIndex].user;
     document.getElementById('adminEditModal').classList.add('hidden');
     loadAdminUsers();
 }

@@ -1232,6 +1232,18 @@ function clampThemeNumber(value, min, max, fallback) {
     return Math.max(min, Math.min(max, n));
 }
 
+function sanitizeThemeWallpaperUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const parsed = new URL(raw);
+        if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+        return parsed.toString();
+    } catch (e) {
+        return '';
+    }
+}
+
 function getHexRgbTuple(hex) {
     const clean = sanitizeThemeHexColor(hex, '#F37021').replace('#', '');
     const num = parseInt(clean, 16);
@@ -1250,6 +1262,7 @@ function getDefaultCustomExperimentalThemeConfig() {
         textMain: '#E6F3FF',
         textMuted: '#97B4D1',
         border: '#2F4F72',
+        wallpaper: '',
         mood: 'aurora',
         motionSpeed: 1,
         glowStrength: 0.26,
@@ -1268,6 +1281,7 @@ function sanitizeCustomExperimentalThemeConfig(rawConfig) {
     config.textMain = sanitizeThemeHexColor(config.textMain, defaults.textMain);
     config.textMuted = sanitizeThemeHexColor(config.textMuted, defaults.textMuted);
     config.border = sanitizeThemeHexColor(config.border, defaults.border);
+    config.wallpaper = sanitizeThemeWallpaperUrl(config.wallpaper || '');
     config.mood = allowedMoods.includes(config.mood) ? config.mood : defaults.mood;
     config.motionSpeed = clampThemeNumber(config.motionSpeed, 0.7, 1.5, defaults.motionSpeed);
     config.glowStrength = clampThemeNumber(config.glowStrength, 0.1, 0.5, defaults.glowStrength);
@@ -1282,17 +1296,28 @@ function buildCustomExperimentalThemeBackground(config) {
     const bgLift = lightenColor(config.bgApp, 14);
     const cardLift = lightenColor(config.bgCard, 8);
 
+    let gradientBase = '';
     if (config.mood === 'sunset') {
-        return `linear-gradient(145deg, ${lightenColor(config.accent, -22)} 0%, ${bgLift} 38%, ${config.bgApp} 100%)`;
-    }
-    if (config.mood === 'night') {
-        return `radial-gradient(circle at 20% 0%, ${cardLift} 0%, ${config.bgApp} 62%, #05080E 100%)`;
-    }
-    if (config.mood === 'emerald') {
+        gradientBase = `linear-gradient(145deg, ${lightenColor(config.accent, -22)} 0%, ${bgLift} 38%, ${config.bgApp} 100%)`;
+    } else if (config.mood === 'night') {
+        gradientBase = `radial-gradient(circle at 20% 0%, ${cardLift} 0%, ${config.bgApp} 62%, #05080E 100%)`;
+    } else if (config.mood === 'emerald') {
         const leaf = '#1B6F5F';
-        return `radial-gradient(circle at 80% 10%, ${adjustOpacity(leaf, 0.65)} 0%, transparent 42%), linear-gradient(140deg, ${bgLift} 0%, ${config.bgApp} 55%, ${lightenColor(config.bgApp, -6)} 100%)`;
+        gradientBase = `radial-gradient(circle at 80% 10%, ${adjustOpacity(leaf, 0.65)} 0%, transparent 42%), linear-gradient(140deg, ${bgLift} 0%, ${config.bgApp} 55%, ${lightenColor(config.bgApp, -6)} 100%)`;
+    } else {
+        gradientBase = `radial-gradient(circle at 15% 5%, ${accentSoft} 0%, transparent 32%), radial-gradient(circle at 88% 18%, ${accentMid} 0%, transparent 40%), linear-gradient(140deg, ${bgLift} 0%, ${config.bgApp} 52%, ${lightenColor(config.bgApp, -8)} 100%)`;
     }
-    return `radial-gradient(circle at 15% 5%, ${accentSoft} 0%, transparent 32%), radial-gradient(circle at 88% 18%, ${accentMid} 0%, transparent 40%), linear-gradient(140deg, ${bgLift} 0%, ${config.bgApp} 52%, ${lightenColor(config.bgApp, -8)} 100%)`;
+
+    if (config.wallpaper) {
+        const safeWallpaper = config.wallpaper
+            .replace(/\\/g, '/')
+            .replace(/'/g, '%27')
+            .replace(/\(/g, '%28')
+            .replace(/\)/g, '%29');
+        return `linear-gradient(180deg, rgba(0,0,0,0.62), rgba(0,0,0,0.52)), url('${safeWallpaper}'), ${gradientBase}`;
+    }
+
+    return gradientBase;
 }
 
 function getStoredCustomExperimentalThemeConfig() {
@@ -1365,6 +1390,7 @@ function collectCustomExperimentalThemeFromControls() {
         textMain: document.getElementById('expCustomTextMain'),
         textMuted: document.getElementById('expCustomTextMuted'),
         border: document.getElementById('expCustomBorder'),
+        wallpaper: document.getElementById('expCustomWallpaper'),
         mood: document.getElementById('expCustomMood'),
         motionSpeed: document.getElementById('expCustomMotion'),
         glowStrength: document.getElementById('expCustomGlow'),
@@ -1382,6 +1408,7 @@ function collectCustomExperimentalThemeFromControls() {
         textMain: controls.textMain.value,
         textMuted: controls.textMuted.value,
         border: controls.border.value,
+        wallpaper: controls.wallpaper.value,
         mood: controls.mood.value,
         motionSpeed: controls.motionSpeed.value,
         glowStrength: controls.glowStrength.value,
@@ -1402,6 +1429,7 @@ function syncCustomThemeControlUI(config) {
     setValue('expCustomTextMain', clean.textMain);
     setValue('expCustomTextMuted', clean.textMuted);
     setValue('expCustomBorder', clean.border);
+    setValue('expCustomWallpaper', clean.wallpaper || '');
     setValue('expCustomMood', clean.mood);
     setValue('expCustomMotion', clean.motionSpeed.toFixed(2));
     setValue('expCustomGlow', clean.glowStrength.toFixed(2));
@@ -1508,7 +1536,7 @@ function updateExperimentalThemePickerState() {
 
 function applyExperimentalTheme(themeName) {
     // 1. Remove all experimental classes
-    document.body.classList.remove('exp-theme-active', 'theme-custom-lab', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
+    document.body.classList.remove('exp-theme-active', 'exp-theme-wallpaper', 'theme-custom-lab', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
     clearCustomExperimentalThemeVariables();
     
     if (themeName) {
@@ -1522,7 +1550,11 @@ function applyExperimentalTheme(themeName) {
         // 2. Apply new theme
         document.body.classList.add('exp-theme-active');
         if (themeName === 'theme-custom-lab') {
-            applyCustomExperimentalThemeVariables(getStoredCustomExperimentalThemeConfig());
+            const customConfig = getStoredCustomExperimentalThemeConfig();
+            applyCustomExperimentalThemeVariables(customConfig);
+            if (customConfig.wallpaper) {
+                document.body.classList.add('exp-theme-wallpaper');
+            }
         }
         document.body.classList.add(themeName);
         localStorage.setItem('experimental_theme', themeName);
@@ -2348,6 +2380,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.6.0": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>User Management Reliability:</strong> Hardened delete/edit behavior with case-insensitive tombstones and live username targeting so removed users and profile edits no longer randomly revert after sync or restart.</li>
+                    <li style="margin-bottom: 8px;"><strong>Sync Stability:</strong> Reworked incoming realtime queue processing into guarded chunks to reduce heavy main-thread spikes that could make text fields feel unresponsive during high-volume sync bursts.</li>
+                    <li style="margin-bottom: 8px;"><strong>Study Browser Local Cache:</strong> Added local page snapshot caching with automatic cached-copy fallback when SharePoint/study pages fail to load.</li>
+                    <li style="margin-bottom: 8px;"><strong>Theme Builder Upgrade:</strong> Custom Lab now supports Wallpaper URL overlays directly in the Experimental Theme Builder while keeping one-click revert behavior.</li>
+                </ul>`,
             "2.5.9": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Live Booking Reliability:</strong> Added a new Booking Integrity Check + auto-repair workflow to detect and fix duplicate IDs, slot collisions, invalid statuses, and stale/duplicate trainee bookings before they break downstream views.</li>
