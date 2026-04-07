@@ -2042,6 +2042,14 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.5.8": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved an invisible "zombie process" bug that prevented the app from closing completely, which occasionally blocked auto-updates from installing.</li>
+                </ul>`,
+            "2.5.7": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>System Update:</strong> Version bump and minor maintenance.</li>
+                </ul>`,
             "2.5.6": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Feature: Super Admin Live Data Studio.</strong> Added a new, fully isolated module exclusively for Super Admins to view and edit live database records securely through a user-friendly interface.</li>

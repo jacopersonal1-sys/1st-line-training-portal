@@ -28,6 +28,7 @@ let mainWindow; // Define globally so updater events can access it
 let updateReady = false; // Track if update is downloaded
 let studySessionConfigured = false;
 let isFlushingStudySession = false;
+let isSafeToQuit = false;
 const STUDY_SESSION_PARTITION = 'persist:study_session';
 const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0';
 
@@ -220,7 +221,6 @@ function createWindow() {
         }
     });
 
-    let isSafeToQuit = false;
     // SECURITY & SAFE QUIT: Prevent closing during lockdown or data sync
     mainWindow.on('close', (e) => {
         if (vettingLockdown) {
@@ -313,10 +313,12 @@ if (!gotTheLock) {
     });
 }
 
+let studySessionFlushed = false;
 app.on('before-quit', (event) => {
-    if (!isFlushingStudySession) {
+    if (!studySessionFlushed) {
         event.preventDefault();
         flushStudySession().finally(() => {
+            studySessionFlushed = true;
             app.quit();
         });
     }
@@ -349,6 +351,7 @@ ipcMain.on('manual-update-check', () => {
 
 // IPC Listener for Restart
 ipcMain.on('restart-app', () => {
+    isSafeToQuit = true;
     autoUpdater.quitAndInstall();
 });
 

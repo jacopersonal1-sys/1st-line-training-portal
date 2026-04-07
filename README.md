@@ -155,6 +155,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.5.8**: **Critical Fix**: Resolved an infinite background loop during the safe-quit sequence that created zombie processes and blocked the auto-updater from overwriting files.
+ - **v2.5.7**: **System Update**: Version bump and minor maintenance.
  - **v2.5.6**: **Live Data Studio**: Added a dedicated, isolated module for Super Admins to securely view and directly edit live Supabase database records through a real-time visual interface.
  - **v2.5.5**: **Persistent Login & Study Session Hardening**: The desktop app now restores the last valid login until logout, the Microsoft/SharePoint study browser session is more durable on trainee installs, and the Team Leader Hub Agent Feedback flow was rebuilt into a new guided wizard with linked ticket-path question filtering.
  - **v2.5.4**: **Study Browser Controls**: Reworked the in-app study browser so the full control set stays usable after opening training links in new tabs. Added a dedicated control deck and improved button clickability and tab handling.

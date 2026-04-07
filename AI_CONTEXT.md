@@ -350,6 +350,8 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.5.8:** Fixed critical `before-quit` infinite loop in `electron-main.js` that caused zombie processes and blocked auto-updates.
+- **v2.5.7:** Version bump and minor maintenance.
 - **v2.5.6:** Added a completely isolated Super Admin Data Studio module (`modules/live_data_manager` or `superadmin_data_studio`) leveraging a Webview bridge for real-time visual database editing.
 - **v2.5.5:** Added persistent desktop session restore until explicit logout, hardened the Electron study-session handling for Microsoft/SharePoint material, and rebuilt the Team Leader Hub Agent Production Feedback flow around a new guided wizard plus linked ticket-path question creator.
 
