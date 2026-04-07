@@ -155,7 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
- - **v2.5.6**: **Sync Truth & Timestamps**: Hardened the server-authoritative schedule sync flow, added lightweight cross-module change events so Schedule Studio refreshes when shared data changes, restored the Activity Monitor history toggle, and added shared timestamp metadata (`createdAt`, `lastModified`, `modifiedBy`) to reduce stale merges across devices.
+ - **v2.5.6**: **Live Data Studio**: Added a dedicated, isolated module for Super Admins to securely view and directly edit live Supabase database records through a real-time visual interface.
  - **v2.5.5**: **Persistent Login & Study Session Hardening**: The desktop app now restores the last valid login until logout, the Microsoft/SharePoint study browser session is more durable on trainee installs, and the Team Leader Hub Agent Feedback flow was rebuilt into a new guided wizard with linked ticket-path question filtering.
  - **v2.5.4**: **Study Browser Controls**: Reworked the in-app study browser so the full control set stays usable after opening training links in new tabs. Added a dedicated control deck and improved button clickability and tab handling.
  - **v2.5.3**: **Study Browser Hardening**: Fixed the secure in-app browser bridge so Schedule study material opens inside the Electron overlay again, improved tab/navigation reliability, and added a safe Windows Snipping Tool exception to the OS-level activity monitor.
