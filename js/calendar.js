@@ -29,10 +29,13 @@ const CalendarModule = {
 
             if (isVisible) {
                 (sched.items || []).forEach(item => {
-                    let start = item.dateRange;
-                    let end = item.dateRange;
-                    if (item.dateRange.includes('-')) {
-                        const parts = item.dateRange.split('-');
+                    const safeRange = String(item.dateRange || '').trim();
+                    if (!safeRange) return;
+
+                    let start = safeRange;
+                    let end = safeRange;
+                    if (safeRange.includes('-')) {
+                        const parts = safeRange.split('-');
                         start = parts[0].trim();
                         end = parts[1].trim();
                     }

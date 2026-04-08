@@ -1,4 +1,6 @@
 /* ================= SCHEDULE & BOOKING ENGINE ================= */
+/* NOTE: Timeline editing UI now runs in modules/schedule_studio via schedule_studio_loader.js.
+   This file remains authoritative for legacy helpers and Live Assessment Booking behavior. */
 
 // State Tracker for Timeline
 let ACTIVE_SCHED_ID = 'A'; 
@@ -17,6 +19,16 @@ function cleanSharePointUrl(url) {
     try {
         const parsed = new URL(raw);
         const host = parsed.hostname.toLowerCase();
+        if (host.includes('safelinks.protection.outlook.com')) {
+            const safeTarget = parsed.searchParams.get('url') || parsed.searchParams.get('u') || '';
+            if (safeTarget) {
+                let decoded = safeTarget;
+                for (let i = 0; i < 2; i++) {
+                    try { decoded = decodeURIComponent(decoded); } catch (e) { break; }
+                }
+                if (/^https?:\/\//i.test(decoded)) return decoded;
+            }
+        }
         const isMicrosoftLink =
             host.includes('sharepoint.com') ||
             host.includes('onedrive.com') ||
@@ -65,14 +77,34 @@ function migrateLegacySharePointLinksInSchedules() {
     }
 }
 
-// One-time repair for links previously over-sanitized.
-if (!localStorage.getItem('v259_schedule_link_sanitizer_patch')) {
-    migrateLegacySharePointLinksInSchedules();
-    localStorage.setItem('v259_schedule_link_sanitizer_patch', 'true');
-}
-if (!localStorage.getItem('v260_schedule_link_unwrap_patch')) {
-    migrateLegacySharePointLinksInSchedules();
-    localStorage.setItem('v260_schedule_link_unwrap_patch', 'true');
+function migrateScheduleDurationMetadata() {
+    try {
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        if (!schedules || typeof schedules !== 'object') return;
+
+        let touched = false;
+        Object.keys(schedules).forEach(key => {
+            const group = schedules[key];
+            if (!group || !Array.isArray(group.items)) return;
+
+            group.items.forEach(item => {
+                if (!item || typeof item !== 'object') return;
+                if (normalizeDurationDays(item.durationDays)) return;
+                const inferred = inferScheduleDurationDays(item);
+                if (inferred) {
+                    item.durationDays = inferred;
+                    touched = true;
+                }
+            });
+        });
+
+        if (touched) {
+            localStorage.setItem('schedules', JSON.stringify(schedules));
+            if (typeof saveToServer === 'function') saveToServer(['schedules'], false);
+        }
+    } catch (e) {
+        console.warn('Schedule duration migration skipped:', e);
+    }
 }
 
 // --- SA PUBLIC HOLIDAYS (2026 Reference) ---
@@ -92,6 +124,200 @@ const SA_HOLIDAYS = [
     "2026-12-25", // Christmas
     "2026-12-26"  // Day of Goodwill
 ];
+const SCHEDULE_TEMPLATE_STORAGE_KEY = 'scheduleTemplates';
+const SCHEDULE_HOLIDAY_STORAGE_KEY = 'scheduleHolidays';
+const SCHEDULE_TEMPLATE_MANAGER_MODAL_ID = 'scheduleTemplateManagerModal';
+const NEW_SCHEDULE_TEMPLATE_PROMPT_ID = 'newScheduleTemplatePromptModal';
+let SCHEDULE_TEMPLATE_EDITOR_STATE = null;
+
+function isScheduleTemplateAdmin() {
+    return !!(CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin'));
+}
+
+function ensureScheduleTemplateAdmin(actionText) {
+    if (isScheduleTemplateAdmin()) return true;
+    alert(`Only admins can ${actionText || 'manage schedule templates'}.`);
+    return false;
+}
+
+function formatScheduleDateDash(dateObj) {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function formatScheduleDateSlash(dateObj) {
+    return formatScheduleDateDash(dateObj).replace(/-/g, '/');
+}
+
+function parseScheduleDateStrict(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const normalized = raw.replace(/\./g, '/').replace(/-/g, '/');
+    const match = normalized.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const candidate = new Date(year, month - 1, day);
+    if (
+        candidate.getFullYear() !== year ||
+        candidate.getMonth() !== (month - 1) ||
+        candidate.getDate() !== day
+    ) {
+        return null;
+    }
+    candidate.setHours(12, 0, 0, 0);
+    return candidate;
+}
+
+function normalizeScheduleDateString(value, separator = '/') {
+    const parsed = parseScheduleDateStrict(value);
+    if (!parsed) return '';
+    return separator === '-' ? formatScheduleDateDash(parsed) : formatScheduleDateSlash(parsed);
+}
+
+function extractScheduleDates(dateRangeStr) {
+    const raw = String(dateRangeStr || '').trim();
+    if (!raw) return [];
+    if (/^always available$/i.test(raw) || /^no dates set$/i.test(raw)) return [];
+    const matches = raw.match(/\d{4}[\/-]\d{1,2}[\/-]\d{1,2}/g);
+    return matches && matches.length ? matches : [raw];
+}
+
+function getScheduleStartDateFromRange(dateRangeStr, outputSeparator = '-') {
+    const dateTokens = extractScheduleDates(dateRangeStr);
+    if (!dateTokens.length) return '';
+    return normalizeScheduleDateString(dateTokens[0], outputSeparator);
+}
+
+function normalizeDurationDays(value) {
+    const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+}
+
+function getConfiguredScheduleHolidays() {
+    let saved = [];
+    try {
+        saved = JSON.parse(localStorage.getItem(SCHEDULE_HOLIDAY_STORAGE_KEY) || '[]');
+    } catch (e) {
+        saved = [];
+    }
+    if (!Array.isArray(saved) || saved.length === 0) return new Set(SA_HOLIDAYS);
+    const merged = [...new Set([...SA_HOLIDAYS, ...saved.map(v => String(v || '').trim()).filter(Boolean)])];
+    return new Set(merged);
+}
+
+function moveToBusinessDay(dateObj) {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+    const current = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), 12, 0, 0, 0);
+    let attempts = 0;
+    while (!isBusinessDay(current) && attempts < 370) {
+        current.setDate(current.getDate() + 1);
+        attempts++;
+    }
+    return current;
+}
+
+function getBusinessDayEndDate(startDateObj, durationDays) {
+    const normalizedDuration = normalizeDurationDays(durationDays) || 1;
+    const start = moveToBusinessDay(startDateObj);
+    if (!start) return null;
+
+    let end = new Date(start);
+    let counted = 1;
+    let attempts = 0;
+    while (counted < normalizedDuration && attempts < 4000) {
+        end.setDate(end.getDate() + 1);
+        if (isBusinessDay(end)) counted++;
+        attempts++;
+    }
+    return end;
+}
+
+function calculateScheduleWindow(startDateInput, durationDays) {
+    const parsedStart = parseScheduleDateStrict(startDateInput);
+    if (!parsedStart) return null;
+
+    const startDate = moveToBusinessDay(parsedStart);
+    if (!startDate) return null;
+
+    const normalizedDuration = normalizeDurationDays(durationDays) || 1;
+    const endDate = getBusinessDayEndDate(startDate, normalizedDuration);
+    if (!endDate) return null;
+
+    const startDateDash = formatScheduleDateDash(startDate);
+    const startDateSlash = formatScheduleDateSlash(startDate);
+    const endDateDash = formatScheduleDateDash(endDate);
+    const endDateSlash = formatScheduleDateSlash(endDate);
+    const dateRange = normalizedDuration > 1 ? `${startDateSlash} - ${endDateSlash}` : startDateSlash;
+    return {
+        startDateDash,
+        startDateSlash,
+        endDateDash,
+        endDateSlash,
+        dateRange,
+        dueDate: endDateSlash
+    };
+}
+
+function getNextBusinessDate(dateObj) {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+    const next = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), 12, 0, 0, 0);
+    next.setDate(next.getDate() + 1);
+    return moveToBusinessDay(next);
+}
+
+function inferScheduleDurationDays(item) {
+    if (!item || typeof item !== 'object') return null;
+    const explicit = normalizeDurationDays(item.durationDays);
+    if (explicit) return explicit;
+
+    const dateTokens = extractScheduleDates(item.dateRange);
+    const startDate = parseScheduleDateStrict(dateTokens[0] || '');
+    if (!startDate) return null;
+
+    const endToken = item.dueDate || dateTokens[1] || dateTokens[0];
+    let endDate = parseScheduleDateStrict(endToken);
+    if (!endDate) return null;
+    if (endDate < startDate) endDate = new Date(startDate);
+
+    const cursor = new Date(startDate);
+    let count = 0;
+    let attempts = 0;
+    while (cursor <= endDate && attempts < 4000) {
+        if (isBusinessDay(cursor)) count++;
+        cursor.setDate(cursor.getDate() + 1);
+        attempts++;
+    }
+    return count > 0 ? count : 1;
+}
+
+function getTodayScheduleDateDash() {
+    return formatScheduleDateDash(new Date());
+}
+
+function getTodayOrNextBusinessDateDash() {
+    const next = moveToBusinessDay(new Date());
+    return next ? formatScheduleDateDash(next) : getTodayScheduleDateDash();
+}
+
+// One-time repair and data enrichment patches.
+if (!localStorage.getItem('v259_schedule_link_sanitizer_patch')) {
+    migrateLegacySharePointLinksInSchedules();
+    localStorage.setItem('v259_schedule_link_sanitizer_patch', 'true');
+}
+if (!localStorage.getItem('v260_schedule_link_unwrap_patch')) {
+    migrateLegacySharePointLinksInSchedules();
+    localStorage.setItem('v260_schedule_link_unwrap_patch', 'true');
+}
+if (!localStorage.getItem('v261_schedule_duration_patch')) {
+    migrateScheduleDurationMetadata();
+    localStorage.setItem('v261_schedule_duration_patch', 'true');
+}
 
 // --- GLOBAL NAV HELPER ---
 window.openFullCalendar = function() {
@@ -342,6 +568,12 @@ function buildTabs(schedules, isAdmin) {
     return html;
 }
 
+function buildScheduleAutomationActions() {
+    // Timeline/template automation now lives in modules/schedule_studio.
+    // Keep legacy schedule.js focused on live booking behavior.
+    return '';
+}
+
 function buildToolbar(scheduleData, isAdmin) {
     if (!isAdmin) {
         if (scheduleData.assigned) return `<div style="padding:10px; background:var(--bg-input); border-left:4px solid var(--primary); border-radius:4px;">Currently viewing schedule for: <strong>${(typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned}</strong></div>`;
@@ -349,9 +581,9 @@ function buildToolbar(scheduleData, isAdmin) {
     }
     if (scheduleData.assigned) {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(scheduleData.assigned) : scheduleData.assigned;
-        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div>${(CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader') ? '<span style="color:var(--text-muted);">View Only</span>' : `<button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')" style="margin-left:5px;">Unassign</button>`}</div></div>`;
+        return `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(39, 174, 96, 0.1); border:1px solid #27ae60; border-radius:6px;"><div><i class="fas fa-check-circle" style="color:#27ae60; margin-right:5px;"></i> Assigned to: <strong>${label}</strong></div><div>${(CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader') ? '<span style="color:var(--text-muted);">View Only</span>' : `<button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new" style="margin-right:5px;"><i class="fas fa-clone"></i> Duplicate</button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule" style="margin-right:5px;"><i class="fas fa-copy"></i> Copy From...</button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button><button class="btn-danger btn-sm" onclick="clearAssignment('${ACTIVE_SCHED_ID}')" style="margin-left:5px;">Unassign</button>`}</div></div>${buildScheduleAutomationActions()}`;
     } else {
-        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span>${(CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader') ? '<span style="color:var(--text-muted);">View Only</span>' : `<select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button>`}</div>`;
+        return `<div style="display:flex; gap:10px; align-items:center; padding:15px; background:var(--bg-card); border:1px dashed var(--border-color); border-radius:6px;"><i class="fas fa-exclamation-circle" style="color:orange;"></i><span style="margin-right:auto;">This schedule is currently empty/inactive. Assign a roster to start.</span>${(CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader') ? '<span style="color:var(--text-muted);">View Only</span>' : `<select id="schedAssignSelect" class="form-control" style="width:250px; margin:0;"><option value="">Loading Groups...</option></select><button class="btn-primary btn-sm" onclick="assignRosterToSchedule('${ACTIVE_SCHED_ID}')">Assign Roster</button><button class="btn-secondary btn-sm" onclick="duplicateCurrentSchedule()" title="Duplicate this schedule to new"><i class="fas fa-clone"></i></button><button class="btn-secondary btn-sm" onclick="cloneSchedule('${ACTIVE_SCHED_ID}')" title="Copy from another schedule"><i class="fas fa-copy"></i></button><button class="btn-danger btn-sm" onclick="deleteSchedule('${ACTIVE_SCHED_ID}')" title="Delete Schedule"><i class="fas fa-trash"></i></button>`}</div>${buildScheduleAutomationActions()}`;
     }
 }
 
@@ -404,6 +636,8 @@ function buildTimeline(items, isAdmin) {
             // Hide access time if restrictions are disabled
             const timeInfo = ((item.openTime || item.closeTime) && !item.ignoreTime) ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;"><i class="fas fa-clock"></i> Access: ${item.openTime || '00:00'} - ${item.closeTime || '23:59'}</div>` : '';
             const dueInfo = item.dueDate ? `<span style="font-size:0.75rem; color:#e74c3c; margin-left:10px;">Due: ${item.dueDate}</span>` : '';
+            const durationDays = inferScheduleDurationDays(item);
+            const durationInfo = durationDays ? `<span style="font-size:0.75rem; color:var(--text-muted); margin-left:10px;"><i class="fas fa-business-time"></i> ${durationDays} day${durationDays === 1 ? '' : 's'}</span>` : '';
 
             // --- MATERIAL LINK LOGIC (UPDATED) ---
             let materialLinkHtml = '';
@@ -428,7 +662,7 @@ function buildTimeline(items, isAdmin) {
                 <div class="timeline-marker"></div>
                 <div class="timeline-content" style="background:var(--bg-input); padding:15px; border-radius:8px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div><span class="timeline-date" style="font-size:0.8rem; font-weight:bold; color:var(--primary);">${item.dateRange} ${dueInfo}</span><h4 style="margin:5px 0;">${item.courseName}</h4>${timeInfo}</div>
+                        <div><span class="timeline-date" style="font-size:0.8rem; font-weight:bold; color:var(--primary);">${item.dateRange} ${dueInfo} ${durationInfo}</span><h4 style="margin:5px 0;">${item.courseName}</h4>${timeInfo}</div>
                         <div>${actions}</div>
                     </div>
                     ${materialLinkHtml}
@@ -536,20 +770,23 @@ function buildCalendar(items, isAdmin, options = {}) {
 // --- PART B: LIVE ASSESSMENT BOOKING (REWORKED) ---
 
 function isBusinessDay(dateObj) {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return false;
     const day = dateObj.getDay();
     // 0 = Sunday, 6 = Saturday
     if (day === 0 || day === 6) return false;
     
     // Check Holidays
-    const dateStr = dateObj.toISOString().split('T')[0];
-    if (SA_HOLIDAYS.includes(dateStr)) return false;
+    const dateStr = formatScheduleDateDash(dateObj);
+    const holidays = getConfiguredScheduleHolidays();
+    if (holidays.has(dateStr)) return false;
     
     return true;
 }
 
 function getNextBusinessDays(startDateStr, count) {
     let days = [];
-    let current = new Date(startDateStr);
+    const parsedStart = parseScheduleDateStrict(startDateStr) || new Date(startDateStr);
+    let current = Number.isNaN(parsedStart.getTime()) ? new Date() : new Date(parsedStart);
     
     // Safety Break to prevent infinite loop if data is bad
     let attempts = 0;
@@ -2257,11 +2494,579 @@ function stampScheduleGroup(group, options = {}) {
     }
 }
 
+function getScheduleTemplates() {
+    const raw = JSON.parse(localStorage.getItem(SCHEDULE_TEMPLATE_STORAGE_KEY) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .filter(t => t && typeof t === 'object' && Array.isArray(t.items))
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+function saveScheduleTemplates(templates) {
+    localStorage.setItem(SCHEDULE_TEMPLATE_STORAGE_KEY, JSON.stringify(Array.isArray(templates) ? templates : []));
+}
+
+function normalizeTemplateEditorItem(item, index) {
+    const cloned = JSON.parse(JSON.stringify(item || {}));
+    delete cloned.dateRange;
+    delete cloned.dueDate;
+    delete cloned.createdAt;
+    delete cloned.lastModified;
+    delete cloned.modifiedBy;
+    cloned.courseName = String(cloned.courseName || '').trim() || `Step ${index + 1}`;
+    cloned.durationDays = normalizeDurationDays(cloned.durationDays) || inferScheduleDurationDays(cloned) || 1;
+    return cloned;
+}
+
+function sanitizeTemplateEditorItems(items) {
+    if (!Array.isArray(items)) return [];
+    return items.map((item, index) => normalizeTemplateEditorItem(item, index));
+}
+
+function ensureScheduleTemplateManagerModal() {
+    let modal = document.getElementById(SCHEDULE_TEMPLATE_MANAGER_MODAL_ID);
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = SCHEDULE_TEMPLATE_MANAGER_MODAL_ID;
+    modal.className = 'modal-overlay hidden';
+    modal.style.zIndex = '12010';
+    modal.innerHTML = `
+        <div class="modal-box" style="width:860px; max-width:95%;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0;">Schedule Template Manager</h3>
+                <button class="btn-secondary btn-sm" onclick="closeScheduleTemplateManager()"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 180px; gap:10px; margin-bottom:10px;">
+                <div>
+                    <label for="scheduleTemplateSelect">Template</label>
+                    <select id="scheduleTemplateSelect" onchange="loadScheduleTemplateIntoEditor(this.value)"></select>
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                    <button class="btn-secondary" style="width:100%;" onclick="startNewScheduleTemplateDraft()">+ New Template</button>
+                </div>
+            </div>
+            <label for="scheduleTemplateNameInput">Template Name</label>
+            <input type="text" id="scheduleTemplateNameInput" placeholder="e.g. Month 1 Intake">
+            <div style="margin:10px 0; padding:10px; border:1px dashed var(--border-color); border-radius:8px; font-size:0.85rem; color:var(--text-muted);">
+                Editable fields per timeline step: <strong>Course Name</strong> and <strong>Duration (Business Days)</strong>. Start/end dates are auto-calculated when a template is applied.
+            </div>
+            <div id="scheduleTemplateRows" style="max-height:48vh; overflow:auto; padding-right:4px;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                <button class="btn-secondary btn-sm" onclick="addScheduleTemplateEditorRow()"><i class="fas fa-plus"></i> Add Timeline Step</button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-danger btn-sm" onclick="deleteScheduleTemplateFromEditor()"><i class="fas fa-trash"></i> Delete Template</button>
+                    <button class="btn-secondary" onclick="closeScheduleTemplateManager()">Close</button>
+                    <button class="btn-primary" onclick="saveScheduleTemplateFromEditor()">Save Template</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function syncScheduleTemplateEditorStateFromInputs() {
+    if (!SCHEDULE_TEMPLATE_EDITOR_STATE) return;
+    const nameInput = document.getElementById('scheduleTemplateNameInput');
+    if (nameInput) {
+        SCHEDULE_TEMPLATE_EDITOR_STATE.templateName = String(nameInput.value || '').trim();
+    }
+
+    const rowsContainer = document.getElementById('scheduleTemplateRows');
+    if (!rowsContainer) return;
+
+    const rowEls = Array.from(rowsContainer.querySelectorAll('[data-template-row]'));
+    const previousItems = Array.isArray(SCHEDULE_TEMPLATE_EDITOR_STATE.items) ? SCHEDULE_TEMPLATE_EDITOR_STATE.items : [];
+    SCHEDULE_TEMPLATE_EDITOR_STATE.items = rowEls.map((rowEl, rowIndex) => {
+        const prior = JSON.parse(JSON.stringify(previousItems[rowIndex] || {}));
+        const nameEl = rowEl.querySelector('.tpl-course-name');
+        const durationEl = rowEl.querySelector('.tpl-duration-days');
+        prior.courseName = String(nameEl ? nameEl.value : '').trim() || `Step ${rowIndex + 1}`;
+        prior.durationDays = normalizeDurationDays(durationEl ? durationEl.value : '') || 1;
+        return normalizeTemplateEditorItem(prior, rowIndex);
+    });
+}
+
+function renderScheduleTemplateEditorRows() {
+    const rowsContainer = document.getElementById('scheduleTemplateRows');
+    if (!rowsContainer || !SCHEDULE_TEMPLATE_EDITOR_STATE) return;
+
+    const safeItems = sanitizeTemplateEditorItems(SCHEDULE_TEMPLATE_EDITOR_STATE.items);
+    SCHEDULE_TEMPLATE_EDITOR_STATE.items = safeItems;
+    rowsContainer.innerHTML = safeItems.map((item, idx) => `
+        <div data-template-row="1" style="display:grid; grid-template-columns:65px minmax(0, 1fr) 180px 115px; gap:8px; align-items:end; margin-bottom:8px; padding:8px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-input);">
+            <div style="font-size:0.85rem; color:var(--text-muted);">Step ${idx + 1}</div>
+            <div>
+                <label style="font-size:0.8rem;">Course Name</label>
+                <input type="text" class="tpl-course-name" value="${escapeHtml(item.courseName || '')}" placeholder="Timeline title">
+            </div>
+            <div>
+                <label style="font-size:0.8rem;">Duration (Days)</label>
+                <input type="number" class="tpl-duration-days" min="1" step="1" value="${item.durationDays || 1}">
+            </div>
+            <button class="btn-danger btn-sm" onclick="removeScheduleTemplateEditorRow(${idx})"><i class="fas fa-trash"></i></button>
+        </div>
+    `).join('');
+}
+
+function refreshScheduleTemplateSelect(selectedTemplateId = '') {
+    const select = document.getElementById('scheduleTemplateSelect');
+    if (!select) return;
+
+    const templates = getScheduleTemplates();
+    select.innerHTML = '<option value="">-- New Template --</option>';
+    templates.forEach(template => {
+        const count = Array.isArray(template.items) ? template.items.length : 0;
+        const label = `${template.name} (${count} step${count === 1 ? '' : 's'})`;
+        select.add(new Option(label, template.id));
+    });
+    select.value = selectedTemplateId || '';
+}
+
+window.startNewScheduleTemplateDraft = function(options = {}) {
+    if (!ensureScheduleTemplateAdmin('create schedule templates')) return;
+    const prefillItems = Array.isArray(options.prefillItems) ? options.prefillItems : [];
+    const normalizedPrefill = sanitizeTemplateEditorItems(prefillItems);
+    SCHEDULE_TEMPLATE_EDITOR_STATE = {
+        selectedTemplateId: '',
+        templateName: String(options.defaultName || '').trim(),
+        items: normalizedPrefill.length > 0 ? normalizedPrefill : [{ courseName: 'Step 1', durationDays: 1 }]
+    };
+
+    const nameInput = document.getElementById('scheduleTemplateNameInput');
+    if (nameInput) nameInput.value = SCHEDULE_TEMPLATE_EDITOR_STATE.templateName;
+    refreshScheduleTemplateSelect('');
+    renderScheduleTemplateEditorRows();
+};
+
+window.loadScheduleTemplateIntoEditor = function(templateId) {
+    if (!ensureScheduleTemplateAdmin('edit schedule templates')) return;
+    const trimmedId = String(templateId || '').trim();
+    if (!trimmedId) {
+        window.startNewScheduleTemplateDraft();
+        return;
+    }
+
+    const templates = getScheduleTemplates();
+    const picked = templates.find(template => String(template.id || '') === trimmedId);
+    if (!picked) {
+        window.startNewScheduleTemplateDraft();
+        return;
+    }
+
+    SCHEDULE_TEMPLATE_EDITOR_STATE = {
+        selectedTemplateId: picked.id,
+        templateName: picked.name || '',
+        items: sanitizeTemplateEditorItems(picked.items || [])
+    };
+
+    const nameInput = document.getElementById('scheduleTemplateNameInput');
+    if (nameInput) nameInput.value = SCHEDULE_TEMPLATE_EDITOR_STATE.templateName;
+    refreshScheduleTemplateSelect(picked.id);
+    renderScheduleTemplateEditorRows();
+};
+
+window.addScheduleTemplateEditorRow = function() {
+    if (!ensureScheduleTemplateAdmin('edit schedule templates')) return;
+    syncScheduleTemplateEditorStateFromInputs();
+    if (!SCHEDULE_TEMPLATE_EDITOR_STATE) {
+        SCHEDULE_TEMPLATE_EDITOR_STATE = { selectedTemplateId: '', templateName: '', items: [] };
+    }
+    const nextIndex = SCHEDULE_TEMPLATE_EDITOR_STATE.items.length;
+    SCHEDULE_TEMPLATE_EDITOR_STATE.items.push({
+        courseName: `Step ${nextIndex + 1}`,
+        durationDays: 1
+    });
+    renderScheduleTemplateEditorRows();
+};
+
+window.removeScheduleTemplateEditorRow = function(index) {
+    if (!ensureScheduleTemplateAdmin('edit schedule templates')) return;
+    syncScheduleTemplateEditorStateFromInputs();
+    if (!SCHEDULE_TEMPLATE_EDITOR_STATE || !Array.isArray(SCHEDULE_TEMPLATE_EDITOR_STATE.items)) return;
+    const safeIndex = Number(index);
+    if (!Number.isFinite(safeIndex) || safeIndex < 0 || safeIndex >= SCHEDULE_TEMPLATE_EDITOR_STATE.items.length) return;
+    SCHEDULE_TEMPLATE_EDITOR_STATE.items.splice(safeIndex, 1);
+    if (SCHEDULE_TEMPLATE_EDITOR_STATE.items.length === 0) {
+        SCHEDULE_TEMPLATE_EDITOR_STATE.items.push({ courseName: 'Step 1', durationDays: 1 });
+    }
+    renderScheduleTemplateEditorRows();
+};
+
+window.closeScheduleTemplateManager = function() {
+    const modal = document.getElementById(SCHEDULE_TEMPLATE_MANAGER_MODAL_ID);
+    if (modal) modal.classList.add('hidden');
+};
+
+window.manageScheduleTemplates = function(options = {}) {
+    if (!ensureScheduleTemplateAdmin('manage schedule templates')) return;
+    const modal = ensureScheduleTemplateManagerModal();
+    modal.classList.remove('hidden');
+
+    if (Array.isArray(options.prefillItems) && options.prefillItems.length > 0) {
+        window.startNewScheduleTemplateDraft({
+            prefillItems: options.prefillItems,
+            defaultName: options.defaultName || ''
+        });
+        return;
+    }
+
+    const templates = getScheduleTemplates();
+    const preferredId = String(options.templateId || '').trim();
+    const initialTemplateId = preferredId && templates.some(t => String(t.id || '') === preferredId)
+        ? preferredId
+        : (templates[0] ? templates[0].id : '');
+
+    if (initialTemplateId) {
+        window.loadScheduleTemplateIntoEditor(initialTemplateId);
+    } else {
+        window.startNewScheduleTemplateDraft({
+            defaultName: options.defaultName || ''
+        });
+    }
+};
+
+window.saveScheduleTemplateFromEditor = function() {
+    if (!ensureScheduleTemplateAdmin('save schedule templates')) return;
+    syncScheduleTemplateEditorStateFromInputs();
+    if (!SCHEDULE_TEMPLATE_EDITOR_STATE) return;
+
+    const name = String(SCHEDULE_TEMPLATE_EDITOR_STATE.templateName || '').trim();
+    if (!name) {
+        alert('Template name cannot be empty.');
+        return;
+    }
+
+    const items = sanitizeTemplateEditorItems(SCHEDULE_TEMPLATE_EDITOR_STATE.items || []);
+    if (items.length === 0) {
+        alert('Add at least one timeline step to save a template.');
+        return;
+    }
+
+    const templates = getScheduleTemplates();
+    const selectedId = String(SCHEDULE_TEMPLATE_EDITOR_STATE.selectedTemplateId || '').trim();
+    let existingIndex = selectedId
+        ? templates.findIndex(template => String(template.id || '') === selectedId)
+        : -1;
+
+    const nameCollisionIndex = templates.findIndex(template => normalizeScheduleText(template.name) === normalizeScheduleText(name));
+    if (nameCollisionIndex >= 0 && nameCollisionIndex !== existingIndex) {
+        if (!confirm(`Template "${templates[nameCollisionIndex].name}" already exists. Overwrite it?`)) return;
+        existingIndex = nameCollisionIndex;
+    }
+
+    const now = new Date().toISOString();
+    const templateId = existingIndex >= 0
+        ? templates[existingIndex].id
+        : `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const nextTemplate = {
+        id: templateId,
+        name,
+        sourceScheduleId: ACTIVE_SCHED_ID,
+        itemCount: items.length,
+        items,
+        createdAt: existingIndex >= 0 ? templates[existingIndex].createdAt : now,
+        updatedAt: now
+    };
+
+    if (existingIndex >= 0) templates[existingIndex] = nextTemplate;
+    else templates.push(nextTemplate);
+
+    saveScheduleTemplates(templates);
+    SCHEDULE_TEMPLATE_EDITOR_STATE = {
+        selectedTemplateId: templateId,
+        templateName: name,
+        items: sanitizeTemplateEditorItems(items)
+    };
+    refreshScheduleTemplateSelect(templateId);
+    renderScheduleTemplateEditorRows();
+    if (typeof showToast === 'function') showToast(`Template "${name}" saved.`, 'success');
+};
+
+window.deleteScheduleTemplateFromEditor = function() {
+    if (!ensureScheduleTemplateAdmin('delete schedule templates')) return;
+    if (!SCHEDULE_TEMPLATE_EDITOR_STATE || !SCHEDULE_TEMPLATE_EDITOR_STATE.selectedTemplateId) {
+        alert('Select a saved template to delete.');
+        return;
+    }
+
+    const templates = getScheduleTemplates();
+    const selectedId = String(SCHEDULE_TEMPLATE_EDITOR_STATE.selectedTemplateId);
+    const existingIndex = templates.findIndex(template => String(template.id || '') === selectedId);
+    if (existingIndex < 0) {
+        alert('Template not found.');
+        return;
+    }
+
+    const picked = templates[existingIndex];
+    if (!confirm(`Delete template "${picked.name}"?`)) return;
+    templates.splice(existingIndex, 1);
+    saveScheduleTemplates(templates);
+
+    const nextTemplateId = templates[0] ? templates[0].id : '';
+    if (nextTemplateId) {
+        window.loadScheduleTemplateIntoEditor(nextTemplateId);
+    } else {
+        window.startNewScheduleTemplateDraft();
+    }
+    if (typeof showToast === 'function') showToast(`Template "${picked.name}" deleted.`, 'success');
+};
+
+function buildTemplateItemsFromScheduleItems(items) {
+    if (!Array.isArray(items)) return [];
+    return items.map(item => {
+        const cloned = JSON.parse(JSON.stringify(item || {}));
+        delete cloned.dateRange;
+        delete cloned.dueDate;
+        delete cloned.createdAt;
+        delete cloned.lastModified;
+        delete cloned.modifiedBy;
+        cloned.durationDays = normalizeDurationDays(cloned.durationDays) || inferScheduleDurationDays(item) || 1;
+        return cloned;
+    });
+}
+
+function buildScheduleItemsFromTemplateItems(templateItems, timelineStartDate) {
+    if (!Array.isArray(templateItems)) return [];
+    const parsedStart = parseScheduleDateStrict(timelineStartDate);
+    if (!parsedStart) return null;
+
+    let cursor = moveToBusinessDay(parsedStart);
+    if (!cursor) return null;
+
+    return templateItems.map(sourceItem => {
+        const cloned = JSON.parse(JSON.stringify(sourceItem || {}));
+        const durationDays = normalizeDurationDays(cloned.durationDays) || inferScheduleDurationDays(cloned) || 1;
+        const window = calculateScheduleWindow(formatScheduleDateDash(cursor), durationDays);
+        if (!window) throw new Error('Unable to calculate schedule dates from template.');
+
+        cloned.durationDays = durationDays;
+        cloned.dateRange = window.dateRange;
+        cloned.dueDate = window.endDateSlash;
+
+        delete cloned.createdAt;
+        delete cloned.lastModified;
+        delete cloned.modifiedBy;
+
+        const endDate = parseScheduleDateStrict(window.endDateDash);
+        cursor = endDate ? getNextBusinessDate(endDate) : moveToBusinessDay(new Date());
+        return cloned;
+    });
+}
+
+function resolveScheduleTemplateSelection(input, templates) {
+    const value = String(input || '').trim();
+    if (!value) return null;
+
+    if (/^\d+$/.test(value)) {
+        const idx = Number.parseInt(value, 10) - 1;
+        if (idx >= 0 && idx < templates.length) return templates[idx];
+    }
+
+    const normalizedValue = normalizeScheduleText(value);
+    return templates.find(t => normalizeScheduleText(t.name) === normalizedValue) || null;
+}
+
+async function promptForTemplateSelection() {
+    if (!ensureScheduleTemplateAdmin('apply schedule templates')) return null;
+    const templates = getScheduleTemplates();
+    if (templates.length === 0) {
+        alert('No saved templates found yet. Save a schedule as template first.');
+        return null;
+    }
+
+    const optionsText = templates
+        .map((template, i) => `${i + 1}. ${template.name} (${(template.items || []).length} items)`)
+        .join('\n');
+
+    const selection = await customPrompt(
+        'Apply Schedule Template',
+        `Choose template by number or name:\n${optionsText}`,
+        '1'
+    );
+    if (selection === null) return null;
+
+    const picked = resolveScheduleTemplateSelection(selection, templates);
+    if (!picked) {
+        alert('Template selection not recognized.');
+        return null;
+    }
+    return picked;
+}
+
+async function applyTemplateToScheduleById(targetScheduleId, template, startDateInput) {
+    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const group = schedules[targetScheduleId];
+    if (!group) return false;
+
+    const normalizedStart = normalizeScheduleDateString(startDateInput, '-');
+    if (!normalizedStart) {
+        alert('Invalid start date. Use YYYY-MM-DD or YYYY/MM/DD.');
+        return false;
+    }
+
+    let rebuiltItems = [];
+    try {
+        rebuiltItems = buildScheduleItemsFromTemplateItems(template.items || [], normalizedStart) || [];
+    } catch (error) {
+        console.error('Failed to apply schedule template:', error);
+        alert('Could not apply template. Please validate template items and try again.');
+        return false;
+    }
+
+    group.items = rebuiltItems;
+    stampScheduleGroup(group, { touchGroup: true, touchAllItems: true });
+    localStorage.setItem('schedules', JSON.stringify(schedules));
+    await secureScheduleSave();
+
+    const requestedStartSlash = normalizeScheduleDateString(normalizedStart, '/');
+    const actualStartSlash = rebuiltItems.length > 0 ? getScheduleStartDateFromRange(rebuiltItems[0].dateRange, '/') : requestedStartSlash;
+    if (actualStartSlash && requestedStartSlash && actualStartSlash !== requestedStartSlash && typeof showToast === 'function') {
+        showToast(`Start date shifted to next business day: ${actualStartSlash}`, 'warning');
+    }
+    return true;
+}
+
+async function promptAndApplyTemplateToSchedule(targetScheduleId, options = {}) {
+    if (!ensureScheduleTemplateAdmin('apply schedule templates')) return false;
+    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const group = schedules[targetScheduleId];
+    if (!group) return false;
+
+    if (options.confirmReplace !== false && Array.isArray(group.items) && group.items.length > 0) {
+        if (!confirm('Applying a template will replace all current timeline items for this schedule. Continue?')) return false;
+    }
+
+    const selectedTemplate = await promptForTemplateSelection();
+    if (!selectedTemplate) return false;
+
+    const currentStart = Array.isArray(group.items) && group.items[0] ? getScheduleStartDateFromRange(group.items[0].dateRange, '-') : '';
+    const suggestedStart = currentStart || getTodayOrNextBusinessDateDash();
+    const requestedStart = await customPrompt(
+        'Template Start Date',
+        'Enter timeline start date (YYYY-MM-DD). Weekends and holidays are skipped automatically.',
+        suggestedStart
+    );
+    if (requestedStart === null) return false;
+
+    const applied = await applyTemplateToScheduleById(targetScheduleId, selectedTemplate, requestedStart);
+    if (!applied) return false;
+
+    if (typeof showToast === 'function') {
+        showToast(`Template "${selectedTemplate.name}" applied to Schedule ${targetScheduleId}.`, 'success');
+    }
+    ACTIVE_SCHED_ID = targetScheduleId;
+    renderSchedule();
+    return true;
+}
+
+window.saveCurrentScheduleAsTemplate = async function() {
+    alert('Timeline templates are now managed inside Schedule Studio (Assessment Schedule tab).');
+};
+
+window.applyTemplateToCurrentSchedule = async function() {
+    alert('Use Schedule Studio to add templates to timelines.');
+};
+
+window.recalculateCurrentScheduleDates = async function() {
+    alert('Use Schedule Studio to recalculate timeline dates.');
+};
+
+window.previewScheduleDateFromDuration = function() {
+    const startInputEl = document.getElementById('editStartDate');
+    const durationInputEl = document.getElementById('editDurationDays');
+    const rangeInputEl = document.getElementById('editDateRange');
+    const dueInputEl = document.getElementById('editDueDate');
+    if (!startInputEl || !durationInputEl || !rangeInputEl || !dueInputEl) return;
+
+    const durationDays = normalizeDurationDays(durationInputEl.value);
+    if (!durationDays) return;
+
+    const seedDate =
+        startInputEl.value ||
+        getScheduleStartDateFromRange(rangeInputEl.value, '-') ||
+        normalizeScheduleDateString(dueInputEl.value, '-');
+    if (!seedDate) return;
+
+    const calculated = calculateScheduleWindow(seedDate, durationDays);
+    if (!calculated) return;
+
+    rangeInputEl.value = calculated.dateRange;
+    dueInputEl.value = calculated.endDateSlash;
+    startInputEl.value = calculated.startDateDash;
+};
+
+async function promptTemplateActionForNewSchedule(scheduleId) {
+    if (!isScheduleTemplateAdmin()) return false;
+    const templates = getScheduleTemplates();
+    const hasTemplates = templates.length > 0;
+
+    return new Promise(resolve => {
+        const existing = document.getElementById(NEW_SCHEDULE_TEMPLATE_PROMPT_ID);
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = NEW_SCHEDULE_TEMPLATE_PROMPT_ID;
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '12020';
+        modal.innerHTML = `
+            <div class="modal-box" style="max-width:520px;">
+                <h3 style="margin-top:0;">Schedule ${scheduleId} Created</h3>
+                <p style="font-size:0.95rem; color:var(--text-muted); margin-bottom:14px;">
+                    Add a template now to auto-calculate timeline start/end dates from duration days. Weekends and configured holidays are skipped.
+                </p>
+                ${hasTemplates ? '' : '<p style="font-size:0.85rem; color:#e67e22; margin-top:-4px; margin-bottom:12px;">No saved templates yet. Use Edit Templates to create one.</p>'}
+                <div style="display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                    <button class="btn-secondary" id="btnNewSchedManageTpl"><i class="fas fa-pen-ruler"></i> Edit Templates</button>
+                    <button class="btn-secondary" id="btnNewSchedSkipTpl">Skip for Now</button>
+                    <button class="btn-primary" id="btnNewSchedApplyTpl"><i class="fas fa-layer-group"></i> Add Template</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const cleanup = () => {
+            const target = document.getElementById(NEW_SCHEDULE_TEMPLATE_PROMPT_ID);
+            if (target) target.remove();
+        };
+
+        const skipBtn = modal.querySelector('#btnNewSchedSkipTpl');
+        const applyBtn = modal.querySelector('#btnNewSchedApplyTpl');
+        const manageBtn = modal.querySelector('#btnNewSchedManageTpl');
+
+        skipBtn.onclick = () => {
+            cleanup();
+            resolve(false);
+        };
+        manageBtn.onclick = () => {
+            cleanup();
+            window.manageScheduleTemplates();
+            resolve(false);
+        };
+        applyBtn.onclick = async () => {
+            cleanup();
+            if (!hasTemplates) {
+                window.manageScheduleTemplates({
+                    defaultName: `Schedule ${scheduleId} Template`
+                });
+                resolve(false);
+                return;
+            }
+            const applied = await promptAndApplyTemplateToSchedule(scheduleId, { confirmReplace: false });
+            resolve(Boolean(applied));
+        };
+    });
+}
+
 async function createNewSchedule() {
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    if (!schedules || typeof schedules !== 'object') return;
+
     const keys = Object.keys(schedules).sort();
-    const lastKey = keys[keys.length - 1];
-    const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
+    const lastKey = keys.length > 0 ? keys[keys.length - 1] : 'A';
+    const nextKey = keys.length > 0 ? String.fromCharCode(lastKey.charCodeAt(0) + 1) : 'A';
     
     if (confirm(`Create new Schedule Group '${nextKey}'?`)) {
         schedules[nextKey] = { items: [], assigned: null };
@@ -2332,9 +3137,16 @@ function getTraineeScheduleId(username, schedules) {
 // Timeline Item Editing (CRUD)
 async function addTimelineItem() {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const defaultStart = getTodayOrNextBusinessDateDash();
+    const defaultWindow = calculateScheduleWindow(defaultStart, 1);
     schedules[ACTIVE_SCHED_ID].items.push({
-        dateRange: new Date().toISOString().split('T')[0].replace(/-/g, '/'),
-        courseName: "New Item", materialLink: "", dueDate: "", openTime: "08:00", closeTime: "17:00"
+        dateRange: defaultWindow ? defaultWindow.dateRange : formatScheduleDateSlash(new Date()),
+        courseName: "New Item",
+        materialLink: "",
+        dueDate: defaultWindow ? defaultWindow.endDateSlash : "",
+        durationDays: 1,
+        openTime: "08:00",
+        closeTime: "17:00"
     });
     stampScheduleGroup(schedules[ACTIVE_SCHED_ID], {
         touchGroup: true,
@@ -2361,13 +3173,19 @@ async function deleteTimelineItem(index) {
 function editTimelineItem(index) {
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     const item = schedules[ACTIVE_SCHED_ID].items[index];
+    const inferredDuration = inferScheduleDurationDays(item);
+    const startDateDash = getScheduleStartDateFromRange(item.dateRange, '-');
     document.getElementById('editStepIndex').value = index;
     document.getElementById('editStepType').value = ACTIVE_SCHED_ID; 
-    document.getElementById('editDateRange').value = item.dateRange;
-    document.getElementById('editCourseName').value = item.courseName;
-    document.getElementById('editMaterialLink').value = item.materialLink;
+    document.getElementById('editDateRange').value = item.dateRange || '';
+    document.getElementById('editCourseName').value = item.courseName || '';
+    document.getElementById('editMaterialLink').value = item.materialLink || '';
     document.getElementById('editMaterialAlways').checked = item.materialAlways || false;
-    document.getElementById('editDueDate').value = item.dueDate;
+    document.getElementById('editDueDate').value = item.dueDate || '';
+    const startDateEl = document.getElementById('editStartDate');
+    if (startDateEl) startDateEl.value = startDateDash || '';
+    const durationEl = document.getElementById('editDurationDays');
+    if (durationEl) durationEl.value = normalizeDurationDays(item.durationDays) || inferredDuration || '';
     document.getElementById('editAssessmentLink').value = item.assessmentLink || "";
     document.getElementById('editStartTime').value = item.openTime || "";
     document.getElementById('editEndTime').value = item.closeTime || "";
@@ -2393,12 +3211,41 @@ async function saveScheduleItem() {
     const schedId = document.getElementById('editStepType').value;
     const schedules = JSON.parse(localStorage.getItem('schedules'));
     const item = schedules[schedId].items[index];
+    const startInputEl = document.getElementById('editStartDate');
+    const durationInputEl = document.getElementById('editDurationDays');
+    const manualDateRange = String(document.getElementById('editDateRange').value || '').trim();
+    const manualDueDate = String(document.getElementById('editDueDate').value || '').trim();
+    const durationDays = durationInputEl ? normalizeDurationDays(durationInputEl.value) : null;
 
-    item.dateRange = document.getElementById('editDateRange').value;
+    if (durationDays) {
+        const startSeed =
+            (startInputEl && startInputEl.value) ||
+            getScheduleStartDateFromRange(manualDateRange, '-') ||
+            normalizeScheduleDateString(manualDueDate, '-');
+        if (!startSeed) {
+            alert('Please provide a valid start date when duration is enabled.');
+            return;
+        }
+        const calculated = calculateScheduleWindow(startSeed, durationDays);
+        if (!calculated) {
+            alert('Could not calculate dates. Please verify start date and duration.');
+            return;
+        }
+        item.durationDays = durationDays;
+        item.dateRange = calculated.dateRange;
+        item.dueDate = calculated.endDateSlash;
+        if (startInputEl) startInputEl.value = calculated.startDateDash;
+        document.getElementById('editDateRange').value = calculated.dateRange;
+        document.getElementById('editDueDate').value = calculated.endDateSlash;
+    } else {
+        item.dateRange = manualDateRange;
+        item.dueDate = normalizeScheduleDateString(manualDueDate, '/') || manualDueDate;
+        delete item.durationDays;
+    }
+
     item.courseName = document.getElementById('editCourseName').value;
     item.materialLink = cleanSharePointUrl(document.getElementById('editMaterialLink').value);
     item.materialAlways = document.getElementById('editMaterialAlways').checked;
-    item.dueDate = document.getElementById('editDueDate').value;
     item.assessmentLink = cleanSharePointUrl(document.getElementById('editAssessmentLink').value);
     item.openTime = document.getElementById('editStartTime').value;
     item.closeTime = document.getElementById('editEndTime').value;
@@ -2451,7 +3298,8 @@ async function duplicateCurrentSchedule() {
 }
 
 function isDateInRange(dateRangeStr, dueDateStr, specificDateStr) {
-    if (dateRangeStr === "Always Available") return true;
+    const safeRange = String(dateRangeStr || '').trim();
+    if (safeRange === "Always Available") return true;
     
     // Determine target date: specificDateStr if provided (Calendar), else today (Timeline)
     let target = "";
@@ -2466,11 +3314,11 @@ function isDateInRange(dateRangeStr, dueDateStr, specificDateStr) {
     }
 
     let start = "", end = "";
-    if (dateRangeStr.includes('-') && dateRangeStr.length > 11) {
-        const parts = dateRangeStr.split('-').map(s => s.trim().replace(/-/g, '/'));
+    if (safeRange.includes('-') && safeRange.length > 11) {
+        const parts = safeRange.split('-').map(s => s.trim().replace(/-/g, '/'));
         start = parts[0]; end = parts[1];
-    } else if (dateRangeStr.trim()) {
-        start = dateRangeStr.trim().replace(/-/g, '/');
+    } else if (safeRange) {
+        start = safeRange.replace(/-/g, '/');
         end = start;
     }
 
@@ -2482,7 +3330,9 @@ function isDateInRange(dateRangeStr, dueDateStr, specificDateStr) {
 }
 
 function getScheduleStatus(dateRangeStr, dueDateStr) {
-    if (dateRangeStr === "Always Available") return 'active';
+    const safeRange = String(dateRangeStr || '').trim();
+    if (safeRange === "Always Available") return 'active';
+    if (!safeRange) return 'upcoming';
     
     // Normalize dates to YYYY/MM/DD for consistent string comparison
     const normalize = (d) => d ? d.replace(/-/g, '/').trim() : '';
@@ -2494,11 +3344,11 @@ function getScheduleStatus(dateRangeStr, dueDateStr) {
     const today = `${y}/${m}/${d}`;
     
     let start = "", end = "";
-    if (dateRangeStr.includes('-') && dateRangeStr.length > 11) {
-        const parts = dateRangeStr.split('-').map(s => normalize(s));
+    if (safeRange.includes('-') && safeRange.length > 11) {
+        const parts = safeRange.split('-').map(s => normalize(s));
         start = parts[0]; end = parts[1];
     } else {
-        start = normalize(dateRangeStr); end = normalize(dateRangeStr);
+        start = normalize(safeRange); end = normalize(safeRange);
     }
 
     if (dueDateStr) {
@@ -2512,7 +3362,9 @@ function getScheduleStatus(dateRangeStr, dueDateStr) {
 }
 
 function isAssessmentDay(dateRangeStr, dueDateStr) {
-    if (dateRangeStr === "Always Available") return true;
+    const safeRange = String(dateRangeStr || '').trim();
+    if (safeRange === "Always Available") return true;
+    if (!safeRange) return false;
     
     const normalize = (d) => d ? d.replace(/-/g, '/').trim() : '';
     
@@ -2523,11 +3375,11 @@ function isAssessmentDay(dateRangeStr, dueDateStr) {
     const today = `${y}/${m}/${d}`;
     
     let end = "";
-    if (dateRangeStr.includes('-') && dateRangeStr.length > 11) {
-        const parts = dateRangeStr.split('-').map(s => normalize(s));
+    if (safeRange.includes('-') && safeRange.length > 11) {
+        const parts = safeRange.split('-').map(s => normalize(s));
         end = parts[1];
     } else {
-        end = normalize(dateRangeStr);
+        end = normalize(safeRange);
     }
 
     if (dueDateStr) {

@@ -114,6 +114,19 @@
     
     <label for="editDateRange">Date Range / Duration</label>
     <input type="text" id="editDateRange" placeholder="e.g. 2026/01/06 - 2026/01/07">
+    <div style="display:flex; gap:10px; margin-top:8px; margin-bottom:8px;">
+        <div style="flex:1;">
+            <label for="editStartDate">Auto Start Date</label>
+            <input type="date" id="editStartDate" oninput="previewScheduleDateFromDuration()">
+        </div>
+        <div style="width:170px;">
+            <label for="editDurationDays">Duration (Days)</label>
+            <input type="number" id="editDurationDays" min="1" step="1" placeholder="Optional" oninput="previewScheduleDateFromDuration()">
+        </div>
+    </div>
+    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;">
+        Set duration to auto-calculate dates and skip weekends/public holidays.
+    </div>
     
     <label for="editCourseName">Course Name</label>
     <input type="text" id="editCourseName">

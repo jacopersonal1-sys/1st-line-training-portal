@@ -1568,6 +1568,16 @@ const StudyMonitor = {
         try {
             const parsed = new URL(working, window.location.href);
             const host = parsed.hostname.toLowerCase();
+            if (host.includes('safelinks.protection.outlook.com')) {
+                const safeTarget = parsed.searchParams.get('url') || parsed.searchParams.get('u') || '';
+                if (safeTarget) {
+                    let decoded = safeTarget;
+                    for (let i = 0; i < 2; i++) {
+                        try { decoded = decodeURIComponent(decoded); } catch (e) { break; }
+                    }
+                    if (/^https?:\/\//i.test(decoded)) return decoded;
+                }
+            }
             const isMicrosoftLink =
                 host.includes('sharepoint.com') ||
                 host.includes('onedrive.com') ||

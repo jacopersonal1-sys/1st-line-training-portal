@@ -4,7 +4,12 @@ const App = {
         schedules: {},
         activeScheduleId: 'A',
         view: 'list',
-        currentMonth: new Date()
+        currentMonth: new Date(),
+        templateEditor: {
+            selectedTemplateId: '',
+            templateName: '',
+            items: []
+        }
     },
 
     async init() {
@@ -21,6 +26,7 @@ const App = {
         await ScheduleData.init();
         this.bindHostListeners();
         this.loadState();
+        await this.runDurationMigrationOnce();
         this.render();
     },
 
@@ -92,7 +98,10 @@ const App = {
                             ${TimelineUI.renderScheduleTabs(schedules, this.state.activeScheduleId, canManage)}
                         </aside>
                         <div class="studio-card studio-main-card studio-main">
-                            ${TimelineUI.renderToolbar(active, this.state.view, canEdit, canManage)}
+                            ${TimelineUI.renderToolbar(active, this.state.view, canEdit, canManage, {
+                                templateCount: ScheduleData.getTemplates().length,
+                                totalSchedules: Object.keys(schedules).length
+                            })}
                             ${this.state.view === 'calendar'
                                 ? CalendarUI.render(active.items || [], this.state.currentMonth)
                                 : TimelineUI.renderTimeline(active.items || [], {
@@ -120,6 +129,84 @@ const App = {
 
     canManage() {
         return this.canEdit();
+    },
+
+    notify(message, type = 'info') {
+        if (AppContext.host && typeof AppContext.host.showToast === 'function') {
+            AppContext.host.showToast(message, type);
+            return;
+        }
+        console.log(`[Schedule Studio] ${message}`);
+    },
+
+    unwrapSafeLink(urlValue) {
+        const raw = String(urlValue || '').trim();
+        if (!raw) return '';
+
+        try {
+            const parsed = new URL(raw);
+            const host = parsed.hostname.toLowerCase();
+            if (!host.includes('safelinks.protection.outlook.com')) return raw;
+
+            const nestedRaw = parsed.searchParams.get('url') || parsed.searchParams.get('u') || '';
+            if (!nestedRaw) return raw;
+
+            let decoded = nestedRaw;
+            for (let i = 0; i < 2; i++) {
+                try {
+                    decoded = decodeURIComponent(decoded);
+                } catch (error) {
+                    break;
+                }
+            }
+
+            return /^https?:\/\//i.test(decoded) ? decoded : raw;
+        } catch (error) {
+            return raw;
+        }
+    },
+
+    normalizeExternalLink(urlValue) {
+        let raw = String(urlValue || '').trim();
+        if (!raw) return '';
+
+        raw = raw.replace(/^['"<\s]+|[>'"\s]+$/g, '').replace(/&amp;/gi, '&');
+        let cleaned = raw;
+
+        if (AppContext.host && typeof AppContext.host.cleanSharePointUrl === 'function') {
+            try {
+                cleaned = AppContext.host.cleanSharePointUrl(raw) || raw;
+            } catch (error) {
+                cleaned = raw;
+            }
+        }
+
+        cleaned = String(cleaned || '').trim().replace(/^<|>$/g, '').replace(/&amp;/gi, '&');
+        cleaned = this.unwrapSafeLink(cleaned);
+        if (!cleaned) return '';
+
+        if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(cleaned) && /^www\./i.test(cleaned)) {
+            cleaned = `https://${cleaned}`;
+        }
+        return cleaned;
+    },
+
+    async runDurationMigrationOnce() {
+        const storage = ScheduleData.getStorage();
+        const patchKey = 'v302_schedule_studio_duration_patch';
+        if (storage.getItem(patchKey)) return;
+
+        const changed = ScheduleData.migrateDurationDaysInSchedules(this.state.schedules);
+        if (changed) {
+            try {
+                await ScheduleData.saveSchedules(this.state.schedules, false);
+                this.notify('Timeline durations were inferred for existing items.', 'success');
+            } catch (error) {
+                console.warn('[Schedule Studio] Duration migration save failed:', error);
+            }
+        }
+
+        storage.setItem(patchKey, 'true');
     },
 
     setSchedule(id) {
@@ -197,7 +284,10 @@ const App = {
         this.state.schedules[nextKey] = { items: [], assigned: null };
         this.stampSchedule(nextKey, { touchGroup: true });
         this.state.activeScheduleId = nextKey;
-        await this.persist();
+        const saved = await this.persist();
+        if (saved) {
+            this.openNewScheduleTemplatePrompt(nextKey);
+        }
     },
 
     async deleteSchedule() {
@@ -279,10 +369,12 @@ const App = {
 
     async addItem() {
         if (!this.canManage()) return;
-        const today = this.todayString();
+        const defaultStart = ScheduleData.getTodayOrNextBusinessDayDash();
+        const defaultWindow = ScheduleData.calculateWindow(defaultStart, 1);
         this.getActiveSchedule().items.push({
-            dateRange: today,
-            dueDate: today,
+            dateRange: defaultWindow ? defaultWindow.dateRange : this.todayString(),
+            dueDate: defaultWindow ? defaultWindow.endDateSlash : this.todayString(),
+            durationDays: 1,
             courseName: 'New Item',
             materialLink: '',
             assessmentLink: '',
@@ -304,11 +396,13 @@ const App = {
         if (!this.canEdit()) return;
         const item = this.getActiveSchedule().items[index];
         const range = ScheduleData.parseRange(item);
+        const inferredDuration = ScheduleData.normalizeDurationDays(item.durationDays) || ScheduleData.inferDurationDays(item);
         const tests = ScheduleData.getTests();
 
         document.getElementById('edit-step-index').value = index;
         document.getElementById('edit-start-date').value = this.toInputDate(range.start);
         document.getElementById('edit-end-date').value = this.toInputDate(range.end || range.start);
+        document.getElementById('edit-duration-days').value = inferredDuration || '';
         document.getElementById('edit-course-name').value = item.courseName || '';
         document.getElementById('edit-material-link').value = item.materialLink || '';
         document.getElementById('edit-assessment-link').value = item.assessmentLink || '';
@@ -326,6 +420,7 @@ const App = {
         testSelect.value = item.linkedTestId || '';
 
         document.getElementById('schedule-modal').classList.remove('hidden');
+        this.previewEditorFromDuration();
     },
 
     closeEditor() {
@@ -337,15 +432,32 @@ const App = {
         const item = this.getActiveSchedule().items[index];
         if (!item) return;
 
-        const startDate = document.getElementById('edit-start-date').value;
-        const endDate = document.getElementById('edit-end-date').value || startDate;
-        if (!startDate || !endDate) return alert('Start and end dates are required.');
+        const startDateInput = document.getElementById('edit-start-date').value;
+        const endDateInput = document.getElementById('edit-end-date').value || startDateInput;
+        const durationInput = document.getElementById('edit-duration-days').value;
+        const durationDays = ScheduleData.normalizeDurationDays(durationInput);
 
-        item.dateRange = ScheduleData.formatRange(startDate.replace(/-/g, '/'), endDate.replace(/-/g, '/'));
-        item.dueDate = endDate.replace(/-/g, '/');
+        if (durationDays) {
+            const calculated = ScheduleData.calculateWindow(startDateInput, durationDays);
+            if (!calculated) return alert('Please provide a valid start date for duration-based scheduling.');
+
+            item.durationDays = durationDays;
+            item.dateRange = calculated.dateRange;
+            item.dueDate = calculated.endDateSlash;
+            document.getElementById('edit-start-date').value = calculated.startDateDash;
+            document.getElementById('edit-end-date').value = calculated.endDateDash;
+        } else {
+            if (!startDateInput || !endDateInput) return alert('Start and end dates are required.');
+            const normalizedStart = ScheduleData.normalizeDate(startDateInput);
+            const normalizedEnd = ScheduleData.normalizeDate(endDateInput);
+            item.dateRange = ScheduleData.formatRange(normalizedStart, normalizedEnd);
+            item.dueDate = normalizedEnd;
+            delete item.durationDays;
+        }
+
         item.courseName = document.getElementById('edit-course-name').value.trim();
-        item.materialLink = document.getElementById('edit-material-link').value.trim();
-        item.assessmentLink = document.getElementById('edit-assessment-link').value.trim();
+        item.materialLink = this.normalizeExternalLink(document.getElementById('edit-material-link').value);
+        item.assessmentLink = this.normalizeExternalLink(document.getElementById('edit-assessment-link').value);
         item.openTime = document.getElementById('edit-open-time').value;
         item.closeTime = document.getElementById('edit-close-time').value;
         item.ignoreTime = document.getElementById('edit-ignore-time').checked;
@@ -359,6 +471,21 @@ const App = {
         this.stampSchedule(this.state.activeScheduleId, { touchGroup: true, itemIndex: index });
         await this.persist();
         this.closeEditor();
+    },
+
+    previewEditorFromDuration() {
+        const startEl = document.getElementById('edit-start-date');
+        const endEl = document.getElementById('edit-end-date');
+        const durationEl = document.getElementById('edit-duration-days');
+        if (!startEl || !endEl || !durationEl) return;
+
+        const durationDays = ScheduleData.normalizeDurationDays(durationEl.value);
+        if (!durationDays) return;
+
+        const calculated = ScheduleData.calculateWindow(startEl.value, durationDays);
+        if (!calculated) return;
+        startEl.value = calculated.startDateDash;
+        endEl.value = calculated.endDateDash;
     },
 
     async deleteItem(index) {
@@ -378,6 +505,397 @@ const App = {
         items.splice(targetIndex, 0, item);
         this.stampSchedule(this.state.activeScheduleId, { touchGroup: true });
         await this.persist();
+    },
+
+    openNewScheduleTemplatePrompt(scheduleId) {
+        if (!this.canManage()) return;
+        const modal = document.getElementById('new-schedule-template-modal');
+        const scheduleInput = document.getElementById('new-schedule-template-id');
+        const title = document.getElementById('new-schedule-template-title');
+        const hint = document.getElementById('new-schedule-template-hint');
+        if (!modal || !scheduleInput || !title || !hint) return;
+
+        const templates = ScheduleData.getTemplates();
+        scheduleInput.value = scheduleId;
+        title.textContent = `Timeline ${scheduleId} Created`;
+        hint.textContent = templates.length
+            ? `${templates.length} saved template${templates.length === 1 ? '' : 's'} available.`
+            : 'No templates saved yet. Click "Edit Templates" to create one.';
+        modal.classList.remove('hidden');
+    },
+
+    closeNewScheduleTemplatePrompt() {
+        const modal = document.getElementById('new-schedule-template-modal');
+        if (modal) modal.classList.add('hidden');
+    },
+
+    handleNewScheduleEditTemplates() {
+        const targetId = document.getElementById('new-schedule-template-id')?.value || this.state.activeScheduleId;
+        this.closeNewScheduleTemplatePrompt();
+        this.setSchedule(targetId);
+        this.openTemplateManager({ defaultName: `Schedule ${targetId} Template` });
+    },
+
+    handleNewScheduleAddTemplate() {
+        const targetId = document.getElementById('new-schedule-template-id')?.value || this.state.activeScheduleId;
+        this.closeNewScheduleTemplatePrompt();
+        this.setSchedule(targetId);
+        this.openApplyTemplateModal(targetId, { confirmReplace: false });
+    },
+
+    openApplyTemplateModal(targetScheduleId = this.state.activeScheduleId, options = {}) {
+        if (!this.canManage()) return;
+        const templates = ScheduleData.getTemplates();
+        if (!templates.length) {
+            alert('No saved templates yet. Create one first.');
+            this.openTemplateManager({ defaultName: `Schedule ${targetScheduleId} Template` });
+            return;
+        }
+
+        const modal = document.getElementById('template-apply-modal');
+        const targetInput = document.getElementById('template-apply-target-schedule');
+        const select = document.getElementById('template-apply-select');
+        const startInput = document.getElementById('template-apply-start-date');
+        if (!modal || !targetInput || !select || !startInput) return;
+
+        targetInput.value = targetScheduleId;
+        select.innerHTML = '';
+        templates.forEach(template => {
+            const count = Array.isArray(template.items) ? template.items.length : 0;
+            select.add(new Option(`${template.name} (${count} step${count === 1 ? '' : 's'})`, template.id));
+        });
+
+        const schedule = this.state.schedules[targetScheduleId] || { items: [] };
+        const first = Array.isArray(schedule.items) && schedule.items[0] ? ScheduleData.parseRange(schedule.items[0]).start : '';
+        const suggestedStart = ScheduleData.toDateDash(ScheduleData.parseStrictDate(first)) || ScheduleData.getTodayOrNextBusinessDayDash();
+        startInput.value = suggestedStart;
+        modal.dataset.confirmReplace = options.confirmReplace === false ? '0' : '1';
+        modal.classList.remove('hidden');
+    },
+
+    closeApplyTemplateModal() {
+        const modal = document.getElementById('template-apply-modal');
+        if (modal) modal.classList.add('hidden');
+    },
+
+    async applyTemplateFromModal() {
+        if (!this.canManage()) return;
+        const modal = document.getElementById('template-apply-modal');
+        const targetScheduleId = document.getElementById('template-apply-target-schedule')?.value || this.state.activeScheduleId;
+        const templateId = document.getElementById('template-apply-select')?.value;
+        const startDate = document.getElementById('template-apply-start-date')?.value;
+        if (!templateId) return alert('Please choose a template.');
+        if (!startDate) return alert('Please choose a start date.');
+
+        const templates = ScheduleData.getTemplates();
+        const selectedTemplate = templates.find(template => String(template.id || '') === String(templateId || ''));
+        if (!selectedTemplate) return alert('Template not found.');
+
+        const shouldConfirmReplace = modal?.dataset.confirmReplace !== '0';
+        const applied = await this.applyTemplateToScheduleById(targetScheduleId, selectedTemplate, startDate, { confirmReplace: shouldConfirmReplace });
+        if (!applied) return;
+        this.closeApplyTemplateModal();
+    },
+
+    async applyTemplateToScheduleById(targetScheduleId, template, startDateInput, options = {}) {
+        if (!this.canManage()) return false;
+        const schedule = this.state.schedules[targetScheduleId];
+        if (!schedule) return false;
+
+        const normalizedStart = ScheduleData.toDateDash(ScheduleData.parseStrictDate(startDateInput));
+        if (!normalizedStart) {
+            alert('Invalid start date. Use YYYY-MM-DD.');
+            return false;
+        }
+
+        if (options.confirmReplace !== false && Array.isArray(schedule.items) && schedule.items.length > 0) {
+            if (!confirm(`Applying "${template.name}" will replace all current timeline items in Schedule ${targetScheduleId}. Continue?`)) {
+                return false;
+            }
+        }
+
+        let rebuiltItems = [];
+        try {
+            rebuiltItems = ScheduleData.buildScheduleItemsFromTemplateItems(template.items || [], normalizedStart) || [];
+        } catch (error) {
+            console.error('[Schedule Studio] Template apply failed:', error);
+            alert('Could not apply template. Please verify template data.');
+            return false;
+        }
+
+        schedule.items = rebuiltItems;
+        this.stampSchedule(targetScheduleId, { touchGroup: true, touchAllItems: true });
+        this.state.activeScheduleId = targetScheduleId;
+        const saved = await this.persist();
+        if (!saved) return false;
+        this.notify(`Template "${template.name}" applied to Schedule ${targetScheduleId}.`, 'success');
+        return true;
+    },
+
+    saveCurrentAsTemplate() {
+        if (!this.canManage()) return;
+        const schedule = this.getActiveSchedule();
+        if (!Array.isArray(schedule.items) || !schedule.items.length) {
+            alert('No timeline items to save as a template.');
+            return;
+        }
+
+        this.openTemplateManager({
+            prefillItems: ScheduleData.buildTemplateItemsFromScheduleItems(schedule.items),
+            defaultName: `Schedule ${this.state.activeScheduleId} Template`
+        });
+    },
+
+    async recalculateActiveScheduleDates() {
+        if (!this.canManage()) return;
+        const schedule = this.getActiveSchedule();
+        if (!Array.isArray(schedule.items) || !schedule.items.length) {
+            alert('No timeline items to recalculate.');
+            return;
+        }
+
+        const firstStart = ScheduleData.parseRange(schedule.items[0]).start;
+        const suggestion = ScheduleData.toDateDash(ScheduleData.parseStrictDate(firstStart)) || ScheduleData.getTodayOrNextBusinessDayDash();
+        const entered = prompt('Enter new timeline start date (YYYY-MM-DD):', suggestion);
+        if (entered === null) return;
+
+        const templateLike = {
+            id: `temp_${Date.now()}`,
+            name: 'Temporary Recalculate Template',
+            items: ScheduleData.buildTemplateItemsFromScheduleItems(schedule.items)
+        };
+        await this.applyTemplateToScheduleById(this.state.activeScheduleId, templateLike, entered, { confirmReplace: false });
+    },
+
+    openTemplateManager(options = {}) {
+        if (!this.canManage()) return;
+        const modal = document.getElementById('template-manager-modal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+
+        if (Array.isArray(options.prefillItems) && options.prefillItems.length > 0) {
+            this.startNewTemplateDraft({
+                prefillItems: options.prefillItems,
+                defaultName: options.defaultName || ''
+            });
+            return;
+        }
+
+        const templates = ScheduleData.getTemplates();
+        if (templates.length) {
+            this.loadTemplateIntoEditor(options.templateId || templates[0].id);
+            return;
+        }
+
+        this.startNewTemplateDraft({ defaultName: options.defaultName || '' });
+    },
+
+    closeTemplateManager() {
+        const modal = document.getElementById('template-manager-modal');
+        if (modal) modal.classList.add('hidden');
+    },
+
+    refreshTemplateSelect(selectedTemplateId = '') {
+        const select = document.getElementById('template-select');
+        if (!select) return;
+        const templates = ScheduleData.getTemplates();
+        select.innerHTML = '<option value="">-- New Template --</option>';
+        templates.forEach(template => {
+            const count = Array.isArray(template.items) ? template.items.length : 0;
+            select.add(new Option(`${template.name} (${count} step${count === 1 ? '' : 's'})`, template.id));
+        });
+        select.value = selectedTemplateId || '';
+    },
+
+    startNewTemplateDraft(options = {}) {
+        if (!this.canManage()) return;
+        const prefillItems = Array.isArray(options.prefillItems) ? options.prefillItems : [];
+        const normalizedItems = ScheduleData.buildTemplateItemsFromScheduleItems(prefillItems);
+        this.state.templateEditor = {
+            selectedTemplateId: '',
+            templateName: String(options.defaultName || '').trim(),
+            items: normalizedItems.length ? normalizedItems : [{ courseName: 'Step 1', durationDays: 1 }]
+        };
+
+        const nameInput = document.getElementById('template-name');
+        if (nameInput) nameInput.value = this.state.templateEditor.templateName;
+        this.refreshTemplateSelect('');
+        this.renderTemplateEditorRows();
+    },
+
+    loadTemplateIntoEditor(templateId) {
+        if (!this.canManage()) return;
+        const safeTemplateId = String(templateId || '').trim();
+        if (!safeTemplateId) {
+            this.startNewTemplateDraft();
+            return;
+        }
+
+        const templates = ScheduleData.getTemplates();
+        const selected = templates.find(template => String(template.id || '') === safeTemplateId);
+        if (!selected) {
+            this.startNewTemplateDraft();
+            return;
+        }
+
+        this.state.templateEditor = {
+            selectedTemplateId: selected.id,
+            templateName: selected.name || '',
+            items: ScheduleData.buildTemplateItemsFromScheduleItems(selected.items || [])
+        };
+
+        const nameInput = document.getElementById('template-name');
+        if (nameInput) nameInput.value = this.state.templateEditor.templateName;
+        this.refreshTemplateSelect(selected.id);
+        this.renderTemplateEditorRows();
+    },
+
+    syncTemplateEditorFromDom() {
+        const editor = this.state.templateEditor || { selectedTemplateId: '', templateName: '', items: [] };
+        const nameInput = document.getElementById('template-name');
+        if (nameInput) editor.templateName = String(nameInput.value || '').trim();
+
+        const rows = Array.from(document.querySelectorAll('#template-items-container [data-template-row]'));
+        const previousItems = Array.isArray(editor.items) ? editor.items : [];
+        editor.items = rows.map((row, index) => {
+            const base = JSON.parse(JSON.stringify(previousItems[index] || {}));
+            const courseName = String(row.querySelector('.template-course-name')?.value || '').trim() || `Step ${index + 1}`;
+            const durationDays = ScheduleData.normalizeDurationDays(row.querySelector('.template-duration-days')?.value) || 1;
+            base.courseName = courseName;
+            base.durationDays = durationDays;
+            return base;
+        });
+
+        this.state.templateEditor = editor;
+    },
+
+    renderTemplateEditorRows() {
+        const container = document.getElementById('template-items-container');
+        if (!container) return;
+
+        const editor = this.state.templateEditor || { items: [] };
+        const safeItems = Array.isArray(editor.items) && editor.items.length
+            ? editor.items
+            : [{ courseName: 'Step 1', durationDays: 1 }];
+        editor.items = safeItems;
+        this.state.templateEditor = editor;
+
+        container.innerHTML = safeItems.map((item, index) => `
+            <div data-template-row="1" class="studio-grid three" style="margin-bottom:8px; align-items:end;">
+                <label style="grid-column: span 2;">
+                    <span>Step ${index + 1} Course Name</span>
+                    <input type="text" class="template-course-name" value="${TimelineUI.escape(item.courseName || '')}" placeholder="Timeline step name">
+                </label>
+                <label>
+                    <span>Duration (Days)</span>
+                    <input type="number" class="template-duration-days" min="1" step="1" value="${ScheduleData.normalizeDurationDays(item.durationDays) || 1}">
+                </label>
+                <div style="grid-column: 1 / -1; text-align:right;">
+                    <button class="studio-btn secondary" onclick="App.removeTemplateRow(${index})"><i class="fas fa-trash"></i> Remove</button>
+                </div>
+            </div>
+        `).join('');
+    },
+
+    addTemplateRow() {
+        if (!this.canManage()) return;
+        this.syncTemplateEditorFromDom();
+        const editor = this.state.templateEditor || { selectedTemplateId: '', templateName: '', items: [] };
+        const nextIndex = Array.isArray(editor.items) ? editor.items.length : 0;
+        if (!Array.isArray(editor.items)) editor.items = [];
+        editor.items.push({ courseName: `Step ${nextIndex + 1}`, durationDays: 1 });
+        this.state.templateEditor = editor;
+        this.renderTemplateEditorRows();
+    },
+
+    removeTemplateRow(index) {
+        if (!this.canManage()) return;
+        this.syncTemplateEditorFromDom();
+        const editor = this.state.templateEditor || { items: [] };
+        if (!Array.isArray(editor.items) || !editor.items.length) return;
+        const safeIndex = Number(index);
+        if (!Number.isFinite(safeIndex) || safeIndex < 0 || safeIndex >= editor.items.length) return;
+        editor.items.splice(safeIndex, 1);
+        if (!editor.items.length) editor.items.push({ courseName: 'Step 1', durationDays: 1 });
+        this.state.templateEditor = editor;
+        this.renderTemplateEditorRows();
+    },
+
+    saveTemplateFromEditor() {
+        if (!this.canManage()) return;
+        this.syncTemplateEditorFromDom();
+        const editor = this.state.templateEditor || { selectedTemplateId: '', templateName: '', items: [] };
+        const templateName = String(editor.templateName || '').trim();
+        if (!templateName) return alert('Template name is required.');
+        if (!Array.isArray(editor.items) || !editor.items.length) return alert('Add at least one template step.');
+
+        const normalizedItems = editor.items.map((item, index) => {
+            const cloned = JSON.parse(JSON.stringify(item || {}));
+            cloned.courseName = String(cloned.courseName || '').trim() || `Step ${index + 1}`;
+            cloned.durationDays = ScheduleData.normalizeDurationDays(cloned.durationDays) || 1;
+            return cloned;
+        });
+
+        const templates = ScheduleData.getTemplates();
+        const selectedId = String(editor.selectedTemplateId || '').trim();
+        let existingIndex = selectedId
+            ? templates.findIndex(template => String(template.id || '') === selectedId)
+            : -1;
+
+        const sameNameIndex = templates.findIndex(template => String(template.name || '').trim().toLowerCase() === templateName.toLowerCase());
+        if (sameNameIndex >= 0 && sameNameIndex !== existingIndex) {
+            if (!confirm(`Template "${templates[sameNameIndex].name}" already exists. Overwrite it?`)) return;
+            existingIndex = sameNameIndex;
+        }
+
+        const now = new Date().toISOString();
+        const nextTemplate = {
+            id: existingIndex >= 0 ? templates[existingIndex].id : `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            name: templateName,
+            sourceScheduleId: this.state.activeScheduleId,
+            itemCount: normalizedItems.length,
+            items: normalizedItems,
+            createdAt: existingIndex >= 0 ? templates[existingIndex].createdAt : now,
+            updatedAt: now
+        };
+
+        if (existingIndex >= 0) templates[existingIndex] = nextTemplate;
+        else templates.push(nextTemplate);
+
+        ScheduleData.saveTemplates(templates);
+        this.state.templateEditor = {
+            selectedTemplateId: nextTemplate.id,
+            templateName,
+            items: normalizedItems
+        };
+        this.refreshTemplateSelect(nextTemplate.id);
+        this.renderTemplateEditorRows();
+        this.notify(`Template "${templateName}" saved.`, 'success');
+        this.render();
+    },
+
+    deleteTemplateFromEditor() {
+        if (!this.canManage()) return;
+        const editor = this.state.templateEditor || {};
+        const selectedId = String(editor.selectedTemplateId || '').trim();
+        if (!selectedId) return alert('Select a saved template to delete.');
+
+        const templates = ScheduleData.getTemplates();
+        const existingIndex = templates.findIndex(template => String(template.id || '') === selectedId);
+        if (existingIndex < 0) return alert('Template not found.');
+        if (!confirm(`Delete template "${templates[existingIndex].name}"?`)) return;
+
+        const deletedName = templates[existingIndex].name;
+        templates.splice(existingIndex, 1);
+        ScheduleData.saveTemplates(templates);
+
+        if (templates.length) {
+            this.loadTemplateIntoEditor(templates[0].id);
+        } else {
+            this.startNewTemplateDraft();
+        }
+        this.notify(`Template "${deletedName}" deleted.`, 'success');
+        this.render();
     },
 
     getActiveSchedule() {
@@ -443,9 +961,14 @@ const App = {
         if (!item?.materialLink) return;
         const state = this.getMaterialState(item);
         if (!state.enabled) return;
+        const normalizedUrl = this.normalizeExternalLink(item.materialLink);
+        if (!normalizedUrl) {
+            alert('This material link is invalid. Please edit the timeline step and re-save the URL.');
+            return;
+        }
 
         if (AppContext.host && AppContext.host.StudyMonitor && typeof AppContext.host.StudyMonitor.openStudyWindow === 'function') {
-            AppContext.host.StudyMonitor.openStudyWindow(item.materialLink, item.courseName || 'Study Material');
+            AppContext.host.StudyMonitor.openStudyWindow(normalizedUrl, item.courseName || 'Study Material');
             return;
         }
 
@@ -455,7 +978,7 @@ const App = {
             return;
         }
 
-        window.open(item.materialLink, '_blank');
+        window.open(normalizedUrl, '_blank');
     },
 
     openAssessment(index) {
@@ -470,7 +993,12 @@ const App = {
         }
 
         if (item.assessmentLink) {
-            window.open(item.assessmentLink, '_blank');
+            const normalizedUrl = this.normalizeExternalLink(item.assessmentLink);
+            if (!normalizedUrl) {
+                alert('This assessment link is invalid. Please edit the timeline step and re-save the URL.');
+                return;
+            }
+            window.open(normalizedUrl, '_blank');
         }
     },
 
@@ -480,14 +1008,11 @@ const App = {
     },
 
     todayString() {
-        return this.toStorageDate(new Date());
+        return ScheduleData.toDateSlash(new Date());
     },
 
     toStorageDate(dateObj) {
-        const year = dateObj.getFullYear();
-        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const day = String(dateObj.getDate()).padStart(2, '0');
-        return `${year}/${month}/${day}`;
+        return ScheduleData.toDateSlash(dateObj);
     },
 
     toInputDate(value) {

@@ -23,12 +23,21 @@
             <div class="studio-grid two">
                 <label>
                     <span>Start Date</span>
-                    <input type="date" id="edit-start-date">
+                    <input type="date" id="edit-start-date" oninput="App.previewEditorFromDuration()">
                 </label>
                 <label>
                     <span>End Date</span>
                     <input type="date" id="edit-end-date">
                 </label>
+            </div>
+            <div class="studio-grid two">
+                <label>
+                    <span>Duration (Business Days)</span>
+                    <input type="number" id="edit-duration-days" min="1" step="1" placeholder="Optional" oninput="App.previewEditorFromDuration()">
+                </label>
+                <div class="studio-status" style="display:flex; align-items:end; margin:0;">
+                    Start/end auto-calculate from duration and skip weekends + configured holidays.
+                </div>
             </div>
 
             <label>
@@ -84,6 +93,85 @@
             <div class="studio-modal-actions">
                 <button class="studio-btn secondary" onclick="App.closeEditor()">Cancel</button>
                 <button class="studio-btn primary" onclick="App.saveEditor()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="template-manager-modal" class="studio-modal hidden">
+        <div class="studio-modal-card">
+            <div class="studio-modal-header">
+                <h3>Timeline Template Manager</h3>
+                <button class="studio-icon-btn" onclick="App.closeTemplateManager()"><i class="fas fa-times"></i></button>
+            </div>
+
+            <div class="studio-grid two">
+                <label>
+                    <span>Template</span>
+                    <select id="template-select" onchange="App.loadTemplateIntoEditor(this.value)"></select>
+                </label>
+                <div style="display:flex; align-items:end;">
+                    <button class="studio-btn secondary" style="width:100%;" onclick="App.startNewTemplateDraft()">+ New Template</button>
+                </div>
+            </div>
+
+            <label>
+                <span>Template Name</span>
+                <input type="text" id="template-name" placeholder="e.g. Intake Month 1">
+            </label>
+
+            <div class="studio-callout">
+                <div class="studio-callout-title">Template Steps</div>
+                <div class="studio-status">Each step needs a course name and duration in business days.</div>
+                <div id="template-items-container" style="margin-top:10px; max-height:40vh; overflow:auto; padding-right:4px;"></div>
+                <button class="studio-btn secondary" style="margin-top:10px;" onclick="App.addTemplateRow()"><i class="fas fa-plus"></i> Add Step</button>
+            </div>
+
+            <div class="studio-modal-actions">
+                <button class="studio-btn secondary" onclick="App.deleteTemplateFromEditor()"><i class="fas fa-trash"></i> Delete</button>
+                <button class="studio-btn secondary" onclick="App.closeTemplateManager()">Close</button>
+                <button class="studio-btn primary" onclick="App.saveTemplateFromEditor()">Save Template</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="template-apply-modal" class="studio-modal hidden">
+        <div class="studio-modal-card" style="width:min(560px,100%);">
+            <div class="studio-modal-header">
+                <h3>Add Template To Timeline</h3>
+                <button class="studio-icon-btn" onclick="App.closeApplyTemplateModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <input type="hidden" id="template-apply-target-schedule">
+            <label>
+                <span>Template</span>
+                <select id="template-apply-select"></select>
+            </label>
+            <label>
+                <span>Timeline Start Date</span>
+                <input type="date" id="template-apply-start-date">
+            </label>
+            <div class="studio-status">Dates are auto-generated from each step duration. Weekends and configured holidays are skipped.</div>
+            <div class="studio-modal-actions">
+                <button class="studio-btn secondary" onclick="App.closeApplyTemplateModal()">Cancel</button>
+                <button class="studio-btn primary" onclick="App.applyTemplateFromModal()"><i class="fas fa-layer-group"></i> Add Template</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="new-schedule-template-modal" class="studio-modal hidden">
+        <div class="studio-modal-card" style="width:min(560px,100%);">
+            <div class="studio-modal-header">
+                <h3 id="new-schedule-template-title">Timeline Created</h3>
+                <button class="studio-icon-btn" onclick="App.closeNewScheduleTemplatePrompt()"><i class="fas fa-times"></i></button>
+            </div>
+            <input type="hidden" id="new-schedule-template-id">
+            <div class="studio-status" style="font-size:0.9rem;">
+                Use a template to auto-calculate start/end dates from duration days while skipping weekends and holidays.
+            </div>
+            <div id="new-schedule-template-hint" class="studio-status" style="margin-top:8px;"></div>
+            <div class="studio-modal-actions">
+                <button class="studio-btn secondary" onclick="App.handleNewScheduleEditTemplates()"><i class="fas fa-pen-ruler"></i> Edit Templates</button>
+                <button class="studio-btn secondary" onclick="App.closeNewScheduleTemplatePrompt()">Skip</button>
+                <button class="studio-btn primary" onclick="App.handleNewScheduleAddTemplate()"><i class="fas fa-layer-group"></i> Add Template</button>
             </div>
         </div>
     </div>
