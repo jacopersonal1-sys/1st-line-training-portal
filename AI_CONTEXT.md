@@ -155,7 +155,7 @@ Maps local `localStorage` keys to Supabase tables.
 - **Key Functions:**
     - `loadLiveExecution()`: Starts the Live Arena and binds `buildzone:data-changed` listeners so `liveSessions` cache updates trigger near-instant UI sync.
     - `syncLiveSessionState()`: **No Database Polling.** Reads strictly from `localStorage.getItem('liveSessions')` which is kept up-to-date by realtime handlers plus partial-payload row recovery in `data.js`.
-    - `adminPushQuestion(idx)`: Updates session state to show a specific question.
+    - `adminPushQuestion(idx)`: Updates session state to show a specific question and sends a `sessions.pending_action` live-sync nudge to force trainee refresh if realtime table events lag.
     - `renderTraineeLivePanel()`: Renders the active question for the trainee.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
     - `updateLiveConnectionStatus()`: Checks `ACTIVE_USERS_CACHE` (Presence API) for trainee connectivity health with zero database impact.
@@ -365,6 +365,8 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.6:** Added a secondary Live Arena delivery path (`js/live_execution.js` + `js/data.js`) using `sessions.pending_action` `live_sync:*` commands to trigger targeted `live_sessions` refresh-by-id on trainee clients for question pushes and diagnostics when table realtime events are delayed.
+- **v2.6.5:** Version increment for rollout alignment after the v2.6.4 boot parser hotfix; no new architectural changes introduced.
 - **v2.6.4:** Hotfixed app boot reliability by correcting release-note HTML string formatting in `js/main.js` (removed unescaped inline backticks that broke parser execution and downstream UI boot flow like `showTab` initialization).
 - **v2.6.3:** Hardened Live Arena realtime reliability (`js/live_execution.js` + `js/data.js`) by adding event-driven `liveSessions` cache listeners, monotonic live session revision/push timestamps, trainee session pinning, and automatic `live_sessions` row recovery when Supabase realtime emits partial payloads.
 - **v2.6.2:** Shifted timeline template operations fully into isolated Schedule Studio (`modules/schedule_studio`) with admin-only editable templates, duration-based business-day auto-dates (skip weekends/holidays), restored explicit Delete Timeline controls in Studio, and improved Microsoft SafeLinks/SharePoint URL normalization in both Studio and Study Browser paths.

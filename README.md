@@ -155,6 +155,8 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.6.6**: **Live Arena Command-Channel Fix**: Added a guaranteed `sessions.pending_action` live-sync nudge path so trainee clients force-refresh the exact `live_sessions` row on trainer question pushes and Test Connection pings, preventing stalls that previously required logout/login.
+ - **v2.6.5**: **Release Rollout Update**: Version increment for stable deployment alignment, carrying forward the Live Arena realtime reliability improvements (v2.6.3) and critical boot parser hotfix (v2.6.4).
  - **v2.6.4**: **Critical Boot Hotfix**: Fixed a JavaScript parsing error in release-note rendering that could break app initialization (`main.js`) and trigger downstream UI boot issues like missing `showTab`.
  - **v2.6.3**: **Live Arena Realtime Reliability**: Hardened Live Assessment session propagation so trainee question changes sync immediately without requiring session exit/re-entry, added automatic recovery for partial `live_sessions` realtime payloads, and introduced monotonic live revision/push timestamps plus event-driven cache hooks for more deterministic trainer-to-trainee updates.
  - **v2.6.2**: **Schedule Studio Templates + SharePoint Reliability**: Added admin-only editable timeline templates inside the isolated Schedule Studio module, including duration-based business-day auto date generation that skips weekends/holidays, restored clear Delete Timeline controls, and improved Microsoft SafeLinks/SharePoint URL handling to reduce blank/error study page opens.

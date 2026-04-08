@@ -2380,6 +2380,17 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.6.6": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Live Arena Command Channel:</strong> Added a guaranteed <code>sessions.pending_action</code> nudge path so trainee clients force-refresh the target live session immediately on trainer question pushes.</li>
+                    <li style="margin-bottom: 8px;"><strong>Diagnostic Reliability:</strong> Test Connection now triggers the same live-sync nudge path to reduce false timeouts when <code>live_sessions</code> realtime events are delayed.</li>
+                    <li style="margin-bottom: 8px;"><strong>Resync Guardrail:</strong> Added targeted <code>live_sessions</code> fetch-by-session-id handling when a <code>live_sync</code> command arrives, keeping question progression live without requiring trainee logout/login.</li>
+                </ul>`,
+            "2.6.5": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Release Rollout Update:</strong> Version increment for stable distribution and deployment alignment.</li>
+                    <li style="margin-bottom: 8px;"><strong>Live Arena Baseline:</strong> Carries forward the latest realtime reliability and boot hotfix improvements from v2.6.3/v2.6.4.</li>
+                </ul>`,
             "2.6.4": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Critical Boot Hotfix:</strong> Fixed a JavaScript parsing break in the release notes renderer that could stop app initialization on launch.</li>

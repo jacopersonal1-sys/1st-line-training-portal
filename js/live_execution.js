@@ -68,6 +68,21 @@ function bindLiveExecutionRealtimeHooks() {
     window.addEventListener('buildzone:data-changed', window.LIVE_DATA_EVENT_HANDLER);
 }
 
+async function sendLiveSyncNudge(session, reason = 'sync') {
+    if (!window.supabaseClient || !session || !session.trainee || !session.sessionId) return;
+    try {
+        const action = `live_sync:${session.sessionId}:${Date.now()}:${reason}`;
+        await window.supabaseClient.from('sessions').upsert({
+            username: session.trainee,
+            role: 'trainee',
+            pending_action: action,
+            lastSeen: new Date().toISOString()
+        });
+    } catch (err) {
+        console.warn('Live sync nudge failed:', err);
+    }
+}
+
 function loadLiveExecution() {
     if (window.LIVE_POLLER) clearInterval(window.LIVE_POLLER);
     if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
@@ -940,6 +955,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
     
     // 2. Update Global Array
     await updateGlobalSessionArray(session, false); // Safe Merge to prevent wiping other admins
+    sendLiveSyncNudge(session, 'session_start').catch(()=>{});
     console.log(`Live Session Initiated for ${resolvedTrainee} (ID: ${session.sessionId})`);
 
     showTab('live-execution');
@@ -961,6 +977,7 @@ async function adminPushQuestion(idx) {
     localStorage.setItem('liveSession', JSON.stringify(session));
     
     await updateGlobalSessionArray(session, false);
+    sendLiveSyncNudge(session, 'question_push').catch(()=>{});
     
     renderAdminLivePanel(document.getElementById('live-execution-content'));
 }
@@ -1438,6 +1455,7 @@ window.runLiveDiagnostics = async function() {
     if(el) el.innerHTML = '<i class="fas fa-spinner fa-spin" style="color:var(--primary);"></i> Pinging Trainee...';
     
     await updateGlobalSessionArray(session, true);
+    sendLiveSyncNudge(session, 'diagnostic_ping').catch(()=>{});
     
     // Timeout fallback (Extended to 35 seconds to allow HTTP fallback loops if WebSockets are blocked)
     setTimeout(() => {

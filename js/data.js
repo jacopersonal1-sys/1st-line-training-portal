@@ -2056,6 +2056,10 @@ async function sendHeartbeat(forceInit = false) {
             } else if (sessionData.pending_action.startsWith('msg:')) {
                 const msg = sessionData.pending_action.replace('msg:', '');
                 alert("💬 ADMIN MESSAGE:\n\n" + msg);
+            } else if (sessionData.pending_action.startsWith('live_sync:')) {
+                const parts = sessionData.pending_action.split(':');
+                const targetSessionId = parts[1] || '';
+                if (targetSessionId) forceRefreshLiveSessionById(targetSessionId).catch(()=>{});
             } else if (sessionData.pending_action === 'fix_submission') {
                 // Silently clear blockages and force submit current draft
                 let s = JSON.parse(localStorage.getItem('submissions') || '[]');
@@ -2747,6 +2751,34 @@ function handleLiveBookingRealtime(payload) {
     updateQueueIndicator();
 }
 
+async function forceRefreshLiveSessionById(sessionId) {
+    if (!sessionId || !window.supabaseClient) return false;
+    try {
+        const { data: row, error } = await window.supabaseClient
+            .from('live_sessions')
+            .select('id, data')
+            .eq('id', sessionId)
+            .maybeSingle();
+
+        if (error || !row || !row.data || typeof row.data !== 'object') return false;
+
+        const refreshed = { ...row.data };
+        if (!refreshed.sessionId) refreshed.sessionId = row.id;
+
+        let sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        sessions = sessions.filter(s => s.sessionId !== refreshed.sessionId);
+        sessions.push(refreshed);
+        localStorage.setItem('liveSessions', JSON.stringify(sessions));
+        emitDataChange('liveSessions', 'session_nudge_refresh');
+
+        if (typeof processLiveSessionState === 'function') processLiveSessionState(sessions);
+        return true;
+    } catch (err) {
+        console.warn('forceRefreshLiveSessionById failed:', err);
+        return false;
+    }
+}
+
 function handleSessionRealtime(payload) {
     const row = payload.new;
     if (row && (row.username || row.user)) {
@@ -2766,6 +2798,10 @@ function handleSessionRealtime(payload) {
                 } else if (row.pending_action === 'force_update' && typeof require !== 'undefined') {
                     sessionStorage.setItem('force_update_active', 'true');
                     require('electron').ipcRenderer.send('manual-update-check');
+                } else if (row.pending_action.startsWith('live_sync:')) {
+                    const parts = row.pending_action.split(':');
+                    const targetSessionId = parts[1] || '';
+                    if (targetSessionId) forceRefreshLiveSessionById(targetSessionId).catch(()=>{});
                 }
             }
         }
