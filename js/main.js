@@ -2380,6 +2380,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.6.3": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Live Arena Realtime Reliability:</strong> Hardened live session propagation so trainee question changes refresh immediately without requiring manual exit/re-entry.</li>
+                    <li style="margin-bottom: 8px;"><strong>Partial Realtime Recovery:</strong> Added automatic `live_sessions` row recovery when Supabase realtime sends partial payloads, preventing missed question updates.</li>
+                    <li style="margin-bottom: 8px;"><strong>Deterministic Session Versioning:</strong> Added monotonic live revision and question-push timestamps to improve update ordering and render consistency between trainer and trainee clients.</li>
+                    <li style="margin-bottom: 8px;"><strong>Live Cache Event Hooks:</strong> Live Execution now responds directly to `liveSessions` cache change events for faster UI synchronization under unstable network conditions.</li>
+                </ul>`,
             "2.6.2": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Schedule Studio Templates:</strong> Added admin-managed timeline templates with editable step durations and one-click apply flow directly inside the isolated Schedule Studio module.</li>

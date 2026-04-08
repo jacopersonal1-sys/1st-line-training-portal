@@ -5,6 +5,8 @@ window.LIVE_POLLER = null;
 let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
 let LIVE_CONN_INTERVAL = null;
 let LIVE_TIMER_INTERVAL = null;
+let LIVE_DATA_EVENT_DEBOUNCE = null;
+window.LIVE_DATA_EVENT_HANDLER = window.LIVE_DATA_EVENT_HANDLER || null;
 
 function normalizeLiveText(value) {
     return String(value || '').trim().toLowerCase();
@@ -30,6 +32,42 @@ function resolveLiveTestDefinition(tests, assessmentName, assessmentId) {
     return null;
 }
 
+function getLiveSessionUpdateStamp(session) {
+    if (!session || typeof session !== 'object') return 'none';
+    const timer = session.timer || {};
+    const remote = session.remoteCommand || {};
+    const diagRes = session.diagnosticRes || {};
+    return [
+        session.sessionId || '',
+        session.active ? 1 : 0,
+        Number.isFinite(session.currentQ) ? session.currentQ : '',
+        session.liveRevision || 0,
+        session.lastUpdateTs || 0,
+        session.lastQuestionPushTs || 0,
+        remote.ts || 0,
+        session.diagnosticReq || 0,
+        diagRes.timestamp || 0,
+        timer.active ? 1 : 0,
+        timer.start || 0,
+        timer.duration || 0,
+        JSON.stringify(session.answers || {}),
+        JSON.stringify(session.scores || {}),
+        JSON.stringify(session.comments || {})
+    ].join('|');
+}
+
+function bindLiveExecutionRealtimeHooks() {
+    if (window.LIVE_DATA_EVENT_HANDLER) return;
+    window.LIVE_DATA_EVENT_HANDLER = function(event) {
+        if (!event || !event.detail || event.detail.key !== 'liveSessions') return;
+        if (LIVE_DATA_EVENT_DEBOUNCE) clearTimeout(LIVE_DATA_EVENT_DEBOUNCE);
+        LIVE_DATA_EVENT_DEBOUNCE = setTimeout(() => {
+            syncLiveSessionState();
+        }, 60);
+    };
+    window.addEventListener('buildzone:data-changed', window.LIVE_DATA_EVENT_HANDLER);
+}
+
 function loadLiveExecution() {
     if (window.LIVE_POLLER) clearInterval(window.LIVE_POLLER);
     if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
@@ -47,12 +85,14 @@ function loadLiveExecution() {
         renderTraineeLivePanel(container);
     }
 
+    bindLiveExecutionRealtimeHooks();
+
     // Realtime is now fully managed by data.js INCOMING_DATA_QUEUE
     syncLiveSessionState();
     updateSocketStatusUI();
 
-    // REINSTATE FALLBACK POLLER: Guarantees fast question switching (3s) even if WebSockets are blocked by firewalls.
-    window.LIVE_POLLER = setInterval(syncLiveSessionState, 3000);
+    // Keep a lightweight local fallback check to recover if event dispatch is delayed.
+    window.LIVE_POLLER = setInterval(syncLiveSessionState, 1500);
 }
 
 // --- NEW: GLOBAL REJOIN LOGIC ---
@@ -118,7 +158,27 @@ function processLiveSessionState(allSessions) {
         
         // Sort newest first
         validSessions.sort((a, b) => (b.startTime || 0) - (a.startTime || 0));
-        myServerSession = validSessions.length > 0 ? validSessions[0] : { active: false };
+
+        const pinnedId = localStorage.getItem('currentLiveSessionId');
+        const localSessionId = localSession.sessionId;
+        if (pinnedId) {
+            myServerSession = validSessions.find(s => s.sessionId === pinnedId) || null;
+        }
+        if (!myServerSession && localSessionId) {
+            myServerSession = validSessions.find(s => s.sessionId === localSessionId) || null;
+        }
+        if (!myServerSession) {
+            myServerSession = validSessions.length > 0 ? validSessions[0] : { active: false };
+        }
+
+        if (myServerSession && myServerSession.sessionId) {
+            localStorage.setItem('currentLiveSessionId', myServerSession.sessionId);
+        }
+    }
+
+    if (myServerSession && typeof myServerSession === 'object') {
+        // Work with a detached copy so local merge logic never mutates cached session arrays.
+        myServerSession = JSON.parse(JSON.stringify(myServerSession));
     }
 
     // PRESERVE LOCAL ANSWERS (Trainee Only)
@@ -162,7 +222,9 @@ function processLiveSessionState(allSessions) {
     // Update the local "Active Session" proxy for UI rendering
     
     // Only update if state actually changed
-    if (JSON.stringify(myServerSession) !== JSON.stringify(localSession)) {
+    const serverStamp = getLiveSessionUpdateStamp(myServerSession);
+    const localStamp = getLiveSessionUpdateStamp(localSession);
+    if (serverStamp !== localStamp) {
         localStorage.setItem('liveSession', JSON.stringify(myServerSession));
         
         const container = document.getElementById('live-execution-content');
@@ -176,8 +238,11 @@ function processLiveSessionState(allSessions) {
                 }
             } else {
                 // Trainee: ONLY re-render if the question changed or session status changed
-                if (myServerSession.currentQ !== LAST_RENDERED_Q || myServerSession.active !== localSession.active) {
-                    
+                const questionMoved = myServerSession.currentQ !== LAST_RENDERED_Q;
+                const activeStateChanged = myServerSession.active !== localSession.active;
+                const pushedRefresh = (myServerSession.lastQuestionPushTs || 0) !== (localSession.lastQuestionPushTs || 0);
+                if (questionMoved || activeStateChanged || pushedRefresh) {
+                     
                     // ARCHITECTURAL FIX: FLUSH PENDING KEYSTROKES BEFORE DOM WIPE
                     if (typeof REALTIME_SAVE_TIMEOUT !== 'undefined' && REALTIME_SAVE_TIMEOUT) {
                         clearTimeout(REALTIME_SAVE_TIMEOUT);
@@ -855,6 +920,9 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
         trainee: resolvedTrainee,
         trainer: CURRENT_USER.user,
         currentQ: -1,
+        liveRevision: 1,
+        lastUpdateTs: Date.now(),
+        lastQuestionPushTs: 0,
         answers: {},
         scores: {},
         comments: {}
@@ -880,7 +948,9 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
 
 async function adminPushQuestion(idx) {
     const session = JSON.parse(localStorage.getItem('liveSession'));
+    if (!session) return;
     session.currentQ = idx;
+    session.lastQuestionPushTs = Date.now();
     
     // Reset Timer on new question
     if (session.timer) {
@@ -1221,11 +1291,18 @@ async function endLiveSession() {
 
 // --- HELPER: SYNC LOCAL SESSION TO GLOBAL ARRAY ---
 window.updateGlobalSessionArray = async function(localSession, force = true) {
+    if (!localSession || !localSession.sessionId) return;
+
+    const nowTs = Date.now();
+    localSession.liveRevision = Math.max(1, Number(localSession.liveRevision || 0) + 1);
+    localSession.lastUpdateTs = nowTs;
+
     // 1. Update Local Cache (for UI responsiveness)
     let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
     allSessions = allSessions.filter(s => s.sessionId !== localSession.sessionId);
     allSessions.push(localSession);
     localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+    if (typeof emitDataChange === 'function') emitDataChange('liveSessions', 'local_write');
     
     // 2. Direct Table Upsert (More robust than full array push)
     if (window.supabaseClient) {

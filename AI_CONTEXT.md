@@ -153,8 +153,8 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/live_execution.js` (Live Arena)
 - **Responsibility:** Real-time interactive assessments.
 - **Key Functions:**
-    - `loadLiveExecution()`: Starts the Live Arena.
-    - `syncLiveSessionState()`: **No Database Polling.** Reads strictly from `localStorage.getItem('liveSessions')` which is kept instantly up-to-date by the global WebSocket engine.
+    - `loadLiveExecution()`: Starts the Live Arena and binds `buildzone:data-changed` listeners so `liveSessions` cache updates trigger near-instant UI sync.
+    - `syncLiveSessionState()`: **No Database Polling.** Reads strictly from `localStorage.getItem('liveSessions')` which is kept up-to-date by realtime handlers plus partial-payload row recovery in `data.js`.
     - `adminPushQuestion(idx)`: Updates session state to show a specific question.
     - `renderTraineeLivePanel()`: Renders the active question for the trainee.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
@@ -365,6 +365,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.3:** Hardened Live Arena realtime reliability (`js/live_execution.js` + `js/data.js`) by adding event-driven `liveSessions` cache listeners, monotonic live session revision/push timestamps, trainee session pinning, and automatic `live_sessions` row recovery when Supabase realtime emits partial payloads.
 - **v2.6.2:** Shifted timeline template operations fully into isolated Schedule Studio (`modules/schedule_studio`) with admin-only editable templates, duration-based business-day auto-dates (skip weekends/holidays), restored explicit Delete Timeline controls in Studio, and improved Microsoft SafeLinks/SharePoint URL normalization in both Studio and Study Browser paths.
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).

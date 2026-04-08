@@ -2821,21 +2821,68 @@ function handleRowRealtime(payload) {
     updateQueueIndicator();
 }
 
+const LIVE_SESSION_RECOVERY_WINDOW_MS = 2500;
+const LIVE_SESSION_RECOVERY_TS = {};
+
+async function recoverLiveSessionRow(rowId) {
+    if (!rowId || !window.supabaseClient) return false;
+    const now = Date.now();
+    if (LIVE_SESSION_RECOVERY_TS[rowId] && (now - LIVE_SESSION_RECOVERY_TS[rowId]) < LIVE_SESSION_RECOVERY_WINDOW_MS) {
+        return false;
+    }
+    LIVE_SESSION_RECOVERY_TS[rowId] = now;
+
+    try {
+        const { data: row, error } = await window.supabaseClient
+            .from('live_sessions')
+            .select('id, data')
+            .eq('id', rowId)
+            .maybeSingle();
+
+        if (error || !row || !row.data || typeof row.data !== 'object') {
+            return false;
+        }
+
+        const recovered = { ...row.data };
+        if (!recovered.sessionId) recovered.sessionId = row.id;
+
+        let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        allSessions = allSessions.filter(s => s.sessionId !== recovered.sessionId);
+        allSessions.push(recovered);
+        localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+        window.LIVE_LAST_CACHE_EVENT_AT = Date.now();
+        emitDataChange('liveSessions', 'realtime_partial_recovery');
+
+        if (typeof processLiveSessionState === 'function') processLiveSessionState(allSessions);
+        return true;
+    } catch (err) {
+        console.warn('Live session partial recovery failed:', err);
+        return false;
+    }
+}
+
 function handleLiveSessionRealtime(payload) {
     // INSTANT PROCESSING (Bypass Queue for Zero Latency)
     let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
     if (payload.eventType === 'DELETE') {
         allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
     } else {
-        if (!payload.new.data) return; // Ignore Postgres WAL partial updates
-        const newData = payload.new.data;
-        if (newData) {
-            if (!newData.sessionId) newData.sessionId = payload.new.id;
-            allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
-            allSessions.push(newData);
+        const incoming = payload && payload.new ? payload.new : null;
+        const hasDataObject = incoming && incoming.data && typeof incoming.data === 'object';
+        if (!hasDataObject) {
+            const fallbackId = (incoming && incoming.id) || (payload.old && payload.old.id) || null;
+            if (fallbackId) recoverLiveSessionRow(fallbackId).catch(() => {});
+            return;
         }
+
+        const newData = { ...incoming.data };
+        if (!newData.sessionId) newData.sessionId = incoming.id;
+        allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
+        allSessions.push(newData);
     }
     localStorage.setItem('liveSessions', JSON.stringify(allSessions));
+    window.LIVE_LAST_CACHE_EVENT_AT = Date.now();
+    emitDataChange('liveSessions', 'realtime');
     
     // Update Live Execution UI instantly if open
     if (typeof processLiveSessionState === 'function') processLiveSessionState(allSessions);
