@@ -153,8 +153,8 @@ Maps local `localStorage` keys to Supabase tables.
 #### `js/live_execution.js` (Live Arena)
 - **Responsibility:** Real-time interactive assessments.
 - **Key Functions:**
-    - `loadLiveExecution()`: Starts the Live Arena and binds `buildzone:data-changed` listeners so `liveSessions` cache updates trigger near-instant UI sync.
-    - `syncLiveSessionState()`: **No Database Polling.** Reads strictly from `localStorage.getItem('liveSessions')` which is kept up-to-date by realtime handlers plus partial-payload row recovery in `data.js`.
+    - `loadLiveExecution()`: Starts the Live Arena, binds `buildzone:data-changed` listeners, and runs a strict 1-second hard sync loop (targeted `sessionId` refresh) while the Live tab is open.
+    - `syncLiveSessionState()`: Reads from `localStorage.getItem('liveSessions')` (realtime cache) and is complemented by targeted session-level refresh fallback for tunnel instability.
     - `adminPushQuestion(idx)`: Updates session state to show a specific question and sends a `sessions.pending_action` live-sync nudge to force trainee refresh if realtime table events lag.
     - `renderTraineeLivePanel()`: Renders the active question for the trainee.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
@@ -365,6 +365,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.7:** Added a hard 1-second Live Arena targeted refresh loop in `js/live_execution.js` (using `forceRefreshLiveSessionById` from `js/data.js`) so question/diagnostic changes are polled by `sessionId` while Live Execution is open, even when realtime tunnel delivery is degraded.
 - **v2.6.6:** Added a secondary Live Arena delivery path (`js/live_execution.js` + `js/data.js`) using `sessions.pending_action` `live_sync:*` commands to trigger targeted `live_sessions` refresh-by-id on trainee clients for question pushes and diagnostics when table realtime events are delayed.
 - **v2.6.5:** Version increment for rollout alignment after the v2.6.4 boot parser hotfix; no new architectural changes introduced.
 - **v2.6.4:** Hotfixed app boot reliability by correcting release-note HTML string formatting in `js/main.js` (removed unescaped inline backticks that broke parser execution and downstream UI boot flow like `showTab` initialization).

@@ -2,6 +2,7 @@
 /* Handles real-time interaction between Trainer (Admin) and Trainee */
 
 window.LIVE_POLLER = null;
+window.LIVE_HARD_SYNC_LOOP = window.LIVE_HARD_SYNC_LOOP || null;
 let LAST_RENDERED_Q = -2; // Track rendered state to prevent UI thrashing
 let LIVE_CONN_INTERVAL = null;
 let LIVE_TIMER_INTERVAL = null;
@@ -83,8 +84,22 @@ async function sendLiveSyncNudge(session, reason = 'sync') {
     }
 }
 
+function runLiveHardSyncCheck() {
+    if (!window.supabaseClient || typeof window.forceRefreshLiveSessionById !== 'function') return;
+
+    const liveTab = document.getElementById('live-execution');
+    if (liveTab && !liveTab.classList.contains('active')) return;
+
+    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const sessionId = localStorage.getItem('currentLiveSessionId') || localSession.sessionId || '';
+    if (!sessionId) return;
+
+    window.forceRefreshLiveSessionById(sessionId).catch(()=>{});
+}
+
 function loadLiveExecution() {
     if (window.LIVE_POLLER) clearInterval(window.LIVE_POLLER);
+    if (window.LIVE_HARD_SYNC_LOOP) { clearInterval(window.LIVE_HARD_SYNC_LOOP); window.LIVE_HARD_SYNC_LOOP = null; }
     if (LIVE_CONN_INTERVAL) { clearInterval(LIVE_CONN_INTERVAL); LIVE_CONN_INTERVAL = null; }
     
     if (LIVE_TIMER_INTERVAL) clearInterval(LIVE_TIMER_INTERVAL);
@@ -106,8 +121,12 @@ function loadLiveExecution() {
     syncLiveSessionState();
     updateSocketStatusUI();
 
-    // Keep a lightweight local fallback check to recover if event dispatch is delayed.
-    window.LIVE_POLLER = setInterval(syncLiveSessionState, 1500);
+    // Always check local cache every second for responsive UI updates.
+    window.LIVE_POLLER = setInterval(syncLiveSessionState, 1000);
+
+    // Hard 1s server check by sessionId while Live Arena is open (guaranteed fallback path).
+    window.LIVE_HARD_SYNC_LOOP = setInterval(runLiveHardSyncCheck, 1000);
+    runLiveHardSyncCheck();
 }
 
 // --- NEW: GLOBAL REJOIN LOGIC ---

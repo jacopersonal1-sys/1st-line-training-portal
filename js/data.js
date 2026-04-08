@@ -2778,6 +2778,7 @@ async function forceRefreshLiveSessionById(sessionId) {
         return false;
     }
 }
+window.forceRefreshLiveSessionById = forceRefreshLiveSessionById;
 
 function handleSessionRealtime(payload) {
     const row = payload.new;

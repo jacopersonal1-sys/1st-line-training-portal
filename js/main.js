@@ -2380,6 +2380,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.6.7": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Live Arena 1-Second Hard Sync:</strong> Added a strict 1s targeted live-session refresh loop while the Live Execution tab is open to catch updates even during realtime tunnel instability.</li>
+                    <li style="margin-bottom: 8px;"><strong>Trainee Update Reliability:</strong> Exposed force-refresh-by-session-id as a shared helper so trainer/trainee clients can continuously confirm the latest question state without logout/login.</li>
+                </ul>`,
             "2.6.6": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Live Arena Command Channel:</strong> Added a guaranteed <code>sessions.pending_action</code> nudge path so trainee clients force-refresh the target live session immediately on trainer question pushes.</li>

@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.6.7**: **Live Arena 1-Second Hard Sync**: Added a strict 1-second targeted live-session refresh loop while Live Execution is open, plus shared force-refresh-by-session-id handling, so trainee question updates continue landing even when realtime tunnel delivery is unstable.
  - **v2.6.6**: **Live Arena Command-Channel Fix**: Added a guaranteed `sessions.pending_action` live-sync nudge path so trainee clients force-refresh the exact `live_sessions` row on trainer question pushes and Test Connection pings, preventing stalls that previously required logout/login.
  - **v2.6.5**: **Release Rollout Update**: Version increment for stable deployment alignment, carrying forward the Live Arena realtime reliability improvements (v2.6.3) and critical boot parser hotfix (v2.6.4).
  - **v2.6.4**: **Critical Boot Hotfix**: Fixed a JavaScript parsing error in release-note rendering that could break app initialization (`main.js`) and trigger downstream UI boot issues like missing `showTab`.
