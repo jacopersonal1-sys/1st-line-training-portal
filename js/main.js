@@ -2380,6 +2380,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.6.2": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Schedule Studio Templates:</strong> Added admin-managed timeline templates with editable step durations and one-click apply flow directly inside the isolated Schedule Studio module.</li>
+                    <li style="margin-bottom: 8px;"><strong>Business-Day Auto Dates:</strong> Timeline start/end windows now auto-calculate from duration days while skipping weekends and configured holidays.</li>
+                    <li style="margin-bottom: 8px;"><strong>Timeline Management:</strong> Restored clear Delete Timeline controls in Schedule Studio and tightened module ownership so timeline/template workflows run in Studio.</li>
+                    <li style="margin-bottom: 8px;"><strong>Microsoft Link Reliability:</strong> Improved SharePoint/OneDrive URL normalization, including Outlook SafeLinks unwrapping, to reduce blank/error opens in the study browser.</li>
+                </ul>`,
             "2.6.1": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>Microsoft Study Links:</strong> Preserved Microsoft/SharePoint links exactly as entered to avoid token loss on valid shared URLs.</li>
