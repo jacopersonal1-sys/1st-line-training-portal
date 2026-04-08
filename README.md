@@ -155,6 +155,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 6. **Record**: Final score saved to `records` (Permanent History).
 
 ## Recent Major Updates (AI Context)
+ - **v2.6.4**: **Critical Boot Hotfix**: Fixed a JavaScript parsing error in release-note rendering that could break app initialization (`main.js`) and trigger downstream UI boot issues like missing `showTab`.
  - **v2.6.3**: **Live Arena Realtime Reliability**: Hardened Live Assessment session propagation so trainee question changes sync immediately without requiring session exit/re-entry, added automatic recovery for partial `live_sessions` realtime payloads, and introduced monotonic live revision/push timestamps plus event-driven cache hooks for more deterministic trainer-to-trainee updates.
  - **v2.6.2**: **Schedule Studio Templates + SharePoint Reliability**: Added admin-only editable timeline templates inside the isolated Schedule Studio module, including duration-based business-day auto date generation that skips weekends/holidays, restored clear Delete Timeline controls, and improved Microsoft SafeLinks/SharePoint URL handling to reduce blank/error study page opens.
  - **v2.6.1**: **Microsoft Link Stability + Trainee UX Scope**: Preserved Microsoft/SharePoint links exactly as entered, fixed trainee schedule/calendar visibility to only the learner’s assigned group, expanded trainee Profile & Settings personalization with Experimental Themes/Custom Lab controls, and added a Study Browser cache/session clear action for Microsoft login recovery.
