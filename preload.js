@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         saveCache: (data) => ipcRenderer.invoke('save-disk-cache', data),
         loadCache: () => ipcRenderer.invoke('load-disk-cache')
     },
+    studyBrowser: {
+        clearCache: () => ipcRenderer.invoke('clear-study-browser-cache')
+    },
     webFrame: {
         setZoomFactor: (factor) => webFrame.setZoomFactor(factor)
     }

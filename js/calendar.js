@@ -9,6 +9,7 @@ const CalendarModule = {
         if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER) return events;
         const role = CURRENT_USER.role;
         const user = CURRENT_USER.user;
+        const normalizedUser = String(user || '').toLowerCase();
         
         // 1. SCHEDULE ITEMS (Timeline)
         const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
@@ -20,8 +21,10 @@ const CalendarModule = {
             let isVisible = false;
             if (role === 'admin' || role === 'super_admin' || role === 'special_viewer' || role === 'teamleader') isVisible = true;
             else if (role === 'trainee') {
-                const myGroup = Object.keys(rosters).find(gid => rosters[gid].includes(user));
-                if (sched.assigned === myGroup) isVisible = true;
+                const myGroup = Object.keys(rosters).find(gid =>
+                    Array.isArray(rosters[gid]) && rosters[gid].some(member => String(member || '').toLowerCase() === normalizedUser)
+                );
+                if (String(sched.assigned || '').toLowerCase() === String(myGroup || '').toLowerCase()) isVisible = true;
             }
 
             if (isVisible) {
@@ -58,7 +61,7 @@ const CalendarModule = {
             if (b.status === 'Cancelled') return;
             let isVisible = false;
             if (role === 'admin' || role === 'super_admin' || role === 'special_viewer') isVisible = true;
-            else if (b.trainee === user || b.trainer === user) isVisible = true;
+            else if (String(b.trainee || '').toLowerCase() === normalizedUser || String(b.trainer || '').toLowerCase() === normalizedUser) isVisible = true;
 
             if (isVisible) {
                 events.push({
@@ -81,10 +84,12 @@ const CalendarModule = {
                 if (ev.visibility === 'all') isVisible = true;
                 else if (ev.visibility === 'trainee' && role === 'trainee') isVisible = true;
                 else if (ev.visibility === 'group') {
-                    const myGroup = Object.keys(rosters).find(gid => rosters[gid].includes(user));
-                    if (ev.targetGroup === myGroup) isVisible = true;
+                    const myGroup = Object.keys(rosters).find(gid =>
+                        Array.isArray(rosters[gid]) && rosters[gid].some(member => String(member || '').toLowerCase() === normalizedUser)
+                    );
+                    if (String(ev.targetGroup || '').toLowerCase() === String(myGroup || '').toLowerCase()) isVisible = true;
                 }
-                else if (ev.visibility === 'user' && ev.targetUser === user) isVisible = true;
+                else if (ev.visibility === 'user' && String(ev.targetUser || '').toLowerCase() === normalizedUser) isVisible = true;
             }
 
             if (isVisible) {

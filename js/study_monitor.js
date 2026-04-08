@@ -222,6 +222,20 @@ const StudyMonitor = {
         }
     },
 
+    isMicrosoftAuthUrl: function(url) {
+        try {
+            const parsed = new URL(url, window.location.href);
+            const host = parsed.hostname.toLowerCase();
+            return host.includes('login.microsoftonline.com') ||
+                host.includes('microsoftonline.com') ||
+                host.includes('office.com') ||
+                host.includes('sharepoint.com') ||
+                host.includes('onedrive.com');
+        } catch (e) {
+            return false;
+        }
+    },
+
     openExternalUrl: function(url) {
         if (!url) return;
         if (window.electronAPI?.shell?.openExternal) {
@@ -356,6 +370,37 @@ const StudyMonitor = {
             console.warn('Study browser home action failed:', error);
         }
     },
+
+    clearStudyBrowserCache: async function() {
+        if (!confirm("Clear in-app study browser cache and sign-in session cookies?\n\nThis helps fix Microsoft/SharePoint login loops.\nYou may need to sign in again after this.")) return;
+
+        try {
+            localStorage.removeItem(this.localPageCacheKey);
+
+            if (window.electronAPI?.studyBrowser?.clearCache) {
+                await window.electronAPI.studyBrowser.clearCache();
+            }
+
+            if (typeof showToast === 'function') {
+                showToast('Study browser cache cleared. Reloading active tab...', 'success');
+            }
+
+            const activeTab = this.getActiveTab();
+            if (activeTab?.webview && activeTab.webview.isConnected && activeTab.url) {
+                activeTab.usedCachedFallback = false;
+                activeTab.webview.loadURL(this.cleanUrl(activeTab.url)).catch(() => {
+                    activeTab.webview.reload();
+                });
+            } else if (typeof window.location !== 'undefined') {
+                window.location.reload();
+            }
+        } catch (error) {
+            console.error('Study browser cache clear failed:', error);
+            if (typeof showToast === 'function') {
+                showToast('Could not clear study browser cache.', 'error');
+            }
+        }
+    },
     
     init: async function() {
         if (this.syncInterval) clearInterval(this.syncInterval);
@@ -421,7 +466,19 @@ const StudyMonitor = {
             window.electronAPI.ipcRenderer.removeAllListeners('webview-new-window');
             window.electronAPI.ipcRenderer.on('webview-new-window', (e, url) => {
                 if (this.isStudyOpen) {
-                    this.handleSpawnedStudyUrl(url, "New Tab");
+                    if (this.isMicrosoftAuthUrl(url)) {
+                        const activeTab = this.getActiveTab();
+                        if (activeTab?.webview && activeTab.webview.isConnected) {
+                            activeTab.usedCachedFallback = false;
+                            activeTab.webview.loadURL(this.cleanUrl(url)).catch(() => {
+                                this.handleSpawnedStudyUrl(url, "Sign In");
+                            });
+                        } else {
+                            this.handleSpawnedStudyUrl(url, "Sign In");
+                        }
+                    } else {
+                        this.handleSpawnedStudyUrl(url, "New Tab");
+                    }
                 } else {
                     this.openExternalUrl(url); // Fallback for TL Hub / other webviews
                 }
@@ -1056,6 +1113,9 @@ const StudyMonitor = {
                         <button type="button" id="study-bookmark-btn" class="study-action-btn study-action-secondary" title="Mark a specific spot to ask for clarity later">
                             <i class="fas fa-crop-alt"></i> Mark for Clarity
                         </button>
+                        <button type="button" id="study-clear-cache-btn" class="study-action-btn study-action-secondary" title="Clear browser cache/cookies for Microsoft sign-in troubleshooting">
+                            <i class="fas fa-broom"></i> Clear Browser Cache
+                        </button>
                         <button type="button" id="study-min-btn" class="study-action-btn study-action-primary" title="Keep this study session open and return to the dashboard">
                             <i class="fas fa-desktop"></i> Dashboard
                         </button>
@@ -1082,6 +1142,7 @@ const StudyMonitor = {
         document.getElementById('study-nav-reload').onclick = () => this.reloadActiveTab();
         document.getElementById('study-nav-home').onclick = () => this.goHomeActiveTab();
         document.getElementById('study-bookmark-btn').onclick = () => this.startMarkForClarity();
+        document.getElementById('study-clear-cache-btn').onclick = () => this.clearStudyBrowserCache();
         document.getElementById('study-min-btn').onclick = () => this.minimizeStudyWindow();
         document.getElementById('study-close-btn').onclick = () => this.closeStudyWindow();
         document.getElementById('study-quick-links').onchange = (event) => this.navigateQuickLink(event.target.value);
@@ -1280,7 +1341,7 @@ const StudyMonitor = {
         // REQUIRED: Allows target="_blank" links to fire the 'new-window' event so we can intercept them.
         webview.setAttribute('allowpopups', 'true');
         // DEFUSAL 2: Strict Microsoft Edge Spoofing to bypass SSO Conditional Access blocks
-        webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
+        webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0');
         // UX ENHANCEMENT: Force persistent session for cookies to survive app restarts
         webview.setAttribute('partition', 'persist:study_session');
         webview.classList.add('study-webview');
@@ -1505,31 +1566,17 @@ const StudyMonitor = {
         if (!working) return '';
 
         try {
-            let parsed = new URL(working, window.location.href);
-            const originalHost = parsed.hostname.toLowerCase();
-
-            // 0. Unwrap Outlook SafeLinks when users paste links from emails/chats.
-            if (originalHost.includes('safelinks.protection.outlook.com')) {
-                const wrapped = parsed.searchParams.get('url');
-                if (wrapped) {
-                    working = decodeURIComponent(wrapped);
-                    parsed = new URL(working, window.location.href);
-                }
-            }
-
+            const parsed = new URL(working, window.location.href);
             const host = parsed.hostname.toLowerCase();
-            const isSharepointLike = host.includes('sharepoint.com') || host.includes('onedrive.com') || host === '1drv.ms';
+            const isMicrosoftLink =
+                host.includes('sharepoint.com') ||
+                host.includes('onedrive.com') ||
+                host.includes('microsoftonline.com') ||
+                host.includes('office.com') ||
+                host.includes('safelinks.protection.outlook.com');
 
-            // 1. Conservative cleanup for SharePoint/OneDrive.
-            if (isSharepointLike) {
-                // Keep auth/share tokens intact (e, d, p, tempauth).
-                ['ga', 'email', 'CID', 'OR', 'CT', 'wdOrigin'].forEach(key => parsed.searchParams.delete(key));
-
-                // Download mode often forces a binary response path in embedded views.
-                if (parsed.searchParams.get('download') === '1') {
-                    parsed.searchParams.delete('download');
-                }
-            }
+            // User request: preserve Microsoft links exactly as entered.
+            if (isMicrosoftLink) return working;
 
             // 2. PDF tools: hide browser UI chrome when we can confidently detect PDF content.
             const pathLower = parsed.pathname.toLowerCase();

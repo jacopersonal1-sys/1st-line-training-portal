@@ -17,28 +17,15 @@ function cleanSharePointUrl(url) {
     try {
         const parsed = new URL(raw);
         const host = parsed.hostname.toLowerCase();
+        const isMicrosoftLink =
+            host.includes('sharepoint.com') ||
+            host.includes('onedrive.com') ||
+            host.includes('microsoftonline.com') ||
+            host.includes('office.com') ||
+            host.includes('safelinks.protection.outlook.com');
 
-        // Outlook SafeLinks wrappers are common when copying links from email.
-        if (host.includes('safelinks.protection.outlook.com')) {
-            const wrapped = parsed.searchParams.get('url');
-            if (wrapped) return cleanSharePointUrl(decodeURIComponent(wrapped));
-            return raw;
-        }
-
-        // Conservative cleanup only. Keep share/auth params (e, d, p, tempauth),
-        // otherwise valid SharePoint shared links can break.
-        if (host.includes('sharepoint.com') || host.includes('onedrive.com') || host === '1drv.ms') {
-            ['ga', 'email', 'CID', 'OR', 'CT', 'wdOrigin'].forEach(key => parsed.searchParams.delete(key));
-            Array.from(parsed.searchParams.keys()).forEach(key => {
-                if (parsed.searchParams.get(key) === '') parsed.searchParams.delete(key);
-            });
-        }
-
-        // Do not force download mode in saved links. The in-app browser should render if possible.
-        if (parsed.searchParams.get('download') === '1') {
-            parsed.searchParams.delete('download');
-        }
-
+        // User request: keep Microsoft links exactly as provided.
+        if (isMicrosoftLink) return raw;
         return parsed.toString();
     } catch (e) {
         return raw; // Return original if URL is malformed
@@ -82,6 +69,10 @@ function migrateLegacySharePointLinksInSchedules() {
 if (!localStorage.getItem('v259_schedule_link_sanitizer_patch')) {
     migrateLegacySharePointLinksInSchedules();
     localStorage.setItem('v259_schedule_link_sanitizer_patch', 'true');
+}
+if (!localStorage.getItem('v260_schedule_link_unwrap_patch')) {
+    migrateLegacySharePointLinksInSchedules();
+    localStorage.setItem('v260_schedule_link_unwrap_patch', 'true');
 }
 
 // --- SA PUBLIC HOLIDAYS (2026 Reference) ---
@@ -280,20 +271,27 @@ function renderSchedule() {
         }
     }
 
-    const isAdmin = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader');
-    const isTL = (CURRENT_USER.role === 'teamleader');
-    
-    if (!isAdmin && !isTL) {
+    const isStaffScheduleViewer = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer' || CURRENT_USER.role === 'teamleader');
+    const isTrainee = CURRENT_USER.role === 'trainee';
+
+    let visibleScheduleIds = Object.keys(schedules).sort();
+    if (isTrainee) {
         const mySchedId = getTraineeScheduleId(CURRENT_USER.user, schedules);
         if (!mySchedId) {
             container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-calendar-times" style="font-size:3rem; margin-bottom:15px;"></i><br>No schedule has been assigned to your group yet.</div>`;
             return;
         }
+        visibleScheduleIds = [mySchedId];
         ACTIVE_SCHED_ID = mySchedId;
     }
 
-    const tabsHtml = buildTabs(schedules, isAdmin);
-    const toolbarHtml = buildToolbar(schedules[ACTIVE_SCHED_ID], isAdmin);
+    const visibleSchedules = {};
+    visibleScheduleIds.forEach(id => {
+        if (schedules[id]) visibleSchedules[id] = schedules[id];
+    });
+
+    const tabsHtml = buildTabs(visibleSchedules, isStaffScheduleViewer);
+    const toolbarHtml = buildToolbar(schedules[ACTIVE_SCHED_ID], isStaffScheduleViewer);
     
     // View Switcher
     const viewToggler = `
@@ -305,9 +303,9 @@ function renderSchedule() {
 
     let contentHtml = '';
     if(VIEW_MODE === 'calendar') {
-        contentHtml = buildCalendar(schedules[ACTIVE_SCHED_ID].items, isAdmin);
+        contentHtml = buildCalendar(schedules[ACTIVE_SCHED_ID].items, isStaffScheduleViewer, { useGlobalEvents: !isTrainee });
     } else {
-        contentHtml = buildTimeline(schedules[ACTIVE_SCHED_ID].items, isAdmin);
+        contentHtml = buildTimeline(schedules[ACTIVE_SCHED_ID].items, isStaffScheduleViewer);
     }
 
     container.innerHTML = `
@@ -317,7 +315,7 @@ function renderSchedule() {
         <div id="scheduleTimeline" class="timeline-container">${contentHtml}</div>
     `;
 
-    if (isAdmin && !schedules[ACTIVE_SCHED_ID].assigned) {
+    if (isStaffScheduleViewer && !schedules[ACTIVE_SCHED_ID].assigned) {
         populateScheduleDropdown('schedAssignSelect');
     }
 }
@@ -458,10 +456,11 @@ function changeCalendarMonth(delta) {
     renderSchedule();
 }
 
-function buildCalendar(items, isAdmin) {
-    // NEW: Use aggregated events if available
+function buildCalendar(items, isAdmin, options = {}) {
+    // Staff can use unified event feeds; trainees stay scoped to their own schedule items.
+    const useGlobalEvents = Boolean(options && options.useGlobalEvents);
     let allEvents = items; // Fallback
-    if (typeof CalendarModule !== 'undefined' && typeof CalendarModule.getEvents === 'function') {
+    if (useGlobalEvents && typeof CalendarModule !== 'undefined' && typeof CalendarModule.getEvents === 'function') {
         allEvents = CalendarModule.getEvents();
     }
 
@@ -1668,12 +1667,17 @@ async function assignRosterToLiveSchedule(schedId, groupId) {
 
 function getTraineeLiveScheduleId(username, liveSchedules) {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const normalizedUser = normalizeScheduleText(username);
     let myGroupId = null;
     for (const [gid, members] of Object.entries(rosters)) {
-        if (members.some(m => m.toLowerCase() === username.toLowerCase())) { myGroupId = gid; break; }
+        if (Array.isArray(members) && members.some(m => normalizeScheduleText(m) === normalizedUser)) {
+            myGroupId = gid;
+            break;
+        }
     }
     if (!myGroupId) return null;
-    return Object.keys(liveSchedules).find(key => liveSchedules[key].assigned === myGroupId) || null;
+    const normalizedGroup = normalizeScheduleText(myGroupId);
+    return Object.keys(liveSchedules).find(key => normalizeScheduleText(liveSchedules[key] && liveSchedules[key].assigned) === normalizedGroup) || null;
 }
 
 // --- BOOKING LOGIC ---
@@ -2312,12 +2316,17 @@ function populateScheduleDropdown(elementId) {
 
 function getTraineeScheduleId(username, schedules) {
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const normalizedUser = normalizeScheduleText(username);
     let myGroupId = null;
     for (const [gid, members] of Object.entries(rosters)) {
-        if (members.some(m => m.toLowerCase() === username.toLowerCase())) { myGroupId = gid; break; }
+        if (Array.isArray(members) && members.some(m => normalizeScheduleText(m) === normalizedUser)) {
+            myGroupId = gid;
+            break;
+        }
     }
     if (!myGroupId) return null;
-    return Object.keys(schedules).find(key => schedules[key].assigned === myGroupId) || null;
+    const normalizedGroup = normalizeScheduleText(myGroupId);
+    return Object.keys(schedules).find(key => normalizeScheduleText(schedules[key] && schedules[key].assigned) === normalizedGroup) || null;
 }
 
 // Timeline Item Editing (CRUD)

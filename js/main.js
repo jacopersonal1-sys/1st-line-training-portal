@@ -2380,6 +2380,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+            "2.6.1": `
+                <ul style="padding-left: 20px; margin: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Microsoft Study Links:</strong> Preserved Microsoft/SharePoint links exactly as entered to avoid token loss on valid shared URLs.</li>
+                    <li style="margin-bottom: 8px;"><strong>Trainee Schedule Scope:</strong> Fixed trainee schedule visibility so learners only see the schedule assigned to their own group, including calendar mode.</li>
+                    <li style="margin-bottom: 8px;"><strong>Profile & Settings Upgrade:</strong> Expanded trainee personalization with Experimental Theme controls, including Custom Lab tuning options.</li>
+                    <li style="margin-bottom: 8px;"><strong>Study Browser Recovery:</strong> Added in-browser cache/session clear action to troubleshoot Microsoft sign-in loops directly from the study toolbar.</li>
+                </ul>`,
             "2.6.0": `
                 <ul style="padding-left: 20px; margin: 0;">
                     <li style="margin-bottom: 8px;"><strong>User Management Reliability:</strong> Hardened delete/edit behavior with case-insensitive tombstones and live username targeting so removed users and profile edits no longer randomly revert after sync or restart.</li>

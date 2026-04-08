@@ -343,15 +343,71 @@ async function generateAIResponse(systemPrompt, userPrompt) {
 // --- PROFILE SETTINGS MODAL (Global) ---
 window.openUnifiedProfileSettings = function() {
     const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    const expTheme = localStorage.getItem('experimental_theme') || '';
+    const expLabels = {
+        '': 'Original',
+        'theme-custom-lab': 'Custom Lab',
+        'theme-cyberpunk': 'Neon Nights',
+        'theme-ocean': 'Deep Sea',
+        'theme-forest': 'Enchanted Forest',
+        'theme-royal': 'Royal Amethyst'
+    };
+    const safeAttr = (v) => String(v || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+
+    let customExp = {
+        accent: '#5DB2FF',
+        bgApp: '#0B1726',
+        bgCard: '#14263C',
+        textMain: '#E6F3FF',
+        textMuted: '#97B4D1',
+        border: '#2F4F72',
+        wallpaper: '',
+        mood: 'aurora',
+        motionSpeed: 1,
+        glowStrength: 0.26,
+        cornerRadius: 13
+    };
+    try {
+        if (typeof getStoredCustomExperimentalThemeConfig === 'function') {
+            customExp = getStoredCustomExperimentalThemeConfig();
+        } else {
+            const rawExp = JSON.parse(localStorage.getItem('experimental_theme_custom') || '{}');
+            customExp = { ...customExp, ...rawExp };
+        }
+    } catch (e) {}
+
+    let myGroup = 'Not Assigned';
+    try {
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const normalizedUser = String((CURRENT_USER && CURRENT_USER.user) || '').toLowerCase();
+        for (const [gid, members] of Object.entries(rosters)) {
+            if (Array.isArray(members) && members.some(m => String(m || '').toLowerCase() === normalizedUser)) {
+                myGroup = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, members.length).split('[')[0].trim() : gid;
+                break;
+            }
+        }
+    } catch (e) {}
     
     const modalHtml = `
         <div id="profileSettingsModal" class="modal-overlay" style="z-index:10005;">
-            <div class="modal-box" style="width:500px; max-width:95%;">
+            <div class="modal-box" style="width:680px; max-width:95%; max-height:90vh; overflow-y:auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
                     <h3 style="margin:0;"><i class="fas fa-user-circle"></i> Profile & Settings</h3>
                     <button class="btn-secondary" onclick="document.getElementById('profileSettingsModal').remove()">&times;</button>
                 </div>
                 
+                <div class="card" style="margin-bottom:15px; background:var(--bg-input); border:1px solid var(--border-color);">
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:10px; font-size:0.86rem;">
+                        <div><strong>User:</strong> ${safeAttr(CURRENT_USER?.user || 'Unknown')}</div>
+                        <div><strong>Role:</strong> ${safeAttr(CURRENT_USER?.role || 'Unknown')}</div>
+                        <div><strong>Group:</strong> ${safeAttr(myGroup)}</div>
+                        <div><strong>Theme:</strong> ${safeAttr(expLabels[expTheme] || 'Original')}</div>
+                    </div>
+                </div>
+
                 <div class="card" style="margin-bottom:15px;">
                     <h4 style="margin-top:0;"><i class="fas fa-palette"></i> Personalization</h4>
                     <div class="grid-2" style="margin-bottom:10px;">
@@ -365,7 +421,7 @@ window.openUnifiedProfileSettings = function() {
                         </div>
                     </div>
                     <label style="font-size:0.8rem;">Wallpaper URL</label>
-                    <input type="text" id="profWallpaper" value="${localTheme.wallpaper || ''}" placeholder="https://..." style="margin-bottom:10px;">
+                    <input type="text" id="profWallpaper" value="${safeAttr(localTheme.wallpaper || '')}" placeholder="https://..." style="margin-bottom:10px;">
                     
                     <label style="font-size:0.8rem;">UI Zoom: <span id="profZoomDisplay" style="color:var(--primary); font-weight:bold;">${Math.round((localTheme.zoomLevel || 1)*100)}%</span></label>
                     <div style="display:flex; gap:10px; align-items:center;">
@@ -373,6 +429,60 @@ window.openUnifiedProfileSettings = function() {
                         <input type="range" id="profZoom" min="0.5" max="1.5" step="0.1" value="${localTheme.zoomLevel || 1}" style="flex:1;" oninput="updateProfileZoom(this.value)">
                         <button class="btn-secondary btn-sm" onclick="adjustProfileZoom(0.1)"><i class="fas fa-plus"></i></button>
                         <button class="btn-secondary btn-sm" onclick="resetProfileZoom()" title="Reset"><i class="fas fa-undo"></i></button>
+                    </div>
+
+                    <div style="margin-top:15px; padding-top:12px; border-top:1px dashed var(--border-color);">
+                        <label style="font-size:0.8rem;">Experimental Theme</label>
+                        <select id="profExperimentalTheme" onchange="updateProfileExperimentalThemeUI()" style="margin-bottom:8px;">
+                            <option value="" ${expTheme === '' ? 'selected' : ''}>Original</option>
+                            <option value="theme-custom-lab" ${expTheme === 'theme-custom-lab' ? 'selected' : ''}>Custom Lab</option>
+                            <option value="theme-cyberpunk" ${expTheme === 'theme-cyberpunk' ? 'selected' : ''}>Neon Nights</option>
+                            <option value="theme-ocean" ${expTheme === 'theme-ocean' ? 'selected' : ''}>Deep Sea</option>
+                            <option value="theme-forest" ${expTheme === 'theme-forest' ? 'selected' : ''}>Enchanted Forest</option>
+                            <option value="theme-royal" ${expTheme === 'theme-royal' ? 'selected' : ''}>Royal Amethyst</option>
+                        </select>
+                        <div id="profExperimentalHint" style="font-size:0.76rem; color:var(--text-muted); margin-bottom:8px;">
+                            Pick a preset theme or keep the original look.
+                        </div>
+
+                        <div id="profCustomLabBlock" class="hidden" style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
+                            <div class="grid-3" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(145px, 1fr)); gap:8px;">
+                                <div><label style="font-size:0.75rem;">Accent</label><input type="color" id="profExpAccent" value="${safeAttr(customExp.accent)}"></div>
+                                <div><label style="font-size:0.75rem;">Background</label><input type="color" id="profExpBgApp" value="${safeAttr(customExp.bgApp)}"></div>
+                                <div><label style="font-size:0.75rem;">Card Surface</label><input type="color" id="profExpBgCard" value="${safeAttr(customExp.bgCard)}"></div>
+                                <div><label style="font-size:0.75rem;">Main Text</label><input type="color" id="profExpTextMain" value="${safeAttr(customExp.textMain)}"></div>
+                                <div><label style="font-size:0.75rem;">Muted Text</label><input type="color" id="profExpTextMuted" value="${safeAttr(customExp.textMuted)}"></div>
+                                <div><label style="font-size:0.75rem;">Border</label><input type="color" id="profExpBorder" value="${safeAttr(customExp.border)}"></div>
+                            </div>
+                            <label style="font-size:0.75rem; margin-top:8px;">Custom Lab Wallpaper URL</label>
+                            <input type="text" id="profExpWallpaper" value="${safeAttr(customExp.wallpaper || '')}" placeholder="https://example.com/wallpaper.jpg" style="margin-bottom:8px;">
+                            <div class="grid-3" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(145px, 1fr)); gap:8px;">
+                                <div>
+                                    <label style="font-size:0.75rem;">Mood</label>
+                                    <select id="profExpMood">
+                                        <option value="aurora" ${customExp.mood === 'aurora' ? 'selected' : ''}>Aurora</option>
+                                        <option value="sunset" ${customExp.mood === 'sunset' ? 'selected' : ''}>Sunset</option>
+                                        <option value="night" ${customExp.mood === 'night' ? 'selected' : ''}>Night Pulse</option>
+                                        <option value="emerald" ${customExp.mood === 'emerald' ? 'selected' : ''}>Emerald Mist</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size:0.75rem;">Motion: <span id="profExpMotionDisplay">${Number(customExp.motionSpeed || 1).toFixed(2)}x</span></label>
+                                    <input type="range" id="profExpMotion" min="0.7" max="1.5" step="0.05" value="${Number(customExp.motionSpeed || 1).toFixed(2)}" oninput="updateProfileExperimentalThemeUI()">
+                                </div>
+                                <div>
+                                    <label style="font-size:0.75rem;">Glow: <span id="profExpGlowDisplay">${Number(customExp.glowStrength || 0.26).toFixed(2)}</span></label>
+                                    <input type="range" id="profExpGlow" min="0.1" max="0.5" step="0.01" value="${Number(customExp.glowStrength || 0.26).toFixed(2)}" oninput="updateProfileExperimentalThemeUI()">
+                                </div>
+                                <div>
+                                    <label style="font-size:0.75rem;">Radius: <span id="profExpRadiusDisplay">${Math.round(Number(customExp.cornerRadius || 13))}px</span></label>
+                                    <input type="range" id="profExpRadius" min="8" max="22" step="1" value="${Math.round(Number(customExp.cornerRadius || 13))}" oninput="updateProfileExperimentalThemeUI()">
+                                </div>
+                                <div style="display:flex; align-items:flex-end;">
+                                    <button class="btn-secondary btn-sm" onclick="resetProfileExperimentalThemeDraft()"><i class="fas fa-undo"></i> Reset Custom Lab Draft</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -405,6 +515,68 @@ window.openUnifiedProfileSettings = function() {
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    if (typeof updateProfileExperimentalThemeUI === 'function') updateProfileExperimentalThemeUI();
+};
+
+window.updateProfileExperimentalThemeUI = function() {
+    const selected = document.getElementById('profExperimentalTheme') ? document.getElementById('profExperimentalTheme').value : '';
+    const customBlock = document.getElementById('profCustomLabBlock');
+    if (customBlock) customBlock.classList.toggle('hidden', selected !== 'theme-custom-lab');
+
+    const motion = document.getElementById('profExpMotion');
+    const glow = document.getElementById('profExpGlow');
+    const radius = document.getElementById('profExpRadius');
+    const motionDisplay = document.getElementById('profExpMotionDisplay');
+    const glowDisplay = document.getElementById('profExpGlowDisplay');
+    const radiusDisplay = document.getElementById('profExpRadiusDisplay');
+
+    if (motion && motionDisplay) motionDisplay.textContent = `${Number(motion.value || 1).toFixed(2)}x`;
+    if (glow && glowDisplay) glowDisplay.textContent = Number(glow.value || 0.26).toFixed(2);
+    if (radius && radiusDisplay) radiusDisplay.textContent = `${Math.round(Number(radius.value || 13))}px`;
+
+    const hint = document.getElementById('profExperimentalHint');
+    if (hint) {
+        if (!selected) hint.textContent = 'Original theme selected. Standard personalization still applies.';
+        else if (selected === 'theme-custom-lab') hint.textContent = 'Custom Lab selected. Tune your draft below.';
+        else hint.textContent = 'Preset selected. Save Changes to apply globally for your profile.';
+    }
+};
+
+window.resetProfileExperimentalThemeDraft = function() {
+    let defaults = {
+        accent: '#5DB2FF',
+        bgApp: '#0B1726',
+        bgCard: '#14263C',
+        textMain: '#E6F3FF',
+        textMuted: '#97B4D1',
+        border: '#2F4F72',
+        wallpaper: '',
+        mood: 'aurora',
+        motionSpeed: 1,
+        glowStrength: 0.26,
+        cornerRadius: 13
+    };
+    if (typeof getDefaultCustomExperimentalThemeConfig === 'function') {
+        defaults = getDefaultCustomExperimentalThemeConfig();
+    }
+
+    const setVal = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+
+    setVal('profExpAccent', defaults.accent);
+    setVal('profExpBgApp', defaults.bgApp);
+    setVal('profExpBgCard', defaults.bgCard);
+    setVal('profExpTextMain', defaults.textMain);
+    setVal('profExpTextMuted', defaults.textMuted);
+    setVal('profExpBorder', defaults.border);
+    setVal('profExpWallpaper', defaults.wallpaper || '');
+    setVal('profExpMood', defaults.mood);
+    setVal('profExpMotion', Number(defaults.motionSpeed || 1).toFixed(2));
+    setVal('profExpGlow', Number(defaults.glowStrength || 0.26).toFixed(2));
+    setVal('profExpRadius', Math.round(Number(defaults.cornerRadius || 13)));
+    updateProfileExperimentalThemeUI();
 };
 
 window.triggerProfileUpdateCheck = function() {
@@ -468,18 +640,41 @@ window.saveProfileSettings = function() {
         };
         
         localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));
+
+        // Experimental Theme Preference (Profile-side access for trainees too)
+        const selectedExpTheme = getVal('profExperimentalTheme') || '';
+        if (selectedExpTheme) {
+            localStorage.setItem('experimental_theme', selectedExpTheme);
+        } else {
+            localStorage.removeItem('experimental_theme');
+        }
+
+        if (selectedExpTheme === 'theme-custom-lab') {
+            const customDraft = {
+                accent: getVal('profExpAccent') || '#5DB2FF',
+                bgApp: getVal('profExpBgApp') || '#0B1726',
+                bgCard: getVal('profExpBgCard') || '#14263C',
+                textMain: getVal('profExpTextMain') || '#E6F3FF',
+                textMuted: getVal('profExpTextMuted') || '#97B4D1',
+                border: getVal('profExpBorder') || '#2F4F72',
+                wallpaper: getVal('profExpWallpaper') || '',
+                mood: getVal('profExpMood') || 'aurora',
+                motionSpeed: parseFloat(getVal('profExpMotion') || '1'),
+                glowStrength: parseFloat(getVal('profExpGlow') || '0.26'),
+                cornerRadius: parseFloat(getVal('profExpRadius') || '13')
+            };
+            const safeDraft = (typeof sanitizeCustomExperimentalThemeConfig === 'function')
+                ? sanitizeCustomExperimentalThemeConfig(customDraft)
+                : customDraft;
+            localStorage.setItem('experimental_theme_custom', JSON.stringify(safeDraft));
+        }
         
         if (typeof applyUserTheme === 'function') applyUserTheme();
+        if (typeof applyExperimentalTheme === 'function') applyExperimentalTheme(selectedExpTheme || null);
         
-        // Force refresh footer avatar
-        if (typeof CURRENT_USER !== 'undefined' && document.getElementById('user-footer')) {
-             // Trigger a re-render of the footer content if possible, or reload page
-             // Simple reload is safest to apply all theme changes cleanly
-             if(confirm("Settings saved. Reload to apply changes fully?")) location.reload();
-        } else {
-             if(typeof showToast === 'function') showToast("Settings Saved!", "success");
-             document.getElementById('profileSettingsModal').remove();
-        }
+        if (typeof showToast === 'function') showToast("Settings Saved!", "success");
+        const modal = document.getElementById('profileSettingsModal');
+        if (modal) modal.remove();
     } catch(e) {
         alert("Error saving settings: " + e.message);
     }

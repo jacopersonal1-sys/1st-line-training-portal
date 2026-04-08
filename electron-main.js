@@ -30,7 +30,7 @@ let studySessionConfigured = false;
 let isFlushingStudySession = false;
 let isSafeToQuit = false;
 const STUDY_SESSION_PARTITION = 'persist:study_session';
-const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0';
+const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0';
 
 function isTrustedStudyUrl(rawUrl = '') {
     try {
@@ -95,6 +95,27 @@ async function flushStudySession() {
         console.error('Study session flush failed:', error);
     } finally {
         isFlushingStudySession = false;
+    }
+}
+
+async function clearStudyBrowserCache() {
+    const studySession = session.fromPartition(STUDY_SESSION_PARTITION);
+    if (!studySession) return false;
+
+    try {
+        // Clear all web storage/cookies tied to the in-app study browser partition.
+        await studySession.clearStorageData({
+            storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers', 'cachestorage']
+        });
+        await studySession.clearCache();
+        if (typeof studySession.clearAuthCache === 'function') {
+            await studySession.clearAuthCache();
+        }
+        await flushStudySession();
+        return true;
+    } catch (error) {
+        console.error('Study browser cache clear failed:', error);
+        return false;
     }
 }
 
@@ -665,6 +686,10 @@ ipcMain.handle('load-disk-cache', async (event) => {
         }
         return null;
     } catch(e) { return null; }
+});
+
+ipcMain.handle('clear-study-browser-cache', async () => {
+    return await clearStudyBrowserCache();
 });
 
 // --- ACTIVE WINDOW TRACKING (Activity Monitor) ---
