@@ -201,15 +201,30 @@ Maps local `localStorage` keys to Supabase tables.
     - `runSelfRepair()`: Fixes data integrity issues.
     - `analyzeForImprovements()`: Background task that analyzes logs and suggests system improvements.
 
-#### `js/schedule.js` (Calendar)
-- **Responsibility:** Scheduling and Live Bookings.
+#### `js/schedule.js` (Schedule Bridge + Live Booking Engine)
+- **Responsibility:** Hosts legacy schedule helpers and the Live Assessment Booking system. Timeline authoring/view now routes through the isolated Schedule Studio module.
 - **Key Functions:**
-    - `renderSchedule()`: Renders the Timeline or Calendar view.
+    - `renderSchedule()`: Delegates the Assessment Schedule tab to `ScheduleStudioLoader` (isolated module render path).
     - `renderLiveTable()`: Renders the Live Assessment booking grid.
     - `confirmBooking()`: Validates and saves a new booking.
     - `editDailyTrainers(date)`: Configures specific trainers for a single day.
     - `openAdminBookingModal()`: Allows Admins to manually assign a trainee to any empty slot.
     - `liveDrop(event)`: Handles Drag & Drop re-scheduling. Uses `force=true` save to prevent appointments from "bouncing" back.
+
+#### `js/schedule_studio_loader.js` (Schedule Studio Host Bridge)
+- **Responsibility:** Injects the Schedule Studio iframe into `#assessment-schedule` and refreshes it through a parent-child bridge.
+- **Key Functions:**
+    - `renderSchedule()`: Replaced by loader to mount `modules/schedule_studio/index.html?embedded=1`.
+    - `ScheduleStudioLoader.refresh()`: Requests in-frame refresh via `App.refresh()` or reload fallback.
+
+#### `modules/schedule_studio/` (Isolated Timeline Program)
+- **Architecture:** Program-within-a-program schedule editor running in an isolated iframe.
+- **Entry Point:** `modules/schedule_studio/index.html`
+- **Key Files:**
+    - `js/main.js`: Timeline app controller, admin template manager/apply flow, duration-based date automation.
+    - `js/data.js`: Shared localStorage/Supabase bridge helpers, business-day date math, template serialization.
+    - `js/ui_timeline.js`: Timeline tabs, toolbar actions, timeline cards.
+    - `js/ui_calendar.js`: Calendar view rendering.
 
 #### `js/network_diag.js` (Network Diagnostics)
 - **Responsibility:** Real-time network health check (Ping Gateway/Internet/Server) and System Stats (CPU/RAM/Disk).
@@ -350,6 +365,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.2:** Shifted timeline template operations fully into isolated Schedule Studio (`modules/schedule_studio`) with admin-only editable templates, duration-based business-day auto-dates (skip weekends/holidays), restored explicit Delete Timeline controls in Studio, and improved Microsoft SafeLinks/SharePoint URL normalization in both Studio and Study Browser paths.
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
