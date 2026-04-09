@@ -83,13 +83,22 @@ function loadTraineeTests() {
             }
         }
 
+        const typeLabel = t.type === 'vetting'
+            ? '<span class="test-type-pill vetting"><i class="fas fa-shield-alt"></i> Vetting</span>'
+            : t.type === 'live'
+                ? '<span class="test-type-pill live"><i class="fas fa-satellite-dish"></i> Live</span>'
+                : '<span class="test-type-pill standard"><i class="fas fa-file-alt"></i> Standard</span>';
+
         return `
         <div class="test-card-row">
-            <div>
+            <div class="test-card-main">
                 <strong>${t.title}</strong>
-                <div style="font-size:0.8rem; color:var(--text-muted);">${t.questions ? t.questions.length : 0} Questions</div>
+                <div class="test-card-meta">
+                    <span><i class="fas fa-list-ol"></i> ${t.questions ? t.questions.length : 0} Questions</span>
+                    ${typeLabel}
+                </div>
             </div>
-            <div style="display:flex; align-items:center; gap:15px;">
+            <div class="test-card-actions" style="display:flex; align-items:center; gap:15px;">
                 ${statusHtml}
                 ${actionBtn}
             </div>
@@ -269,11 +278,23 @@ function renderTestPaper(containerId = 'takingQuestions') {
         }
     }
 
+    const totalQuestions = Array.isArray(window.CURRENT_TEST.questions) ? window.CURRENT_TEST.questions.length : 0;
+    const typeName = window.CURRENT_TEST.type === 'vetting'
+        ? 'Vetting Test'
+        : window.CURRENT_TEST.type === 'live'
+            ? 'Live Assessment'
+            : 'Standard Assessment';
+
     let html = `
     <div class="test-paper">
-        <div style="text-align:center; margin-bottom:50px; padding-bottom:20px; border-bottom:1px dashed var(--border-color);">
-            <h2 style="color:var(--primary); margin-bottom:10px;">${window.CURRENT_TEST.title}</h2>
-            <p style="color:var(--text-muted); font-size:1.1rem;">Answer all questions below. Your progress is saved automatically.</p>
+        <div class="test-paper-head">
+            <div class="test-paper-eyebrow">${typeName}</div>
+            <h2 class="test-paper-title">${window.CURRENT_TEST.title}</h2>
+            <p class="test-paper-subtitle">Answer all questions below. Your progress is saved automatically.</p>
+            <div class="test-paper-meta">
+                <span><i class="fas fa-list-ol"></i> ${totalQuestions} Questions</span>
+                <span><i class="fas fa-save"></i> Auto-save enabled</span>
+            </div>
         </div>
     `;
 
@@ -286,8 +307,8 @@ function renderTestPaper(containerId = 'takingQuestions') {
 
         html += `
         <div class="taking-card ${isAnswered ? 'answered' : ''}" id="card_q_${idx}" style="margin-bottom:40px;">
-            <div class="q-text-large" style="font-weight:700; font-size:1.3rem; margin-bottom:25px; line-height:1.5;">
-                ${idx + 1}. ${q.text} ${refBtn} <span style="font-size:0.8rem; font-weight:normal; color:var(--text-muted); float:right; margin-left:10px;">(${q.points||1} pts)</span>
+            <div class="q-text-large taking-question-title" style="font-weight:700; font-size:1.3rem; margin-bottom:25px; line-height:1.5;">
+                ${idx + 1}. ${q.text} ${refBtn} <span class="taking-points-chip" style="font-size:0.8rem; font-weight:normal; color:var(--text-muted); float:right; margin-left:10px;">(${q.points||1} pts)</span>
             </div>
             <div class="question-input-area" id="q_area_${idx}">${renderQuestionInput(q, idx)}</div>
         </div>`;
@@ -403,68 +424,12 @@ async function submitTest(forceSubmit = false) {
     const bar = document.getElementById('test-timer-bar');
     if (bar) bar.remove();
 
-    let score = 0;
-    let maxScore = 0;
-    let needsManual = false;
+    const autoResult = (typeof calculateAssessmentAutoResult === 'function')
+        ? calculateAssessmentAutoResult(window.CURRENT_TEST, window.USER_ANSWERS)
+        : { autoPoints: 0, maxPoints: 0, percent: 0, needsManual: false };
 
-    window.CURRENT_TEST.questions.forEach((q, idx) => {
-        let pts = parseFloat(q.points || 1);
-        maxScore += pts;
-        let ans = window.USER_ANSWERS[idx];
-
-        if (q.type === 'text') {
-            needsManual = true;
-        } else {
-            if (q.type === 'matching') {
-                let correctCount = 0;
-                (q.pairs || []).forEach((p, pIdx) => {
-                    if (ans && ans[pIdx] === p.right) correctCount++;
-                });
-                if (correctCount === (q.pairs || []).length) score += pts;
-            }
-            else if (q.type === 'drag_drop' || q.type === 'ranking') {
-                let isExact = true;
-                if (!ans || ans.length !== q.items.length) isExact = false;
-                else {
-                    ans.forEach((item, i) => { if (item !== q.items[i]) isExact = false; });
-                }
-                if (isExact) score += pts;
-            }
-            else if (q.type === 'matrix') {
-                let correctRows = 0;
-                (q.rows || []).forEach((r, rIdx) => {
-                    const correctColIdx = q.correct ? q.correct[rIdx] : null;
-                    if (ans && ans[rIdx] == correctColIdx) correctRows++;
-                });
-                
-                if ((q.rows || []).length > 0) {
-                    let partial = (correctRows / q.rows.length) * pts;
-                    score += Math.round(partial * 10) / 10;
-                }
-            }
-            else if (q.type === 'multi_select') {
-               const correctArr = (q.correct || []).map(Number);
-               const userArr = (ans || []).map(Number);
-               let match = 0;
-               let incorrect = 0;
-               userArr.forEach(a => { 
-                   if(correctArr.includes(a)) match++; 
-                   else incorrect++;
-               });
-               
-               if(correctArr.length > 0) {
-                   let rawScore = ((match - incorrect) / correctArr.length) * pts;
-                   score += Math.max(0, rawScore);
-               }
-            }
-            else {
-                if (ans == q.correct) score += pts;
-            }
-        }
-    });
-
-    const finalPercent = (maxScore > 0) ? Math.round((score / maxScore) * 100) : 0;
-    const finalStatus = needsManual ? 'pending' : 'completed';
+    const finalPercent = autoResult.percent;
+    const finalStatus = autoResult.needsManual ? 'pending' : 'completed';
 
     const remappedAnswers = {};
     window.CURRENT_TEST.questions.forEach((q, currentIdx) => {

@@ -50,10 +50,14 @@ It supports multiple user roles (Admin, Team Leader, Trainee, Special Viewer) an
   - **Timer Control**: Admin starts/stops question timers; syncs to Trainee.
   - **Connection Health**: Monitors trainee connectivity status.
   - Admin pushes questions; Trainee answers in real-time.
-- **`js/vetting_arena.js` (Security)**: 
-  - High-security testing environment.
-  - Uses Electron IPC to enforce Kiosk Mode (Fullscreen, No Exit).
-  - Monitors background processes (`get-process-list`) and screen count.
+- **`modules/vetting_rework/js/main.js` + `modules/vetting_rework/js/data.js` (Vetting Arena 2.0 Admin Runtime)**:
+  - Primary Admin/Super Admin/Special Viewer vetting control surface (isolated webview runtime).
+  - Multi-session control, realtime monitor table, per-trainee security toggle/override, force refresh controls.
+  - Dual-table sync (`vetting_sessions_v2` + `vetting_sessions`) with retry queue and fallback polling.
+- **`js/vetting_runtime_v2.js` (Vetting Arena 2.0 Trainee Runtime Bridge)**:
+  - Host-side trainee exam flow (pre-flight checks, auto-route enforcer, kiosk/content-protection enforcement).
+  - Safe status patching with retry queue against both vetting tables.
+  - Preserves timer/start/submit lock behavior until Admin ends the vetting session.
 - **`js/study_monitor.js` (Productivity)**: 
   - Tracks user activity (Study vs External vs Idle).
   - Uses `ipcRenderer` to get active window titles.
@@ -135,13 +139,14 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
   6. Trainee answers -> Syncs to Server -> Admin UI updates.
   7. Admin grades -> "Finish" -> Saves to `submissions` and `records`.
 
-### 4. Vetting Arena (`js/vetting_arena.js`)
-- **Pre-Flight**: Checks for 2nd monitor and forbidden apps (Teams, Discord, etc.).
-- **Lockdown**: 
-  - `ipcRenderer.invoke('set-kiosk-mode', true)`
-  - `ipcRenderer.invoke('set-content-protection', true)`
-- **Monitoring**: Admin sees a live table of all trainees in the arena, their status, and any security violations.
-- **Enforcer**: Background process automatically redirects Trainees to the Arena when a session is active for their group.
+### 4. Vetting Arena 2.0 (Admin Webview + Trainee Bridge)
+- **Admin Runtime (Primary):** `modules/vetting_rework/` runs inside the Vetting tab webview for Admin/Super Admin/Special Viewer.
+- **Trainee Runtime (Primary):** `js/vetting_runtime_v2.js` renders the secure trainee arena in the host app.
+- **Pre-Flight:** Checks for 2nd monitor and forbidden apps before allowing test start.
+- **Lockdown:** Enforces kiosk and content protection during strict mode.
+- **Monitoring:** Admin sees a live table of trainees, statuses, timer progress, and security violations.
+- **Enforcer:** Background watcher auto-redirects trainees to Vetting when a targeted session is active.
+- **Reliability:** Writes and reads both `vetting_sessions_v2` and `vetting_sessions`, with retry queue + 1-second fallback pollers.
 
 ### 5. Assessment Lifecycle
 1. **Creation**: Admin builds test in `js/admin_builder.js`. Saved to `tests`.
@@ -154,7 +159,17 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 5. **Grading**: Admin reviews in `js/assessment_admin.js` or `js/live_execution.js`.
 6. **Record**: Final score saved to `records` (Permanent History).
 
+### 6. Vetting Non-Regression Map
+- **Session visibility drops / stale monitors:** prevented by dual-table sync + retry queue + 1-second fallback pollers.
+- **Trainees not auto-routed into active vetting:** prevented by login enforcer + stale-session filtering.
+- **Security relax accidentally bypassing global strict mode:** prevented by explicit `force_kiosk_global` override in trainee security checks.
+- **"Already Submitted" retake lockouts in arena:** prevented by arena-mode submission archive logic before start.
+- **Data overwrite/race during trainee status updates:** prevented by per-trainee safe patching rather than full-session blind overwrite.
+- **Post-submit unlock or accidental session exit:** prevented by keeping trainee locked in session state until Admin ends the vetting session.
+
 ## Recent Major Updates (AI Context)
+ - **Vetting 2.0 Cutover (Current)**: Promoted Vetting Arena 2.0 as the primary runtime. Admin controls run in isolated `modules/vetting_rework` (with security toggle, override, and force-refresh controls), while trainee secure exam execution runs in `js/vetting_runtime_v2.js` with pre-flight checks, kiosk enforcement, dual-table sync (`vetting_sessions_v2` + `vetting_sessions`), retry queue, and 1-second fallback polling to prevent status/session loss during realtime instability.
+ - **v2.6.8**: **Archive Separation + Hard Refresh Upgrade**: Split retraining transfers into dedicated `retrain_archives` so graduation archive/reporting remains clean, updated agent/report archive lookups to preserve retrain history without graduate labeling, and upgraded the header refresh action to flush queued writes/deletes, trigger embedded vetting queue flushes, clear sync timestamps, and pull a full fresh Supabase snapshot before rerendering active surfaces.
  - **v2.6.7**: **Live Arena 1-Second Hard Sync**: Added a strict 1-second targeted live-session refresh loop while Live Execution is open, plus shared force-refresh-by-session-id handling, so trainee question updates continue landing even when realtime tunnel delivery is unstable.
  - **v2.6.6**: **Live Arena Command-Channel Fix**: Added a guaranteed `sessions.pending_action` live-sync nudge path so trainee clients force-refresh the exact `live_sessions` row on trainer question pushes and Test Connection pings, preventing stalls that previously required logout/login.
  - **v2.6.5**: **Release Rollout Update**: Version increment for stable deployment alignment, carrying forward the Live Arena realtime reliability improvements (v2.6.3) and critical boot parser hotfix (v2.6.4).

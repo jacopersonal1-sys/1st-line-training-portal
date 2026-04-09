@@ -436,6 +436,10 @@
         <button class="nav-item" onclick="showTab('tl-hub')" title="Teamleader Hub">
             <i class="fas fa-users-cog"></i><span class="nav-text">Teamleader Hub</span>
         </button>
+
+        <button class="nav-item admin-only" onclick="showTab('opl-hub')" title="OPL Hub">
+            <i class="fas fa-book-open"></i><span class="nav-text">OPL Hub</span>
+        </button>
         
         <button class="nav-item" id="nav-live-assessment" onclick="showTab('live-assessment')" title="Live Assessment Booking">
             <i class="fas fa-calendar-check"></i><span class="nav-text">Live Assessment Booking</span>
@@ -454,9 +458,6 @@
         </button>
         <button class="nav-item admin-only" onclick="showTab('vetting-arena')" title="Vetting Test Arena">
             <i class="fas fa-dungeon"></i><span class="nav-text">Vetting Test Arena</span>
-        </button>
-        <button class="nav-item admin-only" onclick="showTab('vetting-rework')" title="Vetting Test (Rework)">
-            <i class="fas fa-hammer"></i><span class="nav-text">Vetting (Rework)</span>
         </button>
         <button class="nav-item admin-only" onclick="showTab('superadmin-studio')" title="Super Admin Data Studio">
             <i class="fas fa-satellite-dish"></i><span class="nav-text">Data Studio</span>
@@ -611,6 +612,13 @@
             <div id="tl-hub-content"></div>
         </section>
 
+        <section id="opl-hub" class="admin-only-section">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2>OPL Hub</h2>
+            </div>
+            <div id="opl-hub-content"></div>
+        </section>
+
         <section id="test-records" class="admin-only-section">
         <div style="display:flex; justify-content:space-between;"><h2>Vetting Test Submissions</h2></div>
         <div class="card">
@@ -630,8 +638,11 @@
         </section>
 
         <section id="test-manage" class="admin-only-section">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h2>Test Engine & History</h2>
+            <div class="test-engine-header">
+                <div>
+                    <h2 style="margin:0;">Test Engine & History</h2>
+                    <p class="test-engine-subtitle">Build structured assessments, track submissions, and mark with clear audit visibility.</p>
+                </div>
                 <button class="btn-primary" onclick="loadTestBuilder(); showTab('test-builder')">+ Create New Assessment</button>
             </div>
             
@@ -645,10 +656,10 @@
                 <!-- Top Stats Row -->
                 <div id="assessmentDashboard" style="margin-bottom: 20px;"></div>
 
-                <div class="grid-2" style="grid-template-columns: 2fr 1fr; gap: 20px; align-items: start;">
+                <div class="grid-2 test-engine-grid" style="grid-template-columns: 2fr 1fr; gap: 20px; align-items: start;">
                     <!-- Main Test Manager (Left) -->
-                    <div class="card" style="height: 100%; display: flex; flex-direction: column;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <div class="card test-engine-panel" style="height: 100%; display: flex; flex-direction: column;">
+                        <div class="test-engine-panel-head" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                             <h3 style="margin:0;">Assessment Manager</h3>
                             <div style="position:relative;">
                                 <i class="fas fa-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.8rem;"></i>
@@ -659,8 +670,8 @@
                     </div>
 
                     <!-- Grading Queue (Right) -->
-                    <div class="card" style="height: 100%; display: flex; flex-direction: column;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <div class="card test-engine-panel" style="height: 100%; display: flex; flex-direction: column;">
+                        <div class="test-engine-panel-head" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                             <h3 style="margin:0;">Grading Queue</h3>
                             <span id="markingCountBadge" class="badge-count hidden" style="position:static;">0</span>
                         </div>
@@ -691,68 +702,68 @@
         </section>
 
         <section id="test-builder" class="admin-only-section">
-            <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
-                <button class="btn-secondary" onclick="showTab('test-manage')">&larr; Back to List</button>
-                <div>
-                    <strong>Total Score: <span id="builderTotalScore">0</span></strong>
-                    <button class="btn-primary" onclick="saveTest()">Save Assessment</button>
-                </div>
-            </div>
-            <div class="card">
-                <div class="grid-2" style="margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:20px;">
-                    <div>
-                        <label for="builderTestType">Test Type</label>
-                        <select id="builderTestType">
-                            <option value="standard">Standard Assessment (Schedule Based)</option>
-                            <option value="vetting">Vetting Test (Timer Based)</option>
-                        </select>
-                    </div>
-                    <div id="durationWrapper" class="hidden">
-                        <label for="builderDuration">Duration (Minutes)</label>
-                        <input type="number" id="builderDuration" value="30" min="1">
+            <div class="builder-shell">
+                <div class="builder-topbar">
+                    <button class="btn-secondary" onclick="showTab('test-manage')">&larr; Back to List</button>
+                    <div class="builder-topbar-actions">
+                        <strong class="builder-score-chip">Total Score: <span id="builderTotalScore">0</span></strong>
+                        <button class="btn-primary" onclick="saveTest()">Save Assessment</button>
                     </div>
                 </div>
-
-                <div style="margin-bottom:20px;">
-                    <label id="lblBuilderLink" for="builderAssessmentSelect">Link to Assessment / Subject</label>
-                    <select id="builderAssessmentSelect" style="width:100%; padding:10px; font-size:1rem; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;"></select>
-                    
-                    <div id="vettingWrapper" class="hidden">
-                        <div style="display:flex; gap:10px;">
-                            <select id="builderVettingPhase" style="flex:1; padding:10px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;">
-                                <option value="1st Vetting">1st Vetting</option>
-                                <option value="Final Vetting">Final Vetting</option>
+                <div class="card builder-card">
+                    <div class="builder-setup-head">
+                        <h3 style="margin:0;">Assessment Setup</h3>
+                        <p>Define the test type and the assessment/subject link before adding questions.</p>
+                    </div>
+                    <div class="grid-2 builder-setup-grid" style="margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:20px;">
+                        <div>
+                            <label for="builderTestType">Test Type <span class="field-pill">Required</span></label>
+                            <select id="builderTestType">
+                                <option value="standard">Standard Assessment (Schedule Based)</option>
+                                <option value="vetting">Vetting Test (Timer Based)</option>
                             </select>
-                            <select id="builderVettingTopic" style="flex:1; padding:10px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;"><option value="">-- Select Topic --</option></select>
+                        </div>
+                        <div id="durationWrapper" class="hidden">
+                            <label for="builderDuration">Duration (Minutes) <span class="field-pill">Required for Vetting</span></label>
+                            <input type="number" id="builderDuration" value="30" min="1">
                         </div>
                     </div>
-                    <input type="text" id="builderCustomTitle" class="hidden" placeholder="Enter Vetting Test Name (e.g. 1st Vetting - Topic)" style="width:100%;">
-                </div>
-                <div id="questionContainer"></div>
-                <div style="margin-top:20px; padding-top:20px; border-top:1px dashed var(--border-color); display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-                    <button class="btn-secondary" onclick="addQuestion('multiple_choice')"><i class="fas fa-dot-circle"></i> Multiple Choice (Radio)</button>
-                    <button class="btn-secondary" onclick="addQuestion('multi_select')"><i class="fas fa-check-square"></i> Multiple Answer (Checkbox)</button>
-                    <button class="btn-secondary" onclick="addQuestion('text')"><i class="fas fa-font"></i> Text Answer</button>
-                    <button class="btn-secondary" onclick="addQuestion('live_practical')"><i class="fas fa-chalkboard-teacher"></i> Live Practical (Instruction)</button>
-                    <button class="btn-secondary" onclick="addQuestion('matching')"><i class="fas fa-exchange-alt"></i> Matching / Pairs</button>
-                    <button class="btn-secondary" onclick="addQuestion('ranking')"><i class="fas fa-list-ol"></i> Ranking Order</button>
-                    <button class="btn-secondary" onclick="addQuestion('matrix')"><i class="fas fa-th"></i> Matrix / Grid</button>
+
+                    <div class="builder-link-block" style="margin-bottom:20px;">
+                        <label id="lblBuilderLink" for="builderAssessmentSelect">Link to Assessment / Subject <span class="field-pill">Required</span></label>
+                        <select id="builderAssessmentSelect" style="width:100%; padding:10px; font-size:1rem; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;"></select>
+                        
+                        <div id="vettingWrapper" class="hidden">
+                            <div style="display:flex; gap:10px;">
+                                <select id="builderVettingPhase" style="flex:1; padding:10px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;">
+                                    <option value="1st Vetting">1st Vetting</option>
+                                    <option value="Final Vetting">Final Vetting</option>
+                                </select>
+                                <select id="builderVettingTopic" style="flex:1; padding:10px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:8px;"><option value="">-- Select Topic --</option></select>
+                            </div>
+                        </div>
+                        <input type="text" id="builderCustomTitle" class="hidden" placeholder="Enter Vetting Test Name (e.g. 1st Vetting - Topic)" style="width:100%;">
+                    </div>
+
+                    <div id="questionContainer"></div>
+                    <div class="builder-question-toolbar" style="margin-top:20px; padding-top:20px; border-top:1px dashed var(--border-color); display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                        <button class="btn-secondary" onclick="addQuestion('multiple_choice')"><i class="fas fa-dot-circle"></i> Multiple Choice (Radio)</button>
+                        <button class="btn-secondary" onclick="addQuestion('multi_select')"><i class="fas fa-check-square"></i> Multiple Answer (Checkbox)</button>
+                        <button class="btn-secondary" onclick="addQuestion('text')"><i class="fas fa-font"></i> Text Answer</button>
+                        <button class="btn-secondary" onclick="addQuestion('live_practical')"><i class="fas fa-chalkboard-teacher"></i> Live Practical (Instruction)</button>
+                        <button class="btn-secondary" onclick="addQuestion('matching')"><i class="fas fa-exchange-alt"></i> Matching / Pairs</button>
+                        <button class="btn-secondary" onclick="addQuestion('ranking')"><i class="fas fa-list-ol"></i> Ranking Order</button>
+                        <button class="btn-secondary" onclick="addQuestion('matrix')"><i class="fas fa-th"></i> Matrix / Grid</button>
+                    </div>
                 </div>
             </div>
         </section>
 
         <section id="vetting-arena">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h2>Vetting Test Arena</h2>
+                <h2>Vetting Arena 2.0</h2>
             </div>
             <div id="vetting-arena-content"></div>
-        </section>
-        
-        <section id="vetting-rework" class="admin-only-section">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2><i class="fas fa-hammer" style="color:var(--primary);"></i> Vetting Arena 2.0 (Development Sandbox)</h2>
-            </div>
-            <div id="vetting-rework-content"></div>
         </section>
 
         <section id="superadmin-studio" class="admin-only-section">
@@ -764,11 +775,12 @@
 
         <section id="my-tests">
             <h2>My Assessments</h2>
-            <div class="card"><div id="myTestsList"></div></div>
+            <p class="test-engine-subtitle">Start assigned assessments, track status, and resume with clear progress indicators.</p>
+            <div class="card test-engine-panel"><div id="myTestsList"></div></div>
         </section>
 
         <section id="test-take-view">
-            <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+            <div class="test-take-header" style="display:flex; justify-content:space-between; margin-bottom:15px;">
                 <button class="btn-secondary" onclick="showTab('my-tests')">Cancel / Exit</button>
                 <h3 id="takingTitle" style="margin:0;">Assessment</h3>
             </div>
@@ -1348,7 +1360,6 @@
 <script src="js/admin_sys.js"></script>
 <script src="js/admin_users.js"></script>
 <script src="js/admin_builder.js"></script> 
-<script src="js/vetting_arena.js"></script>
 <script src="js/admin_grading.js"></script> <script src="js/schedule.js"></script>
 <script src="js/reporting.js"></script>
 <script src="js/forms.js"></script> 
@@ -1359,6 +1370,7 @@
 <script src="js/live_execution.js"></script>
 <script src="js/agent_search.js"></script>
 <script src="js/tl_tasks.js"></script>
+<script src="js/opl_hub_loader.js"></script>
 <script src="js/admin_history.js"></script>
 <script src="js/attendance.js"></script>
 <script src="js/study_monitor.js"></script>
@@ -1366,6 +1378,7 @@
 <script src="js/nps_system.js"></script>
 <script src="js/network_diag.js"></script>
 <script src="js/vetting_rework_loader.js"></script>
+<script src="js/vetting_runtime_v2.js"></script>
 <script src="js/schedule_studio_loader.js"></script>
 <script src="js/superadmin_data_studio_loader.js"></script>
 <script src="js/ai_core.js"></script>

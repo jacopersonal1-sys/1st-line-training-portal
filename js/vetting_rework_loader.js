@@ -2,16 +2,22 @@
 /* HOST LOADER: Launches the isolated Vetting 2.0 Module */
 
 const VettingReworkLoader = {
-    renderUI: function() {
+    renderUI: function(targetContainerId = 'vetting-rework-content', options = {}) {
         console.log("[Sandbox Loader] Activating Vetting Rework UI...");
-        const container = document.getElementById('vetting-rework-content');
+        const container = document.getElementById(targetContainerId);
         if (!container) {
-            console.error("[Sandbox Loader] Error: 'vetting-rework-content' div not found in index.html");
+            console.error(`[Sandbox Loader] Error: '${targetContainerId}' div not found in index.html`);
             return;
         }
 
+        const mode = options.mode || 'sandbox';
+        const title = options.title || (mode === 'production' ? 'Vetting Arena 2.0 Active' : 'Sandbox Container Active');
+        const badgeIcon = mode === 'production' ? 'fa-shield-alt' : 'fa-hammer';
+        const partitionName = mode === 'production' ? 'persist:vetting_runtime_v2' : 'persist:vetting_sandbox';
+
         // Avoid re-rendering if already exists, but allow refresh
-        if (document.getElementById('vetting-rework-webview')) {
+        const existing = container.querySelector('.vetting-rework-webview');
+        if (existing && options.force !== true) {
             console.log("[Sandbox Loader] Sandbox already active. Skipping re-render.");
             return; 
         }
@@ -30,15 +36,15 @@ const VettingReworkLoader = {
 
         container.innerHTML = `
             <div style="background:var(--bg-input); padding:10px; border-radius:8px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; border:1px solid var(--primary);">
-                <div style="color:var(--primary); font-weight:bold;"><i class="fas fa-hammer"></i> Sandbox Container Active</div>
-                <button class="btn-secondary btn-sm" onclick="document.getElementById('vetting-rework-webview').openDevTools()"><i class="fas fa-bug"></i> Inspect Sandbox</button>
+                <div style="color:var(--primary); font-weight:bold;"><i class="fas ${badgeIcon}"></i> ${title}</div>
+                <button class="btn-secondary btn-sm" onclick="this.closest('section, div').querySelector('.vetting-rework-webview')?.openDevTools()"><i class="fas fa-bug"></i> Inspect Runtime</button>
             </div>
             <webview 
-                id="vetting-rework-webview" 
-                src="${modulePath}?user=${userParam}&creds=${credsParam}" 
+                class="vetting-rework-webview"
+                src="${modulePath}?user=${userParam}&creds=${credsParam}&mode=${encodeURIComponent(mode)}" 
                 style="width:100%; height:calc(100vh - 200px); border:none; background:var(--bg-card); box-shadow:0 0 15px rgba(0,0,0,0.5);"
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
-                partition="persist:vetting_sandbox"
+                partition="${partitionName}"
                 allowpopups></webview>`;
     }
 };

@@ -548,15 +548,32 @@ function viewSavedReport(id) {
 
     // NEW: Check Archives if not found in active reports
     if (!report) {
-        const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-        for (const g of graduates) {
-            if (g.reports && Array.isArray(g.reports)) {
-                const found = g.reports.find(r => r.id == id);
-                if (found) {
-                    report = found;
-                    break;
+        const allArchiveRows = JSON.parse(localStorage.getItem('graduated_agents') || '[]') || [];
+        const graduates = allArchiveRows.filter(g => {
+            const reason = String((g && g.reason) || '').toLowerCase().trim();
+            return !reason.startsWith('moved to ');
+        });
+        const retrainArchives = [
+            ...(JSON.parse(localStorage.getItem('retrain_archives') || '[]') || []),
+            ...allArchiveRows.filter(g => {
+                const reason = String((g && g.reason) || '').toLowerCase().trim();
+                return reason.startsWith('moved to ');
+            })
+        ];
+        const archiveBuckets = [graduates, retrainArchives];
+
+        for (const bucket of archiveBuckets) {
+            if (!Array.isArray(bucket)) continue;
+            for (const g of bucket) {
+                if (g.reports && Array.isArray(g.reports)) {
+                    const found = g.reports.find(r => r.id == id);
+                    if (found) {
+                        report = found;
+                        break;
+                    }
                 }
             }
+            if (report) break;
         }
     }
 

@@ -1689,6 +1689,12 @@ function updateSidebarVisibility() {
             return;
         }
 
+        // OPL Hub is admin + super_admin only.
+        if (targetTab === 'opl-hub' && !['admin', 'super_admin'].includes(role)) {
+            btn.classList.add('hidden');
+            return;
+        }
+
         // Hide isolated super admin tools from everyone except Super Admin
         if ((targetTab === 'vetting-rework' || targetTab === 'superadmin-studio') && role !== 'super_admin') {
             btn.classList.add('hidden');
@@ -1744,10 +1750,14 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework', 'superadmin-studio'];
+      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
+  }
+
+  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'opl-hub') {
+      return;
   }
 
   if (CURRENT_USER && CURRENT_USER.role !== 'super_admin' && id === 'superadmin-studio') {
@@ -1760,9 +1770,17 @@ function showTab(id, btn) {
       clearInterval(window.TEST_TIMER);
   }
 
+  if (id !== 'vetting-arena' && typeof cleanupVettingArenaWatchers === 'function') {
+      cleanupVettingArenaWatchers();
+  }
+
   // Kill Live Arena Poller if leaving the tab
   if (id !== 'live-execution' && window.LIVE_POLLER) {
       clearInterval(window.LIVE_POLLER);
+  }
+  if (id !== 'live-execution' && window.LIVE_HARD_SYNC_LOOP) {
+      clearInterval(window.LIVE_HARD_SYNC_LOOP);
+      window.LIVE_HARD_SYNC_LOOP = null;
   }
 
   if (TAB_SWITCH_TIMEOUT) clearTimeout(TAB_SWITCH_TIMEOUT);
@@ -1881,6 +1899,14 @@ function showTab(id, btn) {
           }
       }
 
+      if(id === 'opl-hub') {
+          if(typeof OPLHubLoader !== 'undefined' && typeof OPLHubLoader.renderUI === 'function') {
+              OPLHubLoader.renderUI();
+          } else {
+              console.error("OPLHubLoader module not loaded. Check js/opl_hub_loader.js");
+          }
+      }
+
       if(id === 'live-assessment') {
           if(typeof renderLiveTable === 'function') renderLiveTable();
       }
@@ -1942,7 +1968,12 @@ function showTab(id, btn) {
       }
       
       if(id === 'vetting-arena') {
-          if(typeof loadVettingArena === 'function') loadVettingArena();
+          const isAdminVettingUser = CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer');
+          if (isAdminVettingUser && typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
+              VettingReworkLoader.renderUI('vetting-arena-content', { mode: 'production', title: 'Vetting Arena 2.0 Active' });
+          } else if (CURRENT_USER && CURRENT_USER.role === 'trainee' && window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.loadTraineeArena === 'function') {
+              window.VettingRuntimeV2.loadTraineeArena();
+          }
       }
 
       if(id === 'vetting-rework') {
@@ -1996,16 +2027,105 @@ function showAdminSub(viewName, btn) {
 
 /* ================= HEADER BUTTONS ================= */
 
-async function refreshApp() {
-    // Visual Feedback
-    const btn = document.querySelector('.icon-btn[title="Refresh"] i');
-    if(btn) btn.classList.add('fa-spin');
-    
-    // Force Cloud Sync before reloading
-    if (typeof loadFromServer === 'function') {
-        await loadFromServer(true);
+let _isHardRefreshRunning = false;
+
+async function flushEmbeddedRuntimeQueues() {
+    // Trainee Vetting 2.0 bridge queue (host runtime)
+    if (window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.flushNow === 'function') {
+        try { await window.VettingRuntimeV2.flushNow(); } catch (e) {}
     }
-    location.reload();
+
+    // Admin Vetting 2.0 module queue (isolated webview runtime)
+    const vettingWebview = document.querySelector('#vetting-arena-content .vetting-rework-webview');
+    if (vettingWebview && typeof vettingWebview.executeJavaScript === 'function') {
+        try {
+            await vettingWebview.executeJavaScript(`
+                (async () => {
+                    try {
+                        if (window.DataService && typeof window.DataService.flushPendingOps === 'function') {
+                            await window.DataService.flushPendingOps();
+                        }
+                        if (window.DataService && typeof window.DataService.pollSessions === 'function') {
+                            await window.DataService.pollSessions();
+                        }
+                        return true;
+                    } catch (e) {
+                        return false;
+                    }
+                })();
+            `, true);
+        } catch (e) {}
+    }
+}
+
+function clearSyncTimestampsForFreshPull() {
+    Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('sync_ts_') || k.startsWith('row_sync_ts_')) {
+            localStorage.removeItem(k);
+        }
+    });
+}
+
+async function refreshApp() {
+    if (_isHardRefreshRunning) return;
+    _isHardRefreshRunning = true;
+
+    const icon = document.querySelector('button.icon-btn[onclick="refreshApp()"] i') || document.querySelector('.icon-btn[title="Refresh"] i');
+    if (icon) icon.classList.add('fa-spin');
+
+    try {
+        if (typeof showToast === 'function') showToast('Running full sync refresh...', 'info');
+
+        // 1) Flush queued local writes first.
+        if (typeof saveToServer === 'function') {
+            await saveToServer('FLUSH', false, true);
+        }
+        if (typeof processPendingDeletes === 'function') {
+            await processPendingDeletes();
+        }
+        await flushEmbeddedRuntimeQueues();
+
+        // 2) Force fresh pull from Supabase for all sections by clearing sync timestamps.
+        clearSyncTimestampsForFreshPull();
+        if (typeof loadFromServer === 'function') {
+            await loadFromServer(false);
+        }
+
+        // 3) Refresh major module surfaces.
+        if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+        if (typeof ScheduleStudioLoader !== 'undefined' && typeof ScheduleStudioLoader.refresh === 'function') {
+            ScheduleStudioLoader.refresh();
+        }
+        if (typeof updateNotifications === 'function') updateNotifications();
+
+        const active = document.querySelector('section.active');
+        if (active) {
+            const id = active.id;
+            if (id === 'dashboard-view' && typeof renderDashboard === 'function') renderDashboard();
+            if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
+            if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
+            if (id === 'insights' && typeof renderInsightDashboard === 'function') renderInsightDashboard();
+            if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
+            if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
+            if (id === 'admin-panel' && typeof loadAdminUsers === 'function') loadAdminUsers();
+            if (id === 'vetting-arena') {
+                if (CURRENT_USER && CURRENT_USER.role === 'trainee' && window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.renderTraineeArena === 'function') {
+                    window.VettingRuntimeV2.renderTraineeArena();
+                }
+                if (CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') && typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
+                    VettingReworkLoader.renderUI('vetting-arena-content', { mode: 'production', title: 'Vetting Arena 2.0 Active' });
+                }
+            }
+        }
+
+        if (typeof showToast === 'function') showToast('Full refresh completed. Latest cloud data loaded.', 'success');
+    } catch (e) {
+        console.error('Hard refresh failed:', e);
+        if (typeof showToast === 'function') showToast('Refresh failed. Please retry.', 'error');
+    } finally {
+        if (icon) icon.classList.remove('fa-spin');
+        _isHardRefreshRunning = false;
+    }
 }
 
 // triggerUpdateCheck removed - moved to admin_updates.js
@@ -2380,754 +2500,16 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
-            "2.6.7": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Live Arena 1-Second Hard Sync:</strong> Added a strict 1s targeted live-session refresh loop while the Live Execution tab is open to catch updates even during realtime tunnel instability.</li>
-                    <li style="margin-bottom: 8px;"><strong>Trainee Update Reliability:</strong> Exposed force-refresh-by-session-id as a shared helper so trainer/trainee clients can continuously confirm the latest question state without logout/login.</li>
-                </ul>`,
-            "2.6.6": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Live Arena Command Channel:</strong> Added a guaranteed <code>sessions.pending_action</code> nudge path so trainee clients force-refresh the target live session immediately on trainer question pushes.</li>
-                    <li style="margin-bottom: 8px;"><strong>Diagnostic Reliability:</strong> Test Connection now triggers the same live-sync nudge path to reduce false timeouts when <code>live_sessions</code> realtime events are delayed.</li>
-                    <li style="margin-bottom: 8px;"><strong>Resync Guardrail:</strong> Added targeted <code>live_sessions</code> fetch-by-session-id handling when a <code>live_sync</code> command arrives, keeping question progression live without requiring trainee logout/login.</li>
-                </ul>`,
-            "2.6.5": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Release Rollout Update:</strong> Version increment for stable distribution and deployment alignment.</li>
-                    <li style="margin-bottom: 8px;"><strong>Live Arena Baseline:</strong> Carries forward the latest realtime reliability and boot hotfix improvements from v2.6.3/v2.6.4.</li>
-                </ul>`,
-            "2.6.4": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Critical Boot Hotfix:</strong> Fixed a JavaScript parsing break in the release notes renderer that could stop app initialization on launch.</li>
-                    <li style="margin-bottom: 8px;"><strong>Live Arena Stability:</strong> Preserved the v2.6.3 realtime reliability improvements while correcting release-note formatting to avoid runtime crashes.</li>
-                </ul>`,
-            "2.6.3": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Live Arena Realtime Reliability:</strong> Hardened live session propagation so trainee question changes refresh immediately without requiring manual exit/re-entry.</li>
-                    <li style="margin-bottom: 8px;"><strong>Partial Realtime Recovery:</strong> Added automatic <code>live_sessions</code> row recovery when Supabase realtime sends partial payloads, preventing missed question updates.</li>
-                    <li style="margin-bottom: 8px;"><strong>Deterministic Session Versioning:</strong> Added monotonic live revision and question-push timestamps to improve update ordering and render consistency between trainer and trainee clients.</li>
-                    <li style="margin-bottom: 8px;"><strong>Live Cache Event Hooks:</strong> Live Execution now responds directly to <code>liveSessions</code> cache change events for faster UI synchronization under unstable network conditions.</li>
-                </ul>`,
-            "2.6.2": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Schedule Studio Templates:</strong> Added admin-managed timeline templates with editable step durations and one-click apply flow directly inside the isolated Schedule Studio module.</li>
-                    <li style="margin-bottom: 8px;"><strong>Business-Day Auto Dates:</strong> Timeline start/end windows now auto-calculate from duration days while skipping weekends and configured holidays.</li>
-                    <li style="margin-bottom: 8px;"><strong>Timeline Management:</strong> Restored clear Delete Timeline controls in Schedule Studio and tightened module ownership so timeline/template workflows run in Studio.</li>
-                    <li style="margin-bottom: 8px;"><strong>Microsoft Link Reliability:</strong> Improved SharePoint/OneDrive URL normalization, including Outlook SafeLinks unwrapping, to reduce blank/error opens in the study browser.</li>
-                </ul>`,
-            "2.6.1": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Microsoft Study Links:</strong> Preserved Microsoft/SharePoint links exactly as entered to avoid token loss on valid shared URLs.</li>
-                    <li style="margin-bottom: 8px;"><strong>Trainee Schedule Scope:</strong> Fixed trainee schedule visibility so learners only see the schedule assigned to their own group, including calendar mode.</li>
-                    <li style="margin-bottom: 8px;"><strong>Profile & Settings Upgrade:</strong> Expanded trainee personalization with Experimental Theme controls, including Custom Lab tuning options.</li>
-                    <li style="margin-bottom: 8px;"><strong>Study Browser Recovery:</strong> Added in-browser cache/session clear action to troubleshoot Microsoft sign-in loops directly from the study toolbar.</li>
-                </ul>`,
-            "2.6.0": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>User Management Reliability:</strong> Hardened delete/edit behavior with case-insensitive tombstones and live username targeting so removed users and profile edits no longer randomly revert after sync or restart.</li>
-                    <li style="margin-bottom: 8px;"><strong>Sync Stability:</strong> Reworked incoming realtime queue processing into guarded chunks to reduce heavy main-thread spikes that could make text fields feel unresponsive during high-volume sync bursts.</li>
-                    <li style="margin-bottom: 8px;"><strong>Study Browser Local Cache:</strong> Added local page snapshot caching with automatic cached-copy fallback when SharePoint/study pages fail to load.</li>
-                    <li style="margin-bottom: 8px;"><strong>Theme Builder Upgrade:</strong> Custom Lab now supports Wallpaper URL overlays directly in the Experimental Theme Builder while keeping one-click revert behavior.</li>
-                </ul>`,
-            "2.5.9": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Live Booking Reliability:</strong> Added a new Booking Integrity Check + auto-repair workflow to detect and fix duplicate IDs, slot collisions, invalid statuses, and stale/duplicate trainee bookings before they break downstream views.</li>
-                    <li style="margin-bottom: 8px;"><strong>Arena Stability:</strong> Hardened booking normalization so Live Assessment Arena state remains aligned with Live Booking and Assessment Breakdown datasets after admin edits.</li>
-                    <li style="margin-bottom: 8px;"><strong>Theme Lab Upgrade:</strong> Rebuilt Experimental Themes with stronger app-wide visual impact (animated backgrounds, richer card/button/nav behavior) and added a full Custom Theme Builder with preview/save/reset controls.</li>
-                </ul>`,
-            "2.5.8": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved an invisible "zombie process" bug that prevented the app from closing completely, which occasionally blocked auto-updates from installing.</li>
-                </ul>`,
-            "2.5.7": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>System Update:</strong> Version bump and minor maintenance.</li>
-                </ul>`,
-            "2.5.6": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Feature: Super Admin Live Data Studio.</strong> Added a new, fully isolated module exclusively for Super Admins to view and edit live database records securely through a user-friendly interface.</li>
-                </ul>`,
-            "2.5.5": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Persistent Login Restore:</strong> The desktop app now restores the last valid app session across full app closes until the user explicitly logs out, instead of forcing repeated sign-ins after each restart.</li>
-                    <li style="margin-bottom: 8px;"><strong>Microsoft Study Session Handling:</strong> Hardened the persistent Electron study-browser session for SharePoint and Microsoft sign-in flows so training material behaves more reliably on trainee installs.</li>
-                    <li style="margin-bottom: 8px;"><strong>Team Leader Hub Feedback Rebuild:</strong> Replaced the old production feedback flow with the new step-based capture wizard and upgraded the Question Creator to support linked ticket paths, filtering, and search.</li>
-                </ul>`,
-            "2.5.4": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Study Browser Controls:</strong> Reworked the in-app study browser toolbar so Back, Forward, Reload, Home, Mark for Clarity, Dashboard, Program Links, and Exit remain usable after opening study links in new tabs.</li>
-                    <li style="margin-bottom: 8px;"><strong>Browser UX:</strong> Redesigned the browser shell with a dedicated control deck and stronger tab handling so the controls are easier to click and more stable during normal training use.</li>
-                </ul>`,
-            "2.5.3": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Study Browser Hardening:</strong> Fixed the secure in-app browser bridge so Schedule study material stays inside the Electron study overlay instead of falling back to an external browser.</li>
-                    <li style="margin-bottom: 8px;"><strong>Browser Reliability:</strong> Improved study tab navigation, reload handling, title updates, and failed-load feedback to make the internal browser more stable during normal use.</li>
-                    <li style="margin-bottom: 8px;"><strong>Security Rules:</strong> Preserved the existing OS-level monitoring model while adding a safe exception for the Windows Snipping Tool so it no longer triggers false-positive external app violations.</li>
-                </ul>`,
-            "2.5.2": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed a critical case-sensitivity bug in the Sync Engine that caused Trainee records and scores to randomly disappear or fail to load.</li>
-                    <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Defused a bug where stale or abandoned Vetting Sessions would violently pull trainees out of their active standard assessments.</li>
-                </ul>`,
-            "2.5.1": `
-                <ul style="padding-left: 20px; margin: 0;">
-                    <li style="margin-bottom: 8px;"><strong>Hotfix & Polish:</strong> Resolved a startup crash (SyntaxError) in the release notes viewer and finalized the stable deployment of the new Teamleader Hub Agent Feedback System.</li>
-                </ul>`,
-        "2.5.0": `
+        "2.6.8": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature: Agent Feedback System.</strong> Added a comprehensive "Agent Production Feedback" form to the Teamleader Hub for capturing detailed performance notes.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature: Feedback Review Dashboard.</strong> Added a new dashboard for reviewing, analyzing, and exporting all captured agent feedback, complete with historical logs and performance summaries.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> The new feedback system saves all data to a dedicated cloud record ('tl_agent_feedback') and includes robust error handling to prevent data loss.</li>
-                <li style="margin-bottom: 8px;"><strong>UX/UI:</strong> The feedback form dropdowns are now configurable on a per-question basis from the "Backend Data" tab for maximum flexibility.</li>
+                <li style="margin-bottom: 8px;"><strong>Archive Split (Retrain vs Graduate):</strong> Retraining transfers now save to <code>retrain_archives</code> so graduation reporting stays clean.</li>
+                <li style="margin-bottom: 8px;"><strong>Refresh Reliability Upgrade:</strong> Header refresh now flushes pending queues, processes deletes, and then performs a fresh Supabase pull before re-rendering key modules.</li>
+                <li style="margin-bottom: 8px;"><strong>Vetting Runtime Sync:</strong> Vetting 2.0 refresh hooks now support forced flush + fallback poll during manual refresh operations.</li>
             </ul>`,
-        "2.4.77": `
+        "2.6.7": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Sync Reliability:</strong> Silent server switches now await the full migration push before pulling fresh data, and automatically roll back to the previous target if the migration fails.</li>
-                <li style="margin-bottom: 8px;"><strong>Save Safety:</strong> Hardened the mutex save queue so failed uploads are re-queued instead of silently dropping unsynced keys during network or server errors.</li>
-                <li style="margin-bottom: 8px;"><strong>Realtime Engine:</strong> Fallback polling is now disabled while the realtime tunnel is healthy, re-enabled at the role-based sync cadence when the tunnel drops, and the incoming queue now re-queues failed realtime batches instead of losing them.</li>
-            </ul>`,
-        "2.4.76": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a fatal SyntaxError during application startup by correctly awaiting the Activity Monitor's initialization sequence.</li>
-                <li style="margin-bottom: 8px;"><strong>Log Integrity:</strong> Ensured fresh logins strictly await the completion of the daily log archiving process before recording new data.</li>
-            </ul>`,
-        "2.4.75": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Log Integrity:</strong> Fixed a startup race condition that caused logs from the previous day to bleed into the current day's timeline.</li>
-                <li style="margin-bottom: 8px;"><strong>Activity Classification:</strong> Improved the logic for categorizing activities, correctly identifying training materials (.mp4, .pdf) and preventing them from being misclassified as "Tools".</li>
-                <li style="margin-bottom: 8px;"><strong>AI Analysis:</strong> Overhauled the AI prompt to provide a structured, narrative summary of the day's events, including specific explanations for idle time and violations, rather than a generic assessment.</li>
-            </ul>`,
-        "2.4.74": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>AI Analyst Fix:</strong> Hardened the Gemini API integration to resolve connection errors related to CORS, API versions (v1/v1beta), and regional model availability.</li>
-                <li style="margin-bottom: 8px;"><strong>AI Diagnostics:</strong> Added a "Test Connection" tool and a model selector dropdown to the Super Admin console, allowing for dynamic model selection to bypass regional restrictions.</li>
-                <li style="margin-bottom: 8px;"><strong>AI Configuration:</strong> Implemented auto-correction for legacy endpoint URLs to prevent configuration-related failures.</li>
-            </ul>`,
-        "2.4.73": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Study Browser Fix:</strong> Removed the internal domain-blocking firewall. The browser now allows all navigation from trusted training materials, fixing complex login redirects (e.g., Microsoft SSO).</li>
-                <li style="margin-bottom: 8px;"><strong>Security Model:</strong> Simplified security to rely on the OS-level Activity Monitor for flagging unauthorized external applications, as the internal browser has no URL bar for manual navigation.</li>
-            </ul>`,
-        "2.4.72": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Demo Sandbox:</strong> Added a fully isolated, interactive presentation environment. Logging in with 'demo_admin' instantly generates a rich, realistic mock database that never touches your production cloud.</li>
-                <li style="margin-bottom: 8px;"><strong>State Protection:</strong> Implemented a 5-layer memory and network isolation shield (including Hard Reloads, Poison Pills, and Native Disk Firewalls) to guarantee sandbox data can never leak into the live environment.</li>
-            </ul>`,
-        "2.4.71": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Schedule Links:</strong> Added an automatic URL Sanitizer to strip expiring temporary tokens from SharePoint links, preventing study materials from becoming stale over time.</li>
-                <li style="margin-bottom: 8px;"><strong>Activity Monitor:</strong> Fixed a wake-from-sleep race condition that occasionally caused the previous day's detailed timeline data to be lost during the morning sync.</li>
-            </ul>`,
-        "2.4.70": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Fixed a scrolling reset issue in the Activity Monitor's Detailed Breakdown and Recent History views caused by real-time background updates.</li>
-            </ul>`,
-        "2.4.69": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a dashboard rendering crash caused by variable assignment strictness in the new Activity Monitor URL cleaner.</li>
-            </ul>`,
-        "2.4.68": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Activity Monitor 3.0:</strong> Completely redesigned the Activity Summary with a 4-tier breakdown (Material, Tools, External, Idle). Added SharePoint URL cleaner, fixed time-scales for the timeline, added an archive date-picker, and locked scroll position during live updates.</li>
-                <li style="margin-bottom: 8px;"><strong>Study Browser Firewall:</strong> Sealed the "Trojan Horse" loophole. Trainees can no longer bypass tracking by clicking external links (like YouTube) embedded inside PDF documents.</li>
-                <li style="margin-bottom: 8px;"><strong>Performance Optimization:</strong> Parallelized the bootloader sync engine, slashing application startup time by up to 90%.</li>
-                <li style="margin-bottom: 8px;"><strong>Assessment Protection:</strong> Incoming system updates will no longer interrupt active assessments with intrusive popups or restarts.</li>
-            </ul>`,
-        "2.4.67": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Study Browser:</strong> Fixed an issue where PDF viewers would steal focus and prevent the top navigation buttons (Dashboard, Exit, Mark for Clarity) from working on the first click.</li>
-                <li style="margin-bottom: 8px;"><strong>Activity Monitor:</strong> Unauthorized external applications are now explicitly flagged as 'Violations' during working hours, with bold red highlighting in the Detailed Timeline and Review Queue.</li>
-            </ul>`,
-        "2.4.66": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Deep Architectural Hardening:</strong> Defused critical race conditions, state desynchronization bugs, and memory leaks across the platform.</li>
-                <li style="margin-bottom: 8px;"><strong>Storage Optimization:</strong> Implemented aggressive client-side Canvas Compression for image uploads to completely eliminate "Quota Exceeded" crashes in LocalStorage.</li>
-                <li style="margin-bottom: 8px;"><strong>Time & Attendance:</strong> Added a dynamic Lunch Timer UI and patched double-execution vulnerabilities in the clock-in/out and cancellation workflows.</li>
-                <li style="margin-bottom: 8px;"><strong>Exploit Prevention:</strong> Fixed the "Time-Stop" cheat in assessments where users could indefinitely pause the clock by switching tabs.</li>
-                <li style="margin-bottom: 8px;"><strong>Live Arena Stability:</strong> Intercepted background question pushes to force an instant save of trainee keystrokes before the screen re-renders, preventing answer loss.</li>
-            </ul>`,
-        "2.4.65": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Network Resilience:</strong> Hardened the Zero-Latency Real-Time tunnel. The app now silently falls back to high-speed 30-second polling if corporate firewalls block WebSockets, and continuously attempts to rebuild dropped connections to keep your UI instantly synced.</li>
-            </ul>`,
-        "2.4.64": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Performance Optimization:</strong> Trainee Data Minimization ensures trainees only download their own data, dropping bandwidth usage by 98%.</li>
-                <li style="margin-bottom: 8px;"><strong>Zero-Latency Sync:</strong> Live Assessment and Vetting Arena now process WebSockets instantly, bypassing the background queue.</li>
-                <li style="margin-bottom: 8px;"><strong>UX Improvements:</strong> Added native right-click context menu with spellcheck suggestions.</li>
-            </ul>`,
-        "2.4.63": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Performance Optimization:</strong> Drastically reduced database latency and bandwidth by adding SQL indexes to Cloud tables and restricting Activity Monitor payload downloads to Admin roles only.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added a failsafe to silently discard extremely delayed "ghost" diagnostic popups in the Live Assessment Arena.</li>
-            </ul>`,
-        "2.4.62": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Study Browser:</strong> Fixed UI overlap causing navigation buttons to become unresponsive. Added Preseem to quick links.</li>
-                <li style="margin-bottom: 8px;"><strong>Activity Monitor:</strong> Added whitelist exemptions for MS Teams and Outlook to prevent false violation warnings.</li>
-            </ul>`,
-        "2.4.61": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Study Monitor:</strong> Upgraded to a full Sandbox Browser with tabs, quick links, and active external app monitoring.</li>
-                <li style="margin-bottom: 8px;"><strong>Notes & Bookmarks:</strong> Added cloud-synced Bookmarking with text highlighting and teleportation to exact scroll positions.</li>
-                <li style="margin-bottom: 8px;"><strong>Tracking Accuracy:</strong> Activity Monitor now utilizes OS-level hardware tracking for bulletproof idle and active state detection.</li>
-            </ul>`,
-        "2.4.60": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Sync Engine Fix:</strong> Resolved a critical data truncation bug where background syncing would permanently skip downloading Trainee records. Trainee Dashboards will now fully populate.</li>
-            </ul>`,
-        "2.4.59": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Emergency Rescue:</strong> Forced stranded clients on the old infrastructure to connect directly to the new Local VM as the primary "Cloud" source.</li>
-                <li style="margin-bottom: 8px;"><strong>UI Fix:</strong> Resolved missing data on the Trainee Dashboard caused by case-sensitivity mismatches in user names.</li>
-            </ul>`,
-        "2.4.58": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Upgraded the Sync Engine with 'Fault Tolerant Sandboxing'. If a specific data table encounters an error or payload limit, the system will now isolate the failure and allow the rest of the app to sync perfectly.</li>
-            </ul>`,
-        "2.4.57": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Silenced phantom cloud pings. The app will no longer attempt to reach the destroyed cloud server for background diagnostic tests.</li>
-            </ul>`,
-        "2.4.55": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Converted the 'users' database to Row-Level Sync to prevent Admin race conditions.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented global 'Soft Deletes' (Tombstones) to permanently eliminate 'Ghost Data'.</li>
-                <li style="margin-bottom: 8px;"><strong>Grading Locks:</strong> Added Optimistic Concurrency Control (OCC) to prevent Admins from overwriting each other's manual score edits.</li>
-            </ul>`,
-        "2.4.54": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Version synchronization to resolve GitHub auto-updater pipeline conflicts. Contains all recent stability patches.</li>
-            </ul>`,
-        "2.4.53": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a critical "infinite loop" bug during server failovers that could crash the application.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added a mutex lock to the silent failover engine to prevent concurrent database connections from colliding.</li>
-                <li style="margin-bottom: 8px;"><strong>Dev Tools:</strong> Added safety bypasses for the version checker during local development or bootloader crashes.</li>
-            </ul>`,
-        "2.4.52": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved a startup crash on the login screen caused by background sync engines attempting to process Live Assessments before user authentication.</li>
-            </ul>`,
-        "2.4.51": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Added a 'Type Filter' to the Assessment Manager to easily isolate Vetting, Live, or Standard tests.</li>
-                <li style="margin-bottom: 8px;"><strong>Grading Queue:</strong> Completely redesigned the Marking Queue. Submissions are now cleanly grouped by Trainee with color-coded test type badges for faster grading.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Hardened failover logic. Reconnecting to the cloud now actively synchronizes offline local work and explicitly seeks out and destroys cloud "Ghost Data".</li>
-            </ul>`,
-        "2.4.50": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Optimized 'monitor_state' queries to drastically reduce bandwidth and database load.</li>
-                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Separated sync rate configurations for Cloud, Local, and Staging environments.</li>
-                <li style="margin-bottom: 8px;"><strong>UI/UX:</strong> Upgraded the Global Target server selection to a visual card-based interface in the Super Admin console.</li>
-            </ul>`,
-        "2.4.49": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Failover Recovery:</strong> Fixed an issue where reconnecting to the Cloud server after an outage could overwrite live data with stale local cache.</li>
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented a 'Pristine Pull' protocol when migrating to the Cloud server, ensuring absolute data accuracy.</li>
-            </ul>`,
-        "2.4.48": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Live & Vetting Arenas:</strong> Added 'Test Connection' diagnostic tool and 'Force Refresh' remote commands to help Admins assist stuck trainees instantly.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Added a graceful fallback UI to prevent crashes when a trainee's device hasn't downloaded the latest test definitions yet.</li>
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented fallback recovery for dropped network connections during live assessments to ensure questions stay in sync.</li>
-            </ul>`,
-        "2.4.47": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Added global popup alerts for trainees when a session starts. Implemented strict duplicate booking prevention.</li>
-                <li style="margin-bottom: 8px;"><strong>UI/UX:</strong> Added a dedicated 'Refresh Bookings' button to the Live Schedule. Fixed trainee view sync delays after closing modals.</li>
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Real-time updates for critical events (Live/Vetting) now instantly bypass anti-typing protections to ensure immediate delivery.</li>
-            </ul>`,
-        "2.4.46": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Architecture:</strong> Refactored Attendance, Vetting Arena, and Live Execution to use a "Realtime-First" model, eliminating data loss and race conditions.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Patched critical edge cases including offline clock-ins, UI wipes during typing, and drag-and-drop failures.</li>
-                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Removed redundant polling from Live/Vetting modules, relying on the central sync engine for immediate, high-priority updates.</li>
-            </ul>`,
-        "2.4.44": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Live Assessment Stability:</strong> Completely overhauled the Live Assessment grid to prevent race conditions, double-bookings, and mid-interaction UI resets.</li>
-                <li style="margin-bottom: 8px;"><strong>Drag & Drop Locks:</strong> Added transactional safety locks to prevent ghost data when scheduling trainers.</li>
-            </ul>`,
-        "2.4.43": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Critical Stability Fix:</strong> Resolved "Disappearing Data" bug in Live Bookings, Attendance, and Activity Monitor caused by PostgreSQL WAL optimization dropping payload data during bulk syncs.</li>
-            </ul>`,
-        "2.4.42": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Live Assessment Scheduling:</strong> Resolved race conditions causing drag-and-drop appointment moves to fail or revert.</li>
-                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Admins can now manually assign trainees to empty slots directly from the booking grid to recover lost bookings.</li>
-            </ul>`,
-        "2.4.41": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Grading Queue:</strong> Fixed a critical bug where legitimate retakes were mistakenly flagged as 'Ghost Data' and hidden from the Marking Queue.</li>
-                <li style="margin-bottom: 8px;"><strong>Assessment Stats:</strong> Corrected the Test Engine overview to accurately match the number of tests waiting in the Marking Queue.</li>
-            </ul>`,
-        "2.4.40": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Sync Engine:</strong> Implemented a 'Local Edits Shield' to completely eliminate data overwriting race conditions during rapid grading.</li>
-                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Fixed a query issue that was causing the app to repeatedly download the entire database history in the background, significantly reducing bandwidth usage and UI freezing.</li>
-            </ul>`,
-        "2.4.39": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Critical Fix (Grading):</strong> Resolved a race condition where grading one test could overwrite the score of another.</li>
-                <li style="margin-bottom: 8px;"><strong>Test History:</strong> Added a 'Phase Filter' to the Completed Assessments view to easily find Vetting vs. Standard tests.</li>
-            </ul>`,
-        "2.4.38": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Sync:</strong> Implemented 'Ghost Slayer' to actively purge local cache of globally deleted items (Tombstones & Revoked Users).</li>
-                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Fixed an issue where graded duplicate tests were invisible in the History tab. Live Assessment booking dropdowns now dynamically sync with the Test Engine.</li>
-            </ul>`,
-        "2.4.37": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System Stability:</strong> Resolved a race condition where assessment submissions could get stuck in "Processing" during forced timeouts.</li>
-                <li style="margin-bottom: 8px;"><strong>Security Hardening:</strong> Improved the Vetting Arena's background scanner to prevent false positive immediate-kicks. Re-engages kiosk shields automatically when toggled.</li>
-            </ul>`,
-        "2.4.35": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed an issue where the Admin dropdowns for 'Select Test' and 'Select Group' would disappear or become unclickable during real-time background syncing.</li>
-                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Fixed a critical bug causing test timers to accelerate ("Crazy Timer") and trainee answers to clear unexpectedly during Live/Vetting exams.</li>
-            </ul>`,
-        "2.4.34": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved an initialization error with the Vetting Arena Split View.</li>
-            </ul>`,
-        "2.4.33": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved authentication initialization crash.</li>
-            </ul>`,
-        "2.4.32": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Restored core database synchronization engine.</li>
-            </ul>`,
-        "2.4.31": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added "Split View" to seamlessly monitor multiple active testing groups side-by-side.</li>
-                <li style="margin-bottom: 8px;"><strong>UI Polish:</strong> Improved active session layout and multi-tasking capabilities for administrators.</li>
-            </ul>`,
-        "2.4.30": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Upgraded architecture to support running and monitoring multiple live vetting sessions concurrently.</li>
-                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added multi-tab interface for managing parallel test groups securely.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Hardened Kiosk Mode lock/unlock logic to prevent state desynchronization.</li>
-            </ul>`,
-        "2.4.29": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Team Leader Hub:</strong> Major upgrade to Operations Timeline. Added mandatory comment enforcement for Attendance, Support, and Coaching tasks.</li>
-                <li style="margin-bottom: 8px;"><strong>Team Leader Hub:</strong> Enabled multi-entry logging for Network Outages, Handover Problem Tickets, and Bottlenecks.</li>
-                <li style="margin-bottom: 8px;"><strong>UX:</strong> Improved validation logic to prevent submitting daily logs with missing mandatory information.</li>
-            </ul>`,
-        "2.4.28": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Fixed a critical bug preventing sessions from being marked as 'Completed'.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented a "Deep Clean" delete function in Group Management to permanently remove all of a user's associated data.</li>
-                <li style="margin-bottom: 8px;"><strong>Network Tools:</strong> Added a historical view for Admins to review agent network health reports.</li>
-            </ul>`,
-        "2.4.27": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature Fix:</strong> Moved Network Test button to the main sidebar for reliable visibility across all roles.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed a crash in the Network Diagnostics tool caused by a race condition on startup.</li>
-                <li style="margin-bottom: 8px;"><strong>Cleanup:</strong> Resolved console warnings related to Supabase client instances.</li>
-            </ul>`,
-        "2.4.26": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>UX Improvement:</strong> Moved "Network Test" to the main Sidebar for reliable access by all users.</li>
-                <li style="margin-bottom: 8px;"><strong>Cleanup:</strong> Removed unreliable header button injection logic.</li>
-            </ul>`,
-        "2.4.25": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Network Diagnostics tool to sidebar for all users.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Admin view to Network Diagnostics to review historical reports.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed crash in Network Diagnostics tool and resolved button visibility issues.</li>
-            </ul>`,
-        "2.4.24": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature Fix:</strong> Resolved issue where the Network Diagnostics button was not appearing in the header.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed console errors related to the missing 'network_diagnostics' table.</li>
-            </ul>`,
-        "2.4.23": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Critical Fix (Live Assessments):</strong> Resolved an issue where submitting one agent's live assessment could overwrite the scores of another.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed a mismatch where the "Assessment Manager" showed a different number of pending tests than the "Marking Queue".</li>
-                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added a new "Emergency Repair" tool to the Super Admin console to fix local data corruption and sync issues.</li>
-            </ul>`,
-        "2.4.22": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed app freezing issues by optimizing how heavy logs are synced in the background.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Tombstone" protocol to permanently prevent deleted items ("Ghost Data") from reappearing.</li>
-                <li style="margin-bottom: 8px;"><strong>UX:</strong> Improved Sync Queue indicator to show real-time processing status.</li>
-            </ul>`,
-        "2.4.21": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Resolved an issue where old, marked tests could reappear as "Pending" during a sync.</li>
-                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Hardened the booking system to prevent duplicate sessions and provide clearer "Rejoin" options.</li>
-                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Implemented instant "Join Now" alerts for trainees when an admin starts a session.</li>
-            </ul>`,
-        "2.4.20": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Optimized Live Assessment sync to use an on-demand "Server Authority" model, drastically reducing background bandwidth and latency.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Resolved issue where some users would see stale booking data while others saw live updates.</li>
-            </ul>`,
-        "2.4.19": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented "Server Authority" mode for critical tables (Live Bookings, Schedules). This forces a full sync from the server to prevent local data inconsistencies.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed issue where local cache would not update correctly for shared resources.</li>
-            </ul>`,
-        "2.4.19": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Implemented "Server Authority" mode for critical tables (Live Bookings, Schedules). This forces a full sync from the server to prevent local data inconsistencies.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed issue where local cache would not update correctly for shared resources.</li>
-            </ul>`,
-        "2.4.18": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Implemented an intrusive update system. The app now saves your state and forces a restart when an update is ready.</li>
-                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Progress is now saved automatically on every interaction and restored after a crash or update.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Removed the idle timeout feature completely.</li>
-            </ul>`,
-        "2.4.17": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Live Assessment:</strong> Implemented Realtime Sync for bookings to prevent double-booking and ensure instant updates across all clients.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed "Ghost Data" issues in Attendance Review and Schedule Deletion using authoritative server-first logic.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Added Clock Sync Warning to alert users if their system time drifts significantly from the server.</li>
-            </ul>`,
-        "2.4.16": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Authoritative Delete" protocol for Groups, Schedules, and Tests to permanently fix "Ghost Data" issues.</li>
-                <li style="margin-bottom: 8px;"><strong>User Management:</strong> Enhanced "Add Group" to use email addresses and automated Outlook templates. Added "Rename User" feature.</li>
-            </ul>`,
-        "2.4.16": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Authoritative Delete" protocol for Groups, Schedules, and Tests to permanently fix "Ghost Data" issues.</li>
-                <li style="margin-bottom: 8px;"><strong>User Management:</strong> Enhanced "Add Group" to use email addresses and automated Outlook templates. Added "Rename User" feature.</li>
-            </ul>`,
-        "2.4.15": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Teamleader Hub:</strong> Implemented initial structure for Daily/Weekly Operations Timeline and Roster Management (Currently Admin-Only for testing).</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Updated architecture documentation.</li>
-            </ul>`,
-        "2.4.14": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Added time buffer to resolve clock skew issues preventing trainee submissions from appearing.</li>
-                <li style="margin-bottom: 8px;"><strong>Dashboard:</strong> Fixed Attendance widget to only count unconfirmed lates for the current day.</li>
-                <li style="margin-bottom: 8px;"><strong>Dashboard:</strong> Fixed Insight widget to correctly calculate "Action Required" counts by ignoring retaken/passed tests.</li>
-            </ul>`,
-        "2.4.13": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Implemented "Hard Delete Protocol" to permanently remove deleted items from the cloud and prevent "Ghost Data" reappearance.</li>
-                <li style="margin-bottom: 8px;"><strong>Sync Engine:</strong> Added Pending Delete Queue to filter out deleted items during synchronization.</li>
-            </ul>`,
-        "2.4.12": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Migration Tools:</strong> Finalized Staging Mode and Migration protocols for server switchover.</li>
-            </ul>`,
-        "2.4.11": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Workflow:</strong> Implemented Staging Mode and Draft Releases for safer deployment.</li>
-            </ul>`,
-        "2.4.10": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Maintenance:</strong> General stability improvements and version synchronization.</li>
-            </ul>`,
-        "2.4.7": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Maintenance:</strong> Version bump to resolve deployment conflict. Includes fixes for Schedule Links and Update Notifications.</li>
-            </ul>`,
-        "2.4.6": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Notifications:</strong> Fixed issue where update notifications (Bell Icon) wouldn't appear unless the app was restarted. Now checks every 30 minutes.</li>
-                <li style="margin-bottom: 8px;"><strong>Schedule:</strong> Fixed broken "Study Material" links containing special characters (SharePoint).</li>
-                <li style="margin-bottom: 8px;"><strong>Sync:</strong> Forced schedule updates for trainees to ensure new links appear immediately.</li>
-            </ul>`,
-        "2.4.5": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed login loop issue when Local Server is offline. App now stays in Recovery Mode until manually reset.</li>
-            </ul>`,
-        "2.4.4": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Security:</strong> Enhanced protection for global system settings to prevent accidental overwrites by older app versions.</li>
-            </ul>`,
-        "2.3.9": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Data Integrity:</strong> Fixed "Zombie Data" issue where deleted items would reappear after a server switch or sync.</li>
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Upgraded to support multiple, concurrent vetting sessions without conflicts.</li>
-                <li style="margin-bottom: 8px;"><strong>Live Assessments:</strong> Hardened real-time answer syncing to improve stability for multiple trainers.</li>
-            </ul>`,
-        "2.3.8": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Solved issue where the app would get stuck on a disconnected Local Server. It will now auto-revert to Cloud immediately.</li>
-            </ul>`,
-        "2.3.7": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Failover Fix:</strong> App now correctly forces a switch back to Cloud if the Local server is unreachable during configuration save.</li>
-                <li style="margin-bottom: 8px;"><strong>Permissions:</strong> Fixed Team Leader access rights for the Insight Dashboard.</li>
-            </ul>`,
-        "2.3.6": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Failover Stability:</strong> Fixed connection loops by verifying server reachability before switching.</li>
-                <li style="margin-bottom: 8px;"><strong>Auto-Recovery:</strong> App now automatically reverts to Cloud if the Local server is offline.</li>
-            </ul>`,
-        "2.3.5": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Server Indicator:</strong> Added a visual indicator in the header to show current server connection (Cloud vs Local).</li>
-            </ul>`,
-        "2.3.4": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Dual-Server Stability:</strong> Resolved schema conflicts for local Supabase setup, improving reliability when switching servers.</li>
-                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added a "Verify Schema" tool to the Super Admin console to check database compatibility.</li>
-                <li style="margin-bottom: 8px;"><strong>Permissions:</strong> Hardened Team Leader role to correctly restrict access to the Insight Dashboard.</li>
-            </ul>`,
-        "2.3.3": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Stability:</strong> Fixed an issue where security alerts could freeze the test interface.</li>
-                <li style="margin-bottom: 8px;"><strong>False Positives:</strong> Improved detection to ignore background browser processes (e.g., Edge Startup Boost).</li>
-                <li style="margin-bottom: 8px;"><strong>Sync Fix:</strong> Deleted records now correctly disappear from all devices.</li>
-            </ul>`,
-        "2.3.2": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Update Notification:</strong> Added a notification bell alert when a new system update is ready to install.</li>
-            </ul>`,
-        "2.3.1": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Trainee Portal:</strong> You can now view your Vetting Test history and submissions in the 'Test Records' tab.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved permission issues preventing trainees from accessing their own records.</li>
-            </ul>`,
-        "2.3.0": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Dual-Server Architecture:</strong> Added support for Local/Cloud server failover.</li>
-                <li style="margin-bottom: 8px;"><strong>High Availability:</strong> System now actively monitors for server switch commands to ensure uptime.</li>
-                <li style="margin-bottom: 8px;"><strong>Data Safety:</strong> Implemented auto-migration protocol to preserve data when switching servers.</li>
-            </ul>`,
-        "2.2.15": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Documentation updated to reflect recent architecture changes (Universal Search, Working Hours Logic).</li>
-            </ul>`,
-        "2.2.14": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved issue where deleted records would reappear after refresh.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Factory Reset now correctly wipes all cloud data tables.</li>
-            </ul>`,
-        "2.2.13": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Insight Dashboard:</strong> Fixed "Action Required" to correctly update when a trainee retakes and passes a test (Highest Score wins).</li>
-                <li style="margin-bottom: 8px;"><strong>Live Assessment:</strong> Fixed issue where old/stale sessions remained visible to trainees.</li>
-            </ul>`,
-        "2.2.12": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed missing timer display for trainees. Improved timer synchronization for Admins.</li>
-            </ul>`,
-        "2.2.11": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Critical Fix:</strong> Resolved version comparison bug preventing login (e.g., 2.2.10 being treated as older than 2.2.6).</li>
-            </ul>`,
-        "2.2.10": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed issue where counters (Connected, In Progress) were not updating.</li>
-                <li style="margin-bottom: 8px;"><strong>Assessments:</strong> Prevented double-submission errors by disabling the submit button immediately.</li>
-            </ul>`,
-        "2.2.9": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added active server polling for Admins to ensure real-time visibility of trainees.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved "Already Submitted" error by enforcing strict ID matching.</li>
-            </ul>`,
-        "2.2.8": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Fixed real-time visibility of trainees for Admins. Added tolerance for Microsoft Teams running in the background.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Improved submission reliability and error messaging for assessments.</li>
-            </ul>`,
-        "2.2.6": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Enforced Background Color theme application to ensure UI components (Cards, Inputs) update correctly.</li>
-            </ul>`,
-        "2.2.5": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Theme Engine:</strong> Background Color setting now applies to Cards, Inputs, and Sidebars (Gloss Grey areas) for a fully consistent look.</li>
-            </ul>`,
-        "2.2.4": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Super Admin Console crash (Syntax Error).</li>
-                <li style="margin-bottom: 8px;"><strong>Theme:</strong> Added "Background Color" customization for Dark Mode in Theme Settings.</li>
-            </ul>`,
-        "2.2.3": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> Added "Last Sync Time" column to the Row-Level Sync Status table for better visibility.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where custom User Idle Timeout settings were ignored (defaulting to 15 mins).</li>
-            </ul>`,
-        "2.2.2": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Resolved login lockout for Admins switching between terminals or Dev/Prod environments.</li>
-            </ul>`,
-        "2.2.1": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Major storage optimization. Reduced local database size by ~90% using lightweight sync checksums.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Fixed "Server Ahead" sync loops and added automatic duplicate cleanup for Records and Archives.</li>
-                <li style="margin-bottom: 8px;"><strong>Health Check:</strong> Added database health monitoring and auto-pruning for old Activity Logs.</li>
-                <li style="margin-bottom: 8px;"><strong>Admin Tools:</strong> New "Force Pull" and "Local Cleanup" tools in Super Admin Console.</li>
-            </ul>`,
-        "2.1.61": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Header UI:</strong> Separated Profile Settings (Logo) from Admin Tools (Gear).</li>
-                <li style="margin-bottom: 8px;"><strong>Profile:</strong> Added "My Profile" shortcut in Admin User Management.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Live Assessment booking visibility for Admins/TLs.</li>
-            </ul>`,
-        "2.1.60": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Zoom Control:</strong> New UI Zoom slider in Theme Settings to scale the interface.</li>
-                <li style="margin-bottom: 8px;"><strong>Visual Polish:</strong> Added smooth transitions when switching themes.</li>
-                <li style="margin-bottom: 8px;"><strong>Light Mode:</strong> Improved readability with softer borders and text.</li>
-            </ul>`,
-        "2.1.59": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Super Admin Console 2.0:</strong> Redesigned with Tabs, Raw Data Inspector, and AI Analyst Chat.</li>
-                <li style="margin-bottom: 8px;"><strong>Study Monitor 2.0:</strong> Improved "Lenient Scoring" for short interruptions and better Idle Detection.</li>
-                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Added "Waiting for Admin" indicator and fixed idle timeouts during sessions.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Enhanced cloud sync reliability and error handling.</li>
-            </ul>`,
-        "2.1.44": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Filtered out Graduated Agents from the Trainee Login list to prevent confusion.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Prevented auto-regeneration of user accounts if they exist in the Graduated Agents archive.</li>
-            </ul>`,
-        "2.1.43": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Daily Tip Management' widget for Admins to customize trainee tips.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Hardened Sync Engine. Removed conflict prompts (Server Wins), added auto-retry for saves, and improved nested object merging.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Trainee Dashboard rendering crash.</li>
-            </ul>`,
-        "2.1.42": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Date Graduated' field to the Agent Search profile for archived users.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Onboard Report auto-fill to correctly match assessment scores even if casing differs (Fuzzy Match).</li>
-            </ul>`,
-        "2.1.41": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Onboard Reports for Graduated/Archived agents could not be viewed.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Improved 'Graduate Trainee' workflow stability.</li>
-            </ul>`,
-        "2.1.40": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Conflict Resolution' modal. You can now choose between Server or Local versions when a data conflict is detected during sync.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Enhanced sync logic to pause and wait for user input on critical data mismatches (Tests, Rosters, Settings).</li>
-            </ul>`,
-        "2.1.39": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Major Sync Engine upgrade. Fixed data reversion issues by implementing 'Server-Wins' (Pull) vs 'Local-Wins' (Push) merge strategies.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added visual 'Unsaved Changes' indicator and 'Offline' detection with Auto-Recovery.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Retry' button with Connection Speed Test for failed syncs.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Improved timestamp accuracy using Server Time to prevent sync loops.</li>
-            </ul>`,
-        "2.1.38": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Cleanup Duplicates' tool to Admin Database to remove redundant records.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where viewing assessments opened the wrong submission due to duplicate data.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Enhanced duplicate prevention in Live Assessment saving logic.</li>
-            </ul>`,
-        "2.1.37": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Agent Search crash when viewing agents with recent Onboard Reports.</li>
-            </ul>`,
-        "2.1.36": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Agent Search loading error.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Enabled 'Save Note' functionality in Agent Profile.</li>
-            </ul>`,
-        "2.1.35": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where classified 'External' activities would reappear in the Review Queue.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Implemented 'Reviewed' list to permanently dismiss classified items across all admins.</li>
-            </ul>`,
-        "2.1.34": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Improved Activity Monitor robustness (Idle detection & Data retention).</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved data sync conflicts where users could overwrite each other's status.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added auto-away status when no mouse/keyboard input is detected for 1 minute.</li>
-            </ul>`,
-        "2.1.33": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Pre-Production Feedback persisted between different trainees in Onboard Reports.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Included Live Assessments (e.g. Course 2) in the main Assessment Scores table.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Force Update' auto-install capability for remote admin updates.</li>
-            </ul>`,
-        "2.1.32": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Activity Monitor list flickering/resetting by implementing Smart Merge sync.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Fixed issue where classified apps would reappear as 'External' after refresh.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced whitelist logic to prioritize Admin classification over raw trainee logs.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Optimized background data synchronization for stability.</li>
-            </ul>`,
-        "2.1.31": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Robust 'Retrain' workflow when moving agents to a new group (Archives old data).</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Added 'Reason' field to Graduated Agents list (e.g. Moved vs Graduated).</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved context mismatch issues in Admin User management.</li>
-            </ul>`,
-        "2.1.30": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Graduated Agents' tab to Admin Panel for archiving and restoring users.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Onboard Report visuals and print formatting.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Auto-mark 'Absent' for weekdays with no login activity in Attendance Register.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Vetting Test separation in Onboard Report tables.</li>
-            </ul>`,
-        "2.1.29": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added 'Graduate Trainee' workflow to archive completed agents.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected answer display for Multiple Choice questions in Live Arena (Admin View).</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Implemented robust data archiving for graduated users.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Sorted Agent Progress checklist (Vetting at bottom).</li>
-            </ul>`,
-        "2.1.28": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Vetting Tests were missing from Agent Progress checklist.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Live Assessment Timer visibility for trainees.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced fuzzy matching for Vetting Topic completion detection.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Removed duplicate code blocks in data sync logic.</li>
-            </ul>`,
-        "2.1.27": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where input fields froze after submitting scores in Capture Scores.</li>
-                <li style="margin-bottom: 8px;"><strong>System:</strong> Improved background user generation to be silent during score capture.</li>
-            </ul>`,
-        "2.1.26": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added support for multiple questions in NPS Surveys.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Live Assessment Timer for Admins.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Restored Rich Text Editor visibility in Test Builder.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Analytics Dashboard to break down NPS scores per question.</li>
-            </ul>`,
-        "2.1.25": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added NPS Rating System for trainee feedback.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added NPS Control Panel for Admins (Create, Clone, Preview).</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Activity Monitor with precise external app tracking.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Idle Timeout setting not applying to specific users.</li>
-            </ul>`,
-        "2.1.24": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Enhanced Department Overview with Effort vs Performance matrix.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Added Group Knowledge Gap Heatmap with test filtering.</li>
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Individual At-Risk Score and Activity Timeline in Agent Search.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Added fail-safe to prevent overwriting existing manual scores.</li>
-            </ul>`,
-        "2.1.22": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Restored Admin Panel access for Team Leaders (Profile & Settings).</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved Admin Dashboard rendering error.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Corrected Dashboard layout issues (squashed widgets).</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Dashboard customization (drag to empty space).</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Added Date column to Assessment Records view.</li>
-            </ul>`,
-        "2.1.21": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Team Leader Dashboard overhaul with customizable widgets.</li>
-                <li style="margin-bottom: 8px;"><strong>Visuals:</strong> Added Loading Skeleton animations for smoother experience.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Refined Team Leader permissions for Schedule and Insights.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved display issues in Insight Dashboard.</li>
-            </ul>`,
-        "2.1.20": `
-            <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature:</strong> Replaced system prompts with custom modals for better compatibility.</li>
-                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Resolved issue where Admins couldn't add links to Assessment Records.</li>
-                <li style="margin-bottom: 8px;"><strong>New:</strong> Trainee Dashboard widgets (Daily Tip, Request Help).</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Enhanced Activity Monitor reliability.</li>
+                <li style="margin-bottom: 8px;"><strong>Live Arena 1-Second Hard Sync:</strong> Added a strict 1s targeted live-session refresh loop while Live Execution is open.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Update Reliability:</strong> Added stronger force-refresh-by-session-id handling for trainer and trainee clients.</li>
             </ul>`,
         "default": `
             <p>Performance improvements and bug fixes.</p>

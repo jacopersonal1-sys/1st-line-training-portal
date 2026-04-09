@@ -429,7 +429,7 @@ function renderMarkingAuditTrail(submission) {
     return audit.map(entry => `
         <div class="marking-audit-entry">
             <strong>${entry.action || 'Updated'}</strong>
-            <span>${entry.marker || 'Unknown'} • ${entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'No time'} • ${entry.score ?? '-'}%</span>
+            <span>${entry.marker || 'Unknown'} &bull; ${entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'No time'} &bull; ${entry.score ?? '-'}%</span>
         </div>
     `).join('');
 }
@@ -669,6 +669,9 @@ async function openAdminMarking(subId, options = {}) {
         const pointsMax = parseFloat(q.points || 1);
         let markHtml = '';
         let autoScore = 0;
+        if (typeof calculateQuestionAutoScore === 'function') {
+            autoScore = calculateQuestionAutoScore(q, userAns).score;
+        }
         
         const noteText = q.adminNotes || 'No note added';
         const editBtn = `<button class="btn-secondary btn-sm" onclick="editMarkerNote('${sub.testId}', ${lookupIdx}, '${sub.id}')" style="margin-left:10px; padding:2px 6px; font-size:0.7rem;"><i class="fas fa-edit"></i> Edit Note</button>`;
@@ -711,52 +714,6 @@ async function openAdminMarking(subId, options = {}) {
                 </div>`;
         } 
         else {
-            if (q.type === 'matching') {
-                let correctCount = 0;
-                (q.pairs || []).forEach((p, pIdx) => {
-                    if (userAns && userAns[pIdx] === p.right) correctCount++;
-                });
-                if (correctCount === (q.pairs || []).length) autoScore = pointsMax;
-            }
-            else if (q.type === 'drag_drop' || q.type === 'ranking') {
-                let isExact = true;
-                if (!userAns || userAns.length !== q.items.length) isExact = false;
-                else {
-                    userAns.forEach((item, i) => { if (item !== q.items[i]) isExact = false; });
-                }
-                if (isExact) autoScore = pointsMax;
-            }
-            else if (q.type === 'matrix') {
-                let correctRows = 0;
-                const totalRows = (q.rows || []).length;
-                (q.rows || []).forEach((r, rIdx) => {
-                    const correctColIdx = q.correct ? q.correct[rIdx] : null;
-                    if (userAns && userAns[rIdx] == correctColIdx) correctRows++;
-                });
-                if (totalRows > 0) {
-                    autoScore = (correctRows / totalRows) * pointsMax;
-                    autoScore = Math.round(autoScore * 10) / 10;
-                }
-            }
-            else if (q.type === 'multi_select') {
-               const correctArr = (q.correct || []).map(Number);
-               const userArr = (userAns || []).map(Number);
-               let match = 0;
-               let incorrect = 0;
-               userArr.forEach(a => { 
-                   if(correctArr.includes(a)) match++; 
-                   else incorrect++;
-               });
-               if(correctArr.length > 0) {
-                   let rawScore = ((match - incorrect) / correctArr.length) * pointsMax;
-                   autoScore = Math.max(0, rawScore);
-                   autoScore = Math.round(autoScore * 10) / 10;
-               }
-            }
-            else {
-                if (userAns == q.correct) autoScore = pointsMax;
-            }
-            
             let answerDisplay = `<div style="font-style:italic; color:var(--text-muted);">No Answer</div>`;
             
             if (q.type === 'matrix') {
@@ -800,19 +757,21 @@ async function openAdminMarking(subId, options = {}) {
             }
             else if (q.type === 'multiple_choice') {
                 answerDisplay = (q.options || []).map((opt, oIdx) => {
-                    const isSelected = userAns == oIdx;
-                    const isCorrect = q.correct == oIdx;
+                    const isSelected = Number(userAns) === Number(oIdx);
+                    const isCorrect = Number(q.correct) === Number(oIdx);
                     let style = "";
                     if(isSelected) style = "font-weight:bold; color:var(--primary);";
                     if(isCorrect) style += " border:1px solid green;";
-                    return `<div style="padding:5px; ${style}">${isSelected ? '●' : '○'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
+                    return `<div style="padding:5px; ${style}">${isSelected ? '&#9679;' : '&#9675;'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
                 }).join('');
             }
             else if (q.type === 'multi_select') {
+                const selectedSet = new Set(Array.isArray(userAns) ? userAns.map(Number) : []);
+                const correctSet = new Set((q.correct || []).map(Number));
                 answerDisplay = (q.options || []).map((opt, oIdx) => {
-                    const isSelected = userAns && userAns.includes(oIdx);
-                    const isCorrect = q.correct && q.correct.includes(oIdx);
-                    return `<div style="padding:5px; ${isSelected ? 'color:var(--primary); font-weight:bold;' : ''}">${isSelected ? '☑' : '☐'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
+                    const isSelected = selectedSet.has(Number(oIdx));
+                    const isCorrect = correctSet.has(Number(oIdx));
+                    return `<div style="padding:5px; ${isSelected ? 'color:var(--primary); font-weight:bold;' : ''}">${isSelected ? '&#9745;' : '&#9744;'} ${opt} ${isCorrect ? ' (Correct)' : ''}</div>`;
                 }).join('');
             }
             else {
@@ -1094,3 +1053,4 @@ window.editMarkerNote = async function(testId, qIdx, subId = null) {
     
     if (typeof showToast === 'function') showToast("Marker note updated globally.", "success");
 };
+

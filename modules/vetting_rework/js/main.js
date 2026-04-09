@@ -17,6 +17,7 @@ const App = {
         activeTabId: null,
         timerTick: null,
         realtimeUnsub: null,
+        fallbackPollTick: null,
         // --- NEW: Trainee State ---
         traineeSession: null,
         isCheckingCompliance: false,
@@ -27,6 +28,7 @@ const App = {
     init: async function() {
         const container = document.getElementById('app-container');
         try {
+        this.shutdown(false);
         container.innerHTML = '<div style="text-align:center; padding:50px; color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin fa-2x" style="color:var(--primary); margin-bottom:15px;"></i><h3>Booting Sandbox...</h3></div>';
 
         await DataService.loadInitialData();
@@ -89,6 +91,13 @@ const App = {
             if (realtimeRenderDebounce) clearTimeout(realtimeRenderDebounce);
             realtimeRenderDebounce = setTimeout(() => this.render(), 100);
         });
+
+        // 4. Hard backup poller - keeps sessions moving even if realtime tunnel degrades.
+        this.startFallbackPolling(async () => {
+            await DataService.pollSessions();
+            await DataService.flushPendingOps();
+            this.render();
+        });
     },
 
     // ==========================================
@@ -107,6 +116,39 @@ const App = {
         this.state.realtimeUnsub = DataService.setupRealtime((payload) => {
             DataService.pollSessions().then(s => this.processTraineeSessions(s));
         });
+
+        // Backup poller for guaranteed continuity if realtime events pause.
+        this.startFallbackPolling(async () => {
+            const sessions = await DataService.pollSessions();
+            await DataService.flushPendingOps();
+            this.processTraineeSessions(sessions);
+        });
+    },
+
+    startFallbackPolling: function(taskFn) {
+        if (this.state.fallbackPollTick) clearInterval(this.state.fallbackPollTick);
+        this.state.fallbackPollTick = setInterval(() => {
+            Promise.resolve(taskFn()).catch(() => {});
+        }, 1000);
+    },
+
+    shutdown: function(stopRetry = true) {
+        if (this.state.timerTick) clearInterval(this.state.timerTick);
+        this.state.timerTick = null;
+
+        if (this.state.fallbackPollTick) clearInterval(this.state.fallbackPollTick);
+        this.state.fallbackPollTick = null;
+
+        this.stopTraineePollers();
+
+        if (typeof this.state.realtimeUnsub === 'function') {
+            try { this.state.realtimeUnsub(); } catch (e) {}
+        }
+        this.state.realtimeUnsub = null;
+
+        if (stopRetry && typeof DataService !== 'undefined' && typeof DataService.stopRetryLoop === 'function') {
+            DataService.stopRetryLoop();
+        }
     },
 
     processTraineeSessions: function(sessions) {
@@ -285,6 +327,7 @@ const App = {
     // --- HTML GENERATORS ---
     renderIdleShell: function(isCompact) {
         const isViewer = AppContext.user && AppContext.user.role === 'special_viewer';
+        const runtimeLabel = AppContext.mode === 'production' ? 'Vetting Arena 2.0' : 'Sandbox';
         
         let displayStyle = isCompact ? 'display:flex; align-items:center; gap:15px; padding:15px;' : 'text-align:center; padding:50px;';
         let iconStyle = isCompact ? 'font-size:2rem; margin:0;' : 'font-size:3rem; margin-bottom:20px;';
@@ -294,8 +337,8 @@ const App = {
             <div class="card" style="${displayStyle} background:rgba(0,0,0,0.1); border:1px dashed var(--primary);">
                 ${isCompact ? '' : `<i class="fas fa-hammer" style="color:var(--primary); ${iconStyle}"></i>`}
                 <div style="${isCompact ? 'min-width:200px;' : ''}">
-                    <h3 style="margin:0; ${isCompact?'font-size:1.1rem;':''}"><i class="fas fa-rocket" style="color:var(--primary);"></i> Start Sandbox Session</h3>
-                    ${isCompact ? '' : '<p style="color:var(--text-muted); margin-bottom:20px;">Select a test and group to initialize a sandboxed vetting environment.</p>'}
+                    <h3 style="margin:0; ${isCompact?'font-size:1.1rem;':''}"><i class="fas fa-rocket" style="color:var(--primary);"></i> Start ${runtimeLabel} Session</h3>
+                    ${isCompact ? '' : '<p style="color:var(--text-muted); margin-bottom:20px;">Select a test and group to initialize the vetting runtime with strict security rules.</p>'}
                 </div>
                 <div style="${formLayout}">
                     <div style="${isCompact ? 'flex:1;' : ''}">
@@ -344,6 +387,10 @@ const App = {
             </div>
             
             <div class="card" style="padding:0; overflow:hidden;">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 15px; border-bottom:1px solid var(--border-color); background:var(--bg-input);">
+                    <strong><i class="fas fa-desktop"></i> Live Monitor</strong>
+                    <button class="btn-secondary btn-sm" onclick="App.forceRefreshSession('${session.sessionId}')"><i class="fas fa-sync"></i> Force Refresh</button>
+                </div>
                 <table class="admin-table" style="margin:0;">
                     <thead>
                         <tr>
@@ -441,6 +488,7 @@ const App = {
                     <input type="checkbox" ${isSecurityOn ? 'checked' : ''} ${disabledAttr} onchange="App.toggleSecurity('${session.sessionId}', '${safeUser}', !this.checked)">
                     <span class="slider"></span>
                 </label>`;
+            const refreshBtn = isViewer ? '' : `<button class="btn-secondary btn-sm" onclick="App.forceRefreshTrainee('${safeUser}')" title="Force Trainee App Refresh"><i class="fas fa-sync"></i></button>`;
 
             // Timer Extrapolation
             let timerDisplay = '--:--';
@@ -471,7 +519,7 @@ const App = {
             if (tr.querySelector('.col-timer').innerHTML !== timerDisplay) tr.querySelector('.col-timer').innerHTML = timerDisplay;
             if (tr.querySelector('.col-sec').innerHTML !== securityHtml) tr.querySelector('.col-sec').innerHTML = securityHtml;
             
-            const htmlCtrl = `<div style="display:flex; align-items:center; justify-content:flex-end; gap:10px;">${switchHtml}${mainAction}</div>`;
+            const htmlCtrl = `<div style="display:flex; align-items:center; justify-content:flex-end; gap:10px;">${switchHtml}${refreshBtn}${mainAction}</div>`;
             if (tr.querySelector('.col-ctrl').innerHTML !== htmlCtrl) tr.querySelector('.col-ctrl').innerHTML = htmlCtrl;
         });
 
@@ -580,6 +628,25 @@ const App = {
         await this.patchUser(sessionId, username, { relaxed: enable });
     },
 
+    forceRefreshSession: async function(sessionId) {
+        const sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        const session = sessions.find(s => s.sessionId === sessionId);
+        if (!session) return;
+        try {
+            await DataService.saveSessionDirectly(session);
+            await DataService.flushPendingOps();
+            this.render();
+        } catch (e) {
+            console.warn("Force refresh failed:", e);
+        }
+    },
+
+    forceRefreshTrainee: function(username) {
+        if (typeof sendRemoteCommand === 'function') {
+            sendRemoteCommand(username, 'restart');
+        }
+    },
+
     patchUser: async function(sessionId, username, patchData) {
         let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
         const session = activeSessions.find(s => s.sessionId === sessionId);
@@ -625,7 +692,9 @@ const App = {
             
             const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
             const isOverridden = myData && myData.override;
-            const isRelaxed = myData && myData.relaxed;
+            const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+            const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
+            const isRelaxed = (myData && myData.relaxed) && !forceGlobalKiosk;
             
             let errors = [];
             
@@ -671,18 +740,22 @@ const App = {
     checkActiveSecurity: async function() {
         const session = this.state.traineeSession;
         const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
-        if (myData && myData.relaxed) return; // Admin dropped shields mid-test
+        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
+        if (myData && myData.relaxed && !forceGlobalKiosk) return; // Admin dropped shields mid-test
 
         if (typeof require !== 'undefined') {
             const { ipcRenderer } = require('electron');
             
             // Ensure shields stay up
             ipcRenderer.invoke('set-kiosk-mode', true).catch(()=>{});
+            ipcRenderer.invoke('set-content-protection', true).catch(()=>{});
             
             const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
             const apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
+            const screens = await ipcRenderer.invoke('get-screen-count');
             
-            if (apps.length > 0) {
+            if (apps.length > 0 || screens > 1) {
                 this.state.securityWarningCount++;
                 // 4 strikes (~12 seconds) before kick
                 if (this.state.securityWarningCount >= 4) {
@@ -720,3 +793,4 @@ const App = {
 
 // Boot when ready
 window.onload = () => App.init();
+window.onbeforeunload = () => App.shutdown();

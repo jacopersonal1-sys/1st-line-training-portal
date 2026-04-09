@@ -160,14 +160,23 @@ Maps local `localStorage` keys to Supabase tables.
     - `submitLiveAnswer()`: Pushes trainee answer to the server instantly.
     - `updateLiveConnectionStatus()`: Checks `ACTIVE_USERS_CACHE` (Presence API) for trainee connectivity health with zero database impact.
 
-#### `js/vetting_arena.js` (Security)
-- **Responsibility:** Secure testing environment (Kiosk Mode).
+#### `modules/vetting_rework/js/main.js` + `modules/vetting_rework/js/data.js` (Vetting Arena 2.0 Admin Runtime)
+- **Responsibility:** Primary admin-side Vetting Arena runtime in isolated webview.
 - **Key Functions:**
-    - `enterArena()`: Locks the terminal (Kiosk Mode) and hides the sidebar.
-    - `checkSystemCompliance()`: Checks for 2nd monitors or forbidden apps via IPC.
-    - `checkAndEnforceVetting()`: **No Database Polling.** Reads strictly from `localStorage.getItem('adminVettingSessions')` which is kept instantly up-to-date by the global WebSocket engine.
-    - `patchTraineeStatus()`: Safely updates a single trainee's status on the server without overwriting other data, preventing race conditions.
-    - `updateTraineeStatus()`: Pushes status (Started/Blocked/Completed) to `vetting_sessions`.
+    - `App.startSession()` / `App.endSession()`: Creates/closes vetting sessions.
+    - `App.toggleSecurity()` / `App.overrideSecurity()`: Per-trainee strict/relaxed control and unblock flow.
+    - `App.forceRefreshSession()` / `App.forceRefreshTrainee()`: Session-level and per-trainee refresh controls.
+    - `DataService.patchSessionUser()`: Safe per-trainee patching with retry queue.
+    - `DataService.pollSessions()` / `DataService.setupRealtime()`: Dual-table session merge (`vetting_sessions_v2` + `vetting_sessions`) with realtime + fallback polling.
+
+#### `js/vetting_runtime_v2.js` (Vetting Arena 2.0 Trainee Runtime Bridge)
+- **Responsibility:** Primary trainee-side secure exam flow in host app.
+- **Key Functions:**
+    - `loadTraineeArena()` / `renderTraineeArena()`: Renders pre-flight, in-test, and submitted waiting states.
+    - `checkSystemCompliance()`: Pre-flight checks (monitor count + forbidden apps) with admin override handling.
+    - `enterArena()` / `exitArena(keepLocked)`: Kiosk/content protection and submission lock semantics.
+    - `checkAndEnforceVetting()`: Auto-route enforcer from login/runtime.
+    - `patchTraineeStatus()` / `flushQueuedPatches()`: Safe per-user status sync with retry queue to both vetting tables.
 
 ### Admin Modules
 
@@ -334,9 +343,18 @@ Maps local `localStorage` keys to Supabase tables.
 1.  **Entry:** Trainee clicks "Enter Arena".
 2.  **Lockdown:** `ipcRenderer` triggers Kiosk Mode (Fullscreen, No Exit) and Content Protection (No Screenshots).
 3.  **Monitoring:**
-    *   **Net Poller:** Checks `vetting_sessions` table for commands.
-    *   **Local Poller:** Checks Process List (Task Manager) and Screen Count.
+    *   **Admin Runtime:** Vetting 2.0 webview uses realtime + fallback polling and merges `vetting_sessions_v2` + `vetting_sessions`.
+    *   **Trainee Runtime:** Host bridge performs strict local security checks and 1-second fallback session polling.
+    *   **Reliability:** Status patches are queued/retried and written to both vetting tables.
 4.  **Violation:** If forbidden app found -> Alert -> Force Submit -> Kick.
+
+### C1. Vetting Regression Memory (Do Not Reintroduce)
+1.  **"Already Submitted" false lockouts:** Keep arena-mode submission archival + strict ID matching in `assessment_trainee.js`.
+2.  **Session status overwrites/races:** Use per-trainee patching only (`patchSessionUser` / `patchTraineeStatus`), never blind whole-session overwrites from stale local snapshots.
+3.  **Realtime tunnel stalls:** Preserve dual-table session merge + 1-second fallback pollers + retry queue flush loops.
+4.  **Relaxed mode bypassing global strict policy:** Always treat `force_kiosk_global` as authoritative over per-user relaxed toggles.
+5.  **Trainees escaping or not auto-routing:** Keep enforcer startup at login and stale-session-aware target detection.
+6.  **UI wipe during active exam:** Do not rerender over `arenaTestContainer` while a test is in progress.
 
 ### D. Failover Protocol
 1.  **Detection:** `startServerLookout` polls both Cloud and Local URLs every 30s.
@@ -365,6 +383,8 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **Vetting 2.0 Cutover (Current):** Admin/Super Admin/Special Viewer now run Vetting in the isolated `modules/vetting_rework` runtime while trainee secure exam flow runs through `js/vetting_runtime_v2.js`. Legacy `js/vetting_arena.js` has been retired. Reliability guardrails include dual-table sync (`vetting_sessions_v2` + `vetting_sessions`), per-user safe patching, retry queue flush loops, and hard 1-second fallback polling for continuity during realtime tunnel degradation.
+- **v2.6.8:** Split retraining-transfer archives out of `graduated_agents` into dedicated `retrain_archives` to keep graduation reporting clean, added legacy auto-split handling for older `"Moved to ..."` entries, expanded archive lookups (Agent Search/Reports) to include retrain history without graduate badge pollution, and upgraded the header refresh action to flush queued writes/deletes + embedded vetting queues before forcing a full fresh Supabase pull.
 - **v2.6.7:** Added a hard 1-second Live Arena targeted refresh loop in `js/live_execution.js` (using `forceRefreshLiveSessionById` from `js/data.js`) so question/diagnostic changes are polled by `sessionId` while Live Execution is open, even when realtime tunnel delivery is degraded.
 - **v2.6.6:** Added a secondary Live Arena delivery path (`js/live_execution.js` + `js/data.js`) using `sessions.pending_action` `live_sync:*` commands to trigger targeted `live_sessions` refresh-by-id on trainee clients for question pushes and diagnostics when table realtime events are delayed.
 - **v2.6.5:** Version increment for rollout alignment after the v2.6.4 boot parser hotfix; no new architectural changes introduced.
@@ -426,8 +446,9 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 8. Anti-Regression Rules (CRITICAL FOR AI)
 > **AI INSTRUCTION:** You MUST abide by these rules to prevent breaking the application's performance architecture.
-1. **Context Isolation**: `nodeIntegration` is FALSE. You cannot use `require('electron')` in frontend files. You must use `window.electronAPI` routed through `preload.js`.
-2. **No Polling the Database**: Do not use `setInterval` with `supabaseClient.from(...).select()`. All data reads must come from the Real-time cache (`localStorage.getItem(...)`) populated by the Global WebSocket in `data.js`.
+1. **Context Isolation**: Main window runs with `nodeIntegration: false` and `contextIsolation: true`. Frontend OS calls must route through the secure bridge (`window.electronAPI`). Legacy `require('electron')` calls are only valid via the controlled shim in `js/main.js`, which maps to the same bridge.
+2. **No Broad Database Polling**: Do not add generic schema polling loops. Prefer realtime cache (`localStorage`) and websocket push from `data.js`.  
+   **Exception:** Approved targeted reliability pollers exist for exam-critical runtimes (Live Execution and Vetting 2.0) and must remain session-scoped and lightweight.
 3. **No Database Heartbeats**: Do not write to the `sessions` table every 15 seconds. Use `window.PRESENCE_CHANNEL.track()`.
 4. **Protect the UI**: When rendering data from WebSockets, always check `isUserTyping()` or specific input focus states to ensure you do not wipe out a user's active text field.
 5. **Mutex Saves**: If modifying `saveToServer` or `_processSaveQueue`, you must respect the `_IS_PROCESSING_SAVE` mutex to prevent concurrent database upsert corruption.

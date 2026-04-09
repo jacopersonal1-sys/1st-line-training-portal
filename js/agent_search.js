@@ -7,6 +7,41 @@ window.saveAgentNote = saveAgentNote;
 window.printAgentProfile = printAgentProfile;
 window.copyAgentLink = copyAgentLink;
 
+function readGraduatedArchive() {
+    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    return (graduates || []).filter(g => {
+        const reason = String((g && g.reason) || '').toLowerCase().trim();
+        return !reason.startsWith('moved to ');
+    });
+}
+
+function readRetrainArchive() {
+    const primary = JSON.parse(localStorage.getItem('retrain_archives') || '[]');
+    const legacyMoved = (JSON.parse(localStorage.getItem('graduated_agents') || '[]') || []).filter(g => {
+        const reason = String((g && g.reason) || '').toLowerCase().trim();
+        return reason.startsWith('moved to ');
+    });
+
+    const merged = [];
+    const seen = new Set();
+    [...primary, ...legacyMoved].forEach((entry, idx) => {
+        const key = String(entry.id || '') || `${String(entry.user || '').toLowerCase()}|${String(entry.reason || '').toLowerCase()}|${entry.movedDate || entry.graduatedDate || idx}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        merged.push(entry);
+    });
+    return merged;
+}
+
+function findArchivedAgent(agentName) {
+    const target = String(agentName || '').toLowerCase();
+    const graduated = readGraduatedArchive().find(g => String(g.user || '').toLowerCase() === target);
+    if (graduated) return { entry: graduated, type: 'graduated' };
+    const retrain = readRetrainArchive().find(g => String(g.user || '').toLowerCase() === target);
+    if (retrain) return { entry: retrain, type: 'retrain' };
+    return null;
+}
+
 function loadAgentSearch() {
     const input = document.getElementById('agentSearchInput');
     const datalist = document.getElementById('agentSearchList');
@@ -41,7 +76,8 @@ function loadAgentSearch() {
     // Populate Datalist
     const users = JSON.parse(localStorage.getItem('users') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const graduates = readGraduatedArchive();
+    const retrainArchives = readRetrainArchive();
     
     const allAgents = new Set();
     
@@ -55,6 +91,7 @@ function loadAgentSearch() {
     
     // Add from Graduates (Archived)
     graduates.forEach(g => allAgents.add(g.user));
+    retrainArchives.forEach(g => allAgents.add(g.user));
     
     datalist.innerHTML = '';
     Array.from(allAgents).sort().forEach(name => {
@@ -89,8 +126,7 @@ function performAgentSearch(name) {
     window.history.replaceState({}, '', url);
 
     // Check if archived to update loading message
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-    const isArchived = graduates.some(g => g.user.toLowerCase() === name.toLowerCase());
+    const isArchived = !!findArchivedAgent(name);
     
     const loadingMsg = isArchived 
         ? '<div class="spinner"></div><div style="margin-top:10px; color:var(--text-muted);">Fetching from Archive...</div>'
@@ -109,8 +145,9 @@ function renderAgentDashboard(agentName) {
     const container = document.getElementById('agentSearchResults');
     
     // 1. Determine Source (Active vs Archived)
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-    const archivedData = graduates.find(g => g.user.toLowerCase() === agentName.toLowerCase());
+    const archiveMatch = findArchivedAgent(agentName);
+    const archivedData = archiveMatch ? archiveMatch.entry : null;
+    const archiveType = archiveMatch ? archiveMatch.type : '';
     const isArchived = !!archivedData;
 
     let records, submissions, reports, reviews, attRecords, notesMap;
@@ -146,11 +183,18 @@ function renderAgentDashboard(agentName) {
 
     if (isArchived) {
         // Try to recover group from records, otherwise generic
-        if (agentRecords.length > 0) group = agentRecords[0].groupID || "Graduated";
-        else group = "Graduated / Archived";
-        
-        if (archivedData.graduatedDate) {
-            gradDateHtml = `<div style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;"><i class="fas fa-calendar-check"></i> Graduated: ${new Date(archivedData.graduatedDate).toLocaleDateString()}</div>`;
+        if (archiveType === 'retrain') {
+            group = archivedData.targetGroup ? `Retrain -> ${archivedData.targetGroup}` : "Retrain Archive";
+            const movedDate = archivedData.movedDate || archivedData.graduatedDate;
+            if (movedDate) {
+                gradDateHtml = `<div style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;"><i class="fas fa-calendar-alt"></i> Moved to Retrain: ${new Date(movedDate).toLocaleDateString()}</div>`;
+            }
+        } else {
+            if (agentRecords.length > 0) group = agentRecords[0].groupID || "Graduated";
+            else group = "Graduated / Archived";
+            if (archivedData.graduatedDate) {
+                gradDateHtml = `<div style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;"><i class="fas fa-calendar-check"></i> Graduated: ${new Date(archivedData.graduatedDate).toLocaleDateString()}</div>`;
+            }
         }
     } else {
         for (const [gid, members] of Object.entries(rosters)) {
@@ -186,7 +230,12 @@ function renderAgentDashboard(agentName) {
     const avatarBg = getColor(agentName);
     const avatarHtml = `<div style="width:64px; height:64px; border-radius:50%; background:${avatarBg}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:1.5rem; font-weight:bold; box-shadow:0 4px 10px rgba(0,0,0,0.2); flex-shrink:0;">${getInitials(agentName)}</div>`;
     
-    const headerBadge = isArchived ? '<span class="status-badge status-pass" style="margin-left:10px; font-size:0.8rem; vertical-align:middle;"><i class="fas fa-graduation-cap"></i> Graduated</span>' : '';
+    let headerBadge = '';
+    if (isArchived && archiveType === 'retrain') {
+        headerBadge = '<span class="status-badge status-improve" style="margin-left:10px; font-size:0.8rem; vertical-align:middle;"><i class="fas fa-redo"></i> Retrain Archive</span>';
+    } else if (isArchived) {
+        headerBadge = '<span class="status-badge status-pass" style="margin-left:10px; font-size:0.8rem; vertical-align:middle;"><i class="fas fa-graduation-cap"></i> Graduated</span>';
+    }
 
     // --- ADMIN ACTIONS ---
     let adminActions = '';

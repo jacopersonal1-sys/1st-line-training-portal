@@ -62,6 +62,7 @@ const DB_SCHEMA = {
     nps_surveys: [], // Admin defined surveys
     nps_responses: [], // Trainee responses
     graduated_agents: [], // Archived data for graduated trainees
+    retrain_archives: [], // Archived data snapshots for trainees moved to retraining groups
     trainee_notes: {}, // Unified syncable notepad { "username": "text" }
     trainee_bookmarks: {}, // Unified syncable bookmarks { "username": [ { id, url... } ] }
     monitor_whitelist: [], // Custom whitelist for work-related apps
@@ -1129,6 +1130,15 @@ function getArrayItemIdentity(key, item) {
 
     if (key === 'graduated_agents' && item.user) {
         return `graduated:${normalizeIdentityValue(item.user)}`;
+    }
+
+    if (key === 'retrain_archives') {
+        if (item.id !== undefined && item.id !== null) {
+            return `retrain-id:${normalizeIdentityValue(item.id)}`;
+        }
+        if (item.user && item.targetGroup && item.movedDate) {
+            return `retrain:${normalizeIdentityValue(item.user)}|${normalizeIdentityValue(item.targetGroup)}|${normalizeIdentityValue(item.movedDate)}`;
+        }
     }
 
     if (key === 'linkRequests' && item.recordId) {
@@ -2959,14 +2969,25 @@ function handleVettingRealtime(payload) {
 
 let _vettingRenderTimer = null;
 function safeRenderVettingArena() {
+    const runtimeV2 = document.querySelector('#vetting-arena-content .vetting-rework-webview');
+    if (runtimeV2) return; // Vetting Arena 2.0 owns this surface.
+
     const activeTab = document.querySelector('section.active');
-    if (activeTab && activeTab.id === 'vetting-arena' && typeof renderAdminArena === 'function') {
+    if (
+        activeTab &&
+        activeTab.id === 'vetting-arena' &&
+        CURRENT_USER &&
+        CURRENT_USER.role === 'trainee' &&
+        window.VettingRuntimeV2 &&
+        typeof window.VettingRuntimeV2.renderTraineeArena === 'function'
+    ) {
+        if (document.getElementById('arenaTestContainer')) return; // Never wipe active test surface.
         if (isUserTyping()) {
-            // Defer the UI wipe until the Admin stops typing
+            // Defer non-critical rerenders while user is typing.
             if (_vettingRenderTimer) clearTimeout(_vettingRenderTimer);
             _vettingRenderTimer = setTimeout(safeRenderVettingArena, 1000);
         } else {
-            renderAdminArena(); // Refresh Admin UI safely
+            window.VettingRuntimeV2.renderTraineeArena();
         }
     }
 }
@@ -3029,6 +3050,7 @@ async function executeFactoryReset() {
             exemptions: [], 
             notices: [],
             revokedUsers: [],
+            retrain_archives: [],
             system_config: DB_SCHEMA.system_config // Reset system settings to defaults
         };
 

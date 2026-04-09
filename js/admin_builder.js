@@ -4,6 +4,7 @@
 // Global State for Builder
 let BUILDER_QUESTIONS = [];
 let EDITING_TEST_ID = null; 
+let BUILDER_DRAG_STATE = { fromIdx: null };
 
 function loadTestBuilder(existingId = null, targetQIdx = null) {
     BUILDER_QUESTIONS = [];
@@ -267,13 +268,20 @@ function renderBuilder() {
         }
 
         return `
-        <div class="question-card">
-            <div class="q-header">
-                <div style="font-size:1.1rem; font-weight:bold; color:var(--primary);">Question ${idx + 1} <span style="color:var(--text-muted); font-weight:normal; font-size:0.9rem; margin-left:10px;">${q.type.replace('_', ' ').toUpperCase()}</span></div>
-                <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})"><i class="fas fa-times"></i></button>
+        <div class="question-card forms-question-card builder-draggable-card" data-qidx="${idx}">
+            <div class="q-header builder-q-header">
+                <div class="builder-question-title">
+                    <button class="btn-secondary btn-sm builder-drag-handle" type="button" draggable="true" title="Drag to reorder question" aria-label="Drag question">
+                        <i class="fas fa-grip-vertical"></i>
+                    </button>
+                    <span class="builder-question-number">Question ${idx + 1}</span>
+                    <span class="builder-question-type">${q.type.replace('_', ' ').toUpperCase()}</span>
+                </div>
+                <button class="btn-danger btn-sm" onclick="removeQuestion(${idx})" title="Delete Question"><i class="fas fa-times"></i></button>
             </div>
-            <div style="display:flex; gap:10px; margin-bottom:10px;">
-                <div class="rich-text-container" style="flex:3;">
+
+            <div class="builder-question-grid">
+                <div class="rich-text-container">
                     <div class="rich-toolbar">
                         <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('bold')" title="Bold"><i class="fas fa-bold"></i></button>
                         <button class="btn-tool" onmousedown="event.preventDefault(); formatDoc('italic')" title="Italic"><i class="fas fa-italic"></i></button>
@@ -281,11 +289,13 @@ function renderBuilder() {
                     </div>
                     <div class="rich-editor" contenteditable="true" oninput="updateQText(${idx}, this.innerHTML)">${q.text || ''}</div>
                 </div>
-                <div style="flex:1;">
-                    <input type="number" placeholder="Points" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
+                <div class="builder-points-box">
+                    <label>Points</label>
+                    <input type="number" placeholder="1" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>
             </div>
-            <div style="margin-bottom:10px;">
+
+            <div class="builder-admin-notes" style="margin-bottom:10px;">
                 <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:5px;">Admin/Marker Notes (Hidden from Trainee)</label>
                 <div class="rich-text-container">
                     <div class="rich-toolbar" style="margin-bottom:0;">
@@ -296,13 +306,15 @@ function renderBuilder() {
                     <div class="rich-editor" contenteditable="true" oninput="updateAdminNotes(${idx}, this.innerHTML)" style="font-size:0.85rem; color:var(--text-muted); border: 1px dashed var(--border-color); border-top:none; width:100%; min-height:40px; padding: 10px; background: var(--bg-input); border-radius: 0 0 4px 4px;">${q.adminNotes || ''}</div>
                 </div>
             </div>
-            <div style="margin-bottom:10px;">
+
+            <div class="builder-reference-row" style="margin-bottom:10px;">
                 <div style="display:flex; gap:10px; align-items:center;">
                     <input type="text" placeholder="Reference URL (Image/PDF)" value="${q.imageLink || ''}" onchange="updateImageLink(${idx}, this.value)" style="font-size:0.85rem; color:var(--primary); flex:1;">
-                    <label class="btn-secondary btn-sm" style="cursor:pointer; margin:0; display:flex; align-items:center; gap:5px;" title="Upload File"><i class="fas fa-upload"></i><input type="file" accept="image/*,application/pdf" style="display:none;" onchange="uploadImage(${idx}, this)"></label>
-                    ${q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" title="Preview"><i class="fas fa-eye"></i></button>` : ''}
+                    <label class="btn-secondary btn-sm" style="cursor:pointer; margin:0; display:flex; align-items:center; gap:5px;" title="Upload File"><i class="fas fa-upload"></i><span>Upload</span><input type="file" accept="image/*,application/pdf" style="display:none;" onchange="uploadImage(${idx}, this)"></label>
+                    ${q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" title="Preview"><i class="fas fa-eye"></i> Preview</button>` : ''}
                 </div>
             </div>
+
             ${linkControl}
             <div style="margin-top:10px;">
                 ${innerHTML}
@@ -316,6 +328,8 @@ function renderBuilder() {
     setTimeout(() => {
         container.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
     }, 0);
+
+    attachBuilderDragAndDrop();
 }
 
 // --- RICH TEXT HELPER ---
@@ -447,6 +461,60 @@ function updateMatrixCorrect(qIdx, rIdx, val) {
 }
 
 function removeQuestion(idx) { BUILDER_QUESTIONS.splice(idx, 1); renderBuilder(); }
+
+function attachBuilderDragAndDrop() {
+    const container = document.getElementById('questionContainer');
+    if (!container) return;
+
+    const cards = container.querySelectorAll('.builder-draggable-card');
+    cards.forEach(card => {
+        const idx = Number(card.dataset.qidx);
+        const handle = card.querySelector('.builder-drag-handle');
+        if (!handle) return;
+
+        handle.addEventListener('dragstart', (event) => {
+            BUILDER_DRAG_STATE.fromIdx = idx;
+            card.classList.add('drag-source');
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', String(idx));
+            }
+        });
+
+        handle.addEventListener('dragend', () => {
+            BUILDER_DRAG_STATE.fromIdx = null;
+            container.querySelectorAll('.builder-draggable-card').forEach(el => {
+                el.classList.remove('drag-source');
+                el.classList.remove('drag-over');
+            });
+        });
+
+        card.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            if (BUILDER_DRAG_STATE.fromIdx === null || BUILDER_DRAG_STATE.fromIdx === idx) return;
+            card.classList.add('drag-over');
+        });
+
+        card.addEventListener('dragleave', () => {
+            card.classList.remove('drag-over');
+        });
+
+        card.addEventListener('drop', (event) => {
+            event.preventDefault();
+            card.classList.remove('drag-over');
+            const fromIdx = BUILDER_DRAG_STATE.fromIdx;
+            if (fromIdx === null || fromIdx === idx) return;
+            moveBuilderQuestion(fromIdx, idx);
+        });
+    });
+}
+
+function moveBuilderQuestion(fromIdx, toIdx) {
+    if (fromIdx < 0 || toIdx < 0 || fromIdx >= BUILDER_QUESTIONS.length || toIdx >= BUILDER_QUESTIONS.length) return;
+    const [moved] = BUILDER_QUESTIONS.splice(fromIdx, 1);
+    BUILDER_QUESTIONS.splice(toIdx, 0, moved);
+    renderBuilder();
+}
 
 function highlightQuestion(card) {
     document.querySelectorAll('.question-card').forEach(c => c.classList.remove('active-edit'));

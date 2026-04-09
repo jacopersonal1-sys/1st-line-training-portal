@@ -7,6 +7,119 @@ if (typeof window.USER_ANSWERS === 'undefined') window.USER_ANSWERS = {};
 if (typeof window.TEST_TIMER === 'undefined') window.TEST_TIMER = null;
 if (typeof window.IS_LIVE_ARENA === 'undefined') window.IS_LIVE_ARENA = false;
 
+function toSafePoints(rawPoints) {
+    const parsed = parseFloat(rawPoints);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function roundAssessmentScore(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 10) / 10;
+}
+
+function clampAssessmentScore(value, max) {
+    const numericValue = Number.isFinite(Number(value)) ? Number(value) : 0;
+    const numericMax = Number.isFinite(Number(max)) ? Number(max) : 0;
+    return Math.min(numericMax, Math.max(0, numericValue));
+}
+
+function isManualAssessmentQuestion(questionType) {
+    return questionType === 'text' || questionType === 'live_practical';
+}
+
+function normalizeUniqueNumberArray(values) {
+    if (!Array.isArray(values)) return [];
+    const unique = new Set();
+    values.forEach(val => {
+        const parsed = Number(val);
+        if (Number.isFinite(parsed)) unique.add(parsed);
+    });
+    return [...unique];
+}
+
+function calculateQuestionAutoScore(question, answer) {
+    if (!question) {
+        return { score: 0, pointsMax: 0, requiresManual: false };
+    }
+
+    const pointsMax = toSafePoints(question.points);
+    const type = question.type || 'multiple_choice';
+
+    if (isManualAssessmentQuestion(type)) {
+        return { score: 0, pointsMax, requiresManual: true };
+    }
+
+    let score = 0;
+
+    if (type === 'matching') {
+        const pairs = Array.isArray(question.pairs) ? question.pairs : [];
+        if (pairs.length > 0) {
+            let correctCount = 0;
+            pairs.forEach((pair, pairIdx) => {
+                if (answer && answer[pairIdx] === pair.right) correctCount++;
+            });
+            score = (correctCount / pairs.length) * pointsMax;
+        }
+    } else if (type === 'drag_drop' || type === 'ranking') {
+        const expected = Array.isArray(question.items) ? question.items : [];
+        const got = Array.isArray(answer) ? answer : [];
+        const isExact = expected.length > 0 &&
+            got.length === expected.length &&
+            expected.every((item, idx) => got[idx] === item);
+        score = isExact ? pointsMax : 0;
+    } else if (type === 'matrix') {
+        const rows = Array.isArray(question.rows) ? question.rows : [];
+        if (rows.length > 0) {
+            let correctRows = 0;
+            rows.forEach((_, rowIdx) => {
+                const correctColIdx = question.correct ? question.correct[rowIdx] : null;
+                if (answer && answer[rowIdx] == correctColIdx) correctRows++;
+            });
+            score = (correctRows / rows.length) * pointsMax;
+        }
+    } else if (type === 'multi_select') {
+        const correctArr = normalizeUniqueNumberArray(question.correct || []);
+        const userArr = normalizeUniqueNumberArray(answer || []);
+        if (correctArr.length > 0) {
+            const correctSet = new Set(correctArr);
+            let match = 0;
+            let incorrect = 0;
+            userArr.forEach(sel => {
+                if (correctSet.has(sel)) match++;
+                else incorrect++;
+            });
+            const rawScore = ((match - incorrect) / correctArr.length) * pointsMax;
+            score = Math.max(0, rawScore);
+        }
+    } else {
+        score = (answer == question.correct) ? pointsMax : 0;
+    }
+
+    score = roundAssessmentScore(clampAssessmentScore(score, pointsMax));
+    return { score, pointsMax, requiresManual: false };
+}
+
+function calculateAssessmentAutoResult(test, answers = {}) {
+    const questions = Array.isArray(test?.questions) ? test.questions : [];
+    let autoPoints = 0;
+    let maxPoints = 0;
+    let needsManual = false;
+    const questionScores = {};
+
+    questions.forEach((question, idx) => {
+        const result = calculateQuestionAutoScore(question, answers[idx]);
+        autoPoints += result.score;
+        maxPoints += result.pointsMax;
+        questionScores[idx] = result.score;
+        if (result.requiresManual) needsManual = true;
+    });
+
+    autoPoints = roundAssessmentScore(autoPoints);
+    maxPoints = roundAssessmentScore(maxPoints);
+    const percent = maxPoints > 0 ? Math.round((autoPoints / maxPoints) * 100) : 0;
+
+    return { autoPoints, maxPoints, percent, needsManual, questionScores };
+}
+
 // --- HELPER: ASYNC SAVE (CRITICAL FOR EXAMS) ---
 async function secureAssessmentSave() {
     if (typeof saveToServer === 'function') {

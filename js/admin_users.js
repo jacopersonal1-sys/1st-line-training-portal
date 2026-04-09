@@ -5,6 +5,67 @@
 let userToMove = null;
 let editTargetIndex = -1;
 let editTargetUsername = '';
+let _legacyRetrainArchiveSplitRunning = false;
+
+function isRetrainArchiveEntry(entry) {
+    const reason = String((entry && entry.reason) || '').toLowerCase().trim();
+    return reason.startsWith('moved to ');
+}
+
+function readRetrainArchives() {
+    return JSON.parse(localStorage.getItem('retrain_archives') || '[]');
+}
+
+async function splitLegacyRetrainArchives() {
+    if (_legacyRetrainArchiveSplitRunning) return;
+    if (localStorage.getItem('archive_split_v268') === 'true') return;
+
+    _legacyRetrainArchiveSplitRunning = true;
+    try {
+        const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        if (!Array.isArray(graduates) || graduates.length === 0) {
+            localStorage.setItem('archive_split_v268', 'true');
+            return;
+        }
+
+        const retrainLegacy = graduates.filter(isRetrainArchiveEntry);
+        if (retrainLegacy.length === 0) {
+            localStorage.setItem('archive_split_v268', 'true');
+            return;
+        }
+
+        const keepGraduates = graduates.filter(g => !isRetrainArchiveEntry(g));
+        const currentRetrain = readRetrainArchives();
+        const seen = new Set(currentRetrain.map(r => String(r.id || '').trim()).filter(Boolean));
+
+        retrainLegacy.forEach((entry, idx) => {
+            const id = entry.id || (`retrain_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 7)}`);
+            const reason = String(entry.reason || '');
+            const targetGroup = reason.replace(/^Moved to\s*/i, '').trim() || 'Unknown';
+            if (seen.has(id)) return;
+            seen.add(id);
+            currentRetrain.push({
+                ...entry,
+                id,
+                archiveType: 'retrain',
+                targetGroup,
+                movedDate: entry.movedDate || entry.graduatedDate || new Date().toISOString()
+            });
+        });
+
+        localStorage.setItem('graduated_agents', JSON.stringify(keepGraduates));
+        localStorage.setItem('retrain_archives', JSON.stringify(currentRetrain));
+        localStorage.setItem('archive_split_v268', 'true');
+
+        if (typeof saveToServer === 'function') {
+            await saveToServer(['graduated_agents', 'retrain_archives'], true, true);
+        }
+    } catch (e) {
+        console.warn('Legacy retrain archive split failed:', e);
+    } finally {
+        _legacyRetrainArchiveSplitRunning = false;
+    }
+}
 
 // --- HELPER: INSTANT SAVE ---
 // Uses force=true to skip the fetch/merge process for Admin actions.
@@ -312,6 +373,7 @@ async function deleteAgentFromSystem(agentName, groupKey) {
         wipeData('insightReviews', 'trainee');
         wipeData('exemptions', 'trainee');
         wipeData('linkRequests', 'trainee');
+        wipeData('retrain_archives', 'user');
         // Also clean up Monitor History (might be large)
         wipeData('monitor_history', 'user');
         // Also clean up Access Logs
@@ -355,7 +417,7 @@ async function deleteAgentFromSystem(agentName, groupKey) {
             await saveToServer([
                 'rosters', 'users', 'revokedUsers', 'records', 'submissions', 
                 'attendance_records', 'liveBookings', 'savedReports', 'tl_task_submissions',
-                'insightReviews', 'exemptions', 'agentNotes', 'monitor_data', 'linkRequests', 'cancellationCounts',
+                'insightReviews', 'exemptions', 'agentNotes', 'monitor_data', 'linkRequests', 'cancellationCounts', 'retrain_archives',
                 'monitor_history', 'accessLogs'
             ], true);
         }
@@ -474,6 +536,7 @@ function loadAdminUsers() {
     }
 
     restrictTraineeMenu();
+    splitLegacyRetrainArchives().catch(() => {});
 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const savedReports = JSON.parse(localStorage.getItem('savedReports') || '[]');
@@ -708,9 +771,12 @@ async function confirmMoveUser() {
     try {
         // 1. ARCHIVE DATA (Snapshot)
         const archiveData = {
+            id: `retrain_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
             user: userToMove,
-            graduatedDate: new Date().toISOString(), // Use standard key for compatibility
+            movedDate: new Date().toISOString(),
+            archiveType: 'retrain',
             reason: 'Moved to ' + targetGid,
+            targetGroup: targetGid,
             records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => r.trainee === userToMove),
             submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => s.trainee === userToMove),
             attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => r.user === userToMove),
@@ -719,9 +785,9 @@ async function confirmMoveUser() {
             notes: (JSON.parse(localStorage.getItem('agentNotes') || '{}'))[userToMove] || null
         };
 
-        let archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        let archives = readRetrainArchives();
         archives.push(archiveData);
-        localStorage.setItem('graduated_agents', JSON.stringify(archives));
+        localStorage.setItem('retrain_archives', JSON.stringify(archives));
 
         // 2. WIPE ACTIVE DATA (Clean Slate)
         const wipe = (key, field) => {
@@ -751,7 +817,7 @@ async function confirmMoveUser() {
 
         // 4. SYNC EVERYTHING
         if(typeof saveToServer === 'function') {
-            await saveToServer(['rosters', 'graduated_agents', 'records', 'submissions', 'attendance_records', 'savedReports', 'insightReviews', 'agentNotes'], true);
+            await saveToServer(['rosters', 'retrain_archives', 'records', 'submissions', 'attendance_records', 'savedReports', 'insightReviews', 'agentNotes'], true);
         }
 
         alert(`${userToMove} moved to ${targetGid}. Previous data archived.`);
@@ -879,6 +945,7 @@ async function remUser(username) {
         purgeArray('exemptions', ['trainee', 'user', 'user_id']);
         purgeArray('linkRequests', ['trainee', 'user', 'user_id']);
         purgeArray('tl_task_submissions', ['trainee', 'user', 'user_id']);
+        purgeArray('retrain_archives', ['user']);
 
         const purgeObjectKey = (key) => {
             const obj = JSON.parse(localStorage.getItem(key) || '{}');
@@ -900,7 +967,7 @@ async function remUser(username) {
                 'users', 'revokedUsers', 'rosters', 'records', 'submissions',
                 'attendance_records', 'liveBookings', 'savedReports', 'insightReviews',
                 'exemptions', 'linkRequests', 'tl_task_submissions',
-                'agentNotes', 'monitor_data', 'cancellationCounts',
+                'agentNotes', 'monitor_data', 'cancellationCounts', 'retrain_archives',
                 'trainee_notes', 'trainee_bookmarks'
             ], true);
         }
@@ -1022,6 +1089,7 @@ window.renameUser = async function(oldName) {
     migrate('exemptions', 'trainee');
     migrate('linkRequests', 'trainee');
     migrate('tl_task_submissions', 'user');
+    migrate('retrain_archives', 'user');
     
     // Object keys (Agent Notes, Monitor Data)
     const migrateObj = (key) => {
@@ -1038,7 +1106,7 @@ window.renameUser = async function(oldName) {
     
     // Sync
     if (typeof saveToServer === 'function') {
-        await saveToServer(['users', 'rosters', 'records', 'submissions', 'attendance_records', 'liveBookings', 'savedReports', 'insightReviews', 'exemptions', 'linkRequests', 'agentNotes', 'monitor_data', 'cancellationCounts', 'tl_task_submissions'], true);
+        await saveToServer(['users', 'rosters', 'records', 'submissions', 'attendance_records', 'liveBookings', 'savedReports', 'insightReviews', 'exemptions', 'linkRequests', 'agentNotes', 'monitor_data', 'cancellationCounts', 'tl_task_submissions', 'retrain_archives'], true);
     }
     
     alert("User renamed successfully.");
@@ -1113,7 +1181,7 @@ function loadGraduatedAgents() {
     const container = document.getElementById('graduateList');
     if (!container) return;
 
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const graduates = (JSON.parse(localStorage.getItem('graduated_agents') || '[]') || []).filter(g => !isRetrainArchiveEntry(g));
     const search = document.getElementById('graduateSearch') ? document.getElementById('graduateSearch').value.toLowerCase() : '';
 
     const filtered = graduates.filter(g => g.user.toLowerCase().includes(search));
