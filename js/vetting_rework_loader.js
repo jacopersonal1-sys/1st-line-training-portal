@@ -2,6 +2,38 @@
 /* HOST LOADER: Launches the isolated Vetting 2.0 Module */
 
 const VettingReworkLoader = {
+    resolveActiveCredentials: function() {
+        const normalizeUrl = (raw) => {
+            const url = String(raw || '').trim();
+            if (!url) return '';
+            return /^https?:\/\//i.test(url) ? url : `http://${url}`;
+        };
+
+        const target = localStorage.getItem('active_server_target') || 'cloud';
+        const cloud = window.CLOUD_CREDENTIALS || {};
+
+        if (target === 'staging') {
+            try {
+                const stage = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
+                if (stage.url && stage.key) {
+                    return { url: normalizeUrl(stage.url), key: stage.key, target: 'staging' };
+                }
+            } catch (e) {}
+        }
+
+        if (target === 'local') {
+            try {
+                const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+                const localCfg = (cfg && cfg.server_settings) ? cfg.server_settings : {};
+                if (localCfg.local_url && localCfg.local_key) {
+                    return { url: normalizeUrl(localCfg.local_url), key: localCfg.local_key, target: 'local' };
+                }
+            } catch (e) {}
+        }
+
+        return { url: normalizeUrl(cloud.url), key: cloud.key || '', target: 'cloud' };
+    },
+
     renderUI: function(targetContainerId = 'vetting-rework-content', options = {}) {
         console.log("[Sandbox Loader] Activating Vetting Rework UI...");
         const container = document.getElementById(targetContainerId);
@@ -23,7 +55,8 @@ const VettingReworkLoader = {
         }
 
         const userStr = typeof CURRENT_USER !== 'undefined' ? JSON.stringify(CURRENT_USER) : '{}';
-        const credsStr = (window.CLOUD_CREDENTIALS) ? JSON.stringify(window.CLOUD_CREDENTIALS) : '{}';
+        const activeCreds = this.resolveActiveCredentials();
+        const credsStr = JSON.stringify({ url: activeCreds.url, key: activeCreds.key });
         
         const userParam = encodeURIComponent(userStr);
         const credsParam = encodeURIComponent(credsStr);
@@ -32,7 +65,7 @@ const VettingReworkLoader = {
         const basePath = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
         const modulePath = basePath + '/modules/vetting_rework/index.html';
 
-        console.log("[Sandbox Loader] Injecting Webview mapped to:", modulePath);
+        console.log(`[Sandbox Loader] Injecting Webview mapped to: ${modulePath} (target=${activeCreds.target})`);
 
         container.innerHTML = `
             <div style="background:var(--bg-input); padding:10px; border-radius:8px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; border:1px solid var(--primary);">

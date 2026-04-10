@@ -1752,7 +1752,17 @@ function updateSidebarVisibility() {
             // Special Check for Arena
             if (targetTab === 'vetting-arena') {
                 const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
-                if (!session.active) btn.classList.add('hidden');
+                const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+                const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+                const isTargeted = (s) => {
+                    if (!s || !s.active) return false;
+                    if (!s.targetGroup || s.targetGroup === 'all') return true;
+                    const members = rosters[s.targetGroup] || [];
+                    return members.some(m => String(m || '').toLowerCase() === String(CURRENT_USER.user || '').toLowerCase());
+                };
+                const hasActiveTarget = (session && session.active && isTargeted(session))
+                    || (Array.isArray(activeSessions) && activeSessions.some(isTargeted));
+                if (!hasActiveTarget) btn.classList.add('hidden');
                 return;
             }
             
@@ -2542,6 +2552,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.10": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Critical Vetting Join Hotfix:</strong> Fixed Vetting 2.0 admin runtime credential targeting so sessions are created on the active server target (cloud/local/staging) instead of always defaulting to cloud.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Arena Visibility Fix:</strong> Updated trainee arena button visibility checks to include active server-backed <code>adminVettingSessions</code>, preventing false "no session" states when a valid group-targeted session is live.</li>
+            </ul>`,
         "2.6.9": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Server-Authority Sync Guardrails:</strong> Shared data keys now enforce server-first behavior so background local autosaves cannot silently republish stale groups, schedules, tests, users, or live assessment state.</li>

@@ -772,16 +772,20 @@ function applyRolePermissions() {
     const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
     const arenaBtn = document.querySelector('button[onclick="showTab(\'vetting-arena\')"]');
     
-    if (arenaBtn) {
+  if (arenaBtn) {
         let show = false;
         if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') show = true;
-        else if (session.active) {
-            if (!session.targetGroup || session.targetGroup === 'all') show = true;
-            else {
-                const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-                const members = rosters[session.targetGroup] || [];
-                if (members.includes(CURRENT_USER.user)) show = true;
-            }
+        else {
+            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+            const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+            const isTargeted = (s) => {
+                if (!s || !s.active) return false;
+                if (!s.targetGroup || s.targetGroup === 'all') return true;
+                const members = rosters[s.targetGroup] || [];
+                return members.some(m => String(m || '').toLowerCase() === String(CURRENT_USER.user || '').toLowerCase());
+            };
+            if (session.active && isTargeted(session)) show = true;
+            if (!show && Array.isArray(activeSessions) && activeSessions.some(isTargeted)) show = true;
         }
         
         if (show) arenaBtn.classList.remove('hidden');
