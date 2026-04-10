@@ -19,12 +19,20 @@
     let IS_POLLING_SECURITY = false;
     let IS_SUBMITTING_VIOLATION = false;
 
+    function getCurrentUser() {
+        if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) return CURRENT_USER;
+        if (window.CURRENT_USER) return window.CURRENT_USER;
+        return null;
+    }
+
     function isTrainee() {
-        return !!(window.CURRENT_USER && window.CURRENT_USER.role === 'trainee');
+        const user = getCurrentUser();
+        return !!(user && user.role === 'trainee');
     }
 
     function getUsername() {
-        return window.CURRENT_USER && window.CURRENT_USER.user ? window.CURRENT_USER.user : '';
+        const user = getCurrentUser();
+        return user && user.user ? user.user : '';
     }
 
     function normalizeIdentity(value) {

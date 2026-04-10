@@ -10,8 +10,8 @@ async function secureFormSave() {
     // UPDATED: Uses force=true to ensure authoritative overwrite (Instant Save).
     if (typeof saveToServer === 'function') {
         try {
-            // PARAMETER 'true' = FORCE OVERWRITE
-            await saveToServer(true);
+            // Only sync the key this module mutates to avoid pushing stale shared blobs.
+            await saveToServer(['users'], true);
         } catch(e) {
             console.error("Form Cloud Sync Error:", e);
         }

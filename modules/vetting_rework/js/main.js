@@ -25,6 +25,27 @@ const App = {
         localPoller: null
     },
 
+    resolveCurrentUser: function() {
+        if (AppContext.user && AppContext.user.user) return AppContext.user;
+        if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) return CURRENT_USER;
+        if (window.CURRENT_USER && window.CURRENT_USER.user) return window.CURRENT_USER;
+        return null;
+    },
+
+    getMyUsername: function() {
+        const user = this.resolveCurrentUser();
+        return user && user.user ? user.user : '';
+    },
+
+    getMyTraineeData: function(session) {
+        if (!session || !session.trainees) return null;
+        const username = this.getMyUsername();
+        if (!username) return null;
+        if (session.trainees[username]) return session.trainees[username];
+        const matchKey = Object.keys(session.trainees).find(k => this.identitiesMatch(k, username));
+        return matchKey ? session.trainees[matchKey] : null;
+    },
+
     init: async function() {
         const container = document.getElementById('app-container');
         try {
@@ -34,7 +55,8 @@ const App = {
         await DataService.loadInitialData();
 
         // Route user based on role
-        if (AppContext.user && AppContext.user.role === 'trainee') {
+        const user = this.resolveCurrentUser();
+        if (user && user.role === 'trainee') {
             await this.initTrainee();
         } else {
             await this.initAdmin();
@@ -169,7 +191,8 @@ const App = {
     },
 
     processTraineeSessions: function(sessions) {
-        const myName = AppContext.user.user;
+        const myName = this.getMyUsername();
+        if (!myName) return;
         const rosters = DataService.getRosters();
         
         let mySession = null;
@@ -610,6 +633,7 @@ const App = {
         if (activeSessions.length > 1) this.state.viewMode = 'split';
 
         await DataService.saveSessionDirectly(session);
+        await DataService.nudgeTraineesForSession(session);
         // No render needed, realtime will trigger it
     },
 
@@ -706,8 +730,9 @@ const App = {
         try {
             const session = this.state.traineeSession;
             if (!session) return;
-            
-            const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
+            const username = this.getMyUsername();
+            if (!username) return;
+            const myData = this.getMyTraineeData(session);
             const isOverridden = myData && myData.override;
             const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
             const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
@@ -746,7 +771,7 @@ const App = {
 
             // Auto-report status change to Admin
             if (!myData || myData.status !== status) {
-                await DataService.patchSessionUser(session.sessionId, AppContext.user.user, { status: status });
+                await DataService.patchSessionUser(session.sessionId, username, { status: status });
             }
 
         } finally {
@@ -756,10 +781,19 @@ const App = {
 
     checkActiveSecurity: async function() {
         const session = this.state.traineeSession;
-        const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
+        if (!session) return;
+        const myData = this.getMyTraineeData(session);
         const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
-        if (myData && myData.relaxed && !forceGlobalKiosk) return; // Admin dropped shields mid-test
+        if (myData && myData.relaxed && !forceGlobalKiosk) {
+            this.state.securityWarningCount = 0;
+            if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                ipcRenderer.invoke('set-kiosk-mode', false).catch(()=>{});
+                ipcRenderer.invoke('set-content-protection', false).catch(()=>{});
+            }
+            return; // Admin dropped shields mid-test
+        }
 
         if (typeof require !== 'undefined') {
             const { ipcRenderer } = require('electron');
@@ -787,23 +821,31 @@ const App = {
 
     enterArena: async function() {
         this.stopTraineePollers(); // Stop pre-flight
+        const username = this.getMyUsername();
+        if (!username || !this.state.traineeSession) return;
+        const myData = this.getMyTraineeData(this.state.traineeSession);
+        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
+        const isRelaxed = !!(myData && myData.relaxed && !forceGlobalKiosk);
         if (typeof require !== 'undefined') {
             const { ipcRenderer } = require('electron');
-            await ipcRenderer.invoke('set-kiosk-mode', true);
-            await ipcRenderer.invoke('set-content-protection', true);
+            await ipcRenderer.invoke('set-kiosk-mode', !isRelaxed);
+            await ipcRenderer.invoke('set-content-protection', !isRelaxed);
         }
-        await DataService.patchSessionUser(this.state.traineeSession.sessionId, AppContext.user.user, { status: 'started', startedAt: Date.now() });
+        await DataService.patchSessionUser(this.state.traineeSession.sessionId, username, { status: 'started', startedAt: Date.now() });
         this.renderTrainee(); // Render active view
     },
 
     exitArena: async function() {
         this.stopTraineePollers();
+        const username = this.getMyUsername();
+        if (!username || !this.state.traineeSession) return;
         if (typeof require !== 'undefined') {
             const { ipcRenderer } = require('electron');
             await ipcRenderer.invoke('set-kiosk-mode', false);
             await ipcRenderer.invoke('set-content-protection', false);
         }
-        await DataService.patchSessionUser(this.state.traineeSession.sessionId, AppContext.user.user, { status: 'completed' });
+        await DataService.patchSessionUser(this.state.traineeSession.sessionId, username, { status: 'completed' });
         this.renderTrainee(); // Render completion screen
     }
 };

@@ -9,8 +9,8 @@ async function secureReportSave() {
     // UPDATED: Uses force=true to ensure the report is saved immediately (Overwrite).
     if (typeof saveToServer === 'function') {
         try {
-            // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(true);
+            // Only sync report blobs here; avoid forcing unrelated shared keys.
+            await saveToServer(['savedReports'], true);
         } catch(e) {
             console.error("Report Cloud Sync Error:", e);
         }

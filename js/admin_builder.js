@@ -611,8 +611,8 @@ async function saveTest() {
         btn.disabled = true;
     }
 
-    // Push new test definition to Supabase (Safe Merge)
-    if(typeof saveToServer === 'function') await saveToServer(['tests'], false);
+    // Push new test definition to Supabase immediately (server-authoritative key).
+    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
     
     if(btn && btn.tagName === 'BUTTON') {
         btn.innerText = originalText;
@@ -788,8 +788,8 @@ async function copyTest(id) {
     tests.push(copy);
     localStorage.setItem('tests', JSON.stringify(tests));
 
-    // Sync
-    if(typeof saveToServer === 'function') await saveToServer(['tests'], false);
+    // Sync immediately for server-authoritative key.
+    if(typeof saveToServer === 'function') await saveToServer(['tests'], true);
 
     loadManageTests();
     if(typeof showToast === 'function') showToast("Test copied successfully.", "success");

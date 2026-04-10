@@ -764,7 +764,8 @@ window.onload = async function() {
     const earlySession = sessionStorage.getItem('currentUser');
     if (earlySession) {
         try {
-            window.CURRENT_USER = JSON.parse(earlySession);
+            CURRENT_USER = JSON.parse(earlySession);
+            window.CURRENT_USER = CURRENT_USER;
             // Render Skeletons
             if (typeof renderLoadingDashboard === 'function') renderLoadingDashboard();
             // Hide Loader immediately so user sees the skeleton UI
@@ -953,6 +954,7 @@ window.onload = async function() {
             checkAccessControl().then(async allowed => {
                 if(allowed) {
                     CURRENT_USER = JSON.parse(savedSession);
+                    window.CURRENT_USER = CURRENT_USER;
                     if (typeof persistAppSession === 'function') persistAppSession(CURRENT_USER);
                     // --- NEW: Apply User Specific Theme Immediately ---
                     applyUserTheme(); 
@@ -982,6 +984,7 @@ window.onload = async function() {
         } else {
             // Fallback if IP check isn't loaded
              CURRENT_USER = JSON.parse(savedSession);
+             window.CURRENT_USER = CURRENT_USER;
              if (typeof persistAppSession === 'function') persistAppSession(CURRENT_USER);
              applyUserTheme();
              
@@ -2471,8 +2474,8 @@ window.performUpdateRestart = function() {
         
         // Attempt authoritative sync (Best effort)
         if (typeof saveToServer === 'function') {
-            // We don't await here to ensure restart happens even if network is slow
-            saveToServer(null, true).catch(e => console.warn("Update Sync Warning:", e));
+            // Flush pending writes only; avoid force-pushing stale shared keys during restart.
+            saveToServer('FLUSH', false, true).catch(e => console.warn("Update Sync Warning:", e));
         }
     }
 
@@ -2567,6 +2570,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.13": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Relax Enforcement Fix:</strong> Hardened trainee runtime identity resolution so admin security relax/override applies correctly during active vetting sessions.</li>
+                <li style="margin-bottom: 8px;"><strong>Shared-Key Save Reliability:</strong> Explicit saves for strict shared keys (users/tests/schedules/live state) now flush immediately to reduce post-save rollback windows.</li>
+                <li style="margin-bottom: 8px;"><strong>Controlled Restore Safety:</strong> JSON restore now syncs only imported keys instead of force-pushing all keys, preventing stale unrelated data from being republished.</li>
+            </ul>`,
         "2.6.10": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Critical Vetting Join Hotfix:</strong> Fixed Vetting 2.0 admin runtime credential targeting so sessions are created on the active server target (cloud/local/staging) instead of always defaulting to cloud.</li>

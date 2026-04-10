@@ -208,8 +208,8 @@ async function migrateData() {
         // Ensure the fixes are written to the server immediately (Force Sync)
         if (typeof saveToServer === 'function') {
             try {
-                // UPDATED: Use force=true for instant migration persistence
-                await saveToServer(true);
+                // Only users are touched by this migration.
+                await saveToServer(['users'], true);
                 console.log("Migration synced successfully.");
             } catch(e) {
                 console.error("Migration Sync Failed:", e);

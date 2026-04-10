@@ -1296,6 +1296,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
     }
 
     const keysToQueue = targetKeys || Object.keys(DB_SCHEMA);
+    const hasStrictExplicitTargets = Array.isArray(targetKeys) && targetKeys.some(k => STRICT_SERVER_KEYS.has(k));
     if (Array.isArray(targetKeys)) {
         targetKeys.forEach(k => EXPLICIT_SAVE_KEYS.add(k));
     }
@@ -1306,7 +1307,9 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
         updateSyncUI('pending');
     }
 
-    if (force) {
+    // Shared strict keys (tests/schedules/users/etc.) must persist immediately to prevent
+    // server-authoritative pulls from reverting recent edits during debounce windows.
+    if (force || hasStrictExplicitTargets) {
         if (SAVE_TIMEOUT) clearTimeout(SAVE_TIMEOUT);
         SAVE_TIMEOUT = null;
         const isSilent = !window._SAVE_QUEUE_NOT_SILENT;
@@ -2112,6 +2115,8 @@ async function sendHeartbeat(forceInit = false) {
                 const parts = sessionData.pending_action.split(':');
                 const targetSessionId = parts[1] || '';
                 if (targetSessionId) forceRefreshLiveSessionById(targetSessionId).catch(()=>{});
+            } else if (sessionData.pending_action.startsWith('vetting_force:')) {
+                applyVettingSessionNudgeCommand(sessionData.pending_action);
             } else if (sessionData.pending_action === 'fix_submission') {
                 // Silently clear blockages and force submit current draft
                 let s = JSON.parse(localStorage.getItem('submissions') || '[]');
@@ -2189,6 +2194,7 @@ async function importDatabase(input) {
     reader.onload = async function(e) {
         try {
             const data = JSON.parse(e.target.result);
+            const importedKeys = [];
             
             Object.keys(data).forEach(key => {
                 if (key === 'meta') return; // Skip metadata
@@ -2198,10 +2204,14 @@ async function importDatabase(input) {
                 } else {
                     localStorage.setItem(key, data[key]);
                 }
+                importedKeys.push(key);
             });
 
             console.log("Restoring backup to cloud...");
-            if (typeof saveToServer === 'function') await saveToServer(null, true); // Force save ALL keys
+            // Controlled restore: sync only imported keys to avoid republishing unrelated stale state.
+            if (typeof saveToServer === 'function') {
+                await saveToServer(importedKeys, true);
+            }
 
             alert("Database restored successfully.");
             location.reload();
@@ -2464,7 +2474,7 @@ function setupRealtimeListeners() {
             else if (table === 'sessions') handleSessionRealtime(payload);
             else if (table === 'live_bookings') handleLiveBookingRealtime(payload);
             else if (table === 'live_sessions') handleLiveSessionRealtime(payload);
-            else if (table === 'vetting_sessions') handleVettingRealtime(payload);
+            else if (table === 'vetting_sessions' || table === 'vetting_sessions_v2') handleVettingRealtime(payload);
             else if (table === 'app_documents') handleAppDocumentRealtime(payload);
             else {
                 // Catch all generic data rows (records, submissions, logs, etc.)
@@ -2832,6 +2842,57 @@ async function forceRefreshLiveSessionById(sessionId) {
 }
 window.forceRefreshLiveSessionById = forceRefreshLiveSessionById;
 
+function applyVettingSessionNudgeCommand(rawAction) {
+    try {
+        const encoded = String(rawAction || '').replace(/^vetting_force:/, '');
+        if (!encoded) return false;
+
+        const payload = JSON.parse(decodeURIComponent(encoded));
+        if (!payload || !payload.sessionId || !payload.active) return false;
+
+        const currentUser = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.user : '';
+        if (!currentUser) return false;
+
+        const sessionData = {
+            sessionId: payload.sessionId,
+            active: true,
+            testId: payload.testId || null,
+            targetGroup: payload.targetGroup || 'all',
+            startTime: payload.startTime || Date.now(),
+            trainees: (payload.trainees && typeof payload.trainees === 'object') ? payload.trainees : {}
+        };
+
+        let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        sessions = Array.isArray(sessions) ? sessions : [];
+        const idx = sessions.findIndex(s => s && s.sessionId === sessionData.sessionId);
+        if (idx > -1) sessions[idx] = { ...sessions[idx], ...sessionData };
+        else sessions.push(sessionData);
+        localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+
+        const local = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false,"trainees":{}}');
+        const merged = {
+            ...local,
+            ...sessionData,
+            trainees: { ...(local.trainees || {}), ...(sessionData.trainees || {}) }
+        };
+        localStorage.setItem('vettingSession', JSON.stringify(merged));
+        emitDataChange('vettingSession', 'command_nudge');
+
+        if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
+        if (typeof applyRolePermissions === 'function') applyRolePermissions();
+        safeRenderVettingArena();
+
+        const myData = merged.trainees ? merged.trainees[currentUser] : null;
+        if ((!myData || myData.status !== 'completed') && typeof showTab === 'function') {
+            showTab('vetting-arena');
+        }
+        return true;
+    } catch (e) {
+        console.warn('Failed to apply vetting force command:', e);
+        return false;
+    }
+}
+
 function handleSessionRealtime(payload) {
     const row = payload.new;
     if (row && (row.username || row.user)) {
@@ -2855,6 +2916,8 @@ function handleSessionRealtime(payload) {
                     const parts = row.pending_action.split(':');
                     const targetSessionId = parts[1] || '';
                     if (targetSessionId) forceRefreshLiveSessionById(targetSessionId).catch(()=>{});
+                } else if (row.pending_action.startsWith('vetting_force:')) {
+                    applyVettingSessionNudgeCommand(row.pending_action);
                 }
             }
         }

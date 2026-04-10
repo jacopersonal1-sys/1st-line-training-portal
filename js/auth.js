@@ -175,6 +175,7 @@ async function attemptLogin() {
       
       const roleMap = { 'demo_admin': 'super_admin', 'demo_tl': 'teamleader', 'demo_trainee': 'trainee' };
       CURRENT_USER = { user: u.toLowerCase(), role: roleMap[u.toLowerCase()], pass: 'demo123', traineeData: { email: "demo@herotel.com" } };
+      window.CURRENT_USER = CURRENT_USER;
       sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
       persistAppSession(CURRENT_USER);
       
@@ -467,6 +468,7 @@ async function attemptLogin() {
 
     // Success
     CURRENT_USER = validUser;
+    window.CURRENT_USER = CURRENT_USER;
     // Normalize role for session consistency
     if (CURRENT_USER.role) CURRENT_USER.role = CURRENT_USER.role.toLowerCase().trim();
     
@@ -875,6 +877,9 @@ async function logout() {
   if (CURRENT_USER && typeof logAccessEvent === 'function') {
       await logAccessEvent(CURRENT_USER.user, 'Logout');
   }
+
+  CURRENT_USER = null;
+  window.CURRENT_USER = null;
   
   // --- NEW: CLEANUP BACKGROUND PROCESSES ---
   if (typeof window.cleanupVettingEnforcer === 'function') {

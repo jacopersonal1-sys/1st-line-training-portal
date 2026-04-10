@@ -7,6 +7,23 @@ const DataService = {
     RETRY_MS: 1000,
     retryTimer: null,
 
+    normalizeIdentity: function(value) {
+        let v = String(value || '').trim().toLowerCase();
+        if (!v) return '';
+        if (v.includes('@')) v = v.split('@')[0];
+        v = v.replace(/[._-]+/g, ' ');
+        v = v.replace(/\s+/g, ' ').trim();
+        return v;
+    },
+
+    identitiesMatch: function(a, b) {
+        const na = this.normalizeIdentity(a);
+        const nb = this.normalizeIdentity(b);
+        if (!na || !nb) return false;
+        if (na === nb) return true;
+        return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
+    },
+
     loadInitialData: async function() {
         if (!AppContext.supabase) return;
         try {
@@ -244,6 +261,66 @@ const DataService = {
         } catch (e) {
             console.warn("[Vetting Rework] deleteSession queued for retry:", e?.message || e);
             this.queueOp({ type: 'delete_session', sessionId: id });
+        }
+    },
+
+    nudgeTraineesForSession: async function(session) {
+        if (!AppContext.supabase || !session || !session.active) return;
+
+        const rosters = this.getRosters();
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+
+        const allTraineeUsers = (Array.isArray(users) ? users : [])
+            .filter(u => String((u && u.role) || '').toLowerCase() === 'trainee')
+            .map(u => String(u.user || '').trim())
+            .filter(Boolean);
+
+        let targetCandidates = [];
+        if (!session.targetGroup || session.targetGroup === 'all') {
+            targetCandidates = allTraineeUsers;
+        } else {
+            targetCandidates = Array.isArray(rosters[session.targetGroup]) ? rosters[session.targetGroup] : [];
+        }
+
+        const resolvedTargets = new Set();
+        targetCandidates.forEach(candidate => {
+            const exact = allTraineeUsers.find(u => String(u).toLowerCase() === String(candidate || '').toLowerCase());
+            if (exact) {
+                resolvedTargets.add(exact);
+                return;
+            }
+            const mapped = allTraineeUsers.find(u => this.identitiesMatch(u, candidate));
+            if (mapped) resolvedTargets.add(mapped);
+        });
+
+        if (!resolvedTargets.size) return;
+
+        const nudgePayload = {
+            sessionId: session.sessionId,
+            active: true,
+            testId: session.testId,
+            targetGroup: session.targetGroup || 'all',
+            startTime: session.startTime || Date.now(),
+            trainees: {}
+        };
+        const action = `vetting_force:${encodeURIComponent(JSON.stringify(nudgePayload))}`;
+
+        for (const username of resolvedTargets) {
+            try {
+                await AppContext.supabase.from('sessions').upsert({
+                    username,
+                    role: 'trainee',
+                    pending_action: action,
+                    lastSeen: new Date().toISOString()
+                });
+            } catch (e) {
+                try {
+                    await AppContext.supabase
+                        .from('sessions')
+                        .update({ pending_action: action, lastSeen: new Date().toISOString() })
+                        .eq('username', username);
+                } catch (_) {}
+            }
         }
     },
 
