@@ -612,6 +612,22 @@ function checkFirstTimeLogin() {
 }
 
 function applyRolePermissions() {
+  const normalizeIdentity = (value) => {
+      let v = String(value || '').trim().toLowerCase();
+      if (!v) return '';
+      if (v.includes('@')) v = v.split('@')[0];
+      v = v.replace(/[._-]+/g, ' ');
+      v = v.replace(/\s+/g, ' ').trim();
+      return v;
+  };
+  const identitiesMatch = (a, b) => {
+      const na = normalizeIdentity(a);
+      const nb = normalizeIdentity(b);
+      if (!na || !nb) return false;
+      if (na === nb) return true;
+      return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
+  };
+
   const adminElems = document.querySelectorAll('.admin-only');
   const tlElems = document.querySelectorAll('.tl-access');
   const filterContainer = document.getElementById('filterContainer');
@@ -782,7 +798,7 @@ function applyRolePermissions() {
                 if (!s || !s.active) return false;
                 if (!s.targetGroup || s.targetGroup === 'all') return true;
                 const members = rosters[s.targetGroup] || [];
-                return members.some(m => String(m || '').toLowerCase() === String(CURRENT_USER.user || '').toLowerCase());
+                return members.some(m => identitiesMatch(m, CURRENT_USER.user));
             };
             if (session.active && isTargeted(session)) show = true;
             if (!show && Array.isArray(activeSessions) && activeSessions.some(isTargeted)) show = true;

@@ -100,6 +100,23 @@ const App = {
         });
     },
 
+    normalizeIdentity: function(value) {
+        let v = String(value || '').trim().toLowerCase();
+        if (!v) return '';
+        if (v.includes('@')) v = v.split('@')[0];
+        v = v.replace(/[._-]+/g, ' ');
+        v = v.replace(/\s+/g, ' ').trim();
+        return v;
+    },
+
+    identitiesMatch: function(a, b) {
+        const na = this.normalizeIdentity(a);
+        const nb = this.normalizeIdentity(b);
+        if (!na || !nb) return false;
+        if (na === nb) return true;
+        return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
+    },
+
     // ==========================================
     // TRAINEE LOGIC & KIOSK ENGINE
     // ==========================================
@@ -161,7 +178,7 @@ const App = {
             if (!s.targetGroup || s.targetGroup === 'all') isTarget = true;
             else {
                 const members = rosters[s.targetGroup] || [];
-                if (members.some(m => m.toLowerCase() === myName.toLowerCase())) isTarget = true;
+                if (members.some(m => this.identitiesMatch(m, myName))) isTarget = true;
             }
             if (isTarget) { mySession = s; break; }
         }

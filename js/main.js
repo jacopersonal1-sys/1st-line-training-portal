@@ -1615,6 +1615,21 @@ function updateSidebarVisibility() {
     if (!CURRENT_USER) return;
 
     const role = CURRENT_USER.role;
+    const normalizeIdentity = (value) => {
+        let v = String(value || '').trim().toLowerCase();
+        if (!v) return '';
+        if (v.includes('@')) v = v.split('@')[0];
+        v = v.replace(/[._-]+/g, ' ');
+        v = v.replace(/\s+/g, ' ').trim();
+        return v;
+    };
+    const identitiesMatch = (a, b) => {
+        const na = normalizeIdentity(a);
+        const nb = normalizeIdentity(b);
+        if (!na || !nb) return false;
+        if (na === nb) return true;
+        return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
+    };
     
     // --- DYNAMIC LABEL UPDATE ---
     // Rename the hardcoded button based on role
@@ -1758,7 +1773,7 @@ function updateSidebarVisibility() {
                     if (!s || !s.active) return false;
                     if (!s.targetGroup || s.targetGroup === 'all') return true;
                     const members = rosters[s.targetGroup] || [];
-                    return members.some(m => String(m || '').toLowerCase() === String(CURRENT_USER.user || '').toLowerCase());
+                    return members.some(m => identitiesMatch(m, CURRENT_USER.user));
                 };
                 const hasActiveTarget = (session && session.active && isTargeted(session))
                     || (Array.isArray(activeSessions) && activeSessions.some(isTargeted));

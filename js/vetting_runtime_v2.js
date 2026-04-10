@@ -27,6 +27,32 @@
         return window.CURRENT_USER && window.CURRENT_USER.user ? window.CURRENT_USER.user : '';
     }
 
+    function normalizeIdentity(value) {
+        let v = String(value || '').trim().toLowerCase();
+        if (!v) return '';
+        if (v.includes('@')) v = v.split('@')[0];
+        v = v.replace(/[._-]+/g, ' ');
+        v = v.replace(/\s+/g, ' ').trim();
+        return v;
+    }
+
+    function identitiesMatch(a, b) {
+        const na = normalizeIdentity(a);
+        const nb = normalizeIdentity(b);
+        if (!na || !nb) return false;
+        if (na === nb) return true;
+        const ca = na.replace(/\s+/g, '');
+        const cb = nb.replace(/\s+/g, '');
+        return !!ca && ca === cb;
+    }
+
+    function getTraineeData(session, username) {
+        if (!session || !session.trainees || !username) return null;
+        if (session.trainees[username]) return session.trainees[username];
+        const matchKey = Object.keys(session.trainees).find(k => identitiesMatch(k, username));
+        return matchKey ? session.trainees[matchKey] : null;
+    }
+
     function getLocalSession() {
         try {
             return JSON.parse(localStorage.getItem('vettingSession') || '{"active":false,"trainees":{}}');
@@ -151,7 +177,7 @@
         if (!session.targetGroup || session.targetGroup === 'all') return true;
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         const members = rosters[session.targetGroup] || [];
-        return members.some(m => String(m).toLowerCase() === String(username).toLowerCase());
+        return members.some(m => identitiesMatch(m, username));
     }
 
     function mergeActiveSessions(rows) {
@@ -255,7 +281,7 @@
 
         const session = getLocalSession();
         const username = getUsername();
-        const myData = session.trainees ? session.trainees[username] : null;
+        const myData = getTraineeData(session, username);
         const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         const isRelaxed = !!(myData && myData.relaxed && !forceGlobalKiosk);
@@ -390,7 +416,7 @@
 
             const session = getLocalSession();
             const username = getUsername();
-            const myData = session.trainees ? session.trainees[username] : null;
+            const myData = getTraineeData(session, username);
             const isOverridden = !!(myData && myData.override);
             const isRelaxed = !!(myData && myData.relaxed);
 
@@ -453,7 +479,7 @@
         stopTraineeLocalPollers();
 
         const session = getLocalSession();
-        const myData = session.trainees ? session.trainees[getUsername()] : null;
+        const myData = getTraineeData(session, getUsername());
         let isRelaxed = !!(myData && myData.relaxed);
 
         const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
@@ -530,7 +556,7 @@
         if (session.targetGroup && session.targetGroup !== 'all') {
             const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
             const members = rosters[session.targetGroup] || [];
-            const isMember = members.some(m => String(m).toLowerCase() === String(username).toLowerCase());
+            const isMember = members.some(m => identitiesMatch(m, username));
             if (!isMember) {
                 stopTraineeLocalPollers();
                 container.innerHTML = `
@@ -543,7 +569,7 @@
             }
         }
 
-        const myData = session.trainees ? session.trainees[username] : null;
+        const myData = getTraineeData(session, username);
 
         if (myData && myData.status === 'completed') {
             stopTraineeLocalPollers();
@@ -617,8 +643,11 @@
             trainees: { ...(local.trainees || {}) }
         };
 
-        if (serverSession && serverSession.trainees && serverSession.trainees[username]) {
-            next.trainees[username] = { ...(next.trainees[username] || {}), ...serverSession.trainees[username] };
+        if (serverSession && serverSession.trainees) {
+            const serverMyData = getTraineeData(serverSession, username);
+            if (serverMyData) {
+                next.trainees[username] = { ...(next.trainees[username] || {}), ...serverMyData };
+            }
         }
 
         const oldStr = JSON.stringify(local);
@@ -683,7 +712,7 @@
 
             if (found) {
                 checkAndHandleSession(found);
-                const myData = found.trainees ? found.trainees[username] : null;
+                const myData = getTraineeData(found, username);
                 if (!myData || myData.status !== 'completed') {
                     const activeTab = document.querySelector('section.active');
                     if (!activeTab || activeTab.id !== 'vetting-arena') {
