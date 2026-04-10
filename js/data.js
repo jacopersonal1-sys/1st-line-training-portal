@@ -116,6 +116,7 @@ if (IS_DEMO_MODE) {
 // Tables that must always reflect the exact state of the server (No Merging, Full Overwrite).
 // This fixes "Ghost Data" and synchronization lag for critical shared resources.
 const AUTHORITATIVE_TABLES = [
+    'users',
     'live_sessions',
     'live_bookings',
     'tl_task_submissions',
@@ -123,10 +124,33 @@ const AUTHORITATIVE_TABLES = [
     'calendar_events'
 ];
 
+// --- STRICT SERVER AUTHORITY (Shared Data) ---
+// These keys represent shared/global state. Background autosaves must never push them
+// unless the save was an explicit action (targeted key save) or force=true.
+const STRICT_SERVER_BLOB_KEYS = new Set([
+    'rosters',
+    'tests',
+    'schedules',
+    'liveSchedules',
+    'assessments'
+]);
+
+const STRICT_SERVER_ROW_KEYS = new Set([
+    'users',
+    'liveBookings',
+    'liveSessions'
+]);
+
+const STRICT_SERVER_KEYS = new Set([
+    ...Array.from(STRICT_SERVER_BLOB_KEYS),
+    ...Array.from(STRICT_SERVER_ROW_KEYS)
+]);
+
 // --- NEW: DEBOUNCED SAVE QUEUE (PERFORMANCE) ---
 // This prevents the UI from freezing on large data saves by queueing the save
 // and processing it a few seconds later in the background.
 let SAVE_QUEUE = new Set();
+const EXPLICIT_SAVE_KEYS = new Set();
 let SAVE_TIMEOUT = null;
 window._SAVE_QUEUE_NOT_SILENT = false;
 const SAVE_DEBOUNCE_MS = 500; // 500ms (High-Speed Server Authority)
@@ -314,8 +338,10 @@ async function loadFromServer(silent = false) {
             if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(localKey)) return;
             
             const localTs = localStorage.getItem('sync_ts_' + localKey);
+            const isStrictServerBlob = STRICT_SERVER_BLOB_KEYS.has(localKey);
             // If we don't have it, or server is newer, fetch it
-            if (!localTs || new Date(row.updated_at) > new Date(localTs)) {
+            // Shared/global keys are always fetched from server to enforce server truth.
+            if (isStrictServerBlob || !localTs || new Date(row.updated_at) > new Date(localTs)) {
                 keysToFetch.push(row.key);
             }
         });
@@ -1270,6 +1296,9 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
     }
 
     const keysToQueue = targetKeys || Object.keys(DB_SCHEMA);
+    if (Array.isArray(targetKeys)) {
+        targetKeys.forEach(k => EXPLICIT_SAVE_KEYS.add(k));
+    }
     keysToQueue.forEach(k => SAVE_QUEUE.add(k));
 
     if (!silent) {
@@ -1359,6 +1388,17 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
 
         for (currentKeyIndex = 0; currentKeyIndex < keysToSave.length; currentKeyIndex++) {
             const key = keysToSave[currentKeyIndex];
+            const isStrictServerKey = STRICT_SERVER_KEYS.has(key);
+            const hasExplicitSaveRequest = EXPLICIT_SAVE_KEYS.has(key);
+            const keyForce = force || (isStrictServerKey && hasExplicitSaveRequest);
+
+            // Shared/global keys are server-authoritative.
+            // Ignore background/autosave uploads unless this key was explicitly targeted or force=true.
+            if (isStrictServerKey && !keyForce) {
+                if (!silent) console.log(`[Sync] Skipping background upload for server-authoritative key: ${key}`);
+                continue;
+            }
+
             try {
             const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
             
@@ -1394,7 +1434,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                             currentHash = generateChecksum(JSON.stringify(item));
                         }
 
-                        if (force || currentHash !== persistedHash) {
+                        if (keyForce || currentHash !== persistedHash) {
                             itemsToUpload.push(item);
                             hashMap[item.id] = currentHash; // Update hash immediately (Optimistic)
                         }
@@ -1482,7 +1522,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 const remoteKey = IS_DEMO_MODE ? `demo_${key}` : key;
 
                 // Optimistic Merge (Fetch -> Merge -> Push)
-                if (!force) {
+                if (!keyForce) {
                     const { data: remoteRow } = await window.supabaseClient
                         .from('app_documents')
                         .select('content')
@@ -1512,10 +1552,12 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 if(savedData && savedData[0]) localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
                 emitDataChange(key, 'save_to_server');
             }
+            if (hasExplicitSaveRequest) EXPLICIT_SAVE_KEYS.delete(key);
             } catch (keyErr) {
                 console.warn(`[Sync Sandbox] Failed to process key '${key}':`, keyErr.message || keyErr);
                 const msg = keyErr.message || '';
                 if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('521') || msg.includes('503')) throw keyErr;
+                if (hasExplicitSaveRequest) EXPLICIT_SAVE_KEYS.delete(key);
             }
         }
 

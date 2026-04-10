@@ -15,6 +15,9 @@ window.initSupabaseClient = function() {
     const currentTarget = localStorage.getItem('active_server_target');
     if (currentTarget === 'local') {
         localStorage.setItem('active_server_target', 'cloud'); // We treat the new VM as the master "Cloud"
+        if (localStorage.getItem('last_connected_server') === 'local') {
+            localStorage.setItem('last_connected_server', 'cloud');
+        }
     }
     
     let activeTarget = localStorage.getItem('active_server_target') || 'cloud';

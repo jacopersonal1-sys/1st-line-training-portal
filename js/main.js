@@ -94,6 +94,23 @@ window.onerror = function(msg, url, line, col, error) {
 
 // Lock to prevent concurrent failovers destroying the boot cycle
 window._isSwitchingServers = false;
+window._diskCacheRecoveredThisBoot = false;
+
+function isSyncMetadataKey(key) {
+    return key.startsWith('sync_ts_') || key.startsWith('row_sync_ts_') || key.startsWith('hash_map_');
+}
+
+function isRiskyDiskCacheKey(key) {
+    if (!key) return false;
+    if (isSyncMetadataKey(key)) return true;
+    return key === 'active_server_target' || key === 'last_connected_server';
+}
+
+function clearLocalSyncMetadata() {
+    Object.keys(localStorage).forEach(k => {
+        if (isSyncMetadataKey(k)) localStorage.removeItem(k);
+    });
+}
 
 async function migrateLocalStateToActiveServer(options = {}) {
     const { silent = false, loaderText = null } = options;
@@ -191,7 +208,11 @@ window.performSilentServerSwitch = async function(newTarget) {
                 if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k);
             });
 
-            await migrateLocalStateToActiveServer({ silent: true });
+            if (window._diskCacheRecoveredThisBoot) {
+                console.warn("[Silent Failover] Migration push skipped due to disk-cache recovery on this boot.");
+            } else {
+                await migrateLocalStateToActiveServer({ silent: true });
+            }
             localStorage.setItem('last_connected_server', newTarget);
         }
 
@@ -653,7 +674,22 @@ window.onload = async function() {
                         console.warn("Disk cache contains Sandbox Data. Discarding to protect production.");
                         window.electronAPI.disk.saveCache('{}');
                     } else {
-                        Object.keys(parsed).forEach(k => localStorage.setItem(k, parsed[k]));
+                        let restoredKeys = 0;
+                        Object.keys(parsed).forEach(k => {
+                            if (isRiskyDiskCacheKey(k)) return;
+                            localStorage.setItem(k, parsed[k]);
+                            restoredKeys++;
+                        });
+                        if (restoredKeys > 0) {
+                            window._diskCacheRecoveredThisBoot = true;
+                            localStorage.setItem('disk_cache_recovered_at', Date.now().toString());
+                            clearLocalSyncMetadata();
+
+                            // Align server markers to avoid stale-cache migration pushes on first boot.
+                            const target = localStorage.getItem('active_server_target') || 'cloud';
+                            localStorage.setItem('active_server_target', target);
+                            localStorage.setItem('last_connected_server', target);
+                        }
                         console.log("Successfully restored data from Native Disk Cache.");
                     }
                 }
@@ -758,13 +794,19 @@ window.onload = async function() {
         // 3. Reset Row Sync Timestamps (Forces fresh fetch of records/logs)
         Object.keys(localStorage).forEach(k => { if(k.startsWith('row_sync_ts_')) localStorage.removeItem(k); });
 
-        // MASTER AUTHORITY: The local device retains all offline work.
-        // Push the complete local state to the new server and destroy server-side ghost data.
-        try {
-            await migrateLocalStateToActiveServer({ loaderText: "Synchronizing Data to New Server..." });
+        // SAFETY: If this boot restored from native disk cache, local state may be stale.
+        // Never perform an automatic authoritative migration push from recovered cache.
+        if (window._diskCacheRecoveredThisBoot) {
+            console.warn("Migration push skipped because local state was restored from disk cache this boot.");
+        } else {
+            // MASTER AUTHORITY: The local device retains all offline work.
+            // Push the complete local state to the new server and destroy server-side ghost data.
+            try {
+                await migrateLocalStateToActiveServer({ loaderText: "Synchronizing Data to New Server..." });
                 console.log("Migration: Target server synchronized with local state.");
-        } catch(e) { 
-            console.error("Migration Push Failed:", e); 
+            } catch(e) { 
+                console.error("Migration Push Failed:", e); 
+            }
         }
         // CRITICAL FIX: Update this AFTER attempt, regardless of success, to stop the loop.
         localStorage.setItem('last_connected_server', currentTarget);
@@ -2500,6 +2542,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.9": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Server-Authority Sync Guardrails:</strong> Shared data keys now enforce server-first behavior so background local autosaves cannot silently republish stale groups, schedules, tests, users, or live assessment state.</li>
+                <li style="margin-bottom: 8px;"><strong>Disk Cache Recovery Safety:</strong> Startup recovery now excludes risky server-target/sync metadata keys and skips automatic migration push on recovered boots to prevent stale cache resurrection events.</li>
+                <li style="margin-bottom: 8px;"><strong>Group Deletion Integrity Fix:</strong> Group deletes now persist the updated roster snapshot before force sync, with rollback on failure, preventing deleted groups from reappearing.</li>
+            </ul>`,
         "2.6.8": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Archive Split (Retrain vs Graduate):</strong> Retraining transfers now save to <code>retrain_archives</code> so graduation reporting stays clean.</li>

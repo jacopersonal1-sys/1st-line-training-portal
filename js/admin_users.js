@@ -301,20 +301,20 @@ function loadRostersList() {
 async function deleteGroup(groupId) {
     if(!confirm(`Delete group ${groupId} and all associated data? This cannot be undone.`)) return;
     
+    const previousRostersJson = localStorage.getItem('rosters') || '{}';
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     delete rosters[groupId];
+    localStorage.setItem('rosters', JSON.stringify(rosters));
     
-    // AUTHORITATIVE DELETE: Save to server first.
+    // AUTHORITATIVE DELETE: Persist updated local state to server.
     if(typeof saveToServer === 'function') {
         const success = await saveToServer(['rosters'], true);
         if (!success) {
+            localStorage.setItem('rosters', previousRostersJson);
             alert("Failed to delete group from server. Please check your connection and try again.");
             return; // Abort on failure
         }
     }
-    
-    // On success, update local state and UI
-    localStorage.setItem('rosters', JSON.stringify(rosters));
     
     if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Delete Group', `Deleted group ${groupId}`);
     refreshAllDropdowns();
