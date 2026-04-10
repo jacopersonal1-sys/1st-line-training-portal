@@ -1709,10 +1709,14 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         else if (key === 'vettingSession') {
             const safeSVal = sVal || {};
             const safeLVal = lVal || {};
+            const sessionChanged = !!(
+                (safeSVal.sessionId && safeLVal.sessionId && safeSVal.sessionId !== safeLVal.sessionId) ||
+                (safeSVal.startTime && safeLVal.startTime && safeSVal.startTime !== safeLVal.startTime)
+            );
             
             // RESET CHECK: If Server has a different start time, it's a new session.
             // We must discard local stale data (like 'completed' status from previous run).
-            if (safeSVal.startTime && safeLVal.startTime && safeSVal.startTime !== safeLVal.startTime) {
+            if (sessionChanged) {
                  merged[key] = safeSVal;
             } else {
                 // Standard Merge
@@ -1739,9 +1743,15 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 // PROTECTION: If I am a Trainee, my local state is the truth for ME (unless reset above).
                 // This prevents background sync from reverting my answers while I type.
                 if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) {
-                    if (safeLVal.trainees && safeLVal.trainees[CURRENT_USER.user]) {
+                    const myLocal = safeLVal.trainees && safeLVal.trainees[CURRENT_USER.user];
+                    const myLocalStatus = String((myLocal && myLocal.status) || '').toLowerCase();
+                    const canKeepLocal = !!myLocal && myLocalStatus !== 'completed';
+                    if (canKeepLocal) {
                         if (!merged[key].trainees) merged[key].trainees = {};
-                        merged[key].trainees[CURRENT_USER.user] = safeLVal.trainees[CURRENT_USER.user];
+                        merged[key].trainees[CURRENT_USER.user] = myLocal;
+                    } else if (myLocalStatus === 'completed' && merged[key].trainees && merged[key].trainees[CURRENT_USER.user]) {
+                        const myServerStatus = String((merged[key].trainees[CURRENT_USER.user] && merged[key].trainees[CURRENT_USER.user].status) || '').toLowerCase();
+                        if (myServerStatus !== 'completed') delete merged[key].trainees[CURRENT_USER.user];
                     }
                 }
             }
@@ -2852,6 +2862,14 @@ function applyVettingSessionNudgeCommand(rawAction) {
 
         const currentUser = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.user : '';
         if (!currentUser) return false;
+        const normalizeIdentity = (value) => String(value || '').trim().toLowerCase().replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const isSameIdentity = (a, b) => {
+            const na = normalizeIdentity(a);
+            const nb = normalizeIdentity(b);
+            if (!na || !nb) return false;
+            if (na === nb) return true;
+            return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
+        };
 
         const sessionData = {
             sessionId: payload.sessionId,
@@ -2870,10 +2888,23 @@ function applyVettingSessionNudgeCommand(rawAction) {
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
 
         const local = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false,"trainees":{}}');
+        const sameSession = !!(local && local.sessionId && local.sessionId === sessionData.sessionId);
+        const mergedTrainees = sameSession
+            ? { ...(local.trainees || {}), ...(sessionData.trainees || {}) }
+            : { ...(sessionData.trainees || {}) };
+
+        Object.keys(mergedTrainees).forEach(key => {
+            if (key !== currentUser && isSameIdentity(key, currentUser)) delete mergedTrainees[key];
+        });
+
+        if (!sameSession && mergedTrainees[currentUser] && String(mergedTrainees[currentUser].status || '').toLowerCase() === 'completed') {
+            delete mergedTrainees[currentUser];
+        }
+
         const merged = {
             ...local,
             ...sessionData,
-            trainees: { ...(local.trainees || {}), ...(sessionData.trainees || {}) }
+            trainees: mergedTrainees
         };
         localStorage.setItem('vettingSession', JSON.stringify(merged));
         emitDataChange('vettingSession', 'command_nudge');

@@ -42,7 +42,13 @@ const App = {
         const username = this.getMyUsername();
         if (!username) return null;
         if (session.trainees[username]) return session.trainees[username];
-        const matchKey = Object.keys(session.trainees).find(k => this.identitiesMatch(k, username));
+        const matchingKeys = Object.keys(session.trainees).filter(k => this.identitiesMatch(k, username));
+        if (!matchingKeys.length) return null;
+        const nonCompleted = matchingKeys.find(k => {
+            const st = String((session.trainees[k] && session.trainees[k].status) || '').toLowerCase();
+            return st !== 'completed';
+        });
+        const matchKey = nonCompleted || matchingKeys[0];
         return matchKey ? session.trainees[matchKey] : null;
     },
 
@@ -226,7 +232,7 @@ const App = {
         }
 
         const session = this.state.traineeSession;
-        const myData = session.trainees ? session.trainees[AppContext.user.user] : null;
+        const myData = this.getMyTraineeData(session);
 
         if (myData && myData.status === 'completed') {
             this.stopTraineePollers();
@@ -621,10 +627,26 @@ const App = {
             if(!confirm(`A session is already active for group: ${groupId}. Continue?`)) return;
         }
 
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const allTrainees = (Array.isArray(users) ? users : [])
+            .filter(u => String((u && u.role) || '').toLowerCase() === 'trainee')
+            .map(u => String((u && u.user) || '').trim())
+            .filter(Boolean);
+        const seedCandidates = (groupId === 'all')
+            ? allTrainees
+            : (Array.isArray(rosters[groupId]) ? rosters[groupId] : []);
+        const seededTrainees = {};
+        seedCandidates.forEach(candidate => {
+            const exact = allTrainees.find(u => String(u).toLowerCase() === String(candidate || '').toLowerCase());
+            const mapped = exact || allTrainees.find(u => this.identitiesMatch(u, candidate));
+            if (mapped) seededTrainees[mapped] = { status: 'waiting' };
+        });
+
         const session = {
             sessionId: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
             active: true, testId: testId, targetGroup: groupId,
-            startTime: Date.now(), trainees: {}
+            startTime: Date.now(), trainees: seededTrainees
         };
         
         activeSessions.push(session);

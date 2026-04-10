@@ -303,6 +303,9 @@ const DataService = {
             startTime: session.startTime || Date.now(),
             trainees: {}
         };
+        resolvedTargets.forEach(username => {
+            nudgePayload.trainees[username] = { status: 'waiting' };
+        });
         const action = `vetting_force:${encodeURIComponent(JSON.stringify(nudgePayload))}`;
 
         for (const username of resolvedTargets) {

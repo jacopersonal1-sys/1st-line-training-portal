@@ -57,7 +57,13 @@
     function getTraineeData(session, username) {
         if (!session || !session.trainees || !username) return null;
         if (session.trainees[username]) return session.trainees[username];
-        const matchKey = Object.keys(session.trainees).find(k => identitiesMatch(k, username));
+        const matchingKeys = Object.keys(session.trainees).filter(k => identitiesMatch(k, username));
+        if (!matchingKeys.length) return null;
+        const nonCompleted = matchingKeys.find(k => {
+            const st = String((session.trainees[k] && session.trainees[k].status) || '').toLowerCase();
+            return st !== 'completed';
+        });
+        const matchKey = nonCompleted || matchingKeys[0];
         return matchKey ? session.trainees[matchKey] : null;
     }
 
@@ -642,20 +648,42 @@
 
         const username = getUsername();
         const local = getLocalSession();
+        const sameSession = !!(
+            serverSession &&
+            serverSession.sessionId &&
+            local &&
+            local.sessionId &&
+            serverSession.sessionId === local.sessionId
+        );
+        const localMyData = getTraineeData(local, username);
         const next = {
             ...local,
             active: !!(serverSession && serverSession.active),
             testId: serverSession && serverSession.testId ? serverSession.testId : local.testId,
             targetGroup: serverSession && serverSession.targetGroup ? serverSession.targetGroup : local.targetGroup,
             sessionId: serverSession && serverSession.sessionId ? serverSession.sessionId : local.sessionId,
-            trainees: { ...(local.trainees || {}) }
+            trainees: sameSession ? { ...(local.trainees || {}) } : {}
         };
 
         if (serverSession && serverSession.trainees) {
             const serverMyData = getTraineeData(serverSession, username);
             if (serverMyData) {
-                next.trainees[username] = { ...(next.trainees[username] || {}), ...serverMyData };
+                next.trainees[username] = { ...(localMyData || {}), ...serverMyData };
+            } else if (localMyData && String(localMyData.status || '').toLowerCase() === 'completed') {
+                // Prevent stale local "completed" state from locking first-time attempts.
+                delete next.trainees[username];
             }
+
+            // Collapse alias keys for the active user into canonical username key.
+            Object.keys(next.trainees || {}).forEach(k => {
+                if (k !== username && identitiesMatch(k, username)) delete next.trainees[k];
+            });
+        } else if (!sameSession && localMyData && String(localMyData.status || '').toLowerCase() === 'completed') {
+            delete next.trainees[username];
+        }
+
+        if (!next.active) {
+            next.trainees = {};
         }
 
         const oldStr = JSON.stringify(local);

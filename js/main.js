@@ -2570,6 +2570,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.14": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting False-Submit Hotfix:</strong> Fixed stale local trainee session carryover that could incorrectly show "Assessment Submitted" before a trainee starts a new vetting session.</li>
+                <li style="margin-bottom: 8px;"><strong>Identity Collision Guard:</strong> Trainee status resolution now prefers non-completed identity matches when alias usernames exist, preventing old completed aliases from overriding active session state.</li>
+                <li style="margin-bottom: 8px;"><strong>Session Start Seeding:</strong> New vetting sessions now pre-seed target trainees as <code>waiting</code> and nudges include canonical waiting entries for safer first-sync behavior.</li>
+            </ul>`,
         "2.6.13": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Relax Enforcement Fix:</strong> Hardened trainee runtime identity resolution so admin security relax/override applies correctly during active vetting sessions.</li>
