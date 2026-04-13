@@ -212,6 +212,16 @@ function safeLocalParse(key, fallback = null) {
     }
 }
 
+// Generic safe JSON parse for arbitrary strings (FileReader results, sessionStorage, etc.)
+function safeParse(raw, fallback = null) {
+    try {
+        if (raw === null || raw === undefined || raw === 'undefined') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        return fallback;
+    }
+}
+
 // --- HARD DELETE PROTOCOL (Ghost Data Fix) ---
 const PENDING_DEL_KEY = 'system_pending_deletes';
 const TOMBSTONE_KEY = 'system_tombstones'; // New: Persistent Blacklist for Deleted IDs
@@ -389,7 +399,9 @@ async function loadFromServer(silent = false) {
                     localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
                 } else {
                     // Fallback for primitives OR no-merge keys (Direct Overwrite)
-                    localStorage.setItem(localKey, JSON.stringify(doc.content));
+                    // Ensure we never store the string "undefined" (causes JSON.parse failures)
+                    const serialized = (typeof doc.content === 'undefined') ? JSON.stringify(null) : JSON.stringify(doc.content);
+                    localStorage.setItem(localKey, serialized);
                 }
                 localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
                 emitDataChange(localKey, 'load_from_server');
@@ -754,7 +766,7 @@ async function startServerLookout() {
         // The Admin must explicitly save configuration to clear this flag and attempt local again.
         if (sessionStorage.getItem('recovery_mode') === 'true') return;
 
-        const localConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const localConfig = safeLocalParse('system_config', {}) || {};
         const settings = localConfig.server_settings || { active: 'cloud' };
 
         // Define potential servers
@@ -835,7 +847,7 @@ async function startServerLookout() {
 
 // --- HOT RELOAD: APPLY SYSTEM CONFIG ---
 function applySystemConfig() {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = safeLocalParse('system_config', {}) || {};
     
     // 1. Global Announcement
     const bannerId = 'global-announcement-banner';
@@ -929,7 +941,7 @@ async function reportSystemError(msg, type) {
     };
 
     // Optimistic Load & Save
-    const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    const reports = safeLocalParse('error_reports', []) || [];
     reports.push(report);
     
     // Keep size manageable (Last 500 errors) - Increased to ensure multi-user history is kept
@@ -946,7 +958,7 @@ async function reportSystemError(msg, type) {
 function checkErrorAlerts() {
     if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || CURRENT_USER.role !== 'super_admin') return;
     
-    const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    const reports = safeLocalParse('error_reports', []) || [];
     const lastCount = parseInt(localStorage.getItem('last_seen_error_count') || '0');
     
     if (reports.length > lastCount) {
@@ -1361,7 +1373,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
 
     try {
         // LOCKDOWN CHECK
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = safeLocalParse('system_config', {}) || {};
         if (config.security && config.security.lockdown_mode && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
             console.warn("Save blocked by Lockdown Mode.");
             return;
@@ -1415,13 +1427,13 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             }
 
             try {
-            const localContent = JSON.parse(localStorage.getItem(key)) || DB_SCHEMA[key];
+            const localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
             
             // --- STRATEGY A: ROW-LEVEL SYNC (Records, Submissions, Logs) ---
             if (ROW_MAP[key]) {
                 const tableName = ROW_MAP[key];
                 const hashMapKey = `hash_map_${key}`;
-                const hashMap = JSON.parse(localStorage.getItem(hashMapKey) || '{}');
+                const hashMap = safeLocalParse(hashMapKey, {}) || {};
                 const itemsToUpload = [];
                 const batchTimestamp = new Date().toISOString();
                 const modifiedBy = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER)
@@ -1520,7 +1532,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                  // Special handling: Write MY entry to monitor_state table
                  // We do NOT save the whole object as a blob anymore.
                  if (CURRENT_USER) {
-                     const allMon = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                     const allMon = safeLocalParse('monitor_data', {}) || {};
                      const myMon = allMon[CURRENT_USER.user];
                      if (myMon) {
                          await window.supabaseClient.from('monitor_state').upsert({
@@ -1975,7 +1987,7 @@ async function logAccessEvent(username, type) {
     if (!username) return;
     
     // 1. Load current logs (Local cache is fine, we merge later)
-    const logs = JSON.parse(localStorage.getItem('accessLogs') || '[]');
+    const logs = safeLocalParse('accessLogs', []) || [];
     
     const newLog = {
         id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
@@ -2006,7 +2018,7 @@ async function refreshAccessLogs() {
     // Pull latest logs from server to ensure we see other users' activity
     await loadFromServer(true);
     
-    const logs = JSON.parse(localStorage.getItem('accessLogs') || '[]');
+    const logs = safeLocalParse('accessLogs', []) || [];
     // Sort newest first
     logs.sort((a,b) => new Date(b.date) - new Date(a.date));
     
@@ -2021,7 +2033,7 @@ async function logAuditAction(username, action, details) {
     if (!username) return;
     
     // 1. Load current logs
-    const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+    const logs = safeLocalParse('auditLogs', []) || [];
     
     const newLog = {
         id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
@@ -2141,7 +2153,7 @@ async function sendHeartbeat(forceInit = false) {
                 applyVettingSessionNudgeCommand(sessionData.pending_action);
             } else if (sessionData.pending_action === 'fix_submission') {
                 // Silently clear blockages and force submit current draft
-                let s = JSON.parse(localStorage.getItem('submissions') || '[]');
+                let s = safeLocalParse('submissions', []) || [];
                 s.forEach(x => x.archived = true);
                 localStorage.setItem('submissions', JSON.stringify(s));
                 
@@ -2184,7 +2196,7 @@ function importCSV(input) {
             }
         }
         
-        const current = JSON.parse(localStorage.getItem('records') || '[]');
+        const current = safeLocalParse('records', []) || [];
         localStorage.setItem('records', JSON.stringify([...current, ...newRecords]));
         
         if(typeof syncGroupsFromRecords === 'function') syncGroupsFromRecords(false);
@@ -2272,12 +2284,12 @@ async function exportDatabase() {
         const schemaKeys = (typeof DB_SCHEMA !== 'undefined') ? Object.keys(DB_SCHEMA) : ['records','users','assessments','rosters','schedules','liveBookings'];
         
         schemaKeys.forEach(k => {
-            d[k] = JSON.parse(localStorage.getItem(k)) || (typeof DB_SCHEMA !== 'undefined' ? DB_SCHEMA[k] : []);
+            d[k] = safeLocalParse(k, (typeof DB_SCHEMA !== 'undefined' ? DB_SCHEMA[k] : [])) || (typeof DB_SCHEMA !== 'undefined' ? DB_SCHEMA[k] : []);
         });
         
         d.theme = localStorage.getItem('theme') || 'dark';
         d.autoBackup = localStorage.getItem('autoBackup') || 'false';
-        d.local_theme_config = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+        d.local_theme_config = safeLocalParse('local_theme_config', {}) || {};
        
         const b = new Blob([JSON.stringify(d,null,2)],{type:'application/json'}); 
         const a = document.createElement('a'); 
@@ -2389,7 +2401,7 @@ function startRealtimeSync() {
     if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);
     if (HEARTBEAT_INTERVAL_ID) clearInterval(HEARTBEAT_INTERVAL_ID);
 
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = safeLocalParse('system_config', {}) || {};
     const rawRates = config.sync_rates || {};
     const activeTarget = localStorage.getItem('active_server_target') || 'cloud';
     
@@ -2445,8 +2457,8 @@ function startRealtimeSync() {
             }
             
             // EXCEPTION: Vetting Arena (Prevent Logout while waiting)
-            const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-            const isVetting = vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user];
+            const vSession = safeLocalParse('vettingSession', {}) || {};
+            const isVetting = vSession && vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user];
 
             if (!isVetting && (Date.now() - last) > limitMs) {
                 if (typeof window.cacheAndLogout === 'function') window.cacheAndLogout();
@@ -2644,7 +2656,7 @@ function processIncomingDataQueue() {
 
         // 1. Process Monitor
         if (batches.monitor.length > 0) {
-            let data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+            let data = safeLocalParse('monitor_data', {}) || {};
             batches.monitor.forEach(p => {
                 if (p.eventType === 'DELETE') {
                     if (p.old && p.old.user_id) delete data[p.old.user_id];
@@ -2660,7 +2672,7 @@ function processIncomingDataQueue() {
 
         // 2. Process Attendance
         if (batches.attendance.length > 0) {
-            let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+            let records = safeLocalParse('attendance_records', []) || [];
             batches.attendance.forEach(p => {
                 if (p.eventType === 'DELETE') {
                     records = records.filter(r => r.id !== p.old.id);
@@ -2686,7 +2698,7 @@ function processIncomingDataQueue() {
 
         // 3. Process Bookings
         if (batches.bookings.length > 0) {
-            let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+            let bookings = safeLocalParse('liveBookings', []) || [];
             batches.bookings.forEach(p => {
                 if (p.eventType === 'DELETE') {
                     bookings = bookings.filter(b => String(b.id) !== String(p.old.id));
@@ -2725,14 +2737,15 @@ function processIncomingDataQueue() {
                     const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
                     if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(key)) return;
 
-                    const localVal = JSON.parse(localStorage.getItem(key));
+                    const localVal = safeLocalParse(key, null);
                     const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
                     
                     if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(key)) {
                         const merged = performSmartMerge({[key]: content}, {[key]: localVal}, 'server_wins');
                         localStorage.setItem(key, JSON.stringify(merged[key]));
                     } else {
-                        localStorage.setItem(key, JSON.stringify(content));
+                        const serialized = (typeof content === 'undefined') ? JSON.stringify(null) : JSON.stringify(content);
+                        localStorage.setItem(key, serialized);
                     }
                     if (p.new.updated_at) localStorage.setItem('sync_ts_' + key, p.new.updated_at);
                     emitDataChange(key, 'realtime');
@@ -2759,7 +2772,7 @@ function processIncomingDataQueue() {
             Object.keys(tableUpdates).forEach(table => {
                 const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
                 if (!localKey) return;
-                let items = JSON.parse(localStorage.getItem(localKey) || '[]');
+                let items = safeLocalParse(localKey, []) || [];
                 const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
 
                 tableUpdates[table].forEach(p => {
@@ -2780,7 +2793,7 @@ function processIncomingDataQueue() {
                         const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
                         if (idx > -1) {
                             // Local Edit Shield: Don't overwrite if local item is waiting in the save queue
-                            const hashMap = JSON.parse(localStorage.getItem(`hash_map_${localKey}`) || '{}');
+                            const hashMap = safeLocalParse(`hash_map_${localKey}`, {}) || {};
                             const currentLocalHash = generateChecksum(JSON.stringify(items[idx]));
                             const syncedHash = hashMap[newItem.id];
                             if (syncedHash && currentLocalHash !== syncedHash) return; 
@@ -2849,7 +2862,7 @@ async function forceRefreshLiveSessionById(sessionId) {
         const refreshed = { ...row.data };
         if (!refreshed.sessionId) refreshed.sessionId = row.id;
 
-        let sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        let sessions = safeLocalParse('liveSessions', []) || [];
         sessions = sessions.filter(s => s.sessionId !== refreshed.sessionId);
         sessions.push(refreshed);
         localStorage.setItem('liveSessions', JSON.stringify(sessions));
@@ -2869,7 +2882,7 @@ function applyVettingSessionNudgeCommand(rawAction) {
         const encoded = String(rawAction || '').replace(/^vetting_force:/, '');
         if (!encoded) return false;
 
-        const payload = JSON.parse(decodeURIComponent(encoded));
+        const payload = safeParse(decodeURIComponent(encoded), null);
         if (!payload || !payload.sessionId || !payload.active) return false;
 
         const currentUser = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.user : '';
@@ -2892,14 +2905,14 @@ function applyVettingSessionNudgeCommand(rawAction) {
             trainees: (payload.trainees && typeof payload.trainees === 'object') ? payload.trainees : {}
         };
 
-        let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        let sessions = safeLocalParse('adminVettingSessions', []) || [];
         sessions = Array.isArray(sessions) ? sessions : [];
         const idx = sessions.findIndex(s => s && s.sessionId === sessionData.sessionId);
         if (idx > -1) sessions[idx] = { ...sessions[idx], ...sessionData };
         else sessions.push(sessionData);
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
 
-        const local = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false,"trainees":{}}');
+        const local = safeLocalParse('vettingSession', { active: false, trainees: {} }) || { active: false, trainees: {} };
         const sameSession = !!(local && local.sessionId && local.sessionId === sessionData.sessionId);
         const mergedTrainees = sameSession
             ? { ...(local.trainees || {}), ...(sessionData.trainees || {}) }
@@ -2976,7 +2989,7 @@ function applyGenericRowRealtimePayload(payload) {
     const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === payload.table);
     if (!localKey) return false;
 
-    let items = JSON.parse(localStorage.getItem(localKey) || '[]');
+    let items = safeLocalParse(localKey, []) || [];
     const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
 
     if (payload.eventType === 'DELETE') {
@@ -3041,7 +3054,7 @@ async function recoverLiveSessionRow(rowId) {
         const recovered = { ...row.data };
         if (!recovered.sessionId) recovered.sessionId = row.id;
 
-        let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        let allSessions = safeLocalParse('liveSessions', []) || [];
         allSessions = allSessions.filter(s => s.sessionId !== recovered.sessionId);
         allSessions.push(recovered);
         localStorage.setItem('liveSessions', JSON.stringify(allSessions));
@@ -3058,7 +3071,7 @@ async function recoverLiveSessionRow(rowId) {
 
 function handleLiveSessionRealtime(payload) {
     // INSTANT PROCESSING (Bypass Queue for Zero Latency)
-    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    let allSessions = safeLocalParse('liveSessions', []) || [];
     if (payload.eventType === 'DELETE') {
         allSessions = allSessions.filter(s => s.sessionId !== payload.old.id);
     } else {
@@ -3091,10 +3104,10 @@ function handleLiveSessionRealtime(payload) {
 
 function handleVettingRealtime(payload) {
     // INSTANT PROCESSING (Bypass Queue for Zero Latency)
-    let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+    let sessions = safeLocalParse('adminVettingSessions', []) || [];
     if (payload.eventType === 'DELETE') {
         sessions = sessions.filter(s => s.sessionId !== payload.old.id);
-        const local = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        const local = safeLocalParse('vettingSession', {}) || {};
         if (local.sessionId === payload.old.id && typeof handleVettingUpdate === 'function') {
             handleVettingUpdate({ active: false });
         }
