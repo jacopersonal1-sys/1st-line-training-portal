@@ -6,18 +6,23 @@
     const TABLE_MIRROR = 'vetting_sessions';
     const PATCH_QUEUE_KEY = 'vetting_v2_pending_status_patches';
     const STALE_SESSION_MS = 12 * 60 * 60 * 1000;
+    const COMPLETION_RETRY_DELAY_MS = 3000;
 
     let TRAINEE_LOCAL_POLLER = null;
     let SECURITY_VIOLATION_INTERVAL = null;
     let TRAINEE_SESSION_SYNC_INTERVAL = null;
     let VETTING_PATCH_FLUSH_INTERVAL = null;
     let VETTING_ENFORCER_INTERVAL = null;
+    // Debounce and cooldown for pre-flight checks to avoid aggressive blocking
+    let COMPLIANCE_CONSECUTIVE_ERRORS = 0;
+    let LAST_ENTER_ATTEMPT = 0;
 
     let LAST_REPORTED_STATUS = null;
     let IS_CHECKING_COMPLIANCE = false;
     let SECURITY_WARNING_COUNT = 0;
     let IS_POLLING_SECURITY = false;
     let IS_SUBMITTING_VIOLATION = false;
+    let COMPLETION_RETRY_TIMER = null;
 
     function getCurrentUser() {
         if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) return CURRENT_USER;
@@ -89,6 +94,128 @@
 
     function saveAdminSessions(sessions) {
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions || []));
+    }
+
+    function getSubmissionTimestampMs(item) {
+        if (!item) return 0;
+        const candidates = [item.lastModified, item.updated_at, item.createdAt];
+        for (const val of candidates) {
+            const ts = Date.parse(val);
+            if (!Number.isNaN(ts)) return ts;
+        }
+        const fallback = Date.parse(`${item.date || ''}T00:00:00Z`);
+        if (!Number.isNaN(fallback)) return fallback;
+        return 0;
+    }
+
+    function getLatestAttemptSubmission(session, username) {
+        if (!session || !username) return null;
+        const testId = session.testId;
+        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const candidates = submissions.filter(s =>
+            s &&
+            !s.archived &&
+            s.id &&
+            testId !== undefined &&
+            String(s.testId) === String(testId) &&
+            identitiesMatch(s.trainee, username)
+        );
+        if (!candidates.length) return null;
+        candidates.sort((a, b) => getSubmissionTimestampMs(b) - getSubmissionTimestampMs(a));
+        return candidates[0];
+    }
+
+    async function verifySubmissionPipelineForCompletion(session, username) {
+        const latestLocal = getLatestAttemptSubmission(session, username);
+        if (!latestLocal) {
+            return { ready: false, reason: 'No local submission found for this vetting attempt.' };
+        }
+
+        if (!window.supabaseClient) {
+            return { ready: false, reason: 'Cloud sync is unavailable while offline.', submissionId: latestLocal.id };
+        }
+
+        let serverSubmission = null;
+        try {
+            const { data, error } = await window.supabaseClient
+                .from('submissions')
+                .select('id, data, updated_at')
+                .eq('id', latestLocal.id)
+                .maybeSingle();
+            if (error) throw error;
+            serverSubmission = data && data.data ? data.data : null;
+        } catch (e) {
+            return { ready: false, reason: 'Unable to verify submission row on server.', submissionId: latestLocal.id };
+        }
+
+        if (!serverSubmission) {
+            return { ready: false, reason: 'Submission row has not reached the server yet.', submissionId: latestLocal.id };
+        }
+
+        const serverStatus = String(serverSubmission.status || '').toLowerCase();
+        const validStatus = serverStatus === 'pending' || serverStatus === 'completed';
+        if (!validStatus) {
+            return {
+                ready: false,
+                reason: `Submission status is still '${serverStatus || 'unknown'}'.`,
+                submissionId: latestLocal.id
+            };
+        }
+
+        if (!identitiesMatch(serverSubmission.trainee, username)) {
+            return { ready: false, reason: 'Server submission does not match active trainee.', submissionId: latestLocal.id };
+        }
+        if (session && session.testId !== undefined && String(serverSubmission.testId) !== String(session.testId)) {
+            return { ready: false, reason: 'Server submission does not match active vetting test.', submissionId: latestLocal.id };
+        }
+
+        if (serverStatus !== 'completed') {
+            return { ready: true, submissionId: latestLocal.id, submissionStatus: serverStatus };
+        }
+
+        const expectedRecordId = `record_${latestLocal.id}`;
+        try {
+            const { data: recordRow, error: recordErr } = await window.supabaseClient
+                .from('records')
+                .select('id, data')
+                .eq('id', expectedRecordId)
+                .maybeSingle();
+
+            if (recordErr) throw recordErr;
+            let hasLinkedRecord = !!(recordRow && (
+                recordRow.id === expectedRecordId ||
+                (recordRow.data && recordRow.data.submissionId === latestLocal.id)
+            ));
+            if (!hasLinkedRecord) {
+                // Legacy safety: older rows may use non-deterministic record IDs.
+                const { data: traineeRecords, error: legacyErr } = await window.supabaseClient
+                    .from('records')
+                    .select('id, data')
+                    .eq('trainee', username)
+                    .limit(5000);
+                if (legacyErr) throw legacyErr;
+                hasLinkedRecord = Array.isArray(traineeRecords) && traineeRecords.some(r =>
+                    r &&
+                    r.data &&
+                    String(r.data.submissionId || '') === String(latestLocal.id)
+                );
+            }
+            if (!hasLinkedRecord) {
+                return { ready: false, reason: 'Submission is completed but linked record row is missing.', submissionId: latestLocal.id };
+            }
+        } catch (e) {
+            return { ready: false, reason: 'Unable to verify linked record row on server.', submissionId: latestLocal.id };
+        }
+
+        return { ready: true, submissionId: latestLocal.id, submissionStatus: serverStatus };
+    }
+
+    function scheduleCompletionRetry() {
+        if (COMPLETION_RETRY_TIMER) return;
+        COMPLETION_RETRY_TIMER = setTimeout(() => {
+            COMPLETION_RETRY_TIMER = null;
+            updateTraineeStatus('completed').catch(() => {});
+        }, COMPLETION_RETRY_DELAY_MS);
     }
 
     function getQueuedPatches() {
@@ -189,54 +316,13 @@
     function isTargetSessionForUser(session, username) {
         if (!session || !session.active || !username) return false;
         if (!session.targetGroup || session.targetGroup === 'all') return true;
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-        const members = rosters[session.targetGroup] || [];
-        return members.some(m => identitiesMatch(m, username));
-    }
-
-    function mergeActiveSessions(rows) {
-        const byId = {};
-        rows.forEach(row => {
-            if (!row || !row.data || !row.data.sessionId || !row.data.active) return;
-            const existing = byId[row.data.sessionId];
-            const oldTs = existing && existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
-            const newTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-            if (!existing || newTs >= oldTs) byId[row.data.sessionId] = row;
-        });
-        return Object.values(byId).map(r => r.data);
-    }
-
-    async function pollVettingSession() {
-        if (!isTrainee() || !window.supabaseClient) return;
-
-        const readTable = async (table) => {
-            const { data, error } = await window.supabaseClient.from(table).select('id,data,updated_at');
-            if (error || !Array.isArray(data)) return [];
-            return data;
-        };
-
-        const [primary, mirror] = await Promise.all([
-            readTable(TABLE_PRIMARY),
-            readTable(TABLE_MIRROR)
-        ]);
-
-        const merged = mergeActiveSessions([...primary, ...mirror]);
-        saveAdminSessions(merged);
-
-        const username = getUsername();
-        let found = null;
-        for (const s of merged) {
-            if (isTargetSessionForUser(s, username)) {
-                found = s;
-                break;
-            }
-        }
-
-        if (found) {
-            checkAndHandleSession(found);
-        } else {
-            const local = getLocalSession();
-            if (local.active) handleVettingUpdate({ active: false, sessionId: local.sessionId });
+        try {
+            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+            const members = Array.isArray(rosters[session.targetGroup]) ? rosters[session.targetGroup] : [];
+            return members.some(m => identitiesMatch(m, username));
+        } catch (e) {
+            console.warn('[Vetting] isTargetSessionForUser roster parse failed', e);
+            return false;
         }
     }
 
@@ -301,11 +387,16 @@
         const isRelaxed = !!(myData && myData.relaxed && !forceGlobalKiosk);
 
         if (isRelaxed) {
-            if (typeof require !== 'undefined') {
-                const { ipcRenderer } = require('electron');
-                ipcRenderer.invoke('set-kiosk-mode', false).catch(() => {});
-                ipcRenderer.invoke('set-content-protection', false).catch(() => {});
-            }
+            try {
+                if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                    window.electronAPI.setKioskMode(false).catch(() => {});
+                    window.electronAPI.setContentProtection(false).catch(() => {});
+                } else if (typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    ipcRenderer.invoke('set-kiosk-mode', false).catch(() => {});
+                    ipcRenderer.invoke('set-content-protection', false).catch(() => {});
+                }
+            } catch (e) { console.warn('[Vetting] drop shields error', e); }
             return;
         }
 
@@ -313,36 +404,61 @@
         IS_POLLING_SECURITY = true;
 
         try {
-            if (typeof require === 'undefined') return;
-            const { ipcRenderer } = require('electron');
+            // Prefer electronAPI (secure preload) but fall back to ipcRenderer if available
+            if (window.electronAPI && typeof window.electronAPI.getProcessList === 'function') {
+                try {
+                    await window.electronAPI.setKioskMode(true).catch(()=>{});
+                    await window.electronAPI.setContentProtection(true).catch(()=>{});
+                } catch(e){}
 
-            ipcRenderer.invoke('set-kiosk-mode', true).catch(() => {});
-            ipcRenderer.invoke('set-content-protection', true).catch(() => {});
+                let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') forbidden = window.DEFAULT_FORBIDDEN_APPS;
+                const apps = await window.electronAPI.getProcessList(forbidden).catch(()=>[]);
+                const screens = await window.electronAPI.getScreenCount().catch(()=>0);
 
-            let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
-            if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
-                forbidden = window.DEFAULT_FORBIDDEN_APPS;
-            }
-
-            const [apps, screens] = await Promise.all([
-                ipcRenderer.invoke('get-process-list', forbidden),
-                ipcRenderer.invoke('get-screen-count')
-            ]);
-
-            if ((apps && apps.length > 0) || (screens && screens > 1)) {
-                SECURITY_WARNING_COUNT++;
-                if (SECURITY_WARNING_COUNT === 1) {
-                    showSecurityViolationOverlay(
-                        `Forbidden app or monitor detected.<br><strong style="color:#f1c40f;">${(apps || []).join(', ') || 'Policy violation'}</strong>`,
-                        false
-                    );
-                } else if (SECURITY_WARNING_COUNT >= 4) {
-                    await updateTraineeStatus('started');
+                if ((apps && apps.length > 0) || (screens && screens > 1)) {
+                    SECURITY_WARNING_COUNT++;
+                    if (SECURITY_WARNING_COUNT === 1) {
+                        showSecurityViolationOverlay(
+                            `Forbidden app or monitor detected.<br><strong style="color:#f1c40f;">${(apps || []).join(', ') || 'Policy violation'}</strong>`,
+                            false
+                        );
+                    } else if (SECURITY_WARNING_COUNT >= 4) {
+                        await updateTraineeStatus('started');
+                    }
+                } else {
+                    SECURITY_WARNING_COUNT = 0;
+                    const overlay = document.getElementById('security-violation-overlay');
+                    if (overlay && !overlay.dataset.fatal) overlay.remove();
                 }
-            } else {
-                SECURITY_WARNING_COUNT = 0;
-                const overlay = document.getElementById('security-violation-overlay');
-                if (overlay && !overlay.dataset.fatal) overlay.remove();
+            } else if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                ipcRenderer.invoke('set-kiosk-mode', true).catch(() => {});
+                ipcRenderer.invoke('set-content-protection', true).catch(() => {});
+
+                let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') forbidden = window.DEFAULT_FORBIDDEN_APPS;
+
+                const [apps, screens] = await Promise.all([
+                    ipcRenderer.invoke('get-process-list', forbidden),
+                    ipcRenderer.invoke('get-screen-count')
+                ]);
+
+                if ((apps && apps.length > 0) || (screens && screens > 1)) {
+                    SECURITY_WARNING_COUNT++;
+                    if (SECURITY_WARNING_COUNT === 1) {
+                        showSecurityViolationOverlay(
+                            `Forbidden app or monitor detected.<br><strong style="color:#f1c40f;">${(apps || []).join(', ') || 'Policy violation'}</strong>`,
+                            false
+                        );
+                    } else if (SECURITY_WARNING_COUNT >= 4) {
+                        await updateTraineeStatus('started');
+                    }
+                } else {
+                    SECURITY_WARNING_COUNT = 0;
+                    const overlay = document.getElementById('security-violation-overlay');
+                    if (overlay && !overlay.dataset.fatal) overlay.remove();
+                }
             }
         } finally {
             IS_POLLING_SECURITY = false;
@@ -360,6 +476,7 @@
             if (typeof window.submitTest === 'function') await window.submitTest(true);
             return;
         }
+        if (!session.active && status === 'completed') return;
 
         if (!session.trainees) session.trainees = {};
         if (!session.trainees[username]) session.trainees[username] = {};
@@ -368,8 +485,28 @@
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         const isRelaxed = session.trainees[username].relaxed === true && !forceGlobalKiosk;
 
-        session.trainees[username].status = status;
-        if (status === 'started' && !session.trainees[username].startedAt) {
+        let statusToPersist = status;
+        if (status === 'completed') {
+            const readiness = await verifySubmissionPipelineForCompletion(session, username);
+            if (!readiness.ready) {
+                statusToPersist = 'submitting';
+                session.trainees[username].completionGate = {
+                    pending: true,
+                    reason: readiness.reason,
+                    checkedAt: Date.now(),
+                    submissionId: readiness.submissionId || null
+                };
+                scheduleCompletionRetry();
+            } else {
+                delete session.trainees[username].completionGate;
+                session.trainees[username].completedSubmissionId = readiness.submissionId || null;
+            }
+        } else if (status !== 'submitting') {
+            delete session.trainees[username].completionGate;
+        }
+
+        session.trainees[username].status = statusToPersist;
+        if (statusToPersist === 'started' && !session.trainees[username].startedAt) {
             session.trainees[username].startedAt = Date.now();
         }
         if (timerStr) session.trainees[username].timer = timerStr;
@@ -387,7 +524,7 @@
             ]);
             session.trainees[username].security = { screens, apps };
 
-            if (!isRelaxed && apps.length > 0 && status === 'started') {
+            if (!isRelaxed && apps.length > 0 && statusToPersist === 'started') {
                 if (IS_SUBMITTING_VIOLATION) return;
                 IS_SUBMITTING_VIOLATION = true;
                 showSecurityViolationOverlay(`Security Violation: Forbidden apps detected (${apps.join(', ')}). Test ending.`, true);
@@ -497,6 +634,9 @@
         if (!isTrainee()) return;
 
         stopTraineeLocalPollers();
+        // Mark this attempt so transient checks won't immediately block the trainee
+        LAST_ENTER_ATTEMPT = Date.now();
+        COMPLIANCE_CONSECUTIVE_ERRORS = 0;
 
         const session = getLocalSession();
         const myData = getTraineeData(session, getUsername());
@@ -506,9 +646,16 @@
         if (cfg.security && cfg.security.force_kiosk_global) isRelaxed = false;
 
         if (!isRelaxed && typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            await ipcRenderer.invoke('set-kiosk-mode', true);
-            await ipcRenderer.invoke('set-content-protection', true);
+            try {
+                if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                    await window.electronAPI.setKioskMode(true);
+                    await window.electronAPI.setContentProtection(true);
+                } else if (typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    await ipcRenderer.invoke('set-kiosk-mode', true);
+                    await ipcRenderer.invoke('set-content-protection', true);
+                }
+            } catch (e) { console.warn('[Vetting] enterArena IPC error', e); }
         }
 
         toggleSidebar(false);
@@ -530,13 +677,18 @@
         stopTraineeLocalPollers();
 
         if (!keepLocked && typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
             try {
-                await ipcRenderer.invoke('set-kiosk-mode', false);
-                await ipcRenderer.invoke('set-content-protection', false);
-            } catch (e) {
-                console.error('Exit Kiosk Error', e);
-            }
+                if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                    await window.electronAPI.setKioskMode(false);
+                    await window.electronAPI.setContentProtection(false);
+                } else if (typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    try {
+                        await ipcRenderer.invoke('set-kiosk-mode', false);
+                        await ipcRenderer.invoke('set-content-protection', false);
+                    } catch (e) { console.error('Exit Kiosk Error', e); }
+                }
+            } catch (e) { console.warn('[Vetting] exitArena IPC error', e); }
         }
 
         if (!keepLocked) toggleSidebar(true);
@@ -556,11 +708,16 @@
         const username = getUsername();
 
         if (!session.active) {
-            if (typeof require !== 'undefined') {
-                const { ipcRenderer } = require('electron');
-                ipcRenderer.invoke('set-kiosk-mode', false).catch(() => {});
-                ipcRenderer.invoke('set-content-protection', false).catch(() => {});
-            }
+            try {
+                if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                    window.electronAPI.setKioskMode(false).catch(() => {});
+                    window.electronAPI.setContentProtection(false).catch(() => {});
+                } else if (typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    ipcRenderer.invoke('set-kiosk-mode', false).catch(() => {});
+                    ipcRenderer.invoke('set-content-protection', false).catch(() => {});
+                }
+            } catch (e) { console.warn('[Vetting] renderTraineeArena exit IPC error', e); }
             toggleSidebar(true);
             stopTraineeLocalPollers();
 
@@ -602,6 +759,26 @@
                         <i class="fas fa-wifi"></i> Waiting for Admin to End Session...
                     </div>
                     <div style="margin-top:30px; font-size:0.9rem; color:var(--text-muted);">Please remain seated. Your screen is still monitored.</div>
+                </div>`;
+            return;
+        }
+
+        if (myData && myData.status === 'submitting') {
+            stopTraineeLocalPollers();
+            scheduleCompletionRetry();
+            const gateReason = myData.completionGate && myData.completionGate.reason
+                ? myData.completionGate.reason
+                : 'Verifying submission pipeline with the server.';
+            container.innerHTML = `
+                <div style="text-align:center; padding:50px; max-width:620px; margin:0 auto;">
+                    <i class="fas fa-cloud-upload-alt" style="font-size:4rem; color:#3498db; margin-bottom:20px;"></i>
+                    <h3>Submission Sync In Progress</h3>
+                    <p style="font-size:1rem; margin-bottom:18px; color:var(--text-muted);">
+                        Your assessment is submitted. Final completion will unlock once the server confirms submission + record linkage.
+                    </p>
+                    <div style="display:inline-flex; align-items:center; gap:10px; padding:12px 18px; background:rgba(52,152,219,0.1); border:1px solid #3498db; border-radius:10px; color:#3498db; font-weight:600;">
+                        <i class="fas fa-circle-notch fa-spin"></i> ${gateReason}
+                    </div>
                 </div>`;
             return;
         }
@@ -675,8 +852,8 @@
             const serverMyData = getTraineeData(serverSession, username);
             if (serverMyData) {
                 next.trainees[username] = { ...(localMyData || {}), ...serverMyData };
-            } else if (localMyData && String(localMyData.status || '').toLowerCase() === 'completed') {
-                // Prevent stale local "completed" state from locking first-time attempts.
+            } else if (localMyData && ['completed', 'submitting'].includes(String(localMyData.status || '').toLowerCase())) {
+                // Prevent stale local terminal state from locking first-time attempts.
                 delete next.trainees[username];
             }
 
@@ -684,7 +861,7 @@
             Object.keys(next.trainees || {}).forEach(k => {
                 if (k !== username && identitiesMatch(k, username)) delete next.trainees[k];
             });
-        } else if (!sameSession && localMyData && String(localMyData.status || '').toLowerCase() === 'completed') {
+        } else if (!sameSession && localMyData && ['completed', 'submitting'].includes(String(localMyData.status || '').toLowerCase())) {
             delete next.trainees[username];
         }
 
@@ -808,10 +985,14 @@
     function cleanupVettingEnforcer() {
         if (VETTING_ENFORCER_INTERVAL) clearInterval(VETTING_ENFORCER_INTERVAL);
         VETTING_ENFORCER_INTERVAL = null;
+        if (COMPLETION_RETRY_TIMER) clearTimeout(COMPLETION_RETRY_TIMER);
+        COMPLETION_RETRY_TIMER = null;
     }
 
     function cleanupVettingArenaWatchers() {
         stopTraineeLocalPollers();
+        if (COMPLETION_RETRY_TIMER) clearTimeout(COMPLETION_RETRY_TIMER);
+        COMPLETION_RETRY_TIMER = null;
     }
 
     const api = {

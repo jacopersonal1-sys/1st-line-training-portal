@@ -1,62 +1,5 @@
 /* ================= DATA & SYNC ================= */
-
-// 1. Central Schema: Defines all keys and their default values
 const DB_SCHEMA = {
-    records: [], 
-    users: [], 
-    assessments: [], 
-    rosters: {},
-    accessControl: { enabled: false, whitelist: [] },
-    trainingData: {}, 
-    vettingTopics: [],
-    schedules: {}, 
-    liveBookings: [], 
-    cancellationCounts: {}, 
-    liveScheduleSettings: {},
-    liveSchedules: {}, // NEW: Multi-group Live Assessment Schedules
-    tests: [], 
-    submissions: [], 
-    savedReports: [],
-    insightReviews: [], 
-    exemptions: [], 
-    notices: [],
-    tl_task_submissions: [], // Team Leader Daily Submissions
-    tl_personal_lists: {},   // TL Roster { "tl_user": ["agent1", "agent2"] }
-    attendance_records: [],
-    attendance_settings: {
-        platforms: ["WhatsApp", "Microsoft Teams", "Call", "SMS"],
-        contacts: ["Darren", "Netta", "Jaco", "Claudine"]
-    },
-    // --- SUPER ADMIN CONFIGURATION ---
-    system_config: {
-        sync_rates: {
-            cloud: { admin: 4000, teamleader: 60000, trainee: 15000 },
-            local: { admin: 2000, teamleader: 30000, trainee: 5000 },
-            staging: { admin: 4000, teamleader: 60000, trainee: 15000 }
-        },
-        heartbeat_rates: { admin: 5000, default: 30000 },
-        idle_thresholds: { warning: 60000, logout: 900000 },
-        attendance: { work_start: "08:00", late_cutoff: "08:15", work_end: "17:00", reminder_start: "16:45", lunch_start: "12:00", lunch_duration: 60, allow_weekend_login: false },
-        security: { maintenance_mode: false, lockdown_mode: false, min_version: "0.0.0", force_kiosk_global: false, allowed_ips: [], banned_clients: [], client_whitelist: [] },
-        features: { vetting_arena: true, live_assessments: true, nps_surveys: true, daily_tips: true, disable_animations: false },
-        monitoring: { tolerance_ms: 180000, whitelist_strict: false },
-        announcement: { active: false, message: "", type: "info" },
-        broadcast: { id: 0, message: "" },
-        ai: { enabled: true, provider: "gemini", apiKey: "", model: "gemini-1.5-flash", endpoint: "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent" },
-        // NEW: Server Failover Settings
-        server_settings: { active: 'cloud', local_url: '', local_key: '' }
-    },
-    system_tombstones: [], // Persistent blacklist for deleted item IDs
-    ai_suggestions: [], // Stores background improvement suggestions
-    revokedUsers: [], // Added to ensure blacklist syncs
-    auditLogs: [], // Critical Action History
-    network_diagnostics: [], // New: Network Health Reports
-    accessLogs: [], // Login/Logout/Timeout History
-    vettingSession: { active: false, testId: null, trainees: {} }, // Vetting Arena State
-    linkRequests: [], // Requests from TLs for assessment links
-    agentNotes: {}, // Private notes on agents { "username": [ { id, author, date, content } ] }
-    liveSessions: [], // CHANGED: Array to support multiple concurrent sessions
-    forbiddenApps: [], // Dynamic list of blacklisted processes
     monitor_data: {}, // Real-time activity tracking { username: { current, history: [] } }
     monitor_history: [], // Archived daily activity logs
     nps_surveys: [], // Admin defined surveys
@@ -1145,6 +1088,11 @@ function getArrayItemIdentity(key, item) {
         return `user:${normalizeIdentityValue(item.user)}`;
     }
 
+    // Support alternative key shapes (some server rows use 'username')
+    if (key === 'users' && item.username) {
+        return `user:${normalizeIdentityValue(item.username)}`;
+    }
+
     if (key === 'assessments' && item.name) {
         return `assessment:${normalizeIdentityValue(item.name)}`;
     }
@@ -1211,6 +1159,7 @@ function dedupeArrayByIdentity(key, items, strategy = 'server_wins') {
 
     const deduped = [];
     const seen = new Map();
+    let duplicates = 0;
 
     items.forEach(item => {
         const identity = getArrayItemIdentity(key, item);
@@ -1226,8 +1175,11 @@ function dedupeArrayByIdentity(key, items, strategy = 'server_wins') {
             return;
         }
 
+        duplicates++;
         deduped[existingIndex] = resolveDuplicateArrayItem(key, deduped[existingIndex], item, strategy);
     });
+
+    if (duplicates > 0) console.debug(`[dedupeArrayByIdentity] collapsed ${duplicates} duplicates for key='${key}'`);
 
     return deduped;
 }
@@ -1441,10 +1393,19 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                     : 'system';
                 
                 // 1. Identify Changed Items (Delta)
-                if (Array.isArray(localContent)) {
+                    if (Array.isArray(localContent)) {
                     localContent.forEach(item => {
                         // Ensure ID exists
-                        if (!item.id) item.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+                        if (!item.id) {
+                            // Use deterministic IDs for 'users' to avoid duplicate rows across clients
+                            if (key === 'users' && (item.user || item.username)) {
+                                const nameVal = String(item.user || item.username || '').trim();
+                                const normalized = normalizeIdentityValue(nameVal).replace(/\s+/g, '_');
+                                item.id = `user_${normalized}`;
+                            } else {
+                                item.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+                            }
+                        }
 
                         const persistedHash = hashMap[item.id];
                         let currentHash = generateChecksum(JSON.stringify(item));
@@ -1462,8 +1423,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                         }
 
                         if (keyForce || currentHash !== persistedHash) {
-                            itemsToUpload.push(item);
-                            hashMap[item.id] = currentHash; // Update hash immediately (Optimistic)
+                            itemsToUpload.push({ item, currentHash });
                         }
                     });
                 }
@@ -1471,9 +1431,35 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 // 2. Upload Deltas
                 if (itemsToUpload.length > 0) {
                     if(!silent) console.log(`Uploading ${itemsToUpload.length} changed rows to ${tableName}`);
+                    // Attempt to align local items with existing server rows for small identity-driven tables
+                    // This prevents creating duplicate logical rows when clients generate local IDs independently.
+                    if (tableName === 'users') {
+                        try {
+                            const { data: indexRows, error: idxErr } = await window.supabaseClient
+                                .from(tableName)
+                                .select('id, data->>user as username')
+                                .limit(10000);
+                            if (!idxErr && Array.isArray(indexRows)) {
+                                const serverMap = {};
+                                indexRows.forEach(r => {
+                                    const uname = (r.username || (r.data && (r.data.user || r.data.username)) || '').toString().trim().toLowerCase();
+                                    if (uname) serverMap[uname] = r.id;
+                                });
+
+                                itemsToUpload.forEach(entry => {
+                                    const it = entry.item;
+                                    const uname = String(it.user || it.username || '').trim().toLowerCase();
+                                    if (uname && serverMap[uname]) it.id = serverMap[uname];
+                                });
+                            }
+                        } catch (e) {
+                            // Non-fatal: proceed with optimistic deterministic IDs
+                        }
+                    }
                     
                     // Map to Table Schema
-                    const rows = itemsToUpload.map(item => {
+                    const rows = itemsToUpload.map(entry => {
+                        const item = entry.item;
                         // Base Object
                         const row = {
                             id: item.id,
@@ -1521,10 +1507,15 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                         }
                     }
                     
+                    itemsToUpload.forEach(entry => {
+                        if (entry.item && entry.item.id) hashMap[entry.item.id] = entry.currentHash;
+                    });
+
                     // Save Hash Map only on success
                     localStorage.setItem(hashMapKey, JSON.stringify(hashMap));
                     // Save content back to ensure IDs are persisted locally
                     localStorage.setItem(key, JSON.stringify(localContent));
+                    emitDataChange(key, 'save_to_server');
                 }
             } 
             // --- STRATEGY B: MONITOR STATE (Real-time Object -> Table) ---
@@ -1650,7 +1641,13 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
     });
 
-    Object.keys(DB_SCHEMA).forEach(key => {
+    const mergeKeys = new Set([
+        ...Object.keys(DB_SCHEMA || {}),
+        ...Object.keys(server || {}),
+        ...Object.keys(local || {})
+    ]);
+
+    mergeKeys.forEach(key => {
         const sVal = server[key];
         const lVal = local[key];
 
@@ -3017,11 +3014,39 @@ function applyGenericRowRealtimePayload(payload) {
     return true;
 }
 
+function refreshSubmissionDrivenUI() {
+    if (typeof document === 'undefined') return;
+
+    const isTyping = typeof isUserTyping === 'function' ? isUserTyping() : false;
+    const isActiveView = (id) => !!document.getElementById(id)?.classList.contains('active');
+
+    if (isActiveView('dashboard-view') && !isTyping && typeof renderDashboard === 'function') {
+        renderDashboard();
+    }
+
+    if (isActiveView('my-tests') && typeof loadTraineeTests === 'function') {
+        loadTraineeTests();
+    }
+
+    if (isActiveView('test-records') && typeof loadTestRecords === 'function') {
+        loadTestRecords();
+    }
+
+    if (isActiveView('test-manage') && !isTyping) {
+        if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
+        if (typeof loadManageTests === 'function') loadManageTests();
+        if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
+        if (typeof loadCompletedHistory === 'function' && !document.getElementById('engine-view-history')?.classList.contains('hidden')) {
+            loadCompletedHistory();
+        }
+    }
+
+    if (typeof validateActiveMarkingModalLock === 'function') validateActiveMarkingModalLock();
+}
+
 function handleRowRealtime(payload) {
     if (payload.table === 'submissions' && applyGenericRowRealtimePayload(payload)) {
-        if (typeof loadMarkingQueue === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadMarkingQueue();
-        if (typeof loadCompletedHistory === 'function' && !document.getElementById('engine-view-history')?.classList.contains('hidden')) loadCompletedHistory();
-        if (typeof validateActiveMarkingModalLock === 'function') validateActiveMarkingModalLock();
+        refreshSubmissionDrivenUI();
         updateQueueIndicator();
         return;
     }

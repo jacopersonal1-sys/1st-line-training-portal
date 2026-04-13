@@ -219,10 +219,11 @@ function loadAdminDatabase() {
         
         let viewBtn = '';
         if(d.link === 'Digital-Assessment' || d.link === 'Live-Session') {
-             // viewCompletedTest is in assessment.js
-             // Use submissionId if available, else fallback
-             const clickAction = d.submissionId ? `viewCompletedTest('${d.submissionId}', null, 'view')` : `viewCompletedTest('${d.trainee}', '${d.assessment}')`;
-             viewBtn = `<button class="btn-secondary" style="padding:2px 6px;" onclick="${clickAction}" title="View Submission"><i class="fas fa-eye"></i></button>`;
+             if (d.submissionId) {
+                 viewBtn = `<button class="btn-secondary" style="padding:2px 6px;" onclick="viewCompletedTest('${d.submissionId}', null, 'view')" title="View Submission"><i class="fas fa-eye"></i></button>`;
+             } else {
+                 viewBtn = `<button class="btn-secondary" style="padding:2px 6px; opacity:0.5; cursor:not-allowed;" disabled title="Missing submission ID"><i class="fas fa-eye-slash"></i></button>`;
+             }
         }
 
         let actions = viewBtn;

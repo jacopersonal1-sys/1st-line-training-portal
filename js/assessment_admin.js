@@ -533,13 +533,9 @@ async function approveSubmission(subId) {
     const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
     const recordId = buildRecordIdForSubmission(sub);
 
-    const existingIdx = recs.findIndex(r => 
+    const existingIdx = recs.findIndex(r =>
         r.submissionId === sub.id ||
-        r.id === recordId ||
-        r.trainee.toLowerCase() === sub.trainee.toLowerCase() && 
-        r.assessment.toLowerCase() === sub.testTitle.toLowerCase() &&
-        (r.groupID||'').toLowerCase() === targetGroup.toLowerCase() &&
-        (r.phase||'').toLowerCase() === phaseVal.toLowerCase()
+        r.id === recordId
     );
 
     const newRecord = {
@@ -595,6 +591,11 @@ async function approveSubmission(subId) {
 
 // DETAILED MARKING (Modal)
 async function openAdminMarking(subId, options = {}) {
+    if (CURRENT_USER?.role === 'trainee') {
+        alert("Access denied. Trainees cannot open marked scripts after review.");
+        return;
+    }
+
     let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     let sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Error: Submission data not found.");
@@ -824,28 +825,27 @@ async function openAdminMarking(subId, options = {}) {
     validateActiveMarkingModalLock();
 }
 
-function viewCompletedTest(arg1, arg2, arg3) {
+function viewCompletedTest(submissionId, arg2, arg3) {
+    if (CURRENT_USER?.role === 'trainee') {
+        alert("Access denied. Trainees cannot view marked scripts after review.");
+        return;
+    }
+
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    let sub = null;
     let mode = 'view';
 
-    // Overload: (id, null, mode) OR (trainee, assessment, mode)
-    if (arg2 === null || arg2 === undefined || arg2 === 'view' || arg2 === 'edit') {
-        // ID Lookup (Robust)
-        sub = subs.find(s => s.id === arg1);
-        if (arg3) mode = arg3;
-        else if (arg2 === 'view' || arg2 === 'edit') mode = arg2;
-    } else {
-        // Legacy Lookup (Trainee + Title) - Fallback
-        // Find LATEST to avoid opening old duplicates
-        const matches = subs.filter(s => s.trainee === arg1 && s.testTitle === arg2);
-        matches.sort((a,b) => new Date(b.date) - new Date(a.date) || b.score - a.score);
-        sub = matches[0];
-        if (arg3) mode = arg3;
+    if (arg3 === 'view' || arg3 === 'edit') mode = arg3;
+    else if (arg2 === 'view' || arg2 === 'edit') mode = arg2;
+
+    const safeSubmissionId = String(submissionId || '').trim();
+    if (!safeSubmissionId) {
+        alert("This record is not linked to a submission ID.");
+        return;
     }
-    
+
+    const sub = subs.find(s => s.id === safeSubmissionId);
     if(!sub) {
-        alert("Digital submission file not found.");
+        alert(`Digital submission file not found for submission ID: ${safeSubmissionId}.`);
         return;
     }
     
@@ -939,13 +939,9 @@ async function finalizeAdminMarking(subId) {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const recordId = buildRecordIdForSubmission(sub);
     
-    const existingIdx = records.findIndex(r => 
+    const existingIdx = records.findIndex(r =>
         r.submissionId === sub.id ||
-        r.id === recordId ||
-        r.trainee.toLowerCase() === sub.trainee.toLowerCase() && 
-        r.assessment.toLowerCase() === sub.testTitle.toLowerCase() &&
-        (r.groupID||'').toLowerCase() === groupId.toLowerCase() &&
-        (r.phase||'').toLowerCase() === phaseVal.toLowerCase()
+        r.id === recordId
     );
 
     const newRecord = {

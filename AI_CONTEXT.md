@@ -11,8 +11,8 @@
 **Sync Strategy:** Zero-Latency Real-Time Push Architecture with Mutex-Locked Fast Saves
 
 ### Core Principles
-1.  **True Native Desktop App:** The application operates with `contextIsolation: true`. Frontend JavaScript cannot directly access the OS. It communicates with `electron-main.js` securely via the `window.electronAPI` bridge defined in `preload.js`.
-2.  **Zero-Polling & Real-Time Push:** The application does not use `setInterval` to ask the database for updates. A single Global WebSocket listener (`data.js`) instantly catches all database changes and injects them into the local cache. The UI simply reacts to these cache updates.
+1.  **True Native Desktop App:** The application is packaged in Electron and uses a preload bridge (`window.electronAPI`) exposed by `preload.js` to mediate OS interactions. Renderer code is expected to use this bridge; direct `require`/`ipcRenderer` usage is guarded and only used when the preload exposes it (code paths check for `require`/`ipcRenderer` before calling native APIs).
+2.  **Push-first Real-Time Architecture with Dynamic Fallback:** The app prefers realtime WebSocket delivery (a global listener in `js/data.js`) as the primary update mechanism. However, it also uses role-based heartbeat timers and dynamic fallback polling (via `setInterval`) when the realtime tunnel drops or for targeted recovery tasks. Incoming events are queued and processed to avoid UI focus stealing; the system favors push, but polling is used as a reliable fallback.
 3.  **Local-First with Infinite Disk Cache:** `localStorage` acts as the immediate RAM for the UI. To bypass browser limits and prevent data loss, the application silently streams a backup of `localStorage` directly to a native `.json` file on the hard drive via the OS File System.
 4.  **Hybrid Sync Engine:**
     *   **Blobs (`app_documents` table):** Low-volume, atomic data (Config, Rosters, Users) syncs as full JSON objects.
@@ -29,6 +29,7 @@
 | `users` | Array | Blob | User credentials, roles, and themes. |
 | `rosters` | Object | Blob | Group definitions `{ "GroupA": ["User1", "User2"] }`. |
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
+| `system_tombstones` | Array | Blob | Persistent blacklist of deleted item IDs used to prevent deleted items from being resurrected during sync. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
 | `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`. |
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
@@ -49,6 +50,8 @@
 | `linkRequests` | Array | Row (`link_requests`) | TL requests for assessment links. |
 | `calendarEvents` | Array | Row (`calendar_events`) | Custom calendar items. |
 
+
+**Note:** The runtime uses a local delete queue key `system_pending_deletes` (persisted in localStorage) together with `system_tombstones` to reliably queue and flush deletes to the server and prevent deleted items from reappearing during sync.
 
 ### Row-Level Map (`ROW_MAP`)
 Maps local `localStorage` keys to Supabase tables.
@@ -78,9 +81,9 @@ Maps local `localStorage` keys to Supabase tables.
 ### Core Infrastructure
 
 #### `preload.js` (Secure OS Bridge)
-- **Responsibility:** Creates the impenetrable wall between the web content and the Operating System.
+- **Responsibility:** Provides a controlled bridge between renderer code and OS capabilities via `window.electronAPI`.
 - **Key Objects:** Exposes `window.electronAPI` containing safe wrappers for `ipcRenderer.invoke/send`, `shell.openExternal`, `notifications.show`, and `disk.saveCache/loadCache`.
-- **Security:** Prevents Remote Code Execution (RCE) attacks by stripping raw Node.js modules from the frontend.
+- **Security:** Mediates access to Node APIs and restricts direct module usage; renderer code still guards `require`/`ipcRenderer` usage and relies on the preload bridge for native operations.
 
 #### `js/main.js` (Bootloader)
 - **Responsibility:** App initialization, version checks, failover recovery, global event listeners, and Native OS bridging (`preload.js`).
@@ -115,6 +118,8 @@ Maps local `localStorage` keys to Supabase tables.
         - **Fast-Save Mutex:** Uses `_IS_PROCESSING_SAVE` lock to allow hyper-fast 500ms saves without overlapping network race conditions.
         - **Failure Re-Queue:** If an upload fails, the current and remaining keys are pushed back into `SAVE_QUEUE` so unsynced local edits are never silently abandoned.
         - **Safe Quit Flush:** Using target `FLUSH`, it awaits the mutex and pushes all remaining data before allowing the OS to kill the app.
+    - `safeLocalParse(rawKey) / safeParse(str)`: Parsing helpers that guard against literal `'undefined'` and malformed JSON stored in `localStorage`/other sources to prevent `JSON.parse` crashes.
+    - `hardDelete(table,id) / hardDeleteByQuery(...) / processPendingDeletes()`: Local delete queue (`system_pending_deletes`) and persistent tombstone list (`system_tombstones`) are used to queue deletions, apply tombstones locally to prevent resurrection, and flush deletes to the server reliably.
     - `performSmartMerge(server, local)`: Merges arrays/objects. Handles deduplication by ID/Name/Composite Key.
     - `setupRealtimeListeners()`: Subscribes to the entire `public` schema. Routes changes instantly to the `INCOMING_DATA_QUEUE`.
     - `handle...Realtime(payload)`: Pushes incoming realtime events into a temporary `INCOMING_DATA_QUEUE`.
@@ -149,6 +154,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `loadMarkingQueue()`: Lists pending submissions. Includes "Ghost Data" cleanup to hide invalid retakes and "Auto-Repair" to recover falsely archived tests.
     - `openAdminMarking(id)`: Opens the grading modal.
     - `finalizeAdminMarking(id)`: Saves final scores and creates a permanent `record`.
+    - `viewCompletedTest(submissionId, ...)`: Digital script view path is strict by `submissionId`; trainee+assessment fallback lookup is retired to prevent duplicate-attempt misbinding.
 
 #### `js/live_execution.js` (Live Arena)
 - **Responsibility:** Real-time interactive assessments.
@@ -177,6 +183,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `enterArena()` / `exitArena(keepLocked)`: Kiosk/content protection and submission lock semantics.
     - `checkAndEnforceVetting()`: Auto-route enforcer from login/runtime.
     - `patchTraineeStatus()` / `flushQueuedPatches()`: Safe per-user status sync with retry queue to both vetting tables.
+    - `verifySubmissionPipelineForCompletion()`: Completion gate that holds trainee status at `submitting` until authoritative submission pipeline state is verified (includes legacy linked-record fallback by `data.submissionId`).
 
 ### Admin Modules
 
@@ -357,7 +364,7 @@ Maps local `localStorage` keys to Supabase tables.
 6.  **UI wipe during active exam:** Do not rerender over `arenaTestContainer` while a test is in progress.
 
 ### D. Failover Protocol
-1.  **Detection:** `startServerLookout` polls both Cloud and Local URLs every 30s.
+1.  **Detection:** `startServerLookout` is designed to poll Cloud and Local URLs periodically (30s) and detect remote commands to switch targets. Note: in the current runtime this routine is intentionally disabled by default (early return) to avoid automatic server switching; re-enable with admin action if automatic failover is desired.
 2.  **Command:** If `system_config.active` changes on the remote server:
     *   **Ping Check:** Verify new server is reachable.
     *   **Switch:** Update local config, reload app.
@@ -368,14 +375,14 @@ Maps local `localStorage` keys to Supabase tables.
 2.  **Queueing:** Incoming events are pushed into `INCOMING_DATA_QUEUE`.
 3.  **Protection:** `processIncomingDataQueue()` checks `isUserTyping()`. If an Admin is actively typing in a field, the UI refresh is paused to prevent cursor stealing or text wiping, while the data is silently updated in the background cache.
 
-### F. Presence Engine (Zero Database Heartbeats)
-Instead of every user writing to the `sessions` table every 15 seconds:
-1.  Users join the `online_users` Realtime channel.
-2.  They broadcast their status (Idle/Active/Window) via WebSockets (`PRESENCE_CHANNEL.track()`).
-3.  Admins read from `window.ACTIVE_USERS_CACHE` which updates with 0-latency and 0-database writes.
+### F. Presence Engine (Realtime-First with Resilient Backup)
+Presence is handled by the Realtime presence channel rather than frequent DB writes:
+1.  Users join the `online_users` Realtime presence channel and broadcast status via `PRESENCE_CHANNEL.track()` for zero-latency presence.
+2.  The app also performs occasional resilient backup writes to the `sessions` table (roughly every 10 minutes) to persist a durable heartbeat and enable admin remote commands (`sessions.pending_action`).
+3.  Admin UIs read from `window.ACTIVE_USERS_CACHE` for immediate presence information without frequent DB writes.
 
 ### G. Native OS Integrations
-1.  **Disk Cache Recovery:** On every successful sync, `data.js` sends the entire database payload to `electron-main.js` via `save-disk-cache`. If a user accidentally clears their browser cache, `main.js` intercepts the boot, loads the JSON file from the hard drive, and fully restores the system without needing the internet.
+1.  **Disk Cache Recovery:** On every successful sync, `data.js` sends the entire database payload to `electron-main.js` via `save-disk-cache`. Native cache writes now use temp-file + atomic rename, and startup load validates JSON with `.bak` fallback recovery to prevent truncated-cache boot failures.
 2.  **Intercepted Safe Quit:** When a user clicks "X" to close the app, `electron-main.js` blocks the close event, commands the frontend to `FLUSH` its data queue to the cloud, waits for the Mutex lock to complete the upload, and *then* cleanly shuts down the app.
 3.  **Persistent Study Session:** The Electron `persist:study_session` partition is intentionally retained and flushed cleanly on quit so Microsoft/SharePoint training material has a better chance of preserving a stable sign-in session across app restarts.
 
@@ -383,6 +390,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.15 (Rollout Hardening Addendum, 2026-04-13):** Added strict `submissionId`-only digital script viewing in reporting/admin/search flows, removed trainee+assessment fallback linking in digital record upserts, added vetting completion gate (`submitting` -> `completed`) that verifies authoritative submission pipeline state (including retry continuity across restart), hardened native disk-cache persistence with atomic writes + backup recovery, and widened `performSmartMerge` scope to merge on the union of schema/server/local keys.
 - **v2.6.14:** Hardened Vetting 2.0 false-submit prevention. Trainee runtime now avoids carrying local `completed` status across new session IDs, identity-collision matching now prefers non-completed status for alias usernames, and vetting session start/nudge paths seed canonical `waiting` trainee entries to reduce first-sync ambiguity.
 - **v2.6.13:** Hardened recovery and shared-state persistence safety: explicit strict shared-key saves (users/tests/schedules/live state) now flush immediately to reduce debounce rollback windows, JSON import restore now uploads only imported keys instead of force-pushing full local state, and Vetting 2.0 trainee runtime identity resolution was tightened so admin relax/override flags apply reliably during active enforcement checks.
 - **Vetting 2.0 Cutover (Current):** Admin/Super Admin/Special Viewer now run Vetting in the isolated `modules/vetting_rework` runtime while trainee secure exam flow runs through `js/vetting_runtime_v2.js`. Legacy `js/vetting_arena.js` has been retired. Reliability guardrails include dual-table sync (`vetting_sessions_v2` + `vetting_sessions`), per-user safe patching, retry queue flush loops, and hard 1-second fallback polling for continuity during realtime tunnel degradation.
@@ -399,7 +407,7 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
 
-## v2.6.15 — 2026-04-13
+## v2.6.15 - 2026-04-13
 
 - Fix: Vetting Arena trainee overlay blocking Enter/Start — trainee-side overlay logic in `js/vetting_runtime_v2.js` was corrected so compliance scanning no longer prevents the Enter/Start action.
 - Fix: Prevented JSON.parse crashes caused by literal "undefined" in localStorage by adding `safeLocalParse` and `safeParse` helpers used across `js/data.js` and other modules.
@@ -453,9 +461,9 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
     *   **CRITICAL:** Update this file (`AI_CONTEXT.md`) if any architectural changes, new files, or schema changes occurred.
 
 3.  **Generate Git Commands:**
-    *   Provide the standard git commands to commit and push:
+    *   Prefer a scoped/safe commit over blanket staging:
         ```bash
-        git add .
+        git add <only-relevant-files>
         git commit -m "feat: vX.X.X - Summary of changes"
         git push origin main
         ```
@@ -468,3 +476,35 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 3. **No Database Heartbeats**: Do not write to the `sessions` table every 15 seconds. Use `window.PRESENCE_CHANNEL.track()`.
 4. **Protect the UI**: When rendering data from WebSockets, always check `isUserTyping()` or specific input focus states to ensure you do not wipe out a user's active text field.
 5. **Mutex Saves**: If modifying `saveToServer` or `_processSaveQueue`, you must respect the `_IS_PROCESSING_SAVE` mutex to prevent concurrent database upsert corruption.
+6. **Digital Script Linking**: Do not reintroduce trainee+assessment fallback openers for digital marked scripts. Viewer routing must remain strict on `submissionId`.
+
+## 9. Cross-Module Contracts (Change Safety)
+> **AI INSTRUCTION:** Treat these as behavioral contracts. Changes touching any one module must preserve the full contract chain.
+
+### A. Digital Submission Contract
+1. `assessment_trainee.js` creates authoritative submission attempts (`submissions.id`).
+2. `assessment_admin.js` and report/search/admin views must resolve digital scripts by `submissionId` only.
+3. `records` linkage for digital scripts must preserve `record.submissionId`.
+4. Any UI fallback by trainee+assessment is considered unsafe and can bind the wrong attempt.
+
+### B. Vetting Completion Contract
+1. Trainee status can move to `submitting` before `completed`.
+2. Final `completed` requires authoritative server verification of the linked submission pipeline.
+3. Restart continuity must be preserved (a user in `submitting` should retry verification automatically).
+4. Admin/runtime displays must tolerate `submitting` as an intermediate status.
+
+### C. Identity & Merge Contract
+1. Identity comparisons must remain normalized/case-insensitive where roster/user matching is involved.
+2. `performSmartMerge()` must merge across union of schema/server/local keys, not schema-only assumptions.
+3. `revokedUsers`/tombstone semantics must remain preserved through merge and sync.
+
+### D. Native Cache Durability Contract
+1. Disk-cache writes must remain atomic (temp write + rename).
+2. Boot recovery must validate JSON before trusting cached payloads.
+3. Backup fallback (`.bak`) should be retained for recovery from partial/truncated writes.
+
+### E. Rollout Preflight (Required Before Push)
+1. Run targeted security/flow tests for changed subsystems.
+2. Run full test suite at least once for release candidates.
+3. Confirm commit scope excludes backup artifacts, local recovery dumps, and unrelated deletions.
+4. Update `AI_CONTEXT.md` release notes when contracts or architecture change.

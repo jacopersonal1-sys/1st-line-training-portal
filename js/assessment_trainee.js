@@ -474,13 +474,9 @@ async function submitTest(forceSubmit = false) {
         const records = JSON.parse(localStorage.getItem('records') || '[]');
         const recordId = `record_${submission.id}`;
         
-        const existingIdx = records.findIndex(r => 
+        const existingIdx = records.findIndex(r =>
             r.submissionId === submission.id ||
-            r.id === recordId ||
-            r.trainee.toLowerCase() === CURRENT_USER.user.toLowerCase() && 
-            r.assessment.toLowerCase() === window.CURRENT_TEST.title.toLowerCase() &&
-            (r.groupID||'').toLowerCase() === groupId.toLowerCase() &&
-            (r.phase||'').toLowerCase() === phaseVal.toLowerCase()
+            r.id === recordId
         );
 
         const newRecord = {
@@ -514,7 +510,10 @@ async function submitTest(forceSubmit = false) {
         localStorage.setItem('records', JSON.stringify(records));
     }
 
-    if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], false);
+    if (typeof saveToServer === 'function') {
+        // Final submissions are business-critical, so do not leave them on the debounced queue.
+        await saveToServer(['submissions', 'records'], true);
+    }
 
     if (typeof exitArena === 'function') {
         try {

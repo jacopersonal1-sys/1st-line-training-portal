@@ -666,11 +666,46 @@ ipcMain.on('show-notification', (event, { title, body }) => {
 });
 
 // --- NATIVE DISK CACHE (Infinite Storage / Auto-Backup) ---
+async function writeNativeCacheAtomically(cachePath, jsonData) {
+    const tmpPath = `${cachePath}.tmp-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    const bakPath = `${cachePath}.bak`;
+    let movedToBackup = false;
+
+    try {
+        await fs.promises.writeFile(tmpPath, jsonData, 'utf8');
+
+        if (fs.existsSync(cachePath)) {
+            try { await fs.promises.unlink(bakPath); } catch (e) {}
+            await fs.promises.rename(cachePath, bakPath);
+            movedToBackup = true;
+        }
+
+        await fs.promises.rename(tmpPath, cachePath);
+        if (movedToBackup) {
+            try { await fs.promises.unlink(bakPath); } catch (e) {}
+        }
+        return true;
+    } catch (error) {
+        try { await fs.promises.unlink(tmpPath); } catch (e) {}
+        if (movedToBackup && !fs.existsSync(cachePath)) {
+            try { await fs.promises.rename(bakPath, cachePath); } catch (e) {}
+        }
+        throw error;
+    }
+}
+
+async function readValidatedCacheFile(filePath) {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = await fs.promises.readFile(filePath, 'utf8');
+    JSON.parse(raw);
+    return raw;
+}
+
 ipcMain.handle('save-disk-cache', async (event, jsonData) => {
     try {
         const cachePath = path.join(app.getPath('userData'), 'native_cache.json');
-        // Write asynchronously to prevent blocking the main thread
-        await fs.promises.writeFile(cachePath, jsonData, 'utf8');
+        const payload = typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData || {});
+        await writeNativeCacheAtomically(cachePath, payload);
         return true;
     } catch(e) {
         console.error("Disk Cache Save Error:", e);
@@ -681,9 +716,25 @@ ipcMain.handle('save-disk-cache', async (event, jsonData) => {
 ipcMain.handle('load-disk-cache', async (event) => {
     try {
         const cachePath = path.join(app.getPath('userData'), 'native_cache.json');
-        if (fs.existsSync(cachePath)) {
-            return await fs.promises.readFile(cachePath, 'utf8');
+        const backupPath = `${cachePath}.bak`;
+
+        try {
+            const primary = await readValidatedCacheFile(cachePath);
+            if (primary) return primary;
+        } catch (e) {
+            console.warn('Primary native cache file is invalid JSON. Attempting backup restore.');
         }
+
+        try {
+            const backup = await readValidatedCacheFile(backupPath);
+            if (backup) {
+                await writeNativeCacheAtomically(cachePath, backup);
+                return backup;
+            }
+        } catch (e) {
+            console.warn('Backup native cache file is invalid JSON.');
+        }
+
         return null;
     } catch(e) { return null; }
 });

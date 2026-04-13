@@ -245,6 +245,23 @@ const App = {
             return;
         }
 
+        if (myData && myData.status === 'submitting') {
+            this.stopTraineePollers();
+            const gateReason = myData.completionGate && myData.completionGate.reason
+                ? myData.completionGate.reason
+                : 'Verifying server-side submission and record state.';
+            container.innerHTML = `
+                <div style="text-align:center; padding:50px;">
+                    <i class="fas fa-cloud-upload-alt" style="font-size:4rem; color:#3498db; margin-bottom:20px;"></i>
+                    <h3>Submission Sync In Progress</h3>
+                    <p style="font-size:1rem; margin-bottom:20px; color:var(--text-muted);">Please stay on this screen while final sync checks complete.</p>
+                    <div style="display:inline-flex; align-items:center; gap:10px; padding:10px 14px; border-radius:8px; border:1px solid #3498db; background:rgba(52,152,219,0.1); color:#3498db; font-weight:600;">
+                        <i class="fas fa-circle-notch fa-spin"></i> ${gateReason}
+                    </div>
+                </div>`;
+            return;
+        }
+
         if (myData && myData.status === 'started') {
             // Kiosk In-Progress View
             container.innerHTML = `
@@ -483,7 +500,7 @@ const App = {
         if (emptyRow) emptyRow.remove();
 
         // Dynamic Sort (Blocked to top)
-        const statusPriority = { 'blocked': 1, 'waiting': 2, 'ready': 2, 'started': 3, 'completed': 4 };
+        const statusPriority = { 'blocked': 1, 'waiting': 2, 'ready': 2, 'started': 3, 'submitting': 4, 'completed': 5 };
         displayEntries.sort((a, b) => {
             const pA = statusPriority[a[1].status] || 99;
             const pB = statusPriority[b[1].status] || 99;
@@ -499,6 +516,7 @@ const App = {
             let rowClass = '';
 
             if (data.status === 'started') statusBadge = '<span class="status-badge status-semi"><i class="fas fa-play"></i> In Progress</span>';
+            if (data.status === 'submitting') statusBadge = '<span class="status-badge status-improve"><i class="fas fa-cloud-upload-alt"></i> Syncing</span>';
             if (data.status === 'completed') statusBadge = '<span class="status-badge status-pass"><i class="fas fa-check"></i> Completed</span>';
             if (data.status === 'ready') statusBadge = '<span class="status-badge status-pass"><i class="fas fa-thumbs-up"></i> Ready</span>';
             if (data.status === 'blocked') {
@@ -543,6 +561,8 @@ const App = {
                 const m = Math.floor(elapsed / 60);
                 const s = elapsed % 60;
                 timerDisplay = `<span class="vt-live-timer" data-start="${data.startedAt}" style="font-family:monospace; font-weight:bold; font-size:1.1rem; color:var(--primary);">${m}m ${s < 10 ? '0' : ''}${s}s</span>`;
+            } else if (data.status === 'submitting') {
+                timerDisplay = `<span style="font-family:monospace; font-weight:bold; font-size:1.1rem; color:#3498db;">Syncing...</span>`;
             } else if (data.status === 'completed') timerDisplay = `<span style="font-family:monospace; font-weight:bold; font-size:1.1rem; color:#2ecc71;">Done</span>`;
             else if (data.timer) timerDisplay = `<span style="font-family:monospace; font-weight:bold; font-size:1.1rem;">${data.timer}</span>`;
 
@@ -565,7 +585,8 @@ const App = {
             if (tr.querySelector('.col-timer').innerHTML !== timerDisplay) tr.querySelector('.col-timer').innerHTML = timerDisplay;
             if (tr.querySelector('.col-sec').innerHTML !== securityHtml) tr.querySelector('.col-sec').innerHTML = securityHtml;
             
-            const htmlCtrl = `<div style="display:flex; align-items:center; justify-content:flex-end; gap:10px;">${switchHtml}${refreshBtn}${mainAction}</div>`;
+            const excludeBtn = isViewer ? '' : `<button class="btn-outline btn-sm" onclick="App.excludeTrainee('${session.sessionId}', '${safeUser}')" title="Exclude"><i class="fas fa-user-times"></i></button>`;
+            const htmlCtrl = `<div style="display:flex; align-items:center; justify-content:flex-end; gap:10px;">${switchHtml}${refreshBtn}${excludeBtn}${mainAction}</div>`;
             if (tr.querySelector('.col-ctrl').innerHTML !== htmlCtrl) tr.querySelector('.col-ctrl').innerHTML = htmlCtrl;
         });
 
@@ -698,6 +719,10 @@ const App = {
         try {
             await DataService.saveSessionDirectly(session);
             await DataService.flushPendingOps();
+            // Nudge trainees so their runtimes refresh immediately
+            if (typeof DataService.nudgeTraineesForSession === 'function') {
+                try { await DataService.nudgeTraineesForSession(session); } catch(e) { /* best-effort */ }
+            }
             this.render();
         } catch (e) {
             console.warn("Force refresh failed:", e);
@@ -724,6 +749,34 @@ const App = {
         
         // 2. Safe Server Patch (Prevents race conditions)
         await DataService.patchSessionUser(sessionId, username, patchData);
+    },
+
+    excludeTrainee: async function(sessionId, username) {
+        if(!confirm(`Exclude ${username} from this session?`)) return;
+        let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        const session = activeSessions.find(s => s.sessionId === sessionId);
+        if (!session) return;
+
+        // Remove direct key and any alias keys that match
+        if (session.trainees && session.trainees[username]) delete session.trainees[username];
+        Object.keys(session.trainees || {}).forEach(k => {
+            if (k !== username && App.identitiesMatch(k, username)) delete session.trainees[k];
+        });
+
+        localStorage.setItem('adminVettingSessions', JSON.stringify(activeSessions));
+
+        try {
+            await DataService.saveSessionDirectly(session);
+            // Nudge excluded trainee so their client updates immediately
+            if (typeof DataService.nudgeTrainee === 'function') {
+                try { await DataService.nudgeTrainee(username, `vetting_exclude:${encodeURIComponent(sessionId)}`); } catch(e) {}
+            }
+            await DataService.flushPendingOps();
+        } catch (e) {
+            console.warn('Exclude failed:', e);
+        }
+
+        this.render();
     },
 
     // --- TRAINEE SECURITY ACTIONS ---
@@ -763,14 +816,29 @@ const App = {
             let errors = [];
             
             // Call the core Electron IPC (Inherits WhatsApp/Edge logic automatically)
-            if (!isRelaxed && typeof require !== 'undefined') {
-                const { ipcRenderer } = require('electron');
-                const screenCount = await ipcRenderer.invoke('get-screen-count');
-                if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
-                
-                const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
-                const apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
-                if (apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
+            if (!isRelaxed) {
+                try {
+                    let screenCount = 0;
+                    if (window.electronAPI && typeof window.electronAPI.getScreenCount === 'function') {
+                        screenCount = await window.electronAPI.getScreenCount();
+                    } else if (typeof require !== 'undefined') {
+                        const { ipcRenderer } = require('electron');
+                        screenCount = await ipcRenderer.invoke('get-screen-count');
+                    }
+                    if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
+
+                    const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                    let apps = [];
+                    if (window.electronAPI && typeof window.electronAPI.getProcessList === 'function') {
+                        apps = await window.electronAPI.getProcessList(forbidden.length > 0 ? forbidden : null);
+                    } else if (typeof require !== 'undefined') {
+                        const { ipcRenderer } = require('electron');
+                        apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
+                    }
+                    if (apps && apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
+                } catch (e) {
+                    console.warn('[Vetting] IPC check failed', e);
+                }
             }
 
             const logBox = document.getElementById('sandboxSecurityLog');
@@ -809,36 +877,58 @@ const App = {
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         if (myData && myData.relaxed && !forceGlobalKiosk) {
             this.state.securityWarningCount = 0;
-            if (typeof require !== 'undefined') {
-                const { ipcRenderer } = require('electron');
-                ipcRenderer.invoke('set-kiosk-mode', false).catch(()=>{});
-                ipcRenderer.invoke('set-content-protection', false).catch(()=>{});
-            }
+            try {
+                if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                    window.electronAPI.setKioskMode(false).catch(()=>{});
+                    window.electronAPI.setContentProtection(false).catch(()=>{});
+                } else if (typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    ipcRenderer.invoke('set-kiosk-mode', false).catch(()=>{});
+                    ipcRenderer.invoke('set-content-protection', false).catch(()=>{});
+                }
+            } catch (e) { console.warn('[Vetting] Error dropping shields', e); }
             return; // Admin dropped shields mid-test
         }
 
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            
+        try {
             // Ensure shields stay up
-            ipcRenderer.invoke('set-kiosk-mode', true).catch(()=>{});
-            ipcRenderer.invoke('set-content-protection', true).catch(()=>{});
-            
-            const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
-            const apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
-            const screens = await ipcRenderer.invoke('get-screen-count');
-            
-            if (apps.length > 0 || screens > 1) {
-                this.state.securityWarningCount++;
-                // 4 strikes (~12 seconds) before kick
-                if (this.state.securityWarningCount >= 4) {
-                    alert("Security Violation: Background App Detected. Test Terminated.");
-                    this.exitArena();
+            if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                window.electronAPI.setKioskMode(true).catch(()=>{});
+                window.electronAPI.setContentProtection(true).catch(()=>{});
+
+                const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                const apps = await window.electronAPI.getProcessList(forbidden.length > 0 ? forbidden : null).catch(()=>[]);
+                const screens = await window.electronAPI.getScreenCount().catch(()=>0);
+
+                if ((apps && apps.length > 0) || (screens && screens > 1)) {
+                    this.state.securityWarningCount++;
+                    if (this.state.securityWarningCount >= 4) {
+                        alert("Security Violation: Background App Detected. Test Terminated.");
+                        this.exitArena();
+                    }
+                } else {
+                    this.state.securityWarningCount = 0;
                 }
-            } else {
-                this.state.securityWarningCount = 0; // Forgive if they close it quickly
+            } else if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                ipcRenderer.invoke('set-kiosk-mode', true).catch(()=>{});
+                ipcRenderer.invoke('set-content-protection', true).catch(()=>{});
+
+                const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                const apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
+                const screens = await ipcRenderer.invoke('get-screen-count');
+
+                if (apps.length > 0 || screens > 1) {
+                    this.state.securityWarningCount++;
+                    if (this.state.securityWarningCount >= 4) {
+                        alert("Security Violation: Background App Detected. Test Terminated.");
+                        this.exitArena();
+                    }
+                } else {
+                    this.state.securityWarningCount = 0; // Forgive if they close it quickly
+                }
             }
-        }
+        } catch (e) { console.warn('[Vetting] checkActiveSecurity error', e); }
     },
 
     enterArena: async function() {
@@ -849,11 +939,16 @@ const App = {
         const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         const isRelaxed = !!(myData && myData.relaxed && !forceGlobalKiosk);
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            await ipcRenderer.invoke('set-kiosk-mode', !isRelaxed);
-            await ipcRenderer.invoke('set-content-protection', !isRelaxed);
-        }
+        try {
+            if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                await window.electronAPI.setKioskMode(!isRelaxed);
+                await window.electronAPI.setContentProtection(!isRelaxed);
+            } else if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                await ipcRenderer.invoke('set-kiosk-mode', !isRelaxed);
+                await ipcRenderer.invoke('set-content-protection', !isRelaxed);
+            }
+        } catch (e) { console.warn('[Vetting] enterArena IPC error', e); }
         await DataService.patchSessionUser(this.state.traineeSession.sessionId, username, { status: 'started', startedAt: Date.now() });
         this.renderTrainee(); // Render active view
     },
@@ -862,11 +957,16 @@ const App = {
         this.stopTraineePollers();
         const username = this.getMyUsername();
         if (!username || !this.state.traineeSession) return;
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            await ipcRenderer.invoke('set-kiosk-mode', false);
-            await ipcRenderer.invoke('set-content-protection', false);
-        }
+        try {
+            if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
+                await window.electronAPI.setKioskMode(false);
+                await window.electronAPI.setContentProtection(false);
+            } else if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                await ipcRenderer.invoke('set-kiosk-mode', false);
+                await ipcRenderer.invoke('set-content-protection', false);
+            }
+        } catch (e) { console.warn('[Vetting] exitArena IPC error', e); }
         await DataService.patchSessionUser(this.state.traineeSession.sessionId, username, { status: 'completed' });
         this.renderTrainee(); // Render completion screen
     }

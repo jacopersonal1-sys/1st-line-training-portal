@@ -342,9 +342,11 @@ function renderAgentDashboard(agentName) {
                 ${items.map(i => {
                     let action = '-';
                     if (i.link === 'Digital-Assessment' || i.link === 'Live-Session') {
-                        // Use submissionId if available, else fallback to trainee+assessment lookup
-                        const clickAction = i.submissionId ? `viewCompletedTest('${i.submissionId}', null, 'view')` : `viewCompletedTest('${i.trainee.replace(/'/g, "\\'")}', '${i.assessment.replace(/'/g, "\\'")}', 'view')`;
-                        action = `<button class="btn-secondary btn-sm" onclick="${clickAction}" title="View Submission"><i class="fas fa-eye"></i></button>`;
+                        if (i.submissionId) {
+                            action = `<button class="btn-secondary btn-sm" onclick="viewCompletedTest('${i.submissionId}', null, 'view')" title="View Submission"><i class="fas fa-eye"></i></button>`;
+                        } else {
+                            action = `<button class="btn-secondary btn-sm" style="opacity:0.5; cursor:not-allowed;" disabled title="Missing submission ID"><i class="fas fa-eye-slash"></i></button>`;
+                        }
                     } else if (i.link && i.link.startsWith('http')) {
                         action = `<a href="${i.link}" target="_blank" class="btn-secondary btn-sm" style="text-decoration:none;"><i class="fas fa-external-link-alt"></i></a>`;
                     }
