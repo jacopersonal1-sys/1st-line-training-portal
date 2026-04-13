@@ -393,6 +393,12 @@
                 showSecurityViolationOverlay(`Security Violation: Forbidden apps detected (${apps.join(', ')}). Test ending.`, true);
                 if (typeof window.submitTest === 'function') await window.submitTest(true);
                 IS_SUBMITTING_VIOLATION = false;
+                // Ensure the fatal overlay used during submission is removed
+                // so the UI (Enter/Start buttons) becomes clickable again.
+                try {
+                    const ov = document.getElementById('security-violation-overlay');
+                    if (ov && ov.dataset && ov.dataset.fatal) ov.remove();
+                } catch (e) {}
                 return;
             }
         }

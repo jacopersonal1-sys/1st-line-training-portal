@@ -200,6 +200,18 @@ function isUserTyping() {
     return (tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable);
 }
 
+// Safe localStorage JSON parse helper to avoid exceptions when value is invalid
+function safeLocalParse(key, fallback = null) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === 'undefined') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`safeLocalParse: failed parsing localStorage['${key}']`);
+        return fallback;
+    }
+}
+
 // --- HARD DELETE PROTOCOL (Ghost Data Fix) ---
 const PENDING_DEL_KEY = 'system_pending_deletes';
 const TOMBSTONE_KEY = 'system_tombstones'; // New: Persistent Blacklist for Deleted IDs
@@ -209,7 +221,7 @@ async function hardDelete(tableName, id) {
     if (!tableName || !id) return;
     
     // 1. Queue it (Persistence)
-    const queue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+    const queue = safeLocalParse(PENDING_DEL_KEY, []);
     // Avoid duplicates
     if (!queue.some(i => i.type === 'id' && i.table === tableName && i.id === id)) {
         queue.push({ type: 'id', table: tableName, id: id, ts: Date.now() });
@@ -217,7 +229,7 @@ async function hardDelete(tableName, id) {
     }
 
     // 1.5 Add to Tombstones (Local Blacklist) to prevent immediate reappearance
-    const tombstones = JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]');
+    const tombstones = safeLocalParse(TOMBSTONE_KEY, []);
     if (!tombstones.includes(id)) {
         tombstones.push(id);
         localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(tombstones));
@@ -236,7 +248,7 @@ async function hardDelete(tableName, id) {
 async function hardDeleteByQuery(tableName, column, value) {
     if (!tableName || !column || !value) return;
 
-    const queue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+    const queue = safeLocalParse(PENDING_DEL_KEY, []);
     queue.push({ type: 'query', table: tableName, col: column, val: value, ts: Date.now() });
     localStorage.setItem(PENDING_DEL_KEY, JSON.stringify(queue));
 
@@ -247,7 +259,7 @@ async function hardDeleteByQuery(tableName, column, value) {
 async function processPendingDeletes() {
     if (!window.supabaseClient) return;
     
-    const queue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+    const queue = safeLocalParse(PENDING_DEL_KEY, []);
     if (queue.length === 0) return;
 
     console.log(`Processing ${queue.length} pending deletes...`);
@@ -361,7 +373,7 @@ async function loadFromServer(silent = false) {
                 const localKey = IS_DEMO_MODE ? doc.key.replace('demo_', '') : doc.key;
                 // SMART PULL: Always try to merge JSON data to prevent overwriting local unsaved drafts
                 // We use 'server_wins' strategy here: If an item exists in both, Server version is the truth.
-                const localVal = JSON.parse(localStorage.getItem(localKey));
+                const localVal = safeLocalParse(localKey, null);
                 
                 // FIX: For specific Admin keys (Rosters, Schedules, Tests), do NOT merge. 
                 // Merging restores deleted items if the server hasn't updated yet or if we are out of sync.
@@ -391,11 +403,11 @@ async function loadFromServer(silent = false) {
         }
 
         // --- PRE-PROCESS: Load Pending Deletes to prevent Ghost Data ---
-        const pendingQueue = JSON.parse(localStorage.getItem(PENDING_DEL_KEY) || '[]');
+        const pendingQueue = safeLocalParse(PENDING_DEL_KEY, []);
         const pendingIds = new Set(pendingQueue.filter(i => i.type === 'id').map(i => i.id));
-        const tombstoneIds = new Set(JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]'));
+        const tombstoneIds = new Set(safeLocalParse(TOMBSTONE_KEY, []));
         const pendingQueries = pendingQueue.filter(i => i.type === 'query');
-        const revokedUsers = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        const revokedUsers = safeLocalParse('revokedUsers', []);
         const revokedSet = new Set(revokedUsers.map(u => String(u || '').toLowerCase()));
 
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
@@ -524,7 +536,7 @@ async function loadFromServer(silent = false) {
                     return item;
                 });
 
-                let localItems = JSON.parse(localStorage.getItem(localKey) || '[]');
+                let localItems = safeLocalParse(localKey, []);
                 
                 // --- TRAINEE LOCAL CACHE PURGE (Free up memory from past global syncs) ---
                 if (isTrainee) {
@@ -536,7 +548,7 @@ async function loadFromServer(silent = false) {
                 }
                 
                 const hashMapKey = `hash_map_${localKey}`;
-                const hashMap = JSON.parse(localStorage.getItem(hashMapKey) || '{}');
+                const hashMap = safeLocalParse(hashMapKey, {});
                 
                 // --- THE GHOST SLAYER (LOCAL PURGE) ---
                 // Actively destroy items in the local cache that have been deleted globally,
@@ -675,7 +687,7 @@ async function loadFromServer(silent = false) {
                 
             if (monRows) {
                 // Merge server state into local monitor_data
-                const monData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                const monData = safeLocalParse('monitor_data', {});
                 monRows.forEach(r => {
                     const isDeleted = pendingQueries.some(q => q.table === 'monitor_state' && q.col === 'user_id' && q.val === r.user_id);
                     if (!isDeleted) {
@@ -684,7 +696,7 @@ async function loadFromServer(silent = false) {
                 });
                 
                 // Preserve MY local state (Optimistic UI)
-                const currentLocal = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                const currentLocal = safeLocalParse('monitor_data', {});
                 if (currentLocal[CURRENT_USER.user]) {
                     monData[CURRENT_USER.user] = currentLocal[CURRENT_USER.user];
                 }
@@ -693,7 +705,7 @@ async function loadFromServer(silent = false) {
         }
 
         // --- PHASE D: POST-SYNC ACTIONS ---
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = safeLocalParse('system_config', {});
         if (config.security && config.security.lockdown_mode && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
             alert("⚠️ EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
             if(typeof logout === 'function') logout();

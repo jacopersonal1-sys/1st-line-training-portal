@@ -1,0 +1,1054 @@
+{
+  "meta": {
+    "type": "tests_rework_recovery",
+    "createdAt": "2026-04-10T13:15:26.4281929+02:00",
+    "sourceCurrent": "1stLine_Backup_2026-04-10.json",
+    "sourceCache": "sanitized_1st-line-training-portal_20260410_105257.json",
+    "addedTitles": [
+      "Course 5 - Fibre No Internet (Rework)",
+      "Course 2 - Programs & Websites - CHIP (Rework)",
+      "1st Vetting - Course 1 - 3 1st Vetting Test (Rework)"
+    ]
+  },
+  "recovered": [
+    {
+      "id": "1775819726372_375cc878",
+      "type": "standard",
+      "title": "Course 5 - Fibre No Internet (Rework)",
+      "duration": null,
+      "questions": [
+        {
+          "id": "1770907341082_pd08ajerh",
+          "text": "<b>True / False : </b>A ONU can only be a stand alone unit not a intergrated unit with the router.",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 1,
+          "options": [
+            "True",
+            "False"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770907389295_5hi7dy1mg",
+          "text": "<b>True / False :</b> The OLT is located on the customers premises.",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 1,
+          "options": [
+            "True",
+            "False"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770907412093_s0ya2vfk6",
+          "text": "Explain the reason for your answer in question 2&nbsp;",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "",
+          "modelAnswer": "",
+          "linkedToPrevious": true
+        },
+        {
+          "id": "1770907460325_jjtkvoe4z",
+          "text": "What are the three key points when starting a interaction with a customer ?",
+          "type": "text",
+          "points": 3,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>Show empathy</li></ul></div><div><ul><li>listen atentavely</li></ul></div><div><ul><li>Confirm Understanding</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770907583069_s1xhyax4q",
+          "text": "Where can you confirm maintanace or active network outages affecting a customer (select all that apply) :",
+          "type": "multi_select",
+          "points": 4,
+          "correct": [
+            0,
+            1,
+            4,
+            5
+          ],
+          "options": [
+            "MS Team CHannel 7.4.1",
+            "MS Team Channel 7.4.2",
+            "MS Team Channel 2.1.2",
+            "MS Team Channel 7.6.2",
+            "MS Team Channel 7.4.0",
+            "CHIP"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770907648207_vxe18dr5y",
+          "text": "How are objections relating to a network outage addressed between you as a first line support agent and the customer ?",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>acknowledge customer frustration</li><li>explain that updates are posted in real time when available</li></ul></div><div><br></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770907683980_02nyxbknm",
+          "cols": [
+            "Internal Outage",
+            "External Outage"
+          ],
+          "rows": [
+            "These outages are not in the control of herotel / our infrastructure.",
+            "These outages are where Herotel has control over the problem / infrastructure",
+            "A upstream provider is not capable of giving the Herotel network full bandwidth capacity",
+            "A PON on a OLT is offline"
+          ],
+          "text": "Match the description to the term being described",
+          "type": "matrix",
+          "points": 4,
+          "correct": {
+            "0": "1",
+            "1": "0",
+            "2": "1",
+            "3": "0"
+          },
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770907858716_1nswlhxq1",
+          "text": "<b>True / False :</b> A ticket where the customer is identified as wire down will be escalated to Field Operations ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 0,
+          "options": [
+            "True",
+            "False"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770907941758_7qt8ztt92",
+          "text": "Explain your answer from question 8",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>only a singular customer that is wire down is escalated to FO</li><li>Multiple customer that are wire down on the same EPON and same OLT are escalated to C &amp; A</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": true
+        },
+        {
+          "id": "1770908020667_jq177p2xf",
+          "text": "Why is it important that all cables are correctly connected as well that all equipment is powered on ?",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>To aid in a active data session for the customers connection</li><li>If the cable from the ONU to the router is not in the WAN port the customer will not pull a ADS</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770908102694_wx1k5wmad",
+          "text": "What is the main differance between a commonly used router instilation and a XPON / Calix ?",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<div>The XPON / Calix is a intergrated unit which does not have a seperate ONU but the ONU is build into the router</div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770908132271_thxrseqd4",
+          "text": "Start from the pole with the dome outside the customer premises and order the equipment and cables as they are to be plugged in according to the seperate ONT install standard",
+          "type": "ranking",
+          "items": [
+            "The drop cable is spliced into the dome & the splice casette on the customer premises",
+            "One end of the patch lead is plugged into the splice casette",
+            "The other end of the patch lead is plugged into the ONU",
+            "one end of the LAN cable is plugged into the ONU",
+            "The ONU's power supply needs to be plugged in and on by a wall socket",
+            "The other end of the LAN cable is plugged into the WAN / Internet port on the Gateway",
+            "Other ports not dedicated as WAN / Internet can be used to connect devices such as Tv's , Concoles ect."
+          ],
+          "points": 7,
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770908218270_1ezccz1as",
+          "text": "Starting from the dome in what order is the equipment &amp; cables connected for a integrated ONT install standard.",
+          "type": "ranking",
+          "items": [
+            "The drop cable is spliced into the dome & the splice casette on the customer premises",
+            "One end of the patch lead is plugged into the splice casette",
+            "The other end of the patch lead is plugged into the PON port on the Gateway",
+            "The LAN ports on the Gateway are to connect other devices such as TV's , computers ect."
+          ],
+          "points": 4,
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770908299759_p1jnaprni",
+          "text": "Match the photo to the instilation type :&nbsp;",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 2,
+          "options": [
+            "XPON",
+            "Calix",
+            "Commonly used router"
+          ],
+          "imageLink": "https://hereto.sharepoint.com/:i:/s/CEN_Helpdesk-1stLineTraining/IQAKTqtNLL2uQJaF4T8_q6d7Af9Da_moVdzosAa54q5qVtg?e=sLwjbL",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770963898733_mdve26wg2",
+          "text": "Match the photo to the instilation type",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 0,
+          "options": [
+            "XPON",
+            "Calix",
+            "Commonly used router"
+          ],
+          "imageLink": "https://hereto.sharepoint.com/:i:/s/CEN_Helpdesk-1stLineTraining/IQCE_PXqKDSvQIU1hP1mANjGAWBFdbwscQilrS5qj959xts?e=JfdVFe",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770963991179_v6ckd1vh4",
+          "text": "&nbsp;Match the photo to the instilation type",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 1,
+          "options": [
+            "XPON",
+            "Calix",
+            "Commonly used router"
+          ],
+          "imageLink": "https://hereto.sharepoint.com/:i:/s/CEN_Helpdesk-1stLineTraining/IQCzOyQ2hoUcTKpgmHjD4IahAdrSWisGtTXtP-QAqlHbisA?e=TEfDs0",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964065370_5yz9x9pmz",
+          "text": "Complete the scentance : On ACS a router that reset to default settings will show ______________ by the PPPoE username.",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>Provisioning</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964108330_r223g9v4u",
+          "text": "What must be confirmed on ACS before escalating the ticket to field operations if the SSID is not visible on any devices trying to connect via WiFi ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 2,
+          "options": [
+            "Power and cables",
+            "If the customer is part of a network outage",
+            "If the router reset to default settings",
+            "If the customer is suspended"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964172959_b6co9b6u1",
+          "text": "True / False : If only one device cannot connect to the 5Ghz it is a device compatibility problem instead of a hardware fault on the router.",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 0,
+          "options": [
+            "True",
+            "False"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964217845_kdsk8c2hx",
+          "text": "True / False : If one device cannot connect via Wi-Fi / ethernet but all other devices can connect the ticket has to be escalated to field operations.",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 1,
+          "options": [
+            "True",
+            "False"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964240293_bwjiir0kf",
+          "text": "Explain your answer from question 21",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<div>If only one device cannot connect its a possible device error or faulty hardware on the device , advise the customer to have the device checked by a IT</div>",
+          "modelAnswer": "",
+          "linkedToPrevious": true
+        },
+        {
+          "id": "1770964260070_k2qzpzx24",
+          "text": "A reset routers profile can be found on ACS by searching ?",
+          "type": "multi_select",
+          "points": 2,
+          "correct": [
+            1,
+            2
+          ],
+          "options": [
+            "PPPoE Username",
+            "Serial Number",
+            "WAN MAC address",
+            "WAN IP"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964293661_uzpjvap9l",
+          "text": "Explain your answer from question 23",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>if the router reset the pppoe is provisioning and there for the pppoe username cannot be searched</li><li><li>The WAN IP will not be available if there is no ADS</li></li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": true
+        },
+        {
+          "id": "1770964352697_a9g3uoo60",
+          "text": "Where can you locate the customers WAN MAC to search with on ACS ?",
+          "type": "multi_select",
+          "points": 3,
+          "correct": [
+            2,
+            0,
+            5
+          ],
+          "options": [
+            "Radius logs",
+            "ACS",
+            "Corteza",
+            "Preseem",
+            "Q-Contact",
+            "CHIP"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964400546_5uhxfsgxa",
+          "text": "Take a look at the status of a router on ACS , will this router be reachable from the Herotel network and explain the reason for your answer.&nbsp;",
+          "type": "text",
+          "points": 1,
+          "imageLink": "https://hereto.sharepoint.com/:i:/s/CEN_Helpdesk-1stLineTraining/IQDHU7Wr_KRPRoM8DpnSTY7OAWlQrDnUR87phlAL6taSNBo?e=BcHVhY",
+          "adminNotes": "<div><ul><li>No , the status needs to be last 15 minutes other wise the router is not reachable and changes on it is not possible</li></ul></div><div><br></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964454727_lxia1i0zh",
+          "text": "What tools can be used to confirm if the customers CPE is connected to the Herotel network ?",
+          "type": "multi_select",
+          "points": 3,
+          "correct": [
+            2,
+            0,
+            4
+          ],
+          "options": [
+            "Preseem",
+            "Q-Contact",
+            "ACS",
+            "Streamline",
+            "CHIP"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964494545_b72hdizrp",
+          "text": "Scenario : You have identified that multiple customers on the same OLT and EPON are wire down. According to Preseem the customers disconnected at the same time , what would be your next step.",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 0,
+          "options": [
+            "Update the ticket with all findings and escalate to Config & Analyse",
+            "Escalate to Config & Analyse",
+            "Esclate to your team captain",
+            "Escalate to your team leader"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964588861_2bjcv2td3",
+          "text": "How would you locate a customers ONU on the OLT ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 2,
+          "options": [
+            "Search using the customer account code",
+            "Search using the customers data account",
+            "Search using the customers EPON string",
+            "Search using the customers MAC address"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770964615799_cma38mh25",
+          "text": "Explain the reason for your answer in question 29",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>The EPON string is located on preseem and this method is also trained</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": true
+        }
+      ]
+    },
+    {
+      "id": "1775819726413_ac1eec0e",
+      "type": "live",
+      "title": "Course 2 - Programs & Websites - CHIP (Rework)",
+      "shuffle": false,
+      "duration": null,
+      "questions": [
+        {
+          "id": "1770706479361_naxmghkkx",
+          "text": "Scenario:you have a customer that phoned in having no internet connection, you have confirmed that the customer account code is the following, KCWIL044 you now need to verify the customers gateway status \nPreform The following:\nConfirm that status of the gateway and explain to your trainer what you see ",
+          "type": "live_practical",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "1. Correct account&nbsp;<div>1. Refreshed active sessions and explained status of the pppoe session </div>",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770707018535_i53oja0rl",
+          "text": "Scenario: you have a list of passwords to login to herotel equipment however you need to confirm which hub passwords needs to be used to login to the customers ODU account code KCWIL044&nbsp;<div>&nbsp;- confirm which hub your affected customer connects to</div>",
+          "type": "live_practical",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "1. Client information&nbsp;<div>1. Pointed out Hub name </div>",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770707078930_syce1cx4f",
+          "text": "Question : True or false: Work orders within CHIP will have a quick link to take you directly to the status and details of the OPEN Work order, You would now be able to confirm from the link what the status is for the work order.&nbsp;<div>&nbsp;- Provide a reason for your answer</div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "1. Gave statement of False&nbsp;<div>1. Explained that corteza is the only place to confirm the details</div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770707139334_mfzr150w5",
+          "text": "Perform the following task: Check and confirm if the following client is a VIP (TCWIL178)",
+          "type": "live_practical",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "1. Correct account&nbsp;<div>1. Clearly pointed out and said yes </div>",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1770707217209_osb3hlta1",
+          "text": "Question : True or false You have a customer and they informed that one of there Three radius users is offline, upon login in to chip, chip displays that they are affected by an outage, We immediately inform customer and stop all troubleshooting&nbsp;<div>&nbsp;- Give your answer \n- Explain your answer </div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "1. False&nbsp;<div>&nbsp;1. If the customer has multiple data accounts (sites) its recommended to navigate to the teams outage channels to confirm which site is part of the active outage</div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        }
+      ]
+    },
+    {
+      "id": "1775819726423_4f2bbc07",
+      "type": "vetting",
+      "title": "1st Vetting - Course 1 - 3 1st Vetting Test (Rework)",
+      "duration": "90",
+      "questions": [
+        {
+          "id": "1771852898625_j8z8pvr2t",
+          "text": "<div><b>Scenario :</b> A customer contacts in stating that they are expereincing slow speed , you have confirmed the following :</div><div><ul><li>The customer confirms that when the wireless service was installed a few years ago there were no trees in front of the direction where the antenna is pointing however in the last few months he has noticed that the trees do now seem to be at the same height as his ODU.&nbsp;</li><li>It has also been confirmed that the speed is slow in general its not just specific times</li></ul></div><div><b>Identify the possible cause of the problem&nbsp;</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>LOS is possibly obstructed between the ODU &amp; AP / PTMP</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771852944243_syb63pznh",
+          "text": "<b>Scenario :</b> A customer contacts in and states that they are in the process of downloading a file from one drive. How ever the file is 1 Gb big and only downloading at 5 Mbps. The customer has a 10 Mbps download by 5 Mbps upload package. You log into the customers antenna and confirm that the RX traffic shows 10 Mbps. What does this indicate.",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>The full download bandwidth is being utilized</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853051358_69ymksbdb",
+          "text": "<div><b>Scenario : </b>A customer contacts in and states that they would like to extend there network connection to a work shop on the same premises. The following has been confirmed :</div><div><ul><li>The work shop is 300 m from the original point of instalstion&nbsp;</li><li>You have confirmed that a ethernet cable starts degrading packets at 70 m +-</li></ul></div><div><b>What solution can be offered to the customer to resolve this problem</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>Suggest a PTP</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853120721_orfmapvgb",
+          "text": "<b>Scenario :</b> A customer brings a damaged router into the office stating it has been hit by lighting. The customer does not wish to accumalate any aditional costs and supplies a wireless extender with 2 ariels into the office to be reconfigured as the Gateway. Why will this not resolve the problem.",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 1,
+          "options": [
+            "The extender cannot support the customers bandwidth",
+            "The extender cannot be configured in Gateway mode",
+            "The extender was not supplied by Herotel",
+            "The extenders make & model is not well known"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853162131_ty92yv4wj",
+          "text": "<div><b>Scenario :</b> A customer would like to extend his Wi-Fi connectivity to his lapa by his swimming pool. The following has been confirmed :</div><div><ul><li>The lapa is 50 m from the original instilation point</li><li>The connecting the lapa's equipment to the house's equipment will be exposed to weather</li></ul></div><div><b>What is the best cabling solution for the customers request</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>STP</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853234551_wb9hvk4na",
+          "text": "<div><b>Scenario :</b> A customer contacts in stating that they do not have internet access. You have confirmed the following :&nbsp;</div><div><ul><li>The customer has a fiber package</li><li>The ONT / ONU seems to not have power as the customer states there are no lights burning on it</li><li>The Gateway how ever does have lights burning and there is a ethernet connection present between the ONT / ONU &amp; the Gateway</li><li>There is no active data session for the radius user</li></ul></div><div><b>What is the cause of the customer not having a active data session and why is this your answer.</b></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>ONT / ONU does not have power</li><li>There is nothing to convert the fibre signal received from the herotel network into a copper signal so that the gateway can comunicate to and from the Herotel network</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853300054_fb0zq4vt9",
+          "text": "<div><b>Scenario :</b> The customer contacts in and states that recently they have been doing some construction of a building in the back of their yard. They removed a pole which connected multiple fiber customers to the Herotel network.</div><div><ul><li>Why did removing the pole disconnect multiple customers ?</li></ul></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>The pole has a dome which connects the drop cables into the customers premises</li><li>The dome also connects the customers to the rest of the Herotel network</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853345864_51p4br00r",
+          "text": "<div><b>Scenario : </b>A customer contacted in and confirms that there internet feels slow. When they google or try to upload something to one drive it fails and multiple attempts needs to be made before it uploads. You have confirmed the following&nbsp;</div><div><ul><li>The customer is using UTP cabling on the premises which is a office</li><li>All power sources for the offices originate from one point to keep the cabling neat</li><li>The UTP cable that connects the access point to the switch runs over the power cabling</li></ul></div><div><b>What is the possible cause of the problems being expereinced by the customer and why do you suspect this is the cause of the problem.</b></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<ul><li>EMI</li><li><li>EMI is caused by high currents</li></li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853465840_msnmk87er",
+          "text": "<div><b>Scenario :</b> A customer who has 5 flats in back of his yard contacts in stating that his renters have reported slow speed &amp; intermitted connectivity when they are connected to the Wi-Fi. <b>You have confirmed the following :</b></div><div><ul><li>Each flat has there own access point with its own SSID credentials</li><li>Each access point is connected via a ethernet cable to a switch in the customers home</li><li>The flats are 10 m apart &amp; only one story</li></ul></div><div><b>What could be the possible cause of the slow speed / intermitted connectivty.</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>Wireless interference</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853528786_kjav9vck9",
+          "text": "<div><b>Scenario : </b>A customers contacts into the First Line Support department regarding slow speed &amp; intermitted connectivty. You have confirmed the following :</div><div><ul><li>The customers ethernet cable between the ODU &amp; PoE is syncing at 10 Mbps</li><li>The transmision method is described by the attached image</li></ul></div><div><b>Why is this transmission method not optimal ?</b></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "https://hereto.sharepoint.com/:i:/s/CEN_Helpdesk-1stLineTraining/IQAMK0e9vzj7Q5rPGMsXMwfCAZAArN_ezEhnGSHJdRB_9qI?e=PP9SKv",
+          "adminNotes": "<div><ul><li>Half-Duplex</li><li>The device cannot sent &amp; receive at the time which causes the network to feel slow</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853784405_2su8tue9o",
+          "text": "<div><b>Scenario :</b> A cutomer contacts in and states that they would like to configure port forwarding for their camera's that they can view them remotely. You have confirmed the following :</div><div><ul><li>A wireless install is present on the premises</li><li>The ODU is configured in bridge mode</li></ul></div><div><b>Where should the port forwarding rules be configured and why ?</b></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>Gateway</li><li>The ODU is in bridge mode meaning the packets from the ODU pass on to the gateway , the gateway performs the natting</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853914777_z06vcnbxd",
+          "text": "<div><b>Scenario :</b> A customer contacts in stating that they do not have internet access. You have confirmed the following :</div><div><ul><li>The customers ONU status is wire down</li><li>Multiple customers are confirmed wire down on the same EPON at the same time</li></ul></div><div><b>Which department should this problem be escalated to ?</b></div>",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 3,
+          "options": [
+            "Sales_Specialist",
+            "National_Support",
+            "National_Debtors",
+            "Config & Analyse"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771853983843_rei8my7ft",
+          "text": "<div><b>Scenario :</b> A customer contacts in and states they would like an additional installation on another premises.&nbsp;</div><div><b>Which department can assist with the customers query.</b></div>",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 1,
+          "options": [
+            "Wireless Infrastructure",
+            "Sales",
+            "Field Operations",
+            "Fibre Infrastructure"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854024708_fevy5vlcq",
+          "text": "<div>Which program can the following functions be performed on :</div><div><ul><li>Ticket Creation</li><li>Communication between a customer and a agent</li><li>Communication transfer between the customer and another department</li><li>Ticket escalation to another department</li></ul></div>",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 0,
+          "options": [
+            "Q-Contact",
+            "Preseem",
+            "Streamline",
+            "Corteza"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854077150_9apx1zdwp",
+          "cols": [
+            "ACS",
+            "CHIP",
+            "Corteza",
+            "Preseem"
+          ],
+          "rows": [
+            "Confirming the PPPoE username & PPPoE password",
+            "Changing the Wi-Fi SSID / Password",
+            "Confirm the status of a ONT / ODU",
+            "Configure port forwarding (natting)",
+            "Account & Outage status confirmation",
+            "Radius user status confirmation"
+          ],
+          "text": "Match the function with the program / website on which it can be performed",
+          "type": "matrix",
+          "points": 6,
+          "correct": {
+            "0": "2",
+            "1": "0",
+            "2": "3",
+            "3": "0",
+            "4": "1",
+            "5": "1"
+          },
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854223130_0uzwxxnhp",
+          "cols": [
+            "Active",
+            "Flex-20Mbps-7D",
+            "Suspended",
+            "Cancelled",
+            "Flex-Act",
+            "Flex-Default"
+          ],
+          "rows": [
+            "The customers package has expired. Routing to the herotel website is present. The radius user can still have a active data session.",
+            "The account is not billed , no PPPoE usernames & passwords linked to radius users for this account will authenticate.",
+            "All PPPoE accounts linked to the customers account should be able to authenticate",
+            "The radius user has a active voucer & should be able to authenticate & use bandwidth",
+            "The customer did not make payment and no pppoe credentials linked to any radius users for the account will authenticate.",
+            "The customer is newly installyed. This is the package loaded when the customer is installed.",
+            "The instilation has not taken place yet for the radius user"
+          ],
+          "text": "match the account status to its description",
+          "type": "matrix",
+          "points": 6,
+          "correct": {
+            "0": "5",
+            "1": "3",
+            "2": "0",
+            "3": "1",
+            "4": "2",
+            "5": "1",
+            "6": "4"
+          },
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854548327_e68k966gc",
+          "text": "Which of the following routers are not supported by ACS ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 3,
+          "options": [
+            "XPON HG3221D",
+            "XPON V2801RW",
+            "Totolink A3002RU V3",
+            "Totolink N600",
+            "TP-Link EX141 1500 AC"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854623317_euheczvem",
+          "text": "<div><b>Scenario : </b>A customer contacts in stating that there internet is off. You have confirmed the following :</div><div><ul><li>The SSID the customers devices are picking up is a default configuration</li></ul></div><div><b>How would you locate the customers router on ACS ?</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>Mac address</li><li><li>Mac / serial number</li></li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854673510_pd0rig3di",
+          "text": "<div><b>Scenario : </b>A customer contacts in and states the following :</div><div><ul><li>They are currently not on the premises</li><li>They have someone house sitting for them</li><li>The person house sitting reported a week after the account holder went on vacation that the internet connection is not working</li></ul></div><div><b>You have logged into the radius server and filtered the logs to the last week. How ever no entries are present for that radius user. What does that indicate ?</b></div>",
+          "type": "multi_select",
+          "points": 2,
+          "correct": [
+            1,
+            3
+          ],
+          "options": [
+            "The customers equipment is offline",
+            "The customer equipment has not tried communicating with the radius server in the last 7 days",
+            "The customer has a active data session",
+            "The last communication between the customers Gateway & the Herotel network took place more then 7 days ago"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854755374_nly2333e3",
+          "text": "<b>Scenario :</b> A customer contacts in stating that they suspect lightning hit there ODU. You need to locate the ODU via preseem . Which universal search result do you open ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 2,
+          "options": [
+            "Services",
+            "Accounts",
+            "CPE Radio",
+            "Access Points"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854831958_ghlf5l33l",
+          "cols": [
+            "Offline",
+            "Error",
+            "Unknown",
+            "Online"
+          ],
+          "rows": [
+            "Preseem is able to receive & poll information from the OLT",
+            "This error occurs when there is a problem related to the configuration of a device. In some cases historical metrics are still populated.",
+            "Preseem is not able to poll information. If the AP / OLT is offline then the customers connected to it will also go into a offline status.",
+            "The AP / OLT's IP address has been moved out of the range that Preseem can see. The ODU / ONU connected to this AP or OLT will adopt the same status."
+          ],
+          "text": "Match the status to the description",
+          "type": "matrix",
+          "points": 4,
+          "correct": {
+            "0": "3",
+            "1": "1",
+            "2": "0",
+            "3": "2"
+          },
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771854985254_vz1bxxhyv",
+          "text": "The MAC address for a Gateway can be found under the radius logs where ?",
+          "type": "multi_select",
+          "points": 2,
+          "correct": [
+            2,
+            4
+          ],
+          "options": [
+            "Simultaneous Ongoing Sessions",
+            "User accepted",
+            "Calling-Station-id",
+            "User disconnected failed",
+            "vendor-specific.unisphehe-pppoe-description",
+            "All of the above"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855068234_rx246oz38",
+          "text": "<div><b>Scenario :</b> A customers contacts in stating that they do not have internet access. You have confirmed the following :</div><div><ul><li>The customers cables and power is plugged in correctly&nbsp;</li><li>The equipment is on as there are lights shining on the equipment</li><li>The error \"Rejected because of previous failed authentication\" is present on the radius logs for the radius user</li></ul></div><div><b>What does the error on the radius server indicate and what commonly causes this error</b></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<ul><li>The radius user failed to authenticate 3 times &amp; the radius user was placed in a 5 minute blacklist</li><li><li>Incorrect password , duplicate username request</li></li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855119928_ldxgz5j5d",
+          "text": "What log entry on the radius server indicates that a change was made to the customers package ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 0,
+          "options": [
+            "LDAP Object",
+            "Disconnect Failed",
+            "User () being proxied",
+            "Simultaneous Ongoing Sessions"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855163320_5z53db84h",
+          "text": "<div><b>Scenario :</b> A customers contacts in stating that they are expereincing intermitted connectivity. You have confirmed the following :</div><div><ul><li>The customers equipment is powered on and the cables are plugged in correctly&nbsp;</li><li>There are lights on the equipment indicating its on</li><li>a user being proxied log entry is present for the customers radius user</li></ul></div><div><b>What is the cause of this log entry and how can the problem be resolved ?</b></div><div><br></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>The username has a realm which is confiuged to authenticate on a seperate radius</li><li>Escalate to HB</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855222815_s2jru9k72",
+          "text": "<div><b>Scenario : </b>A customer contacts in and states that they do not have internet access , the following steps have been completed :</div><div><ul><li>Account status is active</li><li>outage status is normal</li><li>The power &amp; cable cycle for the medium has been completed</li></ul></div><div><b>After the power cycle you need to confirm if the active data session is active. What details can be used to confirm a session on the radius server and in which cases are those details used ?</b></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>PPPoE username without @&gt; , confirming the individual radius user ADS</li><li>Account code , confirming all radius users ads linked to the account</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855278554_g9na6hgw8",
+          "text": "<div><b>Scenario :</b> A customer contacts in regarding a First line support query. You need to confirm the customers account &amp; outage status using CHIP. The customer was able to provide the following information :</div><div><ul><li>Cellphone number</li><li>Email address</li><li>Physical Address&nbsp;</li><li>Account code</li></ul></div><div><b>What provided information will you use to search for the customer on CHIP</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>Account Code</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855333426_4gkdmyuab",
+          "text": "Scenario : A customer contacts in relating to a First Line Support query. The customer states that they are listed as a VIP and they would like the problem resolved as soon as possible. Where on CHIP can it be verified that the customer is listed as a VIP ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 3,
+          "options": [
+            "Customer Information (Radius)",
+            "Physical Interfaces",
+            "Data Accounts",
+            "Primary Contact"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855387450_4p4agt00p",
+          "text": "Scenario : A customer contacts in stating that they would like access to there domain in order for there internal IT to manage the email addresses. How do you verify using CHIP that the customer is the account holder for the mentioned domain ?",
+          "type": "multiple_choice",
+          "points": 1,
+          "correct": 2,
+          "options": [
+            "Confirm the customers account is active",
+            "Navigate to the domain and confirm the email addresses with the customer",
+            "Confirm the domain detail",
+            "Confirm how much the customer is billed for a site"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855437031_46n00qp4d",
+          "text": "<div><b>Scenario :</b> A cusotmer contacts in and states that all emails linked to there domain cannot send &amp; receive. You have confirmed the following :</div><div><ul><li>The customer is receiveing a incorrect credentials error</li><li>The domains outer colour panel on the email server is red</li></ul></div><div><b>What is the cause of the problem being expereinced ?</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>The domain is suspended</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855484471_gtav1myul",
+          "text": "<div><b>Scenario :</b> A customer contacts in stating that they cannot send or receive. You have confirmed the following :</div><div><ul><li>The domain is active &amp; not suspended</li><li>The qouta &amp; disk used for the domain is exactly the same</li></ul></div><div><b>What is the cause of the problem being expereinced&nbsp;</b></div>",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>The storage limit for the domain has been reached</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855516146_5kkn8t7bh",
+          "text": "<div><b>Scenario : </b>A customer contacts in stating that they cannot send &amp; receive. You have confirmed the following :</div><div><ul><li>The domain is active and not suspended</li><li>The quote and disk used for the domain &amp; email address storage is correct and the limit has not been reached</li><li>The email deliverability check result shows invalid</li></ul></div><div><br></div><div>1. What is the possible cause of the problem being experienced</div><div>2. How can the problem be resolved</div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>The deliverability check results should be valid</li><li>If anything but valid its escalated to config &amp; analyse</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855610107_sp8n1dhqz",
+          "text": "Scenario : A customer contacts in and provides a domain. They would like to add 2 aditional email addresses to the domain. How do we confirm whether first line support can assist with that qeury ?",
+          "type": "text",
+          "points": 1,
+          "imageLink": "",
+          "adminNotes": "<ul><li>Verify the amount of available emails on the domain</li></ul>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855636138_wm1ucqdqo",
+          "cols": [
+            "CP1",
+            "CP2",
+            "C-Panel Server"
+          ],
+          "rows": [
+            "Ther server the customers domain is present on will determine what changes they can make to the domain / emails on that domain",
+            "Customers share a domain with other customers",
+            "Email  addresses can be added to the domain",
+            "Emails ont his server get 500 mb storage. If more is required its escalated to sales specialists",
+            "Emails on his server get 500 mb storage. If more is required its escalated to sales specialists"
+          ],
+          "text": "match the description to the correct server.",
+          "type": "matrix",
+          "points": 5,
+          "correct": {
+            "0": "2",
+            "1": "1",
+            "2": "0",
+            "3": "1",
+            "4": "1"
+          },
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855796774_87iidiczf",
+          "text": "<div><b>Scenario : </b>While on a phone call with a customer the call dropped. The agent tried contacting the customer back once , did not receive answer and sent the cusotmer a ticket closure email.</div><div><ul><li><b>Was the correct procedure followed. If not what is the correct procedure</b></li></ul></div>",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>No , the correct procedure was not followed</li><li>The correct procedure is to contact the customer 4 times in a shift , 2 hours appart , sending a email every time there is no answer. closing the ticket with a final closure email</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771855903645_n4s16w2mn",
+          "text": "<div><ul><li><b>Scenario 1 :</b> The customer requests to be contacted at a time outside of the agent's shift</li><li><b>Scenario 2 :</b> the next call-back must take place after the agents shift ends</li><li><b>Scenario 3 :</b> the agent is unable to complete all their tickets before the end of their shift</li></ul></div><div><b>How is each scenario handeled&nbsp;</b></div>",
+          "type": "multi_select",
+          "points": 3,
+          "correct": [
+            1,
+            5,
+            6
+          ],
+          "options": [
+            "Scenario 1 - The agent can assign the ticket to another agents whom is available on the next shift ",
+            "Scenario 1 : The agent must notify his team leader with the ticket number",
+            "Scenario 1 : The agent must assign the ticket to the shift handover column",
+            "Scenario 2 : The ageent keeps the tickets on his or her name until the next shift to complete the next call back",
+            "Scenario 2 : The agent assigns the ticket to a agents whom is working the next shift",
+            "Scenario 2 : The agent notify's his or her team leader with the ticket number",
+            "Scenario 3 : The agent nofiy's his or her team leader with the ticket number",
+            "Scenario 3 : The agent ends his or her shift with the tickets still being assigned to him or her and continues working on the ticket during their next shift",
+            "Scenario 3 : The agents assigns all remaining tickets equily between the next shifts team members"
+          ],
+          "imageLink": "",
+          "adminNotes": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771856055914_tippntuuz",
+          "text": "<div><b>Scenario : </b>A customer contacts in regarding an existing ticket. During the communication the following is confirmed :The ticket was logged with the incorrect department and is a sales related qeury.</div><div><ul><li>You are in the process of transferring the customer to the sales department but must also assign the ticket to the sales department. What are the required changes that needs to take place on the ticket to ensure it reaches the correct department.</li></ul></div>",
+          "type": "text",
+          "points": 3,
+          "imageLink": "",
+          "adminNotes": "<div><div><ul><li>Type</li><li>Department &amp; assigned to should be the department example sales_specialist</li><li>The data account must be selected</li></ul></div></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        },
+        {
+          "id": "1771856136231_duwjohnu3",
+          "text": "<b>Scenario :</b> A customer contacts in and states that they have been expereincing slow speed for the past month and they wish to cancel. What is the correct procedure.",
+          "type": "text",
+          "points": 2,
+          "imageLink": "",
+          "adminNotes": "<div><ul><li>Offer to assist the customer first</li><li>Escalate to a team leader if the problem is not resolved after assistance</li></ul></div>",
+          "modelAnswer": "",
+          "linkedToPrevious": false
+        }
+      ]
+    }
+  ]
+}

@@ -2570,6 +2570,14 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.15": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena Fix:</strong> Fixed an issue where the compliance overlay could repeat and block the Enter/Start button.</li>
+                <li style="margin-bottom: 8px;"><strong>Crash Prevention:</strong> Added defensive JSON parsing to prevent crashes from invalid localStorage values.</li>
+                <li style="margin-bottom: 8px;"><strong>Data Recovery & Sync:</strong> Improved tombstone/pending-delete handling and duplicate-rework safeguards during import.</li>
+                <li style="margin-bottom: 8px;"><strong>Agent Access Recovery:</strong> Addressed client-binding revocation edge-cases and added recovery tooling for revoked clients.</li>
+                <li style="margin-bottom: 8px;"><strong>Misc:</strong> General bug fixes and stability improvements.</li>
+            </ul>`,
         "2.6.14": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting False-Submit Hotfix:</strong> Fixed stale local trainee session carryover that could incorrectly show "Assessment Submitted" before a trainee starts a new vetting session.</li>
