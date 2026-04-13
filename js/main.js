@@ -1765,7 +1765,7 @@ function updateSidebarVisibility() {
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
             const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework', 'superadmin-studio'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly', 'test-records'];
+            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly'];
             
             // Special Check for Arena
             if (targetTab === 'vetting-arena') {
@@ -1832,6 +1832,13 @@ function showTab(id, btn) {
 
   if (CURRENT_USER && CURRENT_USER.role !== 'super_admin' && id === 'superadmin-studio') {
       return;
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id === 'test-records') {
+      if (typeof showToast === 'function') {
+          showToast("Marked scripts are not available to trainees after review.", "warning");
+      }
+      id = 'monthly';
   }
   
   // --- ROGUE TIMER PREVENTION ---
@@ -2570,6 +2577,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.16": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Release Rollout:</strong> Version bumped to 2.6.16 so updater delivery can proceed beyond already-installed 2.6.15 clients.</li>
+                <li style="margin-bottom: 8px;"><strong>Digital Script Safety:</strong> Viewer routing remains strict on <code>submissionId</code> to prevent duplicate-attempt misbinding.</li>
+                <li style="margin-bottom: 8px;"><strong>Vetting Completion Reliability:</strong> Completion gating now verifies authoritative submission pipeline state before final <code>completed</code> status.</li>
+                <li style="margin-bottom: 8px;"><strong>Cache Durability:</strong> Native disk cache uses atomic write + validated backup recovery to prevent truncated cache restores.</li>
+            </ul>`,
         "2.6.15": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Arena Fix:</strong> Fixed an issue where the compliance overlay could repeat and block the Enter/Start button.</li>

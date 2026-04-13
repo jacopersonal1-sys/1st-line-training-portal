@@ -390,6 +390,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.16 (Release Rollout, 2026-04-13):** Version increment for production rollout delivery so clients already on `2.6.15` can receive the latest hardening package. Reinforces strict `submissionId` linking, vetted completion-gate semantics, and atomic disk-cache recovery as active release contracts.
 - **v2.6.15 (Rollout Hardening Addendum, 2026-04-13):** Added strict `submissionId`-only digital script viewing in reporting/admin/search flows, removed trainee+assessment fallback linking in digital record upserts, added vetting completion gate (`submitting` -> `completed`) that verifies authoritative submission pipeline state (including retry continuity across restart), hardened native disk-cache persistence with atomic writes + backup recovery, and widened `performSmartMerge` scope to merge on the union of schema/server/local keys.
 - **v2.6.14:** Hardened Vetting 2.0 false-submit prevention. Trainee runtime now avoids carrying local `completed` status across new session IDs, identity-collision matching now prefers non-completed status for alias usernames, and vetting session start/nudge paths seed canonical `waiting` trainee entries to reduce first-sync ambiguity.
 - **v2.6.13:** Hardened recovery and shared-state persistence safety: explicit strict shared-key saves (users/tests/schedules/live state) now flush immediately to reduce debounce rollback windows, JSON import restore now uploads only imported keys instead of force-pushing full local state, and Vetting 2.0 trainee runtime identity resolution was tightened so admin relax/override flags apply reliably during active enforcement checks.
@@ -406,6 +407,11 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.16 - 2026-04-13
+
+- Release: Version bump to `2.6.16` to enable updater rollout for fleets already on `2.6.15`.
+- Stability Contract: Maintain strict digital script linking by `submissionId`, vetting completion verification gate, and atomic native cache persistence/recovery.
 
 ## v2.6.15 - 2026-04-13
 
