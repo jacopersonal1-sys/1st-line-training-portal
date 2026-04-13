@@ -398,6 +398,18 @@ Instead of every user writing to the `sessions` table every 15 seconds:
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.15 — 2026-04-13
+
+- Fix: Vetting Arena trainee overlay blocking Enter/Start — trainee-side overlay logic in `js/vetting_runtime_v2.js` was corrected so compliance scanning no longer prevents the Enter/Start action.
+- Fix: Prevented JSON.parse crashes caused by literal "undefined" in localStorage by adding `safeLocalParse` and `safeParse` helpers used across `js/data.js` and other modules.
+- Fix: Hardened hard-delete/tombstone flow to stop "ghost data" reappearing — added `system_tombstones`, `system_pending_deletes`, and `processPendingDeletes()` to ensure deletes are backed up, queued, and reconciled reliably.
+- Change: Improved authoritative blob/row sync behavior and strict-server key handling to avoid accidental background pushes for shared state (users/tests/schedules).
+- Ops: Added `ops/unbind_tshepo.sql` and `ops/unbind_tshepo.sh` to safely backup and remove `boundClientId` from the user row for targeted recovery (see `ops/README.md`).
+- Release: Branch `release/v2.6.15` and tag `v2.6.15` were created for this fixpack; client-side hardening is included in this release.
+
+If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, provide the admin Postgres URI and explicit authorization and I will perform a single-row backup and unbind, then report results.
+
 - **v2.5.8:** Fixed critical `before-quit` infinite loop in `electron-main.js` that caused zombie processes and blocked auto-updates.
 - **v2.5.7:** Version bump and minor maintenance.
 - **v2.5.6:** Added a completely isolated Super Admin Data Studio module (`modules/live_data_manager` or `superadmin_data_studio`) leveraging a Webview bridge for real-time visual database editing.
