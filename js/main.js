@@ -1748,6 +1748,10 @@ function updateSidebarVisibility() {
             btn.classList.add('hidden');
             return;
         }
+        if (features.content_studio === false && targetTab === 'content-studio') {
+            btn.classList.add('hidden');
+            return;
+        }
 
         // OPL Hub is admin + super_admin only.
         if (targetTab === 'opl-hub' && !['admin', 'super_admin'].includes(role)) {
@@ -1765,7 +1769,7 @@ function updateSidebarVisibility() {
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
             const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework', 'superadmin-studio'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly'];
+            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly', 'content-studio'];
             
             // Special Check for Arena
             if (targetTab === 'vetting-arena') {
@@ -1981,6 +1985,14 @@ function showTab(id, btn) {
               OPLHubLoader.renderUI();
           } else {
               console.error("OPLHubLoader module not loaded. Check js/opl_hub_loader.js");
+          }
+      }
+
+      if(id === 'content-studio') {
+          if(typeof ContentStudioLoader !== 'undefined' && typeof ContentStudioLoader.renderUI === 'function') {
+              ContentStudioLoader.renderUI();
+          } else {
+              console.error("ContentStudioLoader module not loaded. Check js/content_studio_loader.js");
           }
       }
 
@@ -2577,6 +2589,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.18": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Trainee Move Reliability:</strong> Hardened retrain/migration cleanup so moved trainees are removed from prior groups case-insensitively with roster dedupe.</li>
+                <li style="margin-bottom: 8px;"><strong>Lifecycle Reset Safety:</strong> Move flow now performs case-insensitive cleanup for linked trainee data to prevent stale first-attempt carryover into new groups.</li>
+                <li style="margin-bottom: 8px;"><strong>Score Consistency Repair:</strong> Completed history and test views now self-heal score drift from linked <code>records</code> when <code>submissions.score</code> is stale after refresh/relogin.</li>
+                <li style="margin-bottom: 8px;"><strong>Rollout:</strong> Version bumped to 2.6.18 for lifecycle and grading reliability patch delivery.</li>
+            </ul>`,
         "2.6.17": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Targeted Recovery Command:</strong> Added a new heartbeat command channel action <code>recover_submission:&lt;payload&gt;</code> for trainee-specific submission recovery.</li>

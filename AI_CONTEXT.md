@@ -431,6 +431,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Feature: Recovery flow now rebuilds missing `record_<submissionId>` entries from local `submissions` before syncing.
 - Release: Version bump to `2.6.17` to push recovery tooling to client fleets.
 
+## v2.6.18 - 2026-04-14
+
+- Fix: Hardened retrain/migration cleanup in `js/admin_users.js` to remove trainees from prior groups case-insensitively, dedupe roster membership, and apply case-insensitive linked-data reset so stale first-attempt data does not leak into new group attempts.
+- Fix: Added score drift self-healing in `js/admin_history.js` and fallback score linking in `js/admin_grading.js` so completed marks remain accurate after refresh/relogin when linked `records` rows are authoritative.
+- Release: Version bump to `2.6.18` for lifecycle + grading reliability rollout.
+
 ## v2.6.16 - 2026-04-13
 
 - Release: Version bump to `2.6.16` to enable updater rollout for fleets already on `2.6.15`.
