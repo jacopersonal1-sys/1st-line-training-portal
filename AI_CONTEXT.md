@@ -404,6 +404,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.19 (Retrain Attempt Unlock Hotfix, 2026-04-14):** Patched `js/assessment_trainee.js` to classify stale pre-move attempts as legacy by combining retrain archive move timestamps with linked `records.groupID` checks, then auto-ignore/archive those legacy attempts so trainees moved to a new group can start current scheduled assessments without false "already completed" lockouts.
 - **v2.6.18 (Lifecycle + Grading Reliability Patch, 2026-04-14):** Hardened retrain/migration flow in `js/admin_users.js` with case-insensitive multi-group removal + dedupe to prevent trainees remaining in old groups after moves, and added completed-score self-healing in `js/admin_history.js` plus score fallback linking in `js/admin_grading.js` so finalized marks no longer display as `0%` after refresh/relogin when linked `records` rows are authoritative.
 - **Content Studio Module (Current Build, 2026-04-14):** Added isolated `content-studio` tab with `View` + `Builder` submenus, schedule-linked header/subject documents, play/document action controls per subject, and per-user video engagement telemetry (watch-time + skip capture) persisted in `content_studio_data`.
 - **v2.6.17 (Targeted Submission Recovery Rollout, 2026-04-14):** Added a new `sessions.pending_action` command `recover_submission:<payload>` in `js/data.js` that targets the logged-in trainee, scans local `submissions` for matching criteria, auto-rebuilds missing linked `records` rows, and force-syncs `submissions` + `records` on next heartbeat/realtime command tick.
@@ -436,6 +437,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Fix: Hardened retrain/migration cleanup in `js/admin_users.js` to remove trainees from prior groups case-insensitively, dedupe roster membership, and apply case-insensitive linked-data reset so stale first-attempt data does not leak into new group attempts.
 - Fix: Added score drift self-healing in `js/admin_history.js` and fallback score linking in `js/admin_grading.js` so completed marks remain accurate after refresh/relogin when linked `records` rows are authoritative.
 - Release: Version bump to `2.6.18` for lifecycle + grading reliability rollout.
+
+## v2.6.19 - 2026-04-14
+
+- Fix: Patched `js/assessment_trainee.js` submission lock logic to detect legacy pre-move attempts using retrain archive move date and linked `records.groupID`, preventing migrated trainees from being blocked by old resurfaced attempts.
+- Fix: Legacy attempts detected at test start are now auto-archived (retake-safe) so current scheduled attempts in the new group can launch immediately.
+- Release: Version bump to `2.6.19` for immediate hotfix rollout.
 
 ## v2.6.16 - 2026-04-13
 

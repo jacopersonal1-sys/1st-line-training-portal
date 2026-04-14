@@ -168,6 +168,7 @@ The app uses a **"Hybrid Row-Level Sync"** engine:
 - **Post-submit unlock or accidental session exit:** prevented by keeping trainee locked in session state until Admin ends the vetting session.
 
 ## Recent Major Updates (AI Context)
+ - **v2.6.19**: **Retrain Attempt Unlock Hotfix**: Updated trainee assessment start logic to ignore/archive legacy pre-move attempts (using retrain archive date + linked record group checks) so trainees already migrated to a new group are no longer blocked by resurfaced old scores/attempts.
  - **v2.6.18**: **Lifecycle + Grading Reliability Patch**: Hardened trainee move/retrain cleanup to prevent dual-group residue (case-insensitive removal + dedupe) and added score drift recovery in completed history/test views by reconciling `submissions` with linked `records` after refresh/relogin.
  - **v2.6.17**: **Targeted Submission Recovery Rollout**: Added a new trainee command action (`recover_submission:<payload>`) processed via session heartbeat/realtime command channels so admins can remotely trigger username-specific local submission recovery. Matching local submissions are force-synced and any missing linked `records` rows are rebuilt before upload.
  - **v2.6.14**: **Vetting False-Submit Guardrails**: Fixed a stale-state path where trainees could see "Assessment Submitted" before first attempt by blocking cross-session carryover of local `completed` flags, preferring non-completed identity matches when alias usernames collide, and seeding new vetting sessions/nudges with canonical `waiting` trainee entries.

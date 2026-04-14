@@ -1,6 +1,61 @@
 /* ================= ASSESSMENT TRAINEE ================= */
 /* Test Taking, Scheduling, and Submission Logic */
 
+function getCurrentTraineeGroupId() {
+    if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || !CURRENT_USER.user) return null;
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (!Array.isArray(members)) continue;
+        if (members.some(m => String(m || '').trim().toLowerCase() === String(CURRENT_USER.user || '').trim().toLowerCase())) {
+            return gid;
+        }
+    }
+    return null;
+}
+
+function getLatestRetrainMoveDateForUser(userName) {
+    const archives = JSON.parse(localStorage.getItem('retrain_archives') || '[]');
+    const normalized = String(userName || '').trim().toLowerCase();
+    const movedTimes = archives
+        .filter(entry => String(entry?.user || '').trim().toLowerCase() === normalized)
+        .map(entry => Date.parse(entry?.movedDate || entry?.graduatedDate || 0))
+        .filter(ts => Number.isFinite(ts) && ts > 0);
+    if (movedTimes.length === 0) return 0;
+    return Math.max(...movedTimes);
+}
+
+function resolveSubmissionLinkedRecord(submission, allRecords) {
+    if (!submission) return null;
+    const records = Array.isArray(allRecords) ? allRecords : JSON.parse(localStorage.getItem('records') || '[]');
+    let record = records.find(r => r && r.submissionId === submission.id);
+    if (record) return record;
+    const subTestTitle = String(submission.testTitle || '').trim().toLowerCase();
+    const subTrainee = String(submission.trainee || '').trim().toLowerCase();
+    return records.find(r =>
+        r &&
+        String(r.trainee || '').trim().toLowerCase() === subTrainee &&
+        String(r.assessment || '').trim().toLowerCase() === subTestTitle
+    ) || null;
+}
+
+function isLegacySubmissionForCurrentAttempt(submission, currentGroupId, latestMoveTs, recordsCache) {
+    if (!submission) return false;
+    if (submission.archived) return true;
+    if (String(submission.status || '').toLowerCase() === 'retake_allowed') return true;
+
+    const linkedRecord = resolveSubmissionLinkedRecord(submission, recordsCache);
+    if (linkedRecord && currentGroupId && linkedRecord.groupID && String(linkedRecord.groupID) !== String(currentGroupId)) {
+        return true;
+    }
+
+    if (latestMoveTs > 0) {
+        const subTs = Date.parse(submission.lastEditedDate || submission.lastModified || submission.createdAt || submission.date || 0);
+        if (Number.isFinite(subTs) && subTs > 0 && subTs <= latestMoveTs) return true;
+    }
+
+    return false;
+}
+
 /**
  * 3. TRAINEE: VIEWING PERSONAL TEST STATUS
  */
@@ -13,15 +68,9 @@ function loadTraineeTests() {
 
     const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    let myGroupId = null;
-    
-
-    for (const [gid, members] of Object.entries(rosters)) {
-        if (!members || !Array.isArray(members)) continue;
-
-        // FIX: Case-insensitive check ensures reliability even if casing differs
-        if (members.some(m => m && m.toLowerCase() === CURRENT_USER.user.toLowerCase())) { myGroupId = gid; break; }
-    }
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const myGroupId = getCurrentTraineeGroupId();
+    const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
 
     let allowedTestIds = new Set();
     if (myGroupId) {
@@ -44,7 +93,12 @@ function loadTraineeTests() {
     }
 
     container.innerHTML = visibleTests.map(t => {
-        const sub = submissions.find(s => s.testId == t.id && s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && !s.archived);
+        const sub = submissions.find(s =>
+            s.testId == t.id &&
+            s.trainee &&
+            s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
+            !isLegacySubmissionForCurrentAttempt(s, myGroupId, latestMoveTs, records)
+        );
         let statusHtml = '<span class="status-badge status-improve">Not Started</span>';
         
         let isLocked = false;
@@ -140,15 +194,12 @@ function openTestTaker(testId, isArenaMode = false) {
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     
+    const myGroupId = getCurrentTraineeGroupId();
+    const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+
     if (typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee' && !isArenaMode) {
         const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-        let myGroupId = null;
-        
-        for (const [gid, members] of Object.entries(rosters)) {
-            // FIX: Case-insensitive check
-            if (members.some(m => m.toLowerCase() === CURRENT_USER.user.toLowerCase())) { myGroupId = gid; break; }
-        }
 
         let isScheduled = false;
         if (myGroupId) {
@@ -193,8 +244,14 @@ function openTestTaker(testId, isArenaMode = false) {
     );
     
     if (existing && !existing.archived) {
+        // If this is a legacy pre-move attempt, auto-archive and continue.
+        if (isLegacySubmissionForCurrentAttempt(existing, myGroupId, latestMoveTs, records)) {
+            existing.archived = true;
+            existing.status = existing.status === 'completed' ? 'retake_allowed' : existing.status;
+            localStorage.setItem('submissions', JSON.stringify(subs));
+            if (typeof saveToServer === 'function') saveToServer(['submissions'], true, true);
+        } else if (isArenaMode) {
         // FIX: Allow Vetting Arena to override/archive previous attempts automatically
-        if (isArenaMode) {
              existing.archived = true;
              localStorage.setItem('submissions', JSON.stringify(subs));
         } else {

@@ -2589,6 +2589,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.19": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Retrain Attempt Unlock:</strong> Trainee assessment launcher now auto-ignores legacy attempts from prior groups/move cycles so valid new-group attempts are not blocked.</li>
+                <li style="margin-bottom: 8px;"><strong>Legacy Attempt Auto-Archive:</strong> When a stale pre-move submission is detected, it is archived and marked for retake flow instead of hard-blocking test start.</li>
+                <li style="margin-bottom: 8px;"><strong>Group-Aware Locking:</strong> Submission lock checks now consider linked <code>records.groupID</code> and latest retrain archive move date before determining if an attempt is current.</li>
+                <li style="margin-bottom: 8px;"><strong>Rollout:</strong> Version bumped to 2.6.19 for immediate client hotfix distribution.</li>
+            </ul>`,
         "2.6.18": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Trainee Move Reliability:</strong> Hardened retrain/migration cleanup so moved trainees are removed from prior groups case-insensitively with roster dedupe.</li>
