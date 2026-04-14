@@ -2126,38 +2126,7 @@ async function sendHeartbeat(forceInit = false) {
         if (sessionData && sessionData.pending_action) {
             // Clear command first to prevent loops
             await window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', CURRENT_USER.user);
-            
-            if (sessionData.pending_action === 'logout') {
-                if (typeof logout === 'function') logout();
-            } else if (sessionData.pending_action === 'restart') {
-                if (typeof triggerForceRestart === 'function') triggerForceRestart();
-            } else if (sessionData.pending_action === 'force_update') {
-                if (typeof require !== 'undefined') {
-                    // NEW: Set flag so main.js knows to auto-install when download completes
-                    sessionStorage.setItem('force_update_active', 'true');
-                    const { ipcRenderer } = require('electron');
-                    ipcRenderer.send('manual-update-check');
-                    if(typeof showToast === 'function') showToast("System Update Check Initiated by Admin", "info");
-                }
-            } else if (sessionData.pending_action.startsWith('msg:')) {
-                const msg = sessionData.pending_action.replace('msg:', '');
-                alert("💬 ADMIN MESSAGE:\n\n" + msg);
-            } else if (sessionData.pending_action.startsWith('live_sync:')) {
-                const parts = sessionData.pending_action.split(':');
-                const targetSessionId = parts[1] || '';
-                if (targetSessionId) forceRefreshLiveSessionById(targetSessionId).catch(()=>{});
-            } else if (sessionData.pending_action.startsWith('vetting_force:')) {
-                applyVettingSessionNudgeCommand(sessionData.pending_action);
-            } else if (sessionData.pending_action === 'fix_submission') {
-                // Silently clear blockages and force submit current draft
-                let s = safeLocalParse('submissions', []) || [];
-                s.forEach(x => x.archived = true);
-                localStorage.setItem('submissions', JSON.stringify(s));
-                
-                if(typeof restoreAssessmentDraft === 'function') restoreAssessmentDraft();
-                setTimeout(() => { if(typeof submitTest === 'function') submitTest(true); }, 1000);
-                if(typeof showToast === 'function') showToast("System Auto-Recovery: Draft submitted.", "success");
-            }
+            executePendingSessionAction(sessionData.pending_action);
         }
     } catch (e) { /* Silent fail */ }
 }
@@ -2946,32 +2915,175 @@ function applyVettingSessionNudgeCommand(rawAction) {
     }
 }
 
+function parseRecoveryPayload(rawAction) {
+    const prefix = 'recover_submission:';
+    if (!String(rawAction || '').startsWith(prefix)) return null;
+    const raw = String(rawAction || '').slice(prefix.length).trim();
+    if (!raw) return {};
+
+    let decoded = raw;
+    try { decoded = decodeURIComponent(raw); } catch (e) {}
+
+    const parsed = safeParse(decoded, null);
+    if (parsed && typeof parsed === 'object') return parsed;
+    return { testTitle: decoded };
+}
+
+function findGroupForUser(username) {
+    try {
+        const rosters = safeLocalParse('rosters', {}) || {};
+        const target = String(username || '').trim().toLowerCase();
+        for (const [groupId, members] of Object.entries(rosters)) {
+            if (!Array.isArray(members)) continue;
+            if (members.some(m => String(m || '').trim().toLowerCase() === target)) return groupId;
+        }
+    } catch (e) {}
+    return 'Unknown';
+}
+
+function runTargetedSubmissionRecovery(rawAction) {
+    const payload = parseRecoveryPayload(rawAction);
+    if (!payload) return false;
+    if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || !CURRENT_USER.user) return false;
+
+    const me = String(CURRENT_USER.user || '').trim().toLowerCase();
+    const norm = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    let submissions = safeLocalParse('submissions', []) || [];
+    if (!Array.isArray(submissions)) submissions = [];
+
+    const wantedTitle = norm(payload.testTitle || '');
+    const wantedContains = norm(payload.titleContains || '');
+    const wantedTestId = String(payload.testId || '').trim();
+    const wantedSubmissionIds = Array.isArray(payload.submissionIds)
+        ? new Set(payload.submissionIds.map(v => String(v)))
+        : null;
+    const includeArchived = !!payload.includeArchived;
+
+    const matches = submissions.filter((s) => {
+        if (norm(s.trainee) !== me) return false;
+        if (!includeArchived && s.archived) return false;
+        if (wantedSubmissionIds && wantedSubmissionIds.size > 0 && !wantedSubmissionIds.has(String(s.id))) return false;
+        if (wantedTestId && String(s.testId || '') !== wantedTestId) return false;
+
+        const title = norm(s.testTitle || '');
+        if (wantedTitle && title !== wantedTitle) return false;
+        if (wantedContains && !title.includes(wantedContains)) return false;
+        return true;
+    });
+
+    if (!matches.length) {
+        if (typeof showToast === 'function') showToast('Recovery command found no local submissions to sync.', 'warning');
+        return true;
+    }
+
+    const nowIso = new Date().toISOString();
+    let records = safeLocalParse('records', []) || [];
+    if (!Array.isArray(records)) records = [];
+
+    let changed = false;
+    for (const sub of matches) {
+        const recordId = `record_${sub.id}`;
+        const idx = records.findIndex(r => r && (r.submissionId === sub.id || r.id === recordId));
+        if (idx > -1) continue;
+
+        const groupId = findGroupForUser(sub.trainee || CURRENT_USER.user);
+        const cycleVal = (typeof getTraineeCycle === 'function')
+            ? getTraineeCycle(sub.trainee || CURRENT_USER.user, groupId)
+            : 'New Onboard';
+        const phaseVal = String(sub.testTitle || '').toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+        const createdAt = sub.createdAt || sub.lastModified || nowIso;
+        const scoreVal = Number.isFinite(Number(sub.score)) ? Number(sub.score) : 0;
+
+        records.push({
+            id: recordId,
+            groupID: groupId,
+            trainee: sub.trainee || CURRENT_USER.user,
+            assessment: sub.testTitle || '',
+            score: scoreVal,
+            date: sub.date || nowIso.split('T')[0],
+            phase: phaseVal,
+            cycle: cycleVal,
+            link: 'Digital-Assessment',
+            docSaved: true,
+            submissionId: sub.id,
+            createdAt,
+            lastModified: nowIso,
+            modifiedBy: CURRENT_USER.user
+        });
+        changed = true;
+    }
+
+    if (changed) localStorage.setItem('records', JSON.stringify(records));
+
+    if (typeof saveToServer === 'function') {
+        saveToServer(['submissions', 'records'], true, true).catch(() => {});
+    }
+    if (typeof showToast === 'function') {
+        showToast(`Recovery queued ${matches.length} submission(s) for sync.`, 'success');
+    }
+    return true;
+}
+
+function executePendingSessionAction(rawAction) {
+    const action = String(rawAction || '');
+    if (!action) return false;
+
+    if (action === 'logout') {
+        if (typeof logout === 'function') logout();
+        return true;
+    }
+    if (action === 'restart') {
+        if (typeof triggerForceRestart === 'function') triggerForceRestart();
+        else if (typeof location !== 'undefined') location.reload();
+        return true;
+    }
+    if (action === 'force_update') {
+        if (typeof require !== 'undefined') {
+            sessionStorage.setItem('force_update_active', 'true');
+            require('electron').ipcRenderer.send('manual-update-check');
+            if(typeof showToast === 'function') showToast("System Update Check Initiated by Admin", "info");
+        }
+        return true;
+    }
+    if (action.startsWith('msg:')) {
+        alert("💬 ADMIN MESSAGE:\n\n" + action.replace('msg:', ''));
+        return true;
+    }
+    if (action.startsWith('live_sync:')) {
+        const parts = action.split(':');
+        const targetSessionId = parts[1] || '';
+        if (targetSessionId) forceRefreshLiveSessionById(targetSessionId).catch(()=>{});
+        return true;
+    }
+    if (action.startsWith('vetting_force:')) {
+        applyVettingSessionNudgeCommand(action);
+        return true;
+    }
+    if (action === 'fix_submission') {
+        let s = safeLocalParse('submissions', []) || [];
+        s.forEach(x => x.archived = true);
+        localStorage.setItem('submissions', JSON.stringify(s));
+
+        if(typeof restoreAssessmentDraft === 'function') restoreAssessmentDraft();
+        setTimeout(() => { if(typeof submitTest === 'function') submitTest(true); }, 1000);
+        if(typeof showToast === 'function') showToast("System Auto-Recovery: Draft submitted.", "success");
+        return true;
+    }
+    if (action.startsWith('recover_submission:')) {
+        return runTargetedSubmissionRecovery(action);
+    }
+    return false;
+}
+
 function handleSessionRealtime(payload) {
     const row = payload.new;
     if (row && (row.username || row.user)) {
         const uName = row.username || row.user;
-        
         if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && uName === CURRENT_USER.user) {
             if (row.pending_action) {
                 if (window.supabaseClient) window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', uName).then(()=>{});
-                
-                if (row.pending_action === 'restart') {
-                    if (typeof triggerForceRestart === 'function') triggerForceRestart();
-                    else location.reload();
-                } else if (row.pending_action === 'logout') {
-                    if (typeof logout === 'function') logout();
-                } else if (row.pending_action.startsWith('msg:')) {
-                    alert("💬 ADMIN MESSAGE:\n\n" + row.pending_action.replace('msg:', ''));
-                } else if (row.pending_action === 'force_update' && typeof require !== 'undefined') {
-                    sessionStorage.setItem('force_update_active', 'true');
-                    require('electron').ipcRenderer.send('manual-update-check');
-                } else if (row.pending_action.startsWith('live_sync:')) {
-                    const parts = row.pending_action.split(':');
-                    const targetSessionId = parts[1] || '';
-                    if (targetSessionId) forceRefreshLiveSessionById(targetSessionId).catch(()=>{});
-                } else if (row.pending_action.startsWith('vetting_force:')) {
-                    applyVettingSessionNudgeCommand(row.pending_action);
-                }
+                executePendingSessionAction(row.pending_action);
             }
         }
     }
@@ -3295,3 +3407,5 @@ if (typeof module !== 'undefined' && module.exports) {
         forceFullSync
     };
 }
+
+

@@ -2577,6 +2577,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.17": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Targeted Recovery Command:</strong> Added a new heartbeat command channel action <code>recover_submission:&lt;payload&gt;</code> for trainee-specific submission recovery.</li>
+                <li style="margin-bottom: 8px;"><strong>Auto Record Rebuild:</strong> Recovery now restores missing linked <code>records</code> rows from matching local <code>submissions</code> before sync.</li>
+                <li style="margin-bottom: 8px;"><strong>Next-Heartbeat Execution:</strong> Commands execute on both heartbeat pull and realtime session command events for faster remote remediation.</li>
+                <li style="margin-bottom: 8px;"><strong>Rollout:</strong> Version bumped to 2.6.17 to deliver recovery tooling to trainee fleets.</li>
+            </ul>`,
         "2.6.16": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Release Rollout:</strong> Version bumped to 2.6.16 so updater delivery can proceed beyond already-installed 2.6.15 clients.</li>
