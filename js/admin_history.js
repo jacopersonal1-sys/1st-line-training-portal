@@ -47,6 +47,13 @@ function loadCompletedHistory() {
     if (!container) return;
 
     let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const recordBySubmissionId = new Map();
+    records.forEach(record => {
+        if (!record || !record.submissionId) return;
+        const recScore = Number(record.score);
+        if (Number.isFinite(recScore)) recordBySubmissionId.set(String(record.submissionId), recScore);
+    });
     
     // --- AUTO-REPAIR: RECOVER INVISIBLE GRADED TESTS ---
     let needsRepair = false;
@@ -71,6 +78,19 @@ function loadCompletedHistory() {
             }
         }
     });
+
+    // Self-heal score drifts where record row is authoritative for completed scripts.
+    subs.forEach(sub => {
+        if (!sub || sub.status !== 'completed') return;
+        const linkedScore = recordBySubmissionId.get(String(sub.id));
+        if (!Number.isFinite(linkedScore)) return;
+        const subScore = Number(sub.score);
+        if (!Number.isFinite(subScore) || subScore !== linkedScore) {
+            sub.score = linkedScore;
+            needsRepair = true;
+        }
+    });
+
     if (needsRepair) {
         localStorage.setItem('submissions', JSON.stringify(subs));
         // REMOVED: This background save was causing a race condition with manual grading,

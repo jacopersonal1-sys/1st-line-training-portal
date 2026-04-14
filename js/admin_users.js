@@ -456,16 +456,22 @@ function populateTraineeDropdown() {
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
     const list = document.getElementById('traineeOptions'); 
     
-    if(list) {
-        list.innerHTML = ''; 
-        users.filter(u => u.user && u.role && u.role.trim().toLowerCase() === 'trainee')
-             .sort((a,b) => a.user.localeCompare(b.user))
-             .forEach(u => { 
-                let opt = document.createElement('option'); 
-                opt.value = u.user; 
-                list.appendChild(opt); 
-             }); 
-    }
+     if(list) {
+          list.innerHTML = ''; 
+          const seen = new Set();
+          users.filter(u => (u.user || u.username) && u.role && u.role.trim().toLowerCase() === 'trainee')
+                 .sort((a,b) => (String(a.user || a.username)).localeCompare(String(b.user || b.username)))
+                 .forEach(u => { 
+                     const uname = String(u.user || u.username || '').trim();
+                     if (!uname) return;
+                     const key = uname.toLowerCase();
+                     if (seen.has(key)) return; // Prevent duplicate options
+                     seen.add(key);
+                     let opt = document.createElement('option'); 
+                     opt.value = uname; 
+                     list.appendChild(opt); 
+                 }); 
+     }
 }
 
 // --- USER & TRAINEE MANAGEMENT ---
@@ -762,6 +768,7 @@ function openMoveUserModal(username) {
 async function confirmMoveUser() {
     const targetGid = document.getElementById('moveUserTargetSelect').value;
     if(!targetGid) return alert("Please select a destination group.");
+    const normalizedUserToMove = String(userToMove || '').trim().toLowerCase();
 
     if(!confirm(`Move ${userToMove} to ${targetGid}?\n\nWARNING: This will ARCHIVE all their current progress, records, and attendance to start fresh in the new group (Retrain Mode).\n\nProceed?`)) return;
 
@@ -792,7 +799,7 @@ async function confirmMoveUser() {
         // 2. WIPE ACTIVE DATA (Clean Slate)
         const wipe = (key, field) => {
             let data = JSON.parse(localStorage.getItem(key) || '[]');
-            const newData = data.filter(item => item[field] !== userToMove);
+            const newData = data.filter(item => String((item && item[field]) || '').trim().toLowerCase() !== normalizedUserToMove);
             if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
         };
         
@@ -803,16 +810,21 @@ async function confirmMoveUser() {
         wipe('insightReviews', 'trainee');
         
         let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
-        if(notes[userToMove]) { delete notes[userToMove]; localStorage.setItem('agentNotes', JSON.stringify(notes)); }
+        const noteKey = Object.keys(notes).find(k => String(k || '').trim().toLowerCase() === normalizedUserToMove);
+        if(noteKey) { delete notes[noteKey]; localStorage.setItem('agentNotes', JSON.stringify(notes)); }
 
         // 3. MOVE ROSTER
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         for (const gid in rosters) {
-            const idx = rosters[gid].indexOf(userToMove);
-            if (idx > -1) rosters[gid].splice(idx, 1);
+            if (!Array.isArray(rosters[gid])) continue;
+            rosters[gid] = rosters[gid].filter(member => String(member || '').trim().toLowerCase() !== normalizedUserToMove);
         }
         if(!rosters[targetGid]) rosters[targetGid] = [];
-        if(!rosters[targetGid].includes(userToMove)) rosters[targetGid].push(userToMove);
+        rosters[targetGid] = rosters[targetGid].filter((member, idx, arr) => {
+            const memberNorm = String(member || '').trim().toLowerCase();
+            return memberNorm && arr.findIndex(x => String(x || '').trim().toLowerCase() === memberNorm) === idx;
+        });
+        if(!rosters[targetGid].some(member => String(member || '').trim().toLowerCase() === normalizedUserToMove)) rosters[targetGid].push(userToMove);
         localStorage.setItem('rosters', JSON.stringify(rosters));
 
         // 4. SYNC EVERYTHING

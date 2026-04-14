@@ -228,11 +228,92 @@ async function saveScores() {
 
 // --- SECTION 3: TEST RECORDS & HISTORY ---
 
+function normalizeSubmissionText(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function canonicalizeVettingTestTitle(rawTitle) {
+    const original = String(rawTitle || '').trim();
+    if (!original) return '';
+
+    const lower = normalizeSubmissionText(original);
+    if (!lower.includes('vetting')) return original;
+
+    let phase = '';
+    if (lower.includes('final vetting')) phase = 'Final Vetting';
+    else if (lower.includes('1st vetting') || lower.includes('first vetting')) phase = '1st Vetting';
+
+    let topic = '';
+    if (lower.includes('no internet')) topic = 'No internet';
+    else if (lower.includes('slow speed')) topic = 'Slow Speed';
+    else if (lower.includes('course 1 - 3') || lower.includes('course 1-3') || lower.includes('course 1 3')) topic = 'Course 1 - 3';
+    else if (lower.includes('voip')) topic = 'VoIP';
+    else if (lower.includes('email')) topic = 'Email';
+
+    if (!phase || !topic) return original;
+    const suffix = phase === 'Final Vetting' ? 'Final Vetting Test' : '1st Vetting Test';
+    return `${phase} - ${topic} ${suffix}`;
+}
+
+function getSubmissionDisplayKey(title) {
+    const normalized = canonicalizeVettingTestTitle(title);
+    return normalizeSubmissionText(normalized || title);
+}
+
+function getSubmissionRowSortTime(row) {
+    if (!row) return 0;
+    const directTs = Date.parse(row.lastModified || row.updated_at || row.createdAt || '');
+    if (!Number.isNaN(directTs) && directTs > 0) return directTs;
+
+    const idTs = Number(row.id);
+    if (!Number.isNaN(idTs) && idTs > 0) return idTs;
+
+    const dateTs = Date.parse(`${row.date || ''}T00:00:00Z`);
+    return Number.isNaN(dateTs) ? 0 : dateTs;
+}
+
+function dedupeVettingRows(items) {
+    const seenById = new Set();
+    const stableRows = [];
+    const pendingByLogicalAttempt = new Map();
+
+    (items || []).forEach(item => {
+        if (!item) return;
+
+        if (item.id) {
+            const idKey = `${item.source || 'row'}:${String(item.id)}`;
+            if (seenById.has(idKey)) return;
+            seenById.add(idKey);
+        }
+
+        const isPendingDigital = item.source === 'digital' && String(item.status || '').toLowerCase() === 'pending';
+        if (!isPendingDigital) {
+            stableRows.push(item);
+            return;
+        }
+
+        // Anti-flood collapse for duplicated pending rows of the same logical attempt.
+        const logicalKey = [
+            normalizeSubmissionText(item.trainee),
+            item.testKey || getSubmissionDisplayKey(item.testTitle),
+            normalizeSubmissionText(item.date)
+        ].join('|');
+
+        const previous = pendingByLogicalAttempt.get(logicalKey);
+        if (!previous || getSubmissionRowSortTime(item) >= getSubmissionRowSortTime(previous)) {
+            pendingByLogicalAttempt.set(logicalKey, item);
+        }
+    });
+
+    return [...stableRows, ...pendingByLogicalAttempt.values()];
+}
+
 function loadTestRecords() {
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const tbody = document.querySelector('#testRecordsTable tbody');
     
     // Hide filters for Trainee to reduce clutter
     const filterDiv = document.querySelector('#test-records .grid-4');
@@ -240,10 +321,18 @@ function loadTestRecords() {
         if (CURRENT_USER.role === 'trainee') filterDiv.classList.add('hidden');
         else filterDiv.classList.remove('hidden');
     }
+
+    if (CURRENT_USER.role === 'trainee') {
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#888;">Marked scripts are locked after review and cannot be reopened by trainees.</td></tr>';
+        }
+        return;
+    }
     
     // Filters
     const groupFilter = document.getElementById('filterTestGroup').value;
     const nameFilter = document.getElementById('filterTestName').value;
+    const normalizedNameFilter = normalizeSubmissionText(nameFilter);
     const statusFilter = document.getElementById('filterTestStatus').value;
     const traineeFilter = document.getElementById('filterTestTrainee').value.toLowerCase();
     
@@ -257,13 +346,20 @@ function loadTestRecords() {
         const isVetting = (testDef && testDef.type === 'vetting') || s.testTitle.toLowerCase().includes('vetting');
         
         if (isVetting) {
+            const canonicalTitle = canonicalizeVettingTestTitle(s.testTitle);
+            const linkedRecord = records.find(r => r && (r.submissionId === s.id || r.id === `record_${s.id}`));
+            const normalizedScore = Number(s.score);
+            const linkedScore = linkedRecord ? Number(linkedRecord.score) : NaN;
             combinedData.push({
                 id: s.id,
                 date: s.date,
                 trainee: s.trainee,
-                testTitle: s.testTitle,
-                score: s.score,
+                testTitle: canonicalTitle || s.testTitle,
+                testKey: getSubmissionDisplayKey(canonicalTitle || s.testTitle),
+                score: Number.isFinite(normalizedScore) ? normalizedScore : (Number.isFinite(linkedScore) ? linkedScore : 0),
                 status: s.status,
+                createdAt: s.createdAt,
+                lastModified: s.lastModified,
                 source: 'digital'
             });
         }
@@ -273,17 +369,23 @@ function loadTestRecords() {
     records.forEach(r => {
         // Only include if phase is Vetting AND it's NOT a digital record (avoid duplicates)
         if (r.phase && r.phase.includes('Vetting') && r.link !== 'Digital-Assessment' && r.link !== 'Live-Session') {
+            const canonicalTitle = canonicalizeVettingTestTitle(r.assessment);
             combinedData.push({
                 id: r.id,
                 date: r.date,
                 trainee: r.trainee,
-                testTitle: r.assessment,
+                testTitle: canonicalTitle || r.assessment,
+                testKey: getSubmissionDisplayKey(canonicalTitle || r.assessment),
                 score: r.score,
                 status: 'completed', // Manual records are always completed
+                createdAt: r.createdAt,
+                lastModified: r.lastModified,
                 source: 'manual'
             });
         }
     });
+
+    combinedData = dedupeVettingRows(combinedData);
 
     // --- 2. POPULATE FILTERS DYNAMICALLY ---
     const nameSelect = document.getElementById('filterTestName');
@@ -292,12 +394,18 @@ function loadTestRecords() {
     if (nameSelect && groupSelect) {
         // Only repopulate if not currently focused (prevents UI glitch while typing/selecting)
         if (document.activeElement !== nameSelect && document.activeElement !== groupSelect) {
-            const uniqueTests = [...new Set(combinedData.map(d => d.testTitle))].sort();
+            const testMap = new Map();
+            combinedData.forEach(d => {
+                const key = d.testKey || getSubmissionDisplayKey(d.testTitle);
+                if (!key) return;
+                if (!testMap.has(key)) testMap.set(key, d.testTitle);
+            });
+            const uniqueTests = Array.from(testMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
             const uniqueGroups = Object.keys(rosters).sort().reverse();
 
             nameSelect.innerHTML = '<option value="">All Tests</option>';
-            uniqueTests.forEach(t => nameSelect.add(new Option(t, t)));
-            if (nameFilter && uniqueTests.includes(nameFilter)) nameSelect.value = nameFilter;
+            uniqueTests.forEach(([key, label]) => nameSelect.add(new Option(label, key)));
+            if (normalizedNameFilter && testMap.has(normalizedNameFilter)) nameSelect.value = normalizedNameFilter;
 
             groupSelect.innerHTML = '<option value="">All Groups</option>';
             uniqueGroups.forEach(g => {
@@ -308,12 +416,11 @@ function loadTestRecords() {
         }
     }
 
-    const tbody = document.querySelector('#testRecordsTable tbody');
     if(tbody) {
         tbody.innerHTML = '';
         
         const filtered = combinedData.filter(s => {
-            if(nameFilter && s.testTitle !== nameFilter) return false;
+            if(normalizedNameFilter && (s.testKey || getSubmissionDisplayKey(s.testTitle)) !== normalizedNameFilter) return false;
             if(statusFilter && s.status !== statusFilter) return false;
             if(traineeFilter && !s.trainee.toLowerCase().includes(traineeFilter)) return false;
 

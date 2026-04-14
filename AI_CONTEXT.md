@@ -31,7 +31,7 @@
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
 | `system_tombstones` | Array | Blob | Persistent blacklist of deleted item IDs used to prevent deleted items from being resurrected during sync. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
-| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`. |
+| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`, `opl_hub_data`, `content_studio_data`. |
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
@@ -314,6 +314,20 @@ Maps local `localStorage` keys to Supabase tables.
     - `js/ui_feedback.js`: Renders the multi-question "Agent Production Feedback" capture form.
     - `js/ui_feedback_review.js`: Renders the "Feedback Review Dashboard" with Roster, History, and Analytics views.
 
+#### `js/content_studio_loader.js` + `modules/content_studio/` (Content Studio - Isolated Module)
+- **Architecture:** "Program within a Program" loaded in a dedicated `<webview>` tab (`content-studio`) with internal submenus (`View`, `Builder`).
+- **Entry Point:** `modules/content_studio/index.html` mounted by `js/content_studio_loader.js`.
+- **Data Key:** `app_documents.key = content_studio_data` (local mirror key: `content_studio_data_local`).
+- **Files:**
+    - `js/main.js`: Module shell, subnav routing, and role-gated Builder access.
+    - `js/data.js`: Isolated data + sync layer for timeline entries and engagement analytics.
+        - **Timeline Linkage:** Binds content entries to schedule timeline items from `localStorage.schedules` using deterministic `scheduleKey`.
+        - **Content Model:** Each entry stores header + subject list (`code`, rich text HTML, video link, document link).
+        - **Engagement Model:** Tracks per-user subject analytics (`plays`, `watchSeconds`, `skips`, `skippedSeconds`, `skipEvents`, `lastPosition`).
+    - `js/ui_view.js`: Renders document-style header + subject rows with play/document actions and subject dropdown.
+        - **Tracking:** Video playback records watch-time deltas and forward-seek skip events (TikTok-style engagement intent).
+    - `js/ui_builder.js`: Builder for header + subjects (custom rich text, video link, document link) with edit/delete + engagement summary.
+
 ---
 
 ## 4. Critical Workflows
@@ -390,6 +404,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.18 (Lifecycle + Grading Reliability Patch, 2026-04-14):** Hardened retrain/migration flow in `js/admin_users.js` with case-insensitive multi-group removal + dedupe to prevent trainees remaining in old groups after moves, and added completed-score self-healing in `js/admin_history.js` plus score fallback linking in `js/admin_grading.js` so finalized marks no longer display as `0%` after refresh/relogin when linked `records` rows are authoritative.
+- **Content Studio Module (Current Build, 2026-04-14):** Added isolated `content-studio` tab with `View` + `Builder` submenus, schedule-linked header/subject documents, play/document action controls per subject, and per-user video engagement telemetry (watch-time + skip capture) persisted in `content_studio_data`.
 - **v2.6.17 (Targeted Submission Recovery Rollout, 2026-04-14):** Added a new `sessions.pending_action` command `recover_submission:<payload>` in `js/data.js` that targets the logged-in trainee, scans local `submissions` for matching criteria, auto-rebuilds missing linked `records` rows, and force-syncs `submissions` + `records` on next heartbeat/realtime command tick.
 - **v2.6.16 (Release Rollout, 2026-04-13):** Version increment for production rollout delivery so clients already on `2.6.15` can receive the latest hardening package. Reinforces strict `submissionId` linking, vetted completion-gate semantics, and atomic disk-cache recovery as active release contracts.
 - **v2.6.15 (Rollout Hardening Addendum, 2026-04-13):** Added strict `submissionId`-only digital script viewing in reporting/admin/search flows, removed trainee+assessment fallback linking in digital record upserts, added vetting completion gate (`submitting` -> `completed`) that verifies authoritative submission pipeline state (including retry continuity across restart), hardened native disk-cache persistence with atomic writes + backup recovery, and widened `performSmartMerge` scope to merge on the union of schema/server/local keys.
