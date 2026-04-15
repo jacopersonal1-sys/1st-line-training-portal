@@ -18,10 +18,15 @@ describe('Data Sync Module', () => {
         expect(userA.role).toBe('trainee');
     });
 
-    test('loadFromServer fetches updates when local is stale', async () => {
+    test('loadFromServer fetches stale blob keys and ignores row-synced blob keys', async () => {
         // Mock Supabase response
-        const mockMeta = [{ key: 'users', updated_at: '2026-01-02T00:00:00.000Z' }];
-        const mockContent = [{ key: 'users', content: [{ user: 'admin' }], updated_at: '2026-01-02T00:00:00.000Z' }];
+        const mockMeta = [
+            { key: 'users', updated_at: '2026-01-02T00:00:00.000Z' },
+            { key: 'assessments', updated_at: '2026-01-02T00:00:00.000Z' }
+        ];
+        const mockContent = [
+            { key: 'assessments', content: [{ name: 'Course 1' }], updated_at: '2026-01-02T00:00:00.000Z' }
+        ];
 
         const buildRowQuery = (rows = []) => {
             const chain = {
@@ -64,12 +69,15 @@ describe('Data Sync Module', () => {
 
         // Set local state to stale
         localStorage.setItem('sync_ts_users', '2025-01-01T00:00:00.000Z');
+        localStorage.setItem('sync_ts_assessments', '2025-01-01T00:00:00.000Z');
 
         await DataModule.loadFromServer(true);
 
         expect(fromMock).toHaveBeenCalledWith('app_documents');
-        expect(localStorage.getItem('users')).toContain('admin');
-        expect(localStorage.getItem('sync_ts_users')).toBe('2026-01-02T00:00:00.000Z');
+        expect(localStorage.getItem('assessments')).toContain('Course 1');
+        expect(localStorage.getItem('sync_ts_assessments')).toBe('2026-01-02T00:00:00.000Z');
+        expect(localStorage.getItem('users')).toBeNull();
+        expect(localStorage.getItem('sync_ts_users')).toBe('2025-01-01T00:00:00.000Z');
     });
 
     test('performSmartMerge respects revokedUsers blacklist', () => {

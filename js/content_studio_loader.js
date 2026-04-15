@@ -1,0 +1,54 @@
+/* ================= CONTENT STUDIO LOADER ================= */
+/* HOST LOADER: Launches the isolated Content Studio module */
+
+const ContentStudioLoader = {
+    renderUI: function() {
+        const container = document.getElementById('content-studio-content');
+        if (!container) {
+            console.error('[Content Studio Loader] Container not found.');
+            return;
+        }
+
+        if (!CURRENT_USER) {
+            container.innerHTML = `
+                <div class="card" style="max-width:760px; margin:24px auto; text-align:center; border-color:#ff5252;">
+                    <h3 style="color:#ff5252; margin-bottom:8px;">Session Required</h3>
+                    <p style="color:var(--text-muted); margin:0;">Please sign in to open Content Studio.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const role = String(CURRENT_USER.role || '').trim().toLowerCase();
+        if (!['admin', 'super_admin'].includes(role)) {
+            container.innerHTML = `
+                <div class="card" style="max-width:760px; margin:24px auto; text-align:center; border-color:#ff5252;">
+                    <h3 style="color:#ff5252; margin-bottom:8px;">Access Denied</h3>
+                    <p style="color:var(--text-muted); margin:0;">Content Studio is available to Admin and Super Admin only.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const userStr = typeof CURRENT_USER !== 'undefined' ? JSON.stringify(CURRENT_USER) : '{}';
+        const credsStr = (window.CLOUD_CREDENTIALS) ? JSON.stringify(window.CLOUD_CREDENTIALS) : '{}';
+        const userParam = encodeURIComponent(userStr);
+        const credsParam = encodeURIComponent(credsStr);
+
+        const basePath = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
+        const modulePath = basePath + '/modules/content_studio/index.html';
+
+        container.innerHTML = `
+            <webview
+                id="content-studio-webview"
+                src="${modulePath}?user=${userParam}&creds=${credsParam}"
+                style="width:100%; height:calc(100vh - 190px); border:none; background:transparent;"
+                webpreferences="nodeIntegration=yes, contextIsolation=no"
+                partition="persist:content_studio"
+                allowpopups
+            ></webview>
+        `;
+    }
+};
+
+window.ContentStudioLoader = ContentStudioLoader;

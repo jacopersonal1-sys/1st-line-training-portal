@@ -23,13 +23,16 @@ function getAvatarHTML(name) {
 // --- HELPER: ASYNC SAVE ---
 // Ensures reviews and exemptions are saved to server (Supabase) before UI updates.
 async function secureInsightSave() {
+    const includeUserAccess = arguments.length > 0 ? Boolean(arguments[0]) : false;
     // MODIFIED: Removed 'autoBackup' check.
     // Admin reviews, status overrides, and access revocations are critical actions.
     // They must always sync to the cloud immediately to maintain system integrity.
     if (typeof saveToServer === 'function') {
         try {
             // PARAMETER 'true' = FORCE OVERWRITE (Instant)
-            await saveToServer(['insightReviews', 'exemptions', 'users', 'revokedUsers'], true); 
+            const keys = ['insightReviews', 'exemptions'];
+            if (includeUserAccess) keys.push('users', 'revokedUsers');
+            await saveToServer(keys, true); 
         } catch(e) {
             console.error("Insight Cloud Sync Error:", e);
         }
@@ -785,7 +788,16 @@ async function revokeUserAccess(username) {
     
     // 1. ADD TO BLACKLIST
     let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-    if(!revoked.includes(username)) {
+    const toToken = (value) => String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\s+/g, '');
+    const targetToken = toToken(username);
+
+    if(!revoked.some(entry => toToken(entry) === targetToken)) {
         revoked.push(username);
         localStorage.setItem('revokedUsers', JSON.stringify(revoked));
     }
@@ -794,7 +806,7 @@ async function revokeUserAccess(username) {
     let users = JSON.parse(localStorage.getItem('users') || '[]');
     const initialLength = users.length;
     
-    users = users.filter(u => u.user !== username);
+    users = users.filter(u => toToken(u && (u.user || u.username)) !== targetToken);
     
     if(users.length === initialLength) {
         alert("User not found in login database (already removed?).");
@@ -807,7 +819,7 @@ async function revokeUserAccess(username) {
     const btn = document.activeElement;
     if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
 
-    await secureInsightSave();
+    await secureInsightSave(true);
     
     if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-ban"></i>'; }
     

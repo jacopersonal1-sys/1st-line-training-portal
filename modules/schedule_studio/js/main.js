@@ -1,5 +1,8 @@
 const App = {
     refreshTimer: null,
+    refreshInFlight: false,
+    refreshQueued: false,
+    lastForcedRefreshAt: 0,
     state: {
         schedules: {},
         activeScheduleId: 'A',
@@ -61,13 +64,21 @@ const App = {
         const container = document.getElementById('app-container');
         if (!container) return;
 
-        const schedules = this.state.schedules;
-        const active = schedules[this.state.activeScheduleId] || { items: [], assigned: null };
         const currentUser = ScheduleData.getCurrentUser();
-        const canEdit = this.canEdit();
-        const canManage = this.canManage();
+        const schedules = this.state.schedules;
+        let visibleSchedules = schedules;
+        let activeScheduleId = this.state.activeScheduleId;
 
-        if (currentUser && !this.canViewAll()) {
+        if (!this.canViewAll()) {
+            if (!currentUser || !currentUser.user) {
+                container.innerHTML = `
+                    <div class="studio-panel">
+                        <h1 class="studio-title">Assessment Schedule</h1>
+                        <p class="studio-subtitle">Your session is still loading. Please wait a moment and refresh.</p>
+                    </div>
+                `;
+                return;
+            }
             const myScheduleId = ScheduleData.getMyScheduleId(currentUser.user, schedules);
             if (!myScheduleId) {
                 container.innerHTML = `
@@ -78,7 +89,14 @@ const App = {
                 `;
                 return;
             }
+            activeScheduleId = myScheduleId;
+            this.state.activeScheduleId = myScheduleId;
+            visibleSchedules = { [myScheduleId]: schedules[myScheduleId] };
         }
+
+        const active = schedules[activeScheduleId] || { items: [], assigned: null };
+        const canEdit = this.canEdit();
+        const canManage = this.canManage();
 
         container.innerHTML = `
             <div class="studio-shell">
@@ -90,17 +108,17 @@ const App = {
                         <div class="studio-pill-row">
                             <span class="studio-pill"><i class="fas fa-user"></i> ${TimelineUI.escape(currentUser?.user || 'Guest')}</span>
                             <span class="studio-pill"><i class="fas fa-shield-halved"></i> ${TimelineUI.escape(currentUser?.role || 'unknown')}</span>
-                            <span class="studio-pill"><i class="fas fa-layer-group"></i> ${Object.keys(schedules).length} timelines</span>
+                            <span class="studio-pill"><i class="fas fa-layer-group"></i> ${Object.keys(visibleSchedules).length} timeline${Object.keys(visibleSchedules).length === 1 ? '' : 's'}</span>
                         </div>
                     </div>
                     <div class="studio-layout">
                         <aside class="studio-card studio-sidebar">
-                            ${TimelineUI.renderScheduleTabs(schedules, this.state.activeScheduleId, canManage)}
+                            ${TimelineUI.renderScheduleTabs(visibleSchedules, activeScheduleId, canManage)}
                         </aside>
                         <div class="studio-card studio-main-card studio-main">
                             ${TimelineUI.renderToolbar(active, this.state.view, canEdit, canManage, {
                                 templateCount: ScheduleData.getTemplates().length,
-                                totalSchedules: Object.keys(schedules).length
+                                totalSchedules: Object.keys(visibleSchedules).length
                             })}
                             ${this.state.view === 'calendar'
                                 ? CalendarUI.render(active.items || [], this.state.currentMonth)
@@ -119,7 +137,7 @@ const App = {
 
     canViewAll() {
         const role = ScheduleData.getCurrentUser()?.role;
-        return ['admin', 'super_admin', 'special_viewer', 'teamleader'].includes(role);
+        return ['admin', 'super_admin', 'special_viewer'].includes(role);
     },
 
     canEdit() {
@@ -210,6 +228,9 @@ const App = {
     },
 
     setSchedule(id) {
+        if (!this.canViewAll()) {
+            return;
+        }
         this.state.activeScheduleId = id;
         this.render();
     },
@@ -348,7 +369,10 @@ const App = {
         if (!groupId) return alert('Please select a group.');
 
         Object.keys(this.state.schedules).forEach(key => {
-            if (key !== this.state.activeScheduleId && this.state.schedules[key].assigned === groupId) {
+            if (
+                key !== this.state.activeScheduleId &&
+                ScheduleData.identitiesMatch(this.state.schedules[key].assigned, groupId)
+            ) {
                 this.state.schedules[key].assigned = null;
                 this.stampSchedule(key, { touchGroup: true });
             }
@@ -1002,9 +1026,71 @@ const App = {
         }
     },
 
-    refresh() {
-        this.loadState();
-        this.render();
+    async refresh(options = {}) {
+        const forcePull = Boolean(options.forcePull);
+        if (this.refreshInFlight) {
+            this.refreshQueued = true;
+            return;
+        }
+
+        this.refreshInFlight = true;
+        try {
+            if (
+                forcePull &&
+                AppContext.host &&
+                typeof AppContext.host.loadFromServer === 'function'
+            ) {
+                const now = Date.now();
+                const minIntervalMs = 700;
+                if ((now - this.lastForcedRefreshAt) > minIntervalMs) {
+                    this.lastForcedRefreshAt = now;
+                    await AppContext.host.loadFromServer(true);
+                }
+            }
+
+            this.loadState();
+            this.render();
+        } finally {
+            this.refreshInFlight = false;
+            if (this.refreshQueued) {
+                this.refreshQueued = false;
+                this.refresh({ forcePull: false });
+            }
+        }
+    },
+
+    isVisibleInHost() {
+        try {
+            if (!AppContext.host || !AppContext.host.document) return false;
+            const section = AppContext.host.document.getElementById('assessment-schedule');
+            return !!(section && section.classList && section.classList.contains('active'));
+        } catch (error) {
+            return false;
+        }
+    },
+
+    isHighPriorityHostSyncEnabled() {
+        try {
+            return !!(AppContext.host && AppContext.host.__HIGH_PRIORITY_VIEW_SYNC === true);
+        } catch (error) {
+            return false;
+        }
+    },
+
+    startFallbackSyncLoop() {
+        if (this._fallbackLoop) clearInterval(this._fallbackLoop);
+        this._fallbackLoop = setInterval(() => {
+            if (!this.isVisibleInHost()) return;
+            if (!this.isHighPriorityHostSyncEnabled()) return;
+            this.refresh({ forcePull: true });
+        }, 1000);
+    },
+
+    stopFallbackSyncLoop() {
+        if (this._fallbackLoop) {
+            clearInterval(this._fallbackLoop);
+            this._fallbackLoop = null;
+        }
     },
 
     todayString() {
@@ -1027,10 +1113,29 @@ const App = {
     timeToMinutes(timeStr) {
         const [hours, minutes] = String(timeStr || '00:00').split(':').map(Number);
         return (hours || 0) * 60 + (minutes || 0);
+    },
+
+    destroy() {
+        this.stopFallbackSyncLoop();
+        if (this._boundHostDataListener && AppContext.host && typeof AppContext.host.removeEventListener === 'function') {
+            AppContext.host.removeEventListener('buildzone:data-changed', this._boundHostDataListener);
+            this._boundHostDataListener = null;
+        }
+    },
+
+    beforeUnloadBound: false,
+
+    bindLifecycle() {
+        if (this.beforeUnloadBound) return;
+        window.addEventListener('beforeunload', () => this.destroy());
+        this.beforeUnloadBound = true;
     }
 };
 
 window.App = App;
 window.addEventListener('DOMContentLoaded', () => {
-    App.init();
+    App.init().then(() => {
+        App.startFallbackSyncLoop();
+        App.bindLifecycle();
+    });
 });

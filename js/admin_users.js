@@ -6,6 +6,141 @@ let userToMove = null;
 let editTargetIndex = -1;
 let editTargetUsername = '';
 let _legacyRetrainArchiveSplitRunning = false;
+const USER_ROLE_RANK = {
+    trainee: 1,
+    teamleader: 2,
+    special_viewer: 3,
+    admin: 4,
+    super_admin: 5
+};
+
+function normalizeUserIdentityValue(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getUserIdentityToken(value) {
+    return normalizeUserIdentityValue(value).replace(/\s+/g, '');
+}
+
+function userIdentityMatches(left, right) {
+    const leftToken = getUserIdentityToken(left);
+    const rightToken = getUserIdentityToken(right);
+    return !!leftToken && !!rightToken && leftToken === rightToken;
+}
+
+function getRoleRank(role) {
+    return USER_ROLE_RANK[String(role || '').toLowerCase()] || 0;
+}
+
+function findUserByIdentityIndex(users, username) {
+    const targetToken = getUserIdentityToken(username);
+    if (!targetToken || !Array.isArray(users)) return -1;
+    return users.findIndex(u => userIdentityMatches(u && (u.user || u.username), username));
+}
+
+function mergeUserEntries(existingUser, incomingUser) {
+    if (!existingUser) return { ...incomingUser };
+    if (!incomingUser) return existingUser;
+
+    const merged = { ...existingUser };
+    const mergedRole = getRoleRank(incomingUser.role) >= getRoleRank(existingUser.role)
+        ? incomingUser.role
+        : existingUser.role;
+    merged.role = mergedRole;
+
+    if ((!merged.pass || merged.pass === '') && incomingUser.pass) merged.pass = incomingUser.pass;
+    if (!merged.user && incomingUser.user) merged.user = incomingUser.user;
+    if (!merged.username && incomingUser.username) merged.username = incomingUser.username;
+
+    if (incomingUser.traineeData && typeof incomingUser.traineeData === 'object') {
+        merged.traineeData = { ...(existingUser.traineeData || {}), ...incomingUser.traineeData };
+    }
+
+    if (incomingUser.boundClientId) merged.boundClientId = incomingUser.boundClientId;
+
+    const incomingTs = new Date(incomingUser.lastModified || incomingUser.updatedAt || 0).getTime() || 0;
+    const existingTs = new Date(existingUser.lastModified || existingUser.updatedAt || 0).getTime() || 0;
+    if (incomingTs >= existingTs) {
+        merged.lastModified = incomingUser.lastModified || merged.lastModified;
+        merged.modifiedBy = incomingUser.modifiedBy || merged.modifiedBy;
+    }
+
+    return merged;
+}
+
+function dedupeUsersSnapshot(inputUsers) {
+    const users = Array.isArray(inputUsers) ? inputUsers : [];
+    const deduped = [];
+    const userMap = new Map();
+
+    users.forEach(raw => {
+        if (!raw || typeof raw !== 'object') return;
+        const originalName = String(raw.user || raw.username || '').trim();
+        if (!originalName) return;
+
+        const key = getUserIdentityToken(originalName);
+        if (!key) return;
+
+        const candidate = { ...raw, user: raw.user || raw.username || originalName };
+        if (!userMap.has(key)) {
+            userMap.set(key, deduped.length);
+            deduped.push(candidate);
+            return;
+        }
+
+        const idx = userMap.get(key);
+        deduped[idx] = mergeUserEntries(deduped[idx], candidate);
+    });
+
+    return deduped;
+}
+
+function dedupeRosterSnapshot(inputRosters) {
+    const rosters = (inputRosters && typeof inputRosters === 'object') ? { ...inputRosters } : {};
+    const result = {};
+
+    Object.entries(rosters).forEach(([groupId, members]) => {
+        if (!Array.isArray(members)) {
+            result[groupId] = [];
+            return;
+        }
+
+        const seen = new Set();
+        const cleanMembers = [];
+        members.forEach(member => {
+            const value = String(member || '').trim();
+            if (!value) return;
+            const key = getUserIdentityToken(value);
+            if (!key || seen.has(key)) return;
+            seen.add(key);
+            cleanMembers.push(value);
+        });
+        result[groupId] = cleanMembers;
+    });
+
+    return result;
+}
+
+function sanitizeUsersAndRosters() {
+    const rawUsers = JSON.parse(localStorage.getItem('users') || '[]');
+    const rawRosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+
+    const users = dedupeUsersSnapshot(rawUsers);
+    const rosters = dedupeRosterSnapshot(rawRosters);
+
+    const usersChanged = JSON.stringify(users) !== JSON.stringify(Array.isArray(rawUsers) ? rawUsers : []);
+    const rostersChanged = JSON.stringify(rosters) !== JSON.stringify((rawRosters && typeof rawRosters === 'object') ? rawRosters : {});
+
+    if (usersChanged) localStorage.setItem('users', JSON.stringify(users));
+    if (rostersChanged) localStorage.setItem('rosters', JSON.stringify(rosters));
+
+    return { users, rosters, usersChanged, rostersChanged };
+}
 
 function isRetrainArchiveEntry(entry) {
     const reason = String((entry && entry.reason) || '').toLowerCase().trim();
@@ -71,6 +206,7 @@ async function splitLegacyRetrainArchives() {
 // Uses force=true to skip the fetch/merge process for Admin actions.
 // This ensures deletions and edits are authoritative and instant.
 async function secureUserSave() {
+    const includeRevoked = arguments.length > 0 ? Boolean(arguments[0]) : false;
     if (typeof saveToServer === 'function') {
         const btn = document.activeElement;
         let originalText = "";
@@ -84,7 +220,9 @@ async function secureUserSave() {
         try {
             // UPDATED: Use force=true to ensure User/Roster edits are authoritative.
             // This prevents "Ghost Reverts" when changing passwords or updating groups.
-            await saveToServer(['users', 'rosters', 'revokedUsers'], true); 
+            const keys = ['users', 'rosters'];
+            if (includeRevoked) keys.push('revokedUsers');
+            await saveToServer(keys, true); 
         } catch(e) {
             console.error("User Save Error:", e);
         } finally {
@@ -261,7 +399,11 @@ function refreshAllDropdowns() {
 function loadRostersList() { 
     if(document.activeElement && document.activeElement.id === 'newGroupNames') return;
 
-    const r = JSON.parse(localStorage.getItem('rosters') || '{}'); 
+    const sanitized = sanitizeUsersAndRosters();
+    const r = sanitized.rosters; 
+    if (sanitized.rostersChanged && typeof saveToServer === 'function') {
+        saveToServer(['rosters'], true, true).catch(() => {});
+    }
     const list = document.getElementById('rosterList');
     if(list) {
         list.innerHTML = Object.keys(r).sort().reverse().map(k => {
@@ -328,25 +470,26 @@ async function deleteAgentFromSystem(agentName, groupKey) {
     
     const btn = document.activeElement;
     if(btn) { btn.disabled = true; btn.innerText = 'Deleting...'; }
+    const targetToken = getUserIdentityToken(agentName);
 
     try {
         // 1. Remove from ALL Rosters (just in case they are in multiple)
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         Object.keys(rosters).forEach(gid => {
             if (rosters[gid]) {
-                rosters[gid] = rosters[gid].filter(m => m !== agentName);
+                rosters[gid] = rosters[gid].filter(m => getUserIdentityToken(m) !== targetToken);
             }
         });
         localStorage.setItem('rosters', JSON.stringify(rosters));
         
         // 2. Remove User Account
         let users = JSON.parse(localStorage.getItem('users') || '[]');
-        users = users.filter(u => u.user !== agentName);
+        users = users.filter(u => getUserIdentityToken(u && (u.user || u.username)) !== targetToken);
         localStorage.setItem('users', JSON.stringify(users));
         
         // 3. Add to Revoked (Blacklist) to prevent resurrection
         let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-        if(!revoked.includes(agentName)) {
+        if(!revoked.some(name => getUserIdentityToken(name) === targetToken)) {
             revoked.push(agentName);
             localStorage.setItem('revokedUsers', JSON.stringify(revoked));
         }
@@ -359,7 +502,7 @@ async function deleteAgentFromSystem(agentName, groupKey) {
                 // Case insensitive check just to be sure
                 data = data.filter(item => {
                     const val = item[userField];
-                    return !val || val.toLowerCase() !== agentName.toLowerCase();
+                    return !val || getUserIdentityToken(val) !== targetToken;
                 });
                 if(data.length !== originalLen) localStorage.setItem(key, JSON.stringify(data));
             }
@@ -382,10 +525,10 @@ async function deleteAgentFromSystem(agentName, groupKey) {
         // Object based data
         const wipeObjectData = (key) => {
             let data = JSON.parse(localStorage.getItem(key) || '{}');
-            if(data[agentName]) {
-                delete data[agentName];
-                localStorage.setItem(key, JSON.stringify(data));
-            }
+            Object.keys(data || {}).forEach(objKey => {
+                if (getUserIdentityToken(objKey) === targetToken) delete data[objKey];
+            });
+            localStorage.setItem(key, JSON.stringify(data));
         };
         wipeObjectData('agentNotes');
         wipeObjectData('monitor_data');
@@ -477,8 +620,9 @@ function populateTraineeDropdown() {
 // --- USER & TRAINEE MANAGEMENT ---
 
 async function scanAndGenerateUsers(silent = false, emailMap = {}) { 
-    const users = JSON.parse(localStorage.getItem('users') || '[]'); 
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
+    const sanitized = sanitizeUsersAndRosters();
+    const users = Array.isArray(sanitized.users) ? sanitized.users : [];
+    const rosters = (sanitized.rosters && typeof sanitized.rosters === 'object') ? sanitized.rosters : {};
     const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
     const revokedSet = new Set(revoked.map(r => String(r || '').trim().toLowerCase()));
 
@@ -497,7 +641,7 @@ async function scanAndGenerateUsers(silent = false, emailMap = {}) {
         if (revokedSet.has(normalized)) return;
 
         // Case-insensitive check
-        const exists = users.find(u => String(u.user || '').toLowerCase() === normalized);
+        const exists = findUserByIdentityIndex(users, name) > -1;
 
         if(!exists) { 
             // Secure native browser RNG
@@ -533,6 +677,26 @@ async function scanAndGenerateUsers(silent = false, emailMap = {}) {
     }
 }
 
+function renderAdminUsersHeaderStats(stats) {
+    const box = document.getElementById('adminUsersLiveSummary');
+    if (!box) return;
+
+    const items = [
+        { label: 'Visible', value: stats.visible },
+        { label: 'Accounts', value: stats.accounts },
+        { label: 'Trainees', value: stats.trainees },
+        { label: 'Groups', value: stats.groups },
+        { label: 'Active Now', value: stats.activeNow }
+    ];
+
+    box.innerHTML = items.map(item => `
+        <div style="flex:1; min-width:110px; background:var(--bg-input); border:1px solid var(--border-color); border-radius:10px; padding:8px 10px;">
+            <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em;">${item.label}</div>
+            <div style="font-size:1.05rem; font-weight:700; color:var(--text-main);">${item.value}</div>
+        </div>
+    `).join('');
+}
+
 function loadAdminUsers() { 
     if(document.activeElement && 
        (document.activeElement.id === 'userSearch' || 
@@ -544,9 +708,20 @@ function loadAdminUsers() {
     restrictTraineeMenu();
     splitLegacyRetrainArchives().catch(() => {});
 
-    const users = JSON.parse(localStorage.getItem('users') || '[]'); 
+    const sanitized = sanitizeUsersAndRosters();
+    const users = sanitized.users;
     const savedReports = JSON.parse(localStorage.getItem('savedReports') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
+    const rosters = sanitized.rosters;
+    if (sanitized.usersChanged || sanitized.rostersChanged) {
+        if (typeof saveToServer === 'function') {
+            const keys = [];
+            if (sanitized.usersChanged) keys.push('users');
+            if (sanitized.rostersChanged) keys.push('rosters');
+            if (keys.length > 0) {
+                saveToServer(keys, true, true).catch(() => {});
+            }
+        }
+    }
     const search = document.getElementById('userSearch') ? document.getElementById('userSearch').value.toLowerCase() : '';
     const roleFilter = document.getElementById('userRoleFilter') ? document.getElementById('userRoleFilter').value : '';
     
@@ -614,7 +789,7 @@ function loadAdminUsers() {
             let matchesGroup = true;
             if (groupFilter) {
                 const members = rosters[groupFilter] || [];
-                matchesGroup = members.some(m => m.toLowerCase() === u.user.toLowerCase());
+                matchesGroup = members.some(m => userIdentityMatches(m, u.user));
             }
 
             return matchesSearch && matchesRole && matchesGroup;
@@ -631,7 +806,7 @@ function loadAdminUsers() {
             let matchesGroup = true;
             if (groupFilter) {
                 const members = rosters[groupFilter] || [];
-                matchesGroup = members.some(m => m.toLowerCase() === u.user.toLowerCase());
+                matchesGroup = members.some(m => userIdentityMatches(m, u.user));
             }
             return matchesSearch && matchesRole && matchesGroup;
         });
@@ -639,12 +814,24 @@ function loadAdminUsers() {
     else {
         if(createContainer) createContainer.classList.add('hidden');
         if(scanBtn) scanBtn.classList.add('hidden');
-        displayUsers = users.filter(u => u.user === CURRENT_USER.user);
+        displayUsers = users.filter(u => userIdentityMatches(u.user, CURRENT_USER.user));
     }
 
     displayUsers.sort((a,b) => {
-        const roles = { 'admin': 1, 'special_viewer': 1, 'teamleader': 2, 'trainee': 3 };
-        return roles[a.role] - roles[b.role];
+        const aRank = getRoleRank(a.role);
+        const bRank = getRoleRank(b.role);
+        if (aRank !== bRank) return bRank - aRank;
+        return String(a.user || '').localeCompare(String(b.user || ''));
+    });
+
+    const now = Date.now();
+    const activeNow = Object.values(window.ACTIVE_USERS_CACHE || {}).filter(u => (now - (u.local_received_at || 0)) < 90000).length;
+    renderAdminUsersHeaderStats({
+        visible: displayUsers.length,
+        accounts: users.length,
+        trainees: users.filter(u => String(u.role || '').toLowerCase() === 'trainee').length,
+        groups: Object.keys(rosters || {}).length,
+        activeNow
     });
 
     const userList = document.getElementById('userList');
@@ -677,17 +864,19 @@ function loadAdminUsers() {
             const color = "#" + "00000".substring(0, 6 - c.length) + c;
             const avatarHtml = `<div style="width:28px; height:28px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; margin-right:10px; vertical-align:middle; box-shadow:0 2px 4px rgba(0,0,0,0.2);">${initials}</div>`;
 
-            if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && u.user !== 'admin') {
-                const hasReport = savedReports.some(r => r.trainee.toLowerCase() === u.user.toLowerCase());
+            if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && !userIdentityMatches(u.user, 'admin')) {
+                const hasReport = savedReports.some(r => userIdentityMatches(r && r.trainee, u.user));
                 const moveBtn = hasReport 
                     ? `<button class="btn-warning btn-sm" onclick="openMoveUserModal('${safeUser}')" title="Move to another group"><i class="fas fa-exchange-alt"></i></button>`
                     : `<button class="btn-secondary btn-sm" disabled title="Onboard Report Required to Move"><i class="fas fa-exchange-alt" style="opacity:0.5;"></i></button>`;
                 
-                const impBtn = (CURRENT_USER.role === 'super_admin') ? `<button class="btn-primary btn-sm" onclick="impersonateUser('${safeUser}')" title="Impersonate"><i class="fas fa-mask"></i></button>` : '';
+                const impBtn = (CURRENT_USER.role === 'super_admin' && !userIdentityMatches(CURRENT_USER.user, u.user))
+                    ? `<button class="btn-primary btn-sm" onclick="impersonateUser('${safeUser}')" title="Impersonate"><i class="fas fa-mask"></i></button>`
+                    : '';
 
                 // NEW: Demote Button (Super Admin Only)
                 let demoteBtn = '';
-                if (CURRENT_USER.role === 'super_admin' && u.role === 'super_admin') {
+                if (CURRENT_USER.role === 'super_admin' && u.role === 'super_admin' && !userIdentityMatches(CURRENT_USER.user, u.user)) {
                     demoteBtn = `<button class="btn-warning btn-sm" onclick="demoteSuperAdmin('${safeUser}')" title="Demote to Admin"><i class="fas fa-level-down-alt"></i></button>`;
                 }
 
@@ -696,7 +885,7 @@ function loadAdminUsers() {
             } 
             else if (CURRENT_USER.role === 'special_viewer') {
                 actions = `<span style="color:var(--text-muted); font-style:italic;">View Only</span>`;
-            } else if (u.user === CURRENT_USER.user) {
+            } else if (userIdentityMatches(u.user, CURRENT_USER.user)) {
                 actions = `<button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i> Edit Password</button>`;
             }
             
@@ -747,7 +936,7 @@ function openMoveUserModal(username) {
     let currentGroup = "None";
     
     for (const [gid, members] of Object.entries(rosters)) {
-        if (members.includes(username)) {
+        if (Array.isArray(members) && members.some(member => userIdentityMatches(member, username))) {
             currentGroup = getGroupLabel(gid);
             break;
         }
@@ -768,7 +957,7 @@ function openMoveUserModal(username) {
 async function confirmMoveUser() {
     const targetGid = document.getElementById('moveUserTargetSelect').value;
     if(!targetGid) return alert("Please select a destination group.");
-    const normalizedUserToMove = String(userToMove || '').trim().toLowerCase();
+    const normalizedUserToMove = getUserIdentityToken(userToMove);
 
     if(!confirm(`Move ${userToMove} to ${targetGid}?\n\nWARNING: This will ARCHIVE all their current progress, records, and attendance to start fresh in the new group (Retrain Mode).\n\nProceed?`)) return;
 
@@ -799,7 +988,7 @@ async function confirmMoveUser() {
         // 2. WIPE ACTIVE DATA (Clean Slate)
         const wipe = (key, field) => {
             let data = JSON.parse(localStorage.getItem(key) || '[]');
-            const newData = data.filter(item => String((item && item[field]) || '').trim().toLowerCase() !== normalizedUserToMove);
+            const newData = data.filter(item => getUserIdentityToken((item && item[field]) || '') !== normalizedUserToMove);
             if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
         };
         
@@ -810,21 +999,21 @@ async function confirmMoveUser() {
         wipe('insightReviews', 'trainee');
         
         let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
-        const noteKey = Object.keys(notes).find(k => String(k || '').trim().toLowerCase() === normalizedUserToMove);
+        const noteKey = Object.keys(notes).find(k => getUserIdentityToken(k) === normalizedUserToMove);
         if(noteKey) { delete notes[noteKey]; localStorage.setItem('agentNotes', JSON.stringify(notes)); }
 
         // 3. MOVE ROSTER
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         for (const gid in rosters) {
             if (!Array.isArray(rosters[gid])) continue;
-            rosters[gid] = rosters[gid].filter(member => String(member || '').trim().toLowerCase() !== normalizedUserToMove);
+            rosters[gid] = rosters[gid].filter(member => getUserIdentityToken(member) !== normalizedUserToMove);
         }
         if(!rosters[targetGid]) rosters[targetGid] = [];
         rosters[targetGid] = rosters[targetGid].filter((member, idx, arr) => {
-            const memberNorm = String(member || '').trim().toLowerCase();
-            return memberNorm && arr.findIndex(x => String(x || '').trim().toLowerCase() === memberNorm) === idx;
+            const memberNorm = getUserIdentityToken(member);
+            return memberNorm && arr.findIndex(x => getUserIdentityToken(x) === memberNorm) === idx;
         });
-        if(!rosters[targetGid].some(member => String(member || '').trim().toLowerCase() === normalizedUserToMove)) rosters[targetGid].push(userToMove);
+        if(!rosters[targetGid].some(member => getUserIdentityToken(member) === normalizedUserToMove)) rosters[targetGid].push(userToMove);
         localStorage.setItem('rosters', JSON.stringify(rosters));
 
         // 4. SYNC EVERYTHING
@@ -849,7 +1038,7 @@ async function demoteSuperAdmin(username) {
     if (!confirm(`Demote ${username} from Super Admin to Admin?`)) return;
 
     const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const idx = users.findIndex(u => u.user === username);
+    const idx = findUserByIdentityIndex(users, username);
     
     if (idx > -1) {
         users[idx].role = 'admin';
@@ -875,7 +1064,7 @@ async function addUser() {
     const u = document.getElementById('newUserName').value.trim();
     const p = document.getElementById('newUserPass').value;
     const r = document.getElementById('newUserRole').value; 
-    const normalizedUser = String(u || '').trim().toLowerCase();
+    const normalizedUser = getUserIdentityToken(u);
     
     // SECURITY: Prevent Privilege Escalation
     if (r === 'super_admin' && CURRENT_USER.role !== 'super_admin') {
@@ -884,15 +1073,17 @@ async function addUser() {
 
     if(!u || !p) return; 
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
-    if(users.find(x => String(x.user || '').toLowerCase() === normalizedUser)) return alert("User exists"); 
+    if(findUserByIdentityIndex(users, u) > -1) return alert("User exists"); 
     
     // --- TOMBSTONE CHECK ---
     // If this user was previously deleted (revoked), remove them from blacklist
     // so they can be re-created successfully.
     let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-    if(revoked.some(name => String(name || '').toLowerCase() === normalizedUser)) {
-        revoked = revoked.filter(name => String(name || '').toLowerCase() !== normalizedUser);
+    let revokedChanged = false;
+    if(revoked.some(name => getUserIdentityToken(name) === normalizedUser)) {
+        revoked = revoked.filter(name => getUserIdentityToken(name) !== normalizedUser);
         localStorage.setItem('revokedUsers', JSON.stringify(revoked));
+        revokedChanged = true;
     }
 
     let finalPass = p;
@@ -903,7 +1094,7 @@ async function addUser() {
     users.push({user:u, pass:finalPass, role:r}); 
     localStorage.setItem('users', JSON.stringify(users)); 
     
-    await secureUserSave();
+    await secureUserSave(revokedChanged);
     
     document.getElementById('newUserName').value = '';
     document.getElementById('newUserPass').value = '';
@@ -917,16 +1108,16 @@ async function remUser(username) {
     if(confirm(`Permanently delete user '${username}'?`)) { 
         const target = String(username || '').trim();
         if (!target) return;
-        const targetNorm = target.toLowerCase();
+        const targetNorm = getUserIdentityToken(target);
 
         // 1) Remove account (case-insensitive)
         let users = JSON.parse(localStorage.getItem('users') || '[]');
-        users = users.filter(u => String(u.user || '').toLowerCase() !== targetNorm);
+        users = users.filter(u => getUserIdentityToken(u && (u.user || u.username)) !== targetNorm);
         localStorage.setItem('users', JSON.stringify(users));
 
         // 2) Add to blacklist/tombstone (case-insensitive dedupe)
         let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-        if (!revoked.some(r => String(r || '').toLowerCase() === targetNorm)) {
+        if (!revoked.some(r => getUserIdentityToken(r) === targetNorm)) {
             revoked.push(target);
         }
         localStorage.setItem('revokedUsers', JSON.stringify(revoked));
@@ -935,7 +1126,7 @@ async function remUser(username) {
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         Object.keys(rosters).forEach(gid => {
             if (!Array.isArray(rosters[gid])) return;
-            rosters[gid] = rosters[gid].filter(m => String(m || '').toLowerCase() !== targetNorm);
+            rosters[gid] = rosters[gid].filter(m => getUserIdentityToken(m) !== targetNorm);
         });
         localStorage.setItem('rosters', JSON.stringify(rosters));
 
@@ -944,7 +1135,7 @@ async function remUser(username) {
             let arr = JSON.parse(localStorage.getItem(key) || '[]');
             if (!Array.isArray(arr)) return;
             arr = arr.filter(item => {
-                return !fields.some(field => String((item && item[field]) || '').toLowerCase() === targetNorm);
+                return !fields.some(field => getUserIdentityToken((item && item[field]) || '') === targetNorm);
             });
             localStorage.setItem(key, JSON.stringify(arr));
         };
@@ -963,7 +1154,7 @@ async function remUser(username) {
             const obj = JSON.parse(localStorage.getItem(key) || '{}');
             if (!obj || typeof obj !== 'object') return;
             Object.keys(obj).forEach(k => {
-                if (k.toLowerCase() === targetNorm) delete obj[k];
+                if (getUserIdentityToken(k) === targetNorm) delete obj[k];
             });
             localStorage.setItem(key, JSON.stringify(obj));
         };
@@ -992,9 +1183,9 @@ async function remUser(username) {
 
 function openUserEdit(username) {
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
-    const targetNorm = String(username || '').trim().toLowerCase();
+    const targetNorm = getUserIdentityToken(username);
     // FIX: Find index by username
-    const index = users.findIndex(u => String(u.user || '').toLowerCase() === targetNorm);
+    const index = users.findIndex(u => getUserIdentityToken(u && (u.user || u.username)) === targetNorm);
     if(index === -1) return;
 
     editTargetIndex = index;
@@ -1043,8 +1234,8 @@ function openUserEdit(username) {
 window.unbindUserClient = async function(username) {
     if(!confirm("Remove Client ID binding? This allows the user to login from a new machine.")) return;
     const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const targetNorm = String(username || '').trim().toLowerCase();
-    const index = users.findIndex(u => String(u.user || '').toLowerCase() === targetNorm);
+    const targetNorm = getUserIdentityToken(username);
+    const index = users.findIndex(u => getUserIdentityToken(u && (u.user || u.username)) === targetNorm);
     if (index === -1) return;
     delete users[index].boundClientId;
     localStorage.setItem('users', JSON.stringify(users));
@@ -1061,21 +1252,33 @@ window.renameUser = async function(oldName) {
     
     // Check if exists
     const users = JSON.parse(localStorage.getItem('users') || '[]');
-    if (users.some(u => u.user.toLowerCase() === newName.toLowerCase())) return alert("Username already exists.");
+    if (findUserByIdentityIndex(users, newName) > -1) return alert("Username already exists.");
     
     if (!confirm(`Rename '${oldName}' to '${newName}'?\n\nThis will update all records, attendance, and reports associated with this user.`)) return;
     
     // Perform Migration
     // 1. Users
-    const uIdx = users.findIndex(u => u.user === oldName);
+    const oldToken = getUserIdentityToken(oldName);
+    const uIdx = users.findIndex(u => getUserIdentityToken(u && (u.user || u.username)) === oldToken);
     if (uIdx > -1) users[uIdx].user = newName;
     localStorage.setItem('users', JSON.stringify(users));
     
     // 2. Rosters
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     Object.keys(rosters).forEach(gid => {
-        const idx = rosters[gid].indexOf(oldName);
+        const idx = Array.isArray(rosters[gid])
+            ? rosters[gid].findIndex(member => getUserIdentityToken(member) === oldToken)
+            : -1;
         if (idx > -1) rosters[gid][idx] = newName;
+        if (Array.isArray(rosters[gid])) {
+            const seen = new Set();
+            rosters[gid] = rosters[gid].filter(member => {
+                const key = getUserIdentityToken(member);
+                if (!key || seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+        }
     });
     localStorage.setItem('rosters', JSON.stringify(rosters));
     
@@ -1084,7 +1287,7 @@ window.renameUser = async function(oldName) {
         const data = JSON.parse(localStorage.getItem(key) || '[]');
         let changed = false;
         data.forEach(item => {
-            if (item[field] === oldName) {
+            if (getUserIdentityToken(item && item[field]) === oldToken) {
                 item[field] = newName;
                 changed = true;
             }
@@ -1106,11 +1309,15 @@ window.renameUser = async function(oldName) {
     // Object keys (Agent Notes, Monitor Data)
     const migrateObj = (key) => {
         const data = JSON.parse(localStorage.getItem(key) || '{}');
-        if (data[oldName]) {
-            data[newName] = data[oldName];
-            delete data[oldName];
-            localStorage.setItem(key, JSON.stringify(data));
-        }
+        let changed = false;
+        Object.keys(data).forEach(existingKey => {
+            if (getUserIdentityToken(existingKey) === oldToken && existingKey !== newName) {
+                data[newName] = data[existingKey];
+                delete data[existingKey];
+                changed = true;
+            }
+        });
+        if (changed) localStorage.setItem(key, JSON.stringify(data));
     };
     migrateObj('agentNotes');
     migrateObj('monitor_data');
@@ -1128,8 +1335,8 @@ window.renameUser = async function(oldName) {
 
 async function saveUserEdit() {
     const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const targetNorm = String(editTargetUsername || '').trim().toLowerCase();
-    const liveIndex = users.findIndex(u => String(u.user || '').toLowerCase() === targetNorm);
+    const targetNorm = getUserIdentityToken(editTargetUsername);
+    const liveIndex = users.findIndex(u => getUserIdentityToken(u && (u.user || u.username)) === targetNorm);
     if (liveIndex === -1) {
         alert("User no longer exists. The list will refresh.");
         document.getElementById('adminEditModal').classList.add('hidden');
@@ -1175,7 +1382,7 @@ async function saveUserEdit() {
     localStorage.setItem('users', JSON.stringify(users));
 
     // FIX: Update current session if editing self
-    if (CURRENT_USER && String(users[liveIndex].user || '').toLowerCase() === String(CURRENT_USER.user || '').toLowerCase()) {
+    if (CURRENT_USER && userIdentityMatches(users[liveIndex].user, CURRENT_USER.user)) {
         CURRENT_USER = { ...CURRENT_USER, ...users[liveIndex] };
         sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
     }
@@ -1231,7 +1438,8 @@ async function restoreAgent(username) {
     if(!confirm(`Restore ${username} to active duty?\n\nThis will move their data back to the active database and re-enable login access.`)) return;
 
     const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
-    const idx = graduates.findIndex(g => g.user === username);
+    const targetToken = getUserIdentityToken(username);
+    const idx = graduates.findIndex(g => getUserIdentityToken(g && g.user) === targetToken);
     
     if (idx === -1) return alert("Agent not found in archive.");
     
@@ -1266,7 +1474,7 @@ async function restoreAgent(username) {
 
     // 2. Restore User Account (Re-create)
     let users = JSON.parse(localStorage.getItem('users') || '[]');
-    if (!users.some(u => u.user === username)) {
+    if (findUserByIdentityIndex(users, username) === -1) {
         // Generate temp pin
         const pin = Math.floor(1000 + Math.random() * 9000).toString();
         users.push({ user: username, pass: pin, role: 'trainee', lastModified: new Date().toISOString(), modifiedBy: CURRENT_USER.user });
@@ -1276,7 +1484,8 @@ async function restoreAgent(username) {
 
     // 3. Remove from Blacklist
     let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-    revoked = revoked.filter(u => u !== username);
+    const restoreToken = getUserIdentityToken(username);
+    revoked = revoked.filter(u => getUserIdentityToken(u) !== restoreToken);
     localStorage.setItem('revokedUsers', JSON.stringify(revoked));
 
     // 4. Remove from Archive
@@ -1308,17 +1517,22 @@ async function graduateTrainee(username) {
     }
 
     try {
+        const targetToken = getUserIdentityToken(username);
         // 1. ARCHIVE DATA (Snapshot)
         const archiveData = {
             user: username,
             graduatedDate: new Date().toISOString(),
             reason: 'Graduated',
-            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => r.trainee === username),
-            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => s.trainee === username),
-            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => r.user === username),
-            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => r.trainee === username),
-            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => r.trainee === username),
-            notes: (JSON.parse(localStorage.getItem('agentNotes') || '{}'))[username] || null
+            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => getUserIdentityToken(s && s.trainee) === targetToken),
+            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => getUserIdentityToken(r && r.user) === targetToken),
+            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            notes: (() => {
+                const allNotes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+                const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
+                return key ? allNotes[key] : null;
+            })()
         };
 
         let archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
@@ -1330,7 +1544,7 @@ async function graduateTrainee(username) {
             let data = JSON.parse(localStorage.getItem(key) || '[]');
             const newData = data.filter(item => {
                 const val = item[field];
-                return !val || val.toLowerCase() !== username.toLowerCase();
+                return !val || getUserIdentityToken(val) !== targetToken;
             });
             if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
         };
@@ -1345,25 +1559,31 @@ async function graduateTrainee(username) {
         wipe('exemptions', 'trainee');
         
         let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
-        if(notes[username]) { delete notes[username]; localStorage.setItem('agentNotes', JSON.stringify(notes)); }
+        Object.keys(notes).forEach(noteKey => {
+            if (getUserIdentityToken(noteKey) === targetToken) delete notes[noteKey];
+        });
+        localStorage.setItem('agentNotes', JSON.stringify(notes));
 
         let monitor = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-        if(monitor[username]) { delete monitor[username]; localStorage.setItem('monitor_data', JSON.stringify(monitor)); }
+        Object.keys(monitor).forEach(monKey => {
+            if (getUserIdentityToken(monKey) === targetToken) delete monitor[monKey];
+        });
+        localStorage.setItem('monitor_data', JSON.stringify(monitor));
 
         // 3. REMOVE USER & ROSTER
         let users = JSON.parse(localStorage.getItem('users') || '[]');
-        users = users.filter(u => u.user !== username);
+        users = users.filter(u => getUserIdentityToken(u && (u.user || u.username)) !== targetToken);
         localStorage.setItem('users', JSON.stringify(users));
 
         const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
         for (const gid in rosters) {
-            rosters[gid] = rosters[gid].filter(m => m.toLowerCase() !== username.toLowerCase());
+            rosters[gid] = rosters[gid].filter(m => getUserIdentityToken(m) !== targetToken);
         }
         localStorage.setItem('rosters', JSON.stringify(rosters));
 
         // 4. BLACKLIST (Prevent regeneration)
         let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-        if(!revoked.includes(username)) {
+        if(!revoked.some(entry => getUserIdentityToken(entry) === targetToken)) {
             revoked.push(username);
             localStorage.setItem('revokedUsers', JSON.stringify(revoked));
         }

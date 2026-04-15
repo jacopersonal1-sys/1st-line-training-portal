@@ -130,12 +130,25 @@ const DataService = {
                 .single();
             if (error || !data) throw error || new Error(`Missing session ${sessionId} in ${table}`);
 
-            const serverSession = data.data || {};
+            let serverSession = data.data || {};
             if (!serverSession.trainees) serverSession.trainees = {};
-            serverSession.trainees[username] = {
-                ...(serverSession.trainees[username] || {}),
+
+            // Robust key resolution: prefer existing alias key if it matches the username
+            const existingKey = Object.keys(serverSession.trainees).find(k => this.identitiesMatch(k, username));
+            const keyToUse = existingKey || username;
+
+            serverSession.trainees[keyToUse] = {
+                ...(serverSession.trainees[keyToUse] || {}),
                 ...patchData
             };
+
+            // Collapse alias keys into the canonical keyToUse to avoid split state across aliases
+            Object.keys(serverSession.trainees).forEach(k => {
+                if (k !== keyToUse && this.identitiesMatch(k, keyToUse)) {
+                    serverSession.trainees[keyToUse] = { ...(serverSession.trainees[k] || {}), ...(serverSession.trainees[keyToUse] || {}) };
+                    delete serverSession.trainees[k];
+                }
+            });
 
             const { error: updateErr } = await AppContext.supabase
                 .from(table)
@@ -146,6 +159,21 @@ const DataService = {
 
         await patchOneTable(this.TABLE_PRIMARY);
         await patchOneTable(this.TABLE_MIRROR);
+    },
+
+    // Nudge a single trainee by writing a pending_action into the sessions table.
+    nudgeTrainee: async function(username, action) {
+        if (!AppContext.supabase || !username || !action) return;
+        try {
+            await AppContext.supabase.from('sessions').upsert({ username: username, role: 'trainee', pending_action: action, lastSeen: new Date().toISOString() });
+        } catch (e) {
+            try {
+                await AppContext.supabase.from('sessions').update({ pending_action: action, lastSeen: new Date().toISOString() }).eq('username', username);
+            } catch (err) {
+                console.warn(`[Vetting Rework] nudgeTrainee failed for ${username}`, err);
+                throw err;
+            }
+        }
     },
 
     // --- VETTING SESSION SYNC ---

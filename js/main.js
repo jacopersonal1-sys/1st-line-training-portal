@@ -19,6 +19,16 @@ if (window.electronAPI) {
         console.log("OS Woke from Sleep. Forcing immediate reconnection and sync...");
         const el = document.getElementById('sync-indicator');
         if(el) { el.style.opacity = '1'; el.innerHTML = '<i class="fas fa-bolt" style="color:#f1c40f;"></i> Waking...'; }
+        if (typeof window.updateSyncDiagnostics === 'function') {
+            window.updateSyncDiagnostics({
+                status: 'syncing',
+                statusText: 'Resuming after sleep',
+                direction: 'process',
+                phase: 'Reconnecting sync tunnel',
+                item: 'OS resume event',
+                startedAt: Date.now()
+            });
+        }
         
         // 1. Re-establish Database Client & WebSockets to prevent stale connections
         if (typeof initSupabaseClient === 'function') initSupabaseClient();
@@ -35,6 +45,16 @@ if (window.electronAPI) {
         console.log("Intercepted Close. Forcing final data sync...");
         const el = document.getElementById('sync-indicator');
         if(el) { el.style.opacity = '1'; el.innerHTML = '<i class="fas fa-save" style="color:#f1c40f;"></i> Finalizing...'; }
+        if (typeof window.updateSyncDiagnostics === 'function') {
+            window.updateSyncDiagnostics({
+                status: 'busy',
+                statusText: 'Finalizing before close',
+                direction: 'upload',
+                phase: 'Flushing pending saves',
+                item: 'Application shutdown sync',
+                startedAt: Date.now()
+            });
+        }
         
         if (typeof saveToServer === 'function') {
             // Flush existing queue immediately using delta sync to prevent timeouts
@@ -258,6 +278,10 @@ window.addEventListener('beforeunload', () => {
 });
 
 window.onload = async function() {
+    if (typeof refreshAdaptiveViewportLayout === 'function') {
+        refreshAdaptiveViewportLayout();
+    }
+
     // --- INJECT GLOBAL VISUAL STYLES ---
     if (!document.getElementById('global-visuals')) {
         // --- CLIENT IDENTITY ---
@@ -744,8 +768,13 @@ window.onload = async function() {
         banner.style.cssText = "position:fixed; top:0; left:0; width:100%; background:#e74c3c; color:white; text-align:center; padding:5px; z-index:99999; font-weight:bold; cursor:pointer;";
         banner.innerHTML = `<i class="fas fa-mask"></i> You are impersonating a user. Click here to return to Admin.`;
         banner.onclick = function() {
+            if (typeof window.returnFromImpersonation === 'function') {
+                window.returnFromImpersonation();
+                return;
+            }
             sessionStorage.setItem('currentUser', realAdmin);
             sessionStorage.removeItem('real_admin_identity');
+            sessionStorage.removeItem('impersonating_user');
             location.reload();
         };
         document.body.prepend(banner);
@@ -955,7 +984,9 @@ window.onload = async function() {
                 if(allowed) {
                     CURRENT_USER = JSON.parse(savedSession);
                     window.CURRENT_USER = CURRENT_USER;
-                    if (typeof persistAppSession === 'function') persistAppSession(CURRENT_USER);
+                    if (!sessionStorage.getItem('real_admin_identity') && typeof persistAppSession === 'function') {
+                        persistAppSession(CURRENT_USER);
+                    }
                     // --- NEW: Apply User Specific Theme Immediately ---
                     applyUserTheme(); 
                     
@@ -985,7 +1016,9 @@ window.onload = async function() {
             // Fallback if IP check isn't loaded
              CURRENT_USER = JSON.parse(savedSession);
              window.CURRENT_USER = CURRENT_USER;
-             if (typeof persistAppSession === 'function') persistAppSession(CURRENT_USER);
+             if (!sessionStorage.getItem('real_admin_identity') && typeof persistAppSession === 'function') {
+                 persistAppSession(CURRENT_USER);
+             }
              applyUserTheme();
              
              // Check for experimental theme
@@ -1158,6 +1191,69 @@ window.dragRefWindow = function(e, el) {
 };
 
 // --- NEW: THEME APPLICATION LOGIC ---
+function getCurrentUiZoomFactor() {
+    let zoom = 1;
+
+    try {
+        const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}') || {};
+        const storedZoom = parseFloat(localTheme.zoomLevel);
+        if (Number.isFinite(storedZoom) && storedZoom > 0) zoom = storedZoom;
+    } catch (e) {}
+
+    if (typeof require !== 'undefined') {
+        try {
+            const electron = require('electron');
+            if (electron && electron.webFrame && typeof electron.webFrame.getZoomFactor === 'function') {
+                const liveZoom = parseFloat(electron.webFrame.getZoomFactor());
+                if (Number.isFinite(liveZoom) && liveZoom > 0) zoom = liveZoom;
+            }
+        } catch (e) {}
+    } else {
+        const bodyZoom = parseFloat(document.body && document.body.style ? document.body.style.zoom : '');
+        if (Number.isFinite(bodyZoom) && bodyZoom > 0) zoom = bodyZoom;
+    }
+
+    if (!Number.isFinite(zoom) || zoom <= 0) return 1;
+    return Math.max(0.5, Math.min(1.75, zoom));
+}
+
+function refreshAdaptiveViewportLayout() {
+    const root = document.documentElement;
+    if (!root || !document.body) return;
+
+    const zoom = getCurrentUiZoomFactor();
+    const rawWidth = window.innerWidth || root.clientWidth || 0;
+    const rawHeight = window.innerHeight || root.clientHeight || 0;
+
+    const effectiveWidth = Math.max(320, Math.round(rawWidth / zoom));
+    const effectiveHeight = Math.max(320, Math.round(rawHeight / zoom));
+
+    root.style.setProperty('--app-vh', `${(rawHeight * 0.01).toFixed(4)}px`);
+    root.style.setProperty('--app-vw', `${(rawWidth * 0.01).toFixed(4)}px`);
+    root.style.setProperty('--app-effective-width', `${effectiveWidth}px`);
+    root.style.setProperty('--app-effective-height', `${effectiveHeight}px`);
+
+    document.body.classList.toggle('viewport-tight-width', effectiveWidth < 1300);
+    document.body.classList.toggle('viewport-compact-width', effectiveWidth < 1100);
+    document.body.classList.toggle('viewport-tight-height', effectiveHeight < 820);
+    document.body.classList.toggle('viewport-compact-height', effectiveHeight < 700);
+}
+
+window.refreshAdaptiveViewportLayout = refreshAdaptiveViewportLayout;
+
+let _adaptiveViewportTimer = null;
+function scheduleAdaptiveViewportLayoutRefresh() {
+    if (_adaptiveViewportTimer) clearTimeout(_adaptiveViewportTimer);
+    _adaptiveViewportTimer = setTimeout(() => {
+        refreshAdaptiveViewportLayout();
+        _adaptiveViewportTimer = null;
+    }, 60);
+}
+
+window.addEventListener('resize', scheduleAdaptiveViewportLayoutRefresh, { passive: true });
+window.addEventListener('orientationchange', scheduleAdaptiveViewportLayoutRefresh, { passive: true });
+window.addEventListener('focus', scheduleAdaptiveViewportLayoutRefresh, { passive: true });
+
 function applyUserTheme() {
     const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || 'null');
     if (!localTheme) return; // Fallback to CSS defaults
@@ -1223,6 +1319,8 @@ function applyUserTheme() {
             document.body.style.zoom = localTheme.zoomLevel;
         }
     }
+
+    refreshAdaptiveViewportLayout();
 }
 
 // --- HELPER: Lighten/Darken Hex Color ---
@@ -1769,7 +1867,7 @@ function updateSidebarVisibility() {
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
             const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework', 'superadmin-studio'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly', 'content-studio'];
+            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly'];
             
             // Special Check for Arena
             if (targetTab === 'vetting-arena') {
@@ -1793,7 +1891,7 @@ function updateSidebarVisibility() {
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -1804,8 +1902,96 @@ function updateSidebarVisibility() {
 }
 
 let TAB_SWITCH_TIMEOUT = null;
+let VIEW_SYNC_IN_FLIGHT = false;
+const VIEW_SYNC_LAST_RUN = {};
+const HIGH_PRIORITY_SYNC_VIEWS = new Set([
+    'assessment-schedule',
+    'insights',
+    'test-manage',
+    'test-records',
+    'admin-panel',
+    'live-assessment',
+    'monthly'
+]);
+
+function isHighPrioritySyncView(id) {
+    return HIGH_PRIORITY_SYNC_VIEWS.has(String(id || ''));
+}
+
+function applyRealtimeFailoverProfile(id) {
+    const highPriority = isHighPrioritySyncView(id);
+    window.__HIGH_PRIORITY_VIEW_SYNC = highPriority;
+
+    const baseRate = Number(window.BASE_REALTIME_FAILURE_RATE || window.REALTIME_FAILURE_RATE || 15000);
+    const targetRate = highPriority ? 1000 : Math.max(1000, baseRate);
+    if (window.REALTIME_FAILURE_RATE !== targetRate) {
+        window.REALTIME_FAILURE_RATE = targetRate;
+    }
+
+    if (typeof setFallbackPollingRate === 'function' && window.CURRENT_FALLBACK_RATE > 0 && window.CURRENT_FALLBACK_RATE !== targetRate) {
+        setFallbackPollingRate(targetRate);
+    }
+}
+
+function rerenderActiveViewAfterFreshPull(id) {
+    const active = document.querySelector('section.active');
+    if (!active || active.id !== id) return;
+
+    if (id === 'assessment-schedule' && typeof ScheduleStudioLoader !== 'undefined' && typeof ScheduleStudioLoader.refresh === 'function') {
+        ScheduleStudioLoader.refresh();
+        return;
+    }
+    if (id === 'insights' && typeof renderInsightDashboard === 'function') {
+        renderInsightDashboard();
+        return;
+    }
+    if (id === 'test-manage') {
+        if (typeof loadManageTests === 'function') loadManageTests();
+        if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
+        if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
+        return;
+    }
+    if (id === 'test-records' && typeof loadTestRecords === 'function') {
+        loadTestRecords();
+        return;
+    }
+    if (id === 'admin-panel' && typeof loadAdminUsers === 'function') {
+        loadAdminUsers();
+        return;
+    }
+    if (id === 'live-assessment' && typeof renderLiveTable === 'function') {
+        renderLiveTable();
+        return;
+    }
+    if (id === 'monthly' && typeof loadAllDataViews === 'function') {
+        loadAllDataViews();
+    }
+}
+
+async function syncFreshDataForView(id) {
+    if (!isHighPrioritySyncView(id)) return;
+    if (id === 'assessment-schedule') return;
+    if (typeof loadFromServer !== 'function') return;
+
+    const now = Date.now();
+    const last = VIEW_SYNC_LAST_RUN[id] || 0;
+    if (VIEW_SYNC_IN_FLIGHT || (now - last) < 700) return;
+
+    VIEW_SYNC_LAST_RUN[id] = now;
+    VIEW_SYNC_IN_FLIGHT = true;
+    try {
+        await loadFromServer(true);
+    } catch (error) {
+        console.warn(`[View Sync] Fresh pull failed for ${id}:`, error);
+    } finally {
+        VIEW_SYNC_IN_FLIGHT = false;
+        rerenderActiveViewAfterFreshPull(id);
+    }
+}
 
 function showTab(id, btn) {
+  applyRealtimeFailoverProfile(id);
+
   // --- SYNC & REALTIME FLAGS ---
   // Reset one-time sync flags when navigating away from relevant tabs.
   if (id !== 'live-assessment' && window._liveSyncDone) {
@@ -1824,13 +2010,20 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub'];
+      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
   }
 
   if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'opl-hub') {
+      return;
+  }
+
+  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'content-studio') {
+      if (typeof showToast === 'function') {
+          showToast("Access denied: Content Studio is restricted to Admin and Super Admin.", "error");
+      }
       return;
   }
 
@@ -1867,9 +2060,16 @@ function showTab(id, btn) {
   if (TAB_SWITCH_TIMEOUT) clearTimeout(TAB_SWITCH_TIMEOUT);
 
   const current = document.querySelector('section.active');
-  if (current && current.id === id) return;
+  if (current && current.id === id) {
+      syncFreshDataForView(id);
+      return;
+  }
 
   const executeSwitch = () => {
+      if (typeof refreshAdaptiveViewportLayout === 'function') {
+          refreshAdaptiveViewportLayout();
+      }
+
       // HIDDEN LOGIC: Reset views
       document.querySelectorAll('section').forEach(s => {
           s.classList.remove('active');
@@ -1897,6 +2097,7 @@ function showTab(id, btn) {
 
       // VISUAL FIX: Auto-resize textareas when tab becomes visible
       setTimeout(() => {
+          if (typeof refreshAdaptiveViewportLayout === 'function') refreshAdaptiveViewportLayout();
           document.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
       }, 50);
         
@@ -2083,6 +2284,8 @@ function showTab(id, btn) {
               console.error("SuperAdminDataStudioLoader module not loaded.");
           }
       }
+
+      syncFreshDataForView(id);
   };
 
   if (current) {
@@ -2589,6 +2792,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.20": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Content Studio Module:</strong> Added a new isolated <code>content-studio</code> runtime with View + Builder flows, schedule-linked headers/subjects, and play/document controls.</li>
+                <li style="margin-bottom: 8px;"><strong>Engagement Telemetry:</strong> Content Studio now records per-user video plays, watch-time deltas, and skip events for subject-level learning insight.</li>
+                <li style="margin-bottom: 8px;"><strong>Super Admin User Control Workspace:</strong> Expanded Data Studio with cross-module user controls for revoke/binding management, archive attempt editing, and one-click archive/reset of live lifecycle rows.</li>
+                <li style="margin-bottom: 8px;"><strong>Sync + Identity Hardening:</strong> Added auth-critical pre-login refresh, identity-safe user/roster dedupe, high-priority view fresh-pull behavior, and richer realtime sync diagnostics for safer fleet operations.</li>
+            </ul>`,
         "2.6.19": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Retrain Attempt Unlock:</strong> Trainee assessment launcher now auto-ignores legacy attempts from prior groups/move cycles so valid new-group attempts are not blocked.</li>

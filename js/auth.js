@@ -40,6 +40,120 @@ function getPersistentAppSession() {
     }
 }
 
+function normalizeLoginIdentity(value) {
+    try {
+        if (typeof normalizeIdentityValue === 'function') {
+            const normalized = normalizeIdentityValue(value);
+            if (normalized) return normalized;
+        }
+    } catch (e) {
+        // Fall through to local normalization
+    }
+
+    let v = String(value || '').trim().toLowerCase();
+    if (!v) return '';
+    if (v.includes('@')) v = v.split('@')[0];
+    v = v.replace(/[._-]+/g, ' ');
+    v = v.replace(/\s+/g, ' ').trim();
+    return v.replace(/\s+/g, '');
+}
+
+function isUserRevokedLocally(username) {
+    try {
+        const token = normalizeLoginIdentity(username);
+        if (!token) return false;
+        const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        if (!Array.isArray(revoked)) return false;
+        return revoked.some(entry => {
+            const raw = (entry && typeof entry === 'object')
+                ? (entry.user || entry.username || entry.name || '')
+                : entry;
+            return normalizeLoginIdentity(raw) === token;
+        });
+    } catch (e) {
+        return false;
+    }
+}
+
+function withAuthTimeout(promise, timeoutMs = 5500) {
+    let timer = null;
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('AUTH_REFRESH_TIMEOUT')), timeoutMs);
+        })
+    ]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
+
+async function refreshAuthCriticalDataFromServer() {
+    if (!window.supabaseClient) return false;
+    if (localStorage.getItem('DEMO_MODE') === 'true') return false;
+
+    try {
+        const usersQuery = window.supabaseClient
+            .from('users')
+            .select('id, data, updated_at')
+            .order('updated_at', { ascending: true })
+            .limit(5000);
+
+        const docsQuery = window.supabaseClient
+            .from('app_documents')
+            .select('key, content, updated_at')
+            .in('key', ['revokedUsers', 'system_config', 'rosters']);
+
+        const [usersResult, docsResult] = await withAuthTimeout(Promise.all([usersQuery, docsQuery]));
+
+        if (usersResult && !usersResult.error && Array.isArray(usersResult.data)) {
+            const usersByIdentity = new Map();
+            usersResult.data.forEach(row => {
+                if (!row || !row.data) return;
+                const rowData = (row.data && typeof row.data === 'object') ? { ...row.data } : row.data;
+                if (!rowData || typeof rowData !== 'object') return;
+                if ((rowData.id === undefined || rowData.id === null) && row.id !== undefined && row.id !== null) {
+                    rowData.id = row.id;
+                }
+
+                const identity = rowData.user || rowData.username || rowData.id || row.id;
+                const token = normalizeLoginIdentity(identity) || `id_${String(row.id || rowData.id || usersByIdentity.size + 1)}`;
+                usersByIdentity.set(token, rowData);
+            });
+
+            const freshUsers = Array.from(usersByIdentity.values());
+            localStorage.setItem('users', JSON.stringify(freshUsers));
+
+            if (usersResult.data.length > 0) {
+                const latestTs = usersResult.data
+                    .map(r => r && r.updated_at)
+                    .filter(Boolean)
+                    .sort()
+                    .pop();
+                if (latestTs) localStorage.setItem('row_sync_ts_users', latestTs);
+            }
+            if (typeof emitDataChange === 'function') emitDataChange('users', 'auth_refresh');
+        }
+
+        if (docsResult && !docsResult.error && Array.isArray(docsResult.data)) {
+            docsResult.data.forEach(doc => {
+                if (!doc || !doc.key) return;
+                const localKey = String(doc.key || '').replace(/^demo_/, '');
+                const serialized = (typeof doc.content === 'undefined') ? JSON.stringify(null) : JSON.stringify(doc.content);
+                localStorage.setItem(localKey, serialized);
+                if (doc.updated_at) localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
+                if (typeof emitDataChange === 'function') emitDataChange(localKey, 'auth_refresh');
+            });
+        }
+
+        if (typeof applySystemConfig === 'function') applySystemConfig();
+        if (typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
+        return true;
+    } catch (e) {
+        console.warn('Auth refresh fallback to local cache:', e && e.message ? e.message : e);
+        return false;
+    }
+}
+
 // --- HELPER: ASYNC SAVE ---
 // Ensures critical user profile updates are saved before proceeding.
 async function secureAuthSave() {
@@ -135,6 +249,7 @@ function toggleLoginMode(mode) {
 
 async function attemptLogin() {
   let u = (window.LOGIN_MODE === 'admin') ? document.getElementById('adminUsername').value : document.getElementById('traineeUsername').value;
+  u = String(u || '').trim();
   const p = document.getElementById('password').value;
   
   if(!u) { document.getElementById('loginError').innerText = "Enter username."; return; }
@@ -318,9 +433,10 @@ async function attemptLogin() {
   }
   // -----------------------------
 
+  await refreshAuthCriticalDataFromServer();
+
   // --- SECURITY CHECK 1: REVOKED ACCESS (Blacklist) ---
-  const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-  if (revoked.includes(u)) {
+  if (isUserRevokedLocally(u)) {
       document.getElementById('loginError').innerText = "Access has been revoked for this account.";
       document.getElementById('loginError').style.color = "#ff5252";
       return;
@@ -395,7 +511,7 @@ async function attemptLogin() {
 
   // Validate (Check against Plaintext OR Hash for backward compatibility)
   const validUser = users.find(x => {
-      const nameMatch = x.user.toLowerCase() === u.toLowerCase();
+      const nameMatch = String((x && (x.user || x.username)) || '').trim().toLowerCase() === u.toLowerCase();
       if(nameMatch) {
           if (x.pass === p) return true; // Plaintext match
           if (x.pass === hashedPassword) return true; // Correct Hash match
@@ -427,26 +543,45 @@ async function attemptLogin() {
     if(!accessGranted) return; // Overlay will show, stop login
     // -------------------------------
 
-    // --- SECURITY CHECK 3: CLIENT ID BINDING (STRICT) ---
-    const currentClientId = localStorage.getItem('client_id');
+    // --- SECURITY CHECK 3: REVOKED USERS & CLIENT ID BINDING (STRICT) ---
+    // 1) Deny access immediately if the username is present in the revokedUsers blacklist
+    try {
+        const isRevoked = isUserRevokedLocally(validUser.user || validUser.username);
+        if (isRevoked) {
+            document.getElementById('loginError').innerText = "Account access revoked.";
+            return;
+        }
+    } catch (e) {
+        // Ignore parsing errors and continue (no blacklist applied)
+    }
+
+    // 2) Client binding: treat empty/null/'undefined' strings as UNBOUND (safe binding)
+    const currentClientId = localStorage.getItem('client_id') || '';
     const isRoamingUser = (validUser.role === 'admin' || validUser.role === 'super_admin');
-    
+
     if (!isRoamingUser) {
-        if (validUser.boundClientId) {
-            // If user is bound, ID MUST match
-            if (validUser.boundClientId !== currentClientId) {
+        const rawBound = typeof validUser.boundClientId === 'undefined' ? '' : String(validUser.boundClientId || '').trim();
+        const isBound = rawBound !== '' && rawBound.toLowerCase() !== 'undefined' && rawBound.toLowerCase() !== 'null';
+
+        if (isBound) {
+            // If user is bound, ID MUST match exactly (trimmed)
+            if (rawBound !== String(currentClientId || '').trim()) {
                 console.error("Security Violation: Client ID Mismatch");
                 nukeApplication(); // TERMINATE
                 return;
             }
         } else {
-            // First time login? Bind this client ID to the user
-            console.log("Binding user to this Client ID...");
-            validUser.boundClientId = currentClientId;
-            const idx = users.findIndex(u => u.user === validUser.user);
-            if(idx > -1) users[idx] = validUser;
-            localStorage.setItem('users', JSON.stringify(users));
-            secureAuthSave();
+            // First time login or explicitly unbound: bind this client ID to the user
+            try {
+                console.log("Binding user to this Client ID...");
+                validUser.boundClientId = String(currentClientId || '').trim();
+                const idx = users.findIndex(u => String(u.user || '') === String(validUser.user || ''));
+                if (idx > -1) users[idx] = validUser;
+                localStorage.setItem('users', JSON.stringify(users));
+                secureAuthSave();
+            } catch (e) {
+                console.warn('Failed to persist boundClientId locally:', e);
+            }
         }
     }
     // ----------------------------------------------------
@@ -548,7 +683,22 @@ async function autoLogin() {
   // -----------------------------
 
   // Revert to Standard Footer (Profile moved to Header)
-  document.getElementById('user-footer').innerHTML = `Logged in as: <strong>${CURRENT_USER.user}</strong> (${CURRENT_USER.role}) <span id="sync-indicator" style="margin-left:15px; transition: opacity 0.5s; font-size: 0.9em;"></span>`;
+  document.getElementById('user-footer').innerHTML = `Logged in as: <strong>${CURRENT_USER.user}</strong> (${CURRENT_USER.role}) <span id="sync-indicator-wrap" class="sync-indicator-wrap"><span id="sync-indicator" style="margin-left:15px; transition: opacity 0.5s; font-size: 0.9em;"></span><div id="sync-detail-popover" class="sync-detail-popover hidden"></div></span>`;
+  if (typeof window.updateSyncDiagnostics === 'function') {
+      window.updateSyncDiagnostics({
+          status: 'success',
+          statusText: 'Session ready',
+          direction: 'idle',
+          phase: 'Waiting for next sync event',
+          item: '-',
+          progressDone: 0,
+          progressTotal: 0,
+          bytesDone: 0,
+          bytesTotal: 0,
+          lastSuccessAt: Date.now(),
+          startedAt: 0
+      });
+  }
   
   // LOG LOGIN
   if(typeof logAccessEvent === 'function') logAccessEvent(CURRENT_USER.user, 'Login');
@@ -848,9 +998,9 @@ function applyRolePermissions() {
         if(document.getElementById('filterMonthDiv')) document.getElementById('filterMonthDiv').classList.add('hidden');
         document.getElementById('overviewTitle').innerText = "My Results";
         
-        // Hide Admin Sections but KEEP admin-panel and test-records visible
+        // Hide Admin Sections but keep the shared admin landing shell visible
         sections.forEach(s => {
-            if(s.id !== 'admin-panel' && s.id !== 'test-records') s.classList.add('hidden');
+            if(s.id !== 'admin-panel') s.classList.add('hidden');
         });
 
         // Hide Create User & Controls for Trainees
@@ -861,6 +1011,19 @@ function applyRolePermissions() {
 }
 
 async function logout() { 
+  const realAdminRaw = sessionStorage.getItem('real_admin_identity');
+  if (realAdminRaw) {
+      sessionStorage.setItem('currentUser', realAdminRaw);
+      sessionStorage.removeItem('real_admin_identity');
+      sessionStorage.removeItem('impersonating_user');
+      try {
+          const parsed = JSON.parse(realAdminRaw);
+          if (parsed && typeof persistAppSession === 'function') persistAppSession(parsed);
+      } catch (e) {}
+      location.reload();
+      return;
+  }
+
   const isDemo = localStorage.getItem('DEMO_MODE') === 'true';
 
   // ARCHITECTURAL FIX: KIOSK MODE TRAP

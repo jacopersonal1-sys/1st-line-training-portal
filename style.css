@@ -21,6 +21,12 @@
   
   /* NEW: Focus Ring for inputs */
   --focus-ring: 0 0 0 3px rgba(243, 112, 33, 0.25);
+  --app-vh: 1vh;
+  --app-vw: 1vw;
+  --sidebar-collapsed-width: 70px;
+  --sidebar-expanded-width: 250px;
+  --content-pad-y: 15px;
+  --content-pad-x: 25px;
 
   /* Experimental Theme Motion Controls */
   --exp-motion-speed: 1;
@@ -113,6 +119,69 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
     cursor: move;
 }
 .user-footer button { pointer-events: auto; -webkit-app-region: no-drag; }
+.sync-indicator-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    -webkit-app-region: no-drag;
+    cursor: default;
+}
+.sync-detail-popover {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 10px);
+    width: min(420px, 90vw);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.35);
+    padding: 10px 12px;
+    color: var(--text-main);
+    z-index: 2200;
+    white-space: normal;
+    pointer-events: none;
+}
+.sync-indicator-wrap:hover .sync-detail-popover,
+.sync-indicator-wrap:focus-within .sync-detail-popover {
+    display: block !important;
+}
+.sync-detail-title {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 6px;
+}
+.sync-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 5px 12px;
+    font-size: 0.76rem;
+}
+.sync-detail-grid span {
+    color: var(--text-muted);
+}
+.sync-detail-grid strong {
+    color: var(--text-main);
+    font-weight: 600;
+    text-align: right;
+}
+.sync-progress-bar {
+    margin-top: 8px;
+    width: 100%;
+    height: 6px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    overflow: hidden;
+}
+.sync-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), #2ecc71);
+    transition: width 0.2s ease;
+}
 
 /* ================= LOGIN SCREEN ================= */
 .login-page {
@@ -153,19 +222,43 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
 .login-error { color: #ff5252; margin-top: 20px; min-height: 20px; font-size: 0.9rem; text-align: center; }
 
 /* ================= APP LAYOUT ================= */
-.app-layout { display: flex; min-height: 100vh; }
-.content-wrapper { flex: 1; padding: 15px 25px; margin-left: 60px; transition: 0.3s; width: calc(100% - 60px); }
+.app-layout {
+    display: flex;
+    min-height: calc(var(--app-vh) * 100);
+    height: calc(var(--app-vh) * 100);
+    overflow: hidden;
+}
+.content-wrapper {
+    flex: 1;
+    min-width: 0;
+    padding: var(--content-pad-y) var(--content-pad-x);
+    margin-left: var(--sidebar-collapsed-width);
+    transition: 0.3s;
+    width: calc(100% - var(--sidebar-collapsed-width));
+    height: calc(var(--app-vh) * 100);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
 
 /* SIDEBAR */
 .sidebar {
-    position: fixed; top: 0; left: 0; height: 100%; width: 70px;
+    position: fixed; top: 0; left: 0; height: 100%; width: var(--sidebar-collapsed-width);
     background: var(--bg-card); border-right: 1px solid var(--border-color);
     z-index: 1000; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden; white-space: nowrap; display: flex; flex-direction: column;
     -webkit-app-region: drag; /* Make sidebar a drag handle */
 }
-.sidebar:hover { width: 250px; box-shadow: 10px 0 30px rgba(0,0,0,0.5); }
-.sidebar-menu { padding-top: 90px; display: flex; flex-direction: column; gap: 5px; -webkit-app-region: no-drag; /* Keep buttons clickable */ }
+.sidebar:hover { width: var(--sidebar-expanded-width); box-shadow: 10px 0 30px rgba(0,0,0,0.5); }
+.sidebar-menu {
+    padding-top: 90px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    overflow-y: auto;
+    padding-bottom: 15px;
+    -webkit-app-region: no-drag; /* Keep buttons clickable */
+}
 
 .nav-item {
     background: transparent; border: none; color: var(--text-muted);
@@ -182,9 +275,10 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
 
 /* TOP HEADER & NOTIFICATIONS */
 .top-header { 
-    display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; height: 60px;
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; min-height: 60px;
     -webkit-app-region: drag; /* Allows dragging the window */
     padding-right: 150px; /* Space for Windows Controls (Min/Max/Close) */
+    flex: 0 0 auto;
 }
 /* Ensure buttons inside header are clickable, not draggable */
 .top-header button, .notif-wrapper, .control-bubble { -webkit-app-region: no-drag; }
@@ -217,9 +311,67 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
 .icon-btn:hover { background: var(--bg-hover); color: var(--primary); transform: scale(1.1); }
 
 /* ================= ANIMATIONS ================= */
-.views-container { position: relative; overflow: hidden; min-height: 80vh; }
+.views-container {
+    position: relative;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
+}
 section { display: none; }
 section.active { display: block; animation: fadeSlideUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+body.viewport-tight-width {
+    --content-pad-x: 16px;
+    --sidebar-expanded-width: 220px;
+}
+
+body.viewport-compact-width {
+    --sidebar-collapsed-width: 58px;
+    --sidebar-expanded-width: 58px;
+    --content-pad-x: 12px;
+}
+
+body.viewport-tight-height {
+    --content-pad-y: 10px;
+}
+
+body.viewport-compact-height {
+    --content-pad-y: 8px;
+}
+
+body.viewport-tight-height .top-header {
+    margin-bottom: 14px;
+    min-height: 50px;
+}
+
+body.viewport-compact-height .top-header {
+    margin-bottom: 10px;
+    min-height: 44px;
+}
+
+body.viewport-compact-width .sidebar:hover {
+    box-shadow: none;
+}
+
+body.viewport-compact-width .control-bubble:hover {
+    width: 220px;
+}
+
+@media (max-width: 980px) {
+    :root {
+        --sidebar-collapsed-width: 56px;
+        --sidebar-expanded-width: 56px;
+        --content-pad-x: 10px;
+        --content-pad-y: 8px;
+    }
+    .top-header {
+        margin-bottom: 12px;
+        min-height: 46px;
+        padding-right: 90px;
+    }
+}
 
 @keyframes fadeSlideUp { 
     from { transform: translateY(15px); opacity: 0; } 
@@ -499,8 +651,8 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
   body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .no-print, .top-bar, .sidebar, #manage, #capture, #monthly, #insights, #live-assessment, #assessment-schedule, #admin-panel, #profile-view, #bookingModal, #scheduleModal, #adminEditModal, #login-screen { display: none !important; }
   #app { margin: 0; padding: 0; display: block !important; }
-  .content-wrapper { margin: 0; padding: 0; width: 100%; }
-  .views-container { min-height: auto; }
+  .content-wrapper { margin: 0; padding: 0; width: 100%; height: auto !important; overflow: visible !important; }
+  .views-container { min-height: auto; overflow: visible !important; }
   #report-card { display: block !important; position: absolute; top: 0; left: 0; width: 100%; margin: 0; padding: 0; visibility: visible; }
   .a4-page { box-shadow: none; margin: 0; width: 100%; min-height: auto; padding: 0; }
   .hidden-print-field { display: none !important; }

@@ -64,6 +64,7 @@ const VettingReworkLoader = {
         // Derive the absolute path based on the current window location safely
         const basePath = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
         const modulePath = basePath + '/modules/vetting_rework/index.html';
+        const preloadPath = basePath + '/modules/vetting_rework/preload.js';
 
         console.log(`[Sandbox Loader] Injecting Webview mapped to: ${modulePath} (target=${activeCreds.target})`);
 
@@ -76,7 +77,8 @@ const VettingReworkLoader = {
                 class="vetting-rework-webview"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}&mode=${encodeURIComponent(mode)}" 
                 style="width:100%; height:calc(100vh - 200px); border:none; background:var(--bg-card); box-shadow:0 0 15px rgba(0,0,0,0.5);"
-                webpreferences="nodeIntegration=yes, contextIsolation=no"
+                webpreferences="nodeIntegration=no, contextIsolation=yes"
+                preload="${preloadPath}"
                 partition="${partitionName}"
                 allowpopups></webview>`;
     }

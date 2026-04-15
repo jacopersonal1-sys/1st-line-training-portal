@@ -271,6 +271,25 @@ async function loadFromServer(silent = false) {
             return false;
         }
 
+        const pullStartedAt = Date.now();
+        let pullProgressDone = 0;
+        let pullProgressTotal = 1; // metadata
+        let pullBytesDone = 0;
+        let pullBytesTotal = 0;
+        updateSyncDiagnostics({
+            status: 'syncing',
+            statusText: 'Syncing from server',
+            direction: 'download',
+            phase: 'Reading server metadata',
+            item: 'app_documents',
+            server: getActiveSyncServerLabel(),
+            progressDone: pullProgressDone,
+            progressTotal: pullProgressTotal,
+            bytesDone: pullBytesDone,
+            bytesTotal: pullBytesTotal,
+            startedAt: pullStartedAt
+        });
+
         // 0. Process Deletes First (Ensure server is clean before we pull)
         await processPendingDeletes();
 
@@ -295,12 +314,29 @@ async function loadFromServer(silent = false) {
         
         if (error) throw error;
 
+        const metaBytes = estimateSyncPayloadSize(meta);
+        pullProgressDone = 1;
+        pullBytesDone += metaBytes;
+        pullBytesTotal += metaBytes;
+        updateSyncDiagnostics({
+            phase: 'Metadata received',
+            item: `Keys: ${Array.isArray(meta) ? meta.length : 0}`,
+            progressDone: pullProgressDone,
+            progressTotal: pullProgressTotal,
+            bytesDone: pullBytesDone,
+            bytesTotal: pullBytesTotal
+        });
+
         // Identify Stale Blobs
         const keysToFetch = [];
         meta.forEach(row => {
             const localKey = IS_DEMO_MODE ? row.key.replace('demo_', '') : row.key;
             // SECURITY & MINIMIZATION: Skip admin-only blobs for trainees
             if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(localKey)) return;
+            // Legacy compatibility guard:
+            // if a key is row-synced, ignore blob documents with the same key.
+            // This prevents stale app_documents rows from duplicating row-level tables (notably `users`).
+            if (ROW_MAP[localKey]) return;
             
             const localTs = localStorage.getItem('sync_ts_' + localKey);
             const isStrictServerBlob = STRICT_SERVER_BLOB_KEYS.has(localKey);
@@ -312,6 +348,16 @@ async function loadFromServer(silent = false) {
         });
 
         // Fetch Stale Blobs
+        pullProgressTotal += keysToFetch.length;
+        updateSyncDiagnostics({
+            phase: keysToFetch.length > 0 ? 'Downloading document keys' : 'No blob changes',
+            item: keysToFetch.length > 0 ? keysToFetch.join(', ') : 'No stale blob docs',
+            progressDone: pullProgressDone,
+            progressTotal: pullProgressTotal,
+            bytesDone: pullBytesDone,
+            bytesTotal: pullBytesTotal
+        });
+
         if (keysToFetch.length > 0) {
             if(!silent) console.log(`Syncing updates for: ${keysToFetch.join(', ')}`);
             
@@ -348,6 +394,19 @@ async function loadFromServer(silent = false) {
                 }
                 localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
                 emitDataChange(localKey, 'load_from_server');
+
+                const docBytes = estimateSyncPayloadSize(doc.content);
+                pullProgressDone += 1;
+                pullBytesDone += docBytes;
+                pullBytesTotal += docBytes;
+                updateSyncDiagnostics({
+                    phase: 'Downloading documents',
+                    item: localKey,
+                    progressDone: pullProgressDone,
+                    progressTotal: pullProgressTotal,
+                    bytesDone: pullBytesDone,
+                    bytesTotal: pullBytesTotal
+                });
             }
             
             const configKey = IS_DEMO_MODE ? 'demo_system_config' : 'system_config';
@@ -362,8 +421,27 @@ async function loadFromServer(silent = false) {
         const pendingIds = new Set(pendingQueue.filter(i => i.type === 'id').map(i => i.id));
         const tombstoneIds = new Set(safeLocalParse(TOMBSTONE_KEY, []));
         const pendingQueries = pendingQueue.filter(i => i.type === 'query');
-        const revokedUsers = safeLocalParse('revokedUsers', []);
-        const revokedSet = new Set(revokedUsers.map(u => String(u || '').toLowerCase()));
+        let revokedUsers = safeLocalParse('revokedUsers', []);
+        const currentUsers = safeLocalParse('users', []);
+        const activeUserTokens = new Set(
+            (Array.isArray(currentUsers) ? currentUsers : [])
+                .map(u => normalizeIdentityValue((u && (u.user || u.username)) || ''))
+                .filter(Boolean)
+        );
+        const cleanRevoked = [];
+        const seenRevoked = new Set();
+        (Array.isArray(revokedUsers) ? revokedUsers : []).forEach(entry => {
+            const raw = String(entry || '').trim();
+            const token = normalizeIdentityValue(raw);
+            if (!token || seenRevoked.has(token) || activeUserTokens.has(token)) return;
+            seenRevoked.add(token);
+            cleanRevoked.push(raw);
+        });
+        if (JSON.stringify(cleanRevoked) !== JSON.stringify(Array.isArray(revokedUsers) ? revokedUsers : [])) {
+            localStorage.setItem('revokedUsers', JSON.stringify(cleanRevoked));
+        }
+        revokedUsers = cleanRevoked;
+        const revokedSet = new Set(revokedUsers.map(u => normalizeIdentityValue(u)));
 
         // --- PHASE B: ROW SYNC (Records, Submissions, Logs) ---
         // Only fetch rows newer than our last sync timestamp
@@ -372,6 +450,8 @@ async function loadFromServer(silent = false) {
 
         const fastTasks = [];
         const heavyTasks = [];
+        let plannedRowTables = 0;
+        let completedRowTables = 0;
 
         Object.entries(ROW_MAP).forEach(([localKey, tableName]) => {
             
@@ -385,7 +465,19 @@ async function loadFromServer(silent = false) {
                 return;
             }
 
+            plannedRowTables += 1;
+            pullProgressTotal += 1;
+
             const syncTask = async () => {
+                updateSyncDiagnostics({
+                    phase: 'Syncing row tables',
+                    item: `${localKey} (${tableName})`,
+                    progressDone: pullProgressDone + completedRowTables,
+                    progressTotal: pullProgressTotal,
+                    bytesDone: pullBytesDone,
+                    bytesTotal: pullBytesTotal
+                });
+
                 const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
             
             // CLOCK SKEW FIX: Subtract 10 minutes from lastSync to catch items from clients with lagging clocks
@@ -425,7 +517,12 @@ async function loadFromServer(silent = false) {
             
                 // ARCHITECTURAL FIX: Throttle row limits for heavy JSON tables to prevent OOM crashes
                 const fetchLimit = tableName === 'monitor_history' ? 100 : (heavyTables.includes(tableName) ? 500 : 2000);
-            const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
+                const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
+                const rowBytes = estimateSyncPayloadSize((newRows || []).map(r => r && r.data ? r.data : null));
+                if (rowBytes > 0) {
+                    pullBytesDone += rowBytes;
+                    pullBytesTotal += rowBytes;
+                }
 
             if (rowErr) {
                 // ERROR HANDLING: Check if response was actually HTML (Cloudflare Error)
@@ -614,6 +711,17 @@ async function loadFromServer(silent = false) {
                 if(!silent) console.log(`Clearing ${localKey} (Server Empty)`);
                 localStorage.setItem(localKey, '[]');
             }
+
+                completedRowTables += 1;
+                pullProgressDone += 1;
+                updateSyncDiagnostics({
+                    phase: `Row sync ${completedRowTables}/${plannedRowTables || 0}`,
+                    item: `${localKey} (${tableName})`,
+                    progressDone: pullProgressDone,
+                    progressTotal: pullProgressTotal,
+                    bytesDone: pullBytesDone,
+                    bytesTotal: pullBytesTotal
+                });
             };
 
             if (heavyTables.includes(tableName)) {
@@ -634,6 +742,7 @@ async function loadFromServer(silent = false) {
         // --- PHASE C: MONITOR STATE SYNC (Real-time Activity) ---
         // OPTIMIZATION: Only Admins/TeamLeaders need to download the entire company's live activity data.
         if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'teamleader')) {
+            pullProgressTotal += 1;
             const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
             const { data: monRows, error: monErr } = await window.supabaseClient
                 .from('monitor_state')
@@ -656,7 +765,19 @@ async function loadFromServer(silent = false) {
                     monData[CURRENT_USER.user] = currentLocal[CURRENT_USER.user];
                 }
                 localStorage.setItem('monitor_data', JSON.stringify(monData));
+                const monitorBytes = estimateSyncPayloadSize(monRows.map(r => r && r.data ? r.data : null));
+                pullBytesDone += monitorBytes;
+                pullBytesTotal += monitorBytes;
             }
+            pullProgressDone += 1;
+            updateSyncDiagnostics({
+                phase: 'Monitor state sync complete',
+                item: `monitor_state rows: ${Array.isArray(monRows) ? monRows.length : 0}`,
+                progressDone: pullProgressDone,
+                progressTotal: pullProgressTotal,
+                bytesDone: pullBytesDone,
+                bytesTotal: pullBytesTotal
+            });
         }
 
         // --- PHASE D: POST-SYNC ACTIONS ---
@@ -673,6 +794,19 @@ async function loadFromServer(silent = false) {
             }
         }
         updateSyncUI('success');
+        updateSyncDiagnostics({
+            status: 'success',
+            statusText: 'Server pull complete',
+            direction: 'download',
+            phase: 'Download complete',
+            item: '-',
+            progressDone: Math.max(pullProgressDone, pullProgressTotal),
+            progressTotal: Math.max(pullProgressTotal, pullProgressDone),
+            bytesDone: pullBytesDone,
+            bytesTotal: Math.max(pullBytesTotal, pullBytesDone),
+            lastSuccessAt: Date.now(),
+            startedAt: 0
+        });
         
         // NATIVE DISK CACHE BACKUP
         if (!IS_DEMO_MODE && window.electronAPI && window.electronAPI.disk) {
@@ -682,6 +816,15 @@ async function loadFromServer(silent = false) {
 
     } catch (err) { 
         updateSyncUI('error');
+        updateSyncDiagnostics({
+            status: 'error',
+            statusText: 'Download failed',
+            direction: 'download',
+            phase: 'Server pull failed',
+            item: '-',
+            lastError: err && err.message ? err.message : 'Unknown sync error',
+            startedAt: 0
+        });
         if(!silent) {
             console.error("Supabase Load Error:", err);
             // Helper for 401/406 errors to give a clear hint
@@ -993,6 +1136,152 @@ window.retrySync = async function() {
     }
 };
 
+window.SYNC_DIAGNOSTICS = window.SYNC_DIAGNOSTICS || {
+    status: 'idle',
+    statusText: 'Idle',
+    direction: 'idle',
+    phase: 'Waiting',
+    item: '-',
+    server: '-',
+    progressDone: 0,
+    progressTotal: 0,
+    bytesDone: 0,
+    bytesTotal: 0,
+    queuedIncoming: 0,
+    queuedSaves: 0,
+    pendingDeletes: 0,
+    latencyMs: 0,
+    startedAt: 0,
+    updatedAt: Date.now(),
+    lastSuccessAt: 0,
+    lastError: ''
+};
+
+function escapeSyncHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function estimateSyncPayloadSize(payload) {
+    try {
+        const serialized = JSON.stringify(payload === undefined ? null : payload);
+        if (!serialized) return 0;
+        if (typeof Blob !== 'undefined') {
+            return new Blob([serialized]).size;
+        }
+        return serialized.length * 2;
+    } catch (e) {
+        return 0;
+    }
+}
+
+function formatSyncBytes(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function getActiveSyncServerLabel() {
+    const target = (localStorage.getItem('active_server_target') || 'cloud').toLowerCase();
+    if (target === 'local') {
+        const settings = safeLocalParse('system_config', {})?.server_settings || {};
+        const localUrl = String(settings.local_url || '').trim();
+        if (localUrl) {
+            try {
+                const parsed = new URL(localUrl);
+                return `Local (${parsed.host})`;
+            } catch (e) {
+                return `Local (${localUrl})`;
+            }
+        }
+        return 'Local';
+    }
+    if (target === 'staging') return 'Staging';
+    return 'Cloud';
+}
+
+function refreshSyncDiagnosticsCounters() {
+    if (!window.SYNC_DIAGNOSTICS) return;
+    window.SYNC_DIAGNOSTICS.queuedIncoming = Array.isArray(INCOMING_DATA_QUEUE) ? INCOMING_DATA_QUEUE.length : 0;
+    window.SYNC_DIAGNOSTICS.queuedSaves = (SAVE_QUEUE && typeof SAVE_QUEUE.size === 'number') ? SAVE_QUEUE.size : 0;
+    const pending = safeLocalParse(PENDING_DEL_KEY, []);
+    window.SYNC_DIAGNOSTICS.pendingDeletes = Array.isArray(pending) ? pending.length : 0;
+    window.SYNC_DIAGNOSTICS.latencyMs = Number(window.CURRENT_LATENCY || 0);
+}
+
+function renderSyncDiagnostics() {
+    const indicator = document.getElementById('sync-indicator');
+    if (!indicator || !window.SYNC_DIAGNOSTICS) return;
+
+    const state = window.SYNC_DIAGNOSTICS;
+    refreshSyncDiagnosticsCounters();
+
+    const total = Math.max(Number(state.progressTotal) || 0, 0);
+    const done = Math.max(Math.min(Number(state.progressDone) || 0, total || Number(state.progressDone) || 0), 0);
+    const progressPercent = total > 0 ? Math.round((done / total) * 100) : 0;
+    const bytesDone = Math.max(Number(state.bytesDone) || 0, 0);
+    const bytesTotal = Math.max(Number(state.bytesTotal) || 0, bytesDone);
+    const elapsedMs = state.startedAt ? Math.max(0, Date.now() - state.startedAt) : 0;
+    const elapsedText = elapsedMs > 0 ? `${(elapsedMs / 1000).toFixed(1)}s` : '-';
+    const lastSuccessText = state.lastSuccessAt ? new Date(state.lastSuccessAt).toLocaleTimeString() : '-';
+
+    const tooltipLines = [
+        `Status: ${state.statusText || state.status || 'Idle'}`,
+        `Direction: ${state.direction || 'idle'}`,
+        `Phase: ${state.phase || '-'}`,
+        `Item: ${state.item || '-'}`,
+        `Server: ${state.server || '-'}`,
+        `Progress: ${done}/${total || 0} (${progressPercent}%)`,
+        `Transfer: ${formatSyncBytes(bytesDone)} / ${formatSyncBytes(bytesTotal)}`,
+        `Queues: incoming ${state.queuedIncoming || 0}, save ${state.queuedSaves || 0}, delete ${state.pendingDeletes || 0}`,
+        `Latency: ${state.latencyMs || 0}ms`,
+        `Elapsed: ${elapsedText}`,
+        `Last success: ${lastSuccessText}`,
+        `Last error: ${state.lastError || '-'}`,
+        `Updated: ${new Date(state.updatedAt || Date.now()).toLocaleTimeString()}`
+    ];
+    indicator.title = tooltipLines.join('\n');
+
+    const popover = document.getElementById('sync-detail-popover');
+    if (!popover) return;
+
+    popover.innerHTML = `
+        <div class="sync-detail-title">Sync Activity</div>
+        <div class="sync-detail-grid">
+            <span>Status</span><strong>${escapeSyncHtml(state.statusText || state.status || 'Idle')}</strong>
+            <span>Direction</span><strong>${escapeSyncHtml(state.direction || 'idle')}</strong>
+            <span>Phase</span><strong>${escapeSyncHtml(state.phase || '-')}</strong>
+            <span>Item</span><strong>${escapeSyncHtml(state.item || '-')}</strong>
+            <span>Server</span><strong>${escapeSyncHtml(state.server || '-')}</strong>
+            <span>Progress</span><strong>${done}/${total || 0} (${progressPercent}%)</strong>
+            <span>Transfer</span><strong>${formatSyncBytes(bytesDone)} / ${formatSyncBytes(bytesTotal)}</strong>
+            <span>Queue</span><strong>IN ${state.queuedIncoming || 0} / SAVE ${state.queuedSaves || 0} / DEL ${state.pendingDeletes || 0}</strong>
+            <span>Latency</span><strong>${state.latencyMs || 0}ms</strong>
+            <span>Elapsed</span><strong>${elapsedText}</strong>
+            <span>Last Success</span><strong>${escapeSyncHtml(lastSuccessText)}</strong>
+            <span>Last Error</span><strong>${escapeSyncHtml(state.lastError || '-')}</strong>
+        </div>
+        <div class="sync-progress-bar"><div class="sync-progress-fill" style="width:${progressPercent}%;"></div></div>
+    `;
+}
+
+function updateSyncDiagnostics(patch = {}) {
+    if (!window.SYNC_DIAGNOSTICS) return;
+    const next = { ...window.SYNC_DIAGNOSTICS, ...patch, updatedAt: Date.now() };
+    if (!next.server || next.server === '-') next.server = getActiveSyncServerLabel();
+    if (!next.statusText) next.statusText = next.status || 'Idle';
+    window.SYNC_DIAGNOSTICS = next;
+    renderSyncDiagnostics();
+}
+
+window.updateSyncDiagnostics = updateSyncDiagnostics;
+
 // --- SYNC STATUS UI ---
 function updateSyncUI(status) {
     const el = document.getElementById('sync-indicator');
@@ -1004,10 +1293,40 @@ function updateSyncUI(status) {
 
     if(status === 'busy') {
         el.innerHTML = '<i class="fas fa-circle-notch fa-spin" style="color:var(--primary);"></i> Uploading...';
+        updateSyncDiagnostics({
+            status: 'busy',
+            statusText: 'Uploading',
+            direction: 'upload',
+            phase: 'Pushing local changes',
+            server: getActiveSyncServerLabel(),
+            startedAt: window.SYNC_DIAGNOSTICS?.startedAt || Date.now()
+        });
     } else if (status === 'syncing') {
         el.innerHTML = '<i class="fas fa-sync fa-spin" style="color:var(--text-muted);"></i> Syncing...';
+        updateSyncDiagnostics({
+            status: 'syncing',
+            statusText: 'Syncing',
+            direction: 'download',
+            phase: 'Pulling server updates',
+            server: getActiveSyncServerLabel(),
+            startedAt: window.SYNC_DIAGNOSTICS?.startedAt || Date.now()
+        });
     } else if (status === 'success') {
         el.innerHTML = '<i class="fas fa-check" style="color:#2ecc71;"></i> Synced';
+        updateSyncDiagnostics({
+            status: 'success',
+            statusText: 'Synced',
+            direction: 'idle',
+            phase: 'Idle',
+            item: '-',
+            progressDone: Math.max(window.SYNC_DIAGNOSTICS?.progressDone || 0, window.SYNC_DIAGNOSTICS?.progressTotal || 0),
+            progressTotal: Math.max(window.SYNC_DIAGNOSTICS?.progressTotal || 0, window.SYNC_DIAGNOSTICS?.progressDone || 0),
+            bytesDone: window.SYNC_DIAGNOSTICS?.bytesTotal || window.SYNC_DIAGNOSTICS?.bytesDone || 0,
+            bytesTotal: window.SYNC_DIAGNOSTICS?.bytesTotal || window.SYNC_DIAGNOSTICS?.bytesDone || 0,
+            lastSuccessAt: Date.now(),
+            lastError: '',
+            startedAt: 0
+        });
         // Fade out after 3 seconds
         setTimeout(() => { 
             if(el.innerHTML.includes('Synced')) {
@@ -1021,11 +1340,35 @@ function updateSyncUI(status) {
         const msg = isOffline ? 'Offline' : 'Sync Failed';
         const icon = isOffline ? 'fa-wifi' : 'fa-exclamation-circle';
         el.innerHTML = `<i class="fas ${icon}" style="color:#ff5252;"></i> ${msg} <button onclick="retrySync()" style="background:transparent; border:1px solid #ff5252; color:#ff5252; border-radius:4px; cursor:pointer; font-size:0.7rem; padding:1px 5px; margin-left:5px;">Retry</button>`;
+        updateSyncDiagnostics({
+            status: 'error',
+            statusText: msg,
+            direction: 'error',
+            phase: 'Sync interrupted',
+            lastError: msg,
+            server: getActiveSyncServerLabel()
+        });
     } else if (status === 'pending') {
         el.innerHTML = '<i class="fas fa-pen" style="color:#f1c40f;"></i> Unsaved...';
+        updateSyncDiagnostics({
+            status: 'pending',
+            statusText: 'Unsaved changes',
+            direction: 'pending',
+            phase: 'Waiting to upload',
+            server: getActiveSyncServerLabel()
+        });
     } else if (status === 'processing_queue') {
         el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing...`;
+        updateSyncDiagnostics({
+            status: 'processing_queue',
+            statusText: 'Processing queue',
+            direction: 'process',
+            phase: 'Applying realtime updates',
+            server: getActiveSyncServerLabel()
+        });
     }
+
+    renderSyncDiagnostics();
 }
 
 function emitDataChange(localKey, source = 'unknown') {
@@ -1316,6 +1659,11 @@ let _RETRIGGER_SAVE = false;
 async function _processSaveQueue(force = false, silent = false, retryCount = 0) {
     let keysToSave = [];
     let currentKeyIndex = 0;
+    let pushProgressDone = 0;
+    let pushProgressTotal = 0;
+    let pushBytesDone = 0;
+    let pushBytesTotal = 0;
+    const pushStartedAt = Date.now();
 
     if (_IS_PROCESSING_SAVE && retryCount === 0) {
         _RETRIGGER_SAVE = true;
@@ -1361,6 +1709,20 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         if (keysToSave.length === 0) return true; // Nothing to do
         SAVE_QUEUE.clear(); // Clear queue immediately
         if(!silent) updateSyncUI('busy');
+        pushProgressTotal = keysToSave.length;
+        updateSyncDiagnostics({
+            status: 'busy',
+            statusText: 'Uploading changes',
+            direction: 'upload',
+            phase: 'Preparing upload queue',
+            item: '-',
+            server: getActiveSyncServerLabel(),
+            progressDone: pushProgressDone,
+            progressTotal: pushProgressTotal,
+            bytesDone: pushBytesDone,
+            bytesTotal: pushBytesTotal,
+            startedAt: pushStartedAt
+        });
 
         // 0. Process Deletes First (Ensure server is clean before we push)
         await processPendingDeletes();
@@ -1370,17 +1732,39 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             const isStrictServerKey = STRICT_SERVER_KEYS.has(key);
             const hasExplicitSaveRequest = EXPLICIT_SAVE_KEYS.has(key);
             const keyForce = force || (isStrictServerKey && hasExplicitSaveRequest);
+            const localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
+            const keyBytes = estimateSyncPayloadSize(localContent);
+            pushBytesTotal += keyBytes;
+            updateSyncDiagnostics({
+                status: 'busy',
+                statusText: 'Uploading changes',
+                direction: 'upload',
+                phase: 'Uploading key',
+                item: ROW_MAP[key] ? `${key} -> ${ROW_MAP[key]}` : key,
+                progressDone: pushProgressDone,
+                progressTotal: pushProgressTotal,
+                bytesDone: pushBytesDone,
+                bytesTotal: pushBytesTotal
+            });
 
             // Shared/global keys are server-authoritative.
             // Ignore background/autosave uploads unless this key was explicitly targeted or force=true.
             if (isStrictServerKey && !keyForce) {
                 if (!silent) console.log(`[Sync] Skipping background upload for server-authoritative key: ${key}`);
+                pushProgressDone += 1;
+                pushBytesDone += keyBytes;
+                updateSyncDiagnostics({
+                    phase: 'Skipped background key (server-authoritative)',
+                    item: key,
+                    progressDone: pushProgressDone,
+                    progressTotal: pushProgressTotal,
+                    bytesDone: pushBytesDone,
+                    bytesTotal: pushBytesTotal
+                });
                 continue;
             }
 
             try {
-            const localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
-            
             // --- STRATEGY A: ROW-LEVEL SYNC (Records, Submissions, Logs) ---
             if (ROW_MAP[key]) {
                 const tableName = ROW_MAP[key];
@@ -1577,11 +1961,38 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('521') || msg.includes('503')) throw keyErr;
                 if (hasExplicitSaveRequest) EXPLICIT_SAVE_KEYS.delete(key);
             }
+
+            pushProgressDone += 1;
+            pushBytesDone += keyBytes;
+            updateSyncDiagnostics({
+                status: 'busy',
+                statusText: 'Uploading changes',
+                direction: 'upload',
+                phase: 'Uploaded key',
+                item: ROW_MAP[key] ? `${key} -> ${ROW_MAP[key]}` : key,
+                progressDone: pushProgressDone,
+                progressTotal: pushProgressTotal,
+                bytesDone: pushBytesDone,
+                bytesTotal: pushBytesTotal
+            });
         }
 
         currentKeyIndex = keysToSave.length;
 
         if(!silent) updateSyncUI('success');
+        updateSyncDiagnostics({
+            status: 'success',
+            statusText: 'Upload complete',
+            direction: 'upload',
+            phase: 'Upload complete',
+            item: '-',
+            progressDone: pushProgressTotal,
+            progressTotal: pushProgressTotal,
+            bytesDone: pushBytesDone,
+            bytesTotal: Math.max(pushBytesDone, pushBytesTotal),
+            lastSuccessAt: Date.now(),
+            startedAt: 0
+        });
         if(typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
         
         // NATIVE DISK CACHE BACKUP
@@ -1600,6 +2011,19 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         }
 
         if(!silent) updateSyncUI('error');
+        updateSyncDiagnostics({
+            status: 'error',
+            statusText: 'Upload failed',
+            direction: 'upload',
+            phase: 'Upload failed',
+            item: keysToSave[currentKeyIndex] || '-',
+            progressDone: pushProgressDone,
+            progressTotal: pushProgressTotal,
+            bytesDone: pushBytesDone,
+            bytesTotal: Math.max(pushBytesDone, pushBytesTotal),
+            lastError: err && err.message ? err.message : 'Unknown upload error',
+            startedAt: 0
+        });
         console.error("Cloud Sync Error:", err);
         
         let msg = err.message || "Check Console for details";
@@ -1844,8 +2268,14 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
     });
     
-    // Ensure the blacklist itself is preserved
-    merged.revokedUsers = blacklist;
+    // Ensure blacklist is preserved, but never keep identities that currently exist in active users.
+    // This prevents stale local revocation lists from re-revoking restored trainees.
+    const activeUserTokens = new Set(
+        (Array.isArray(merged.users) ? merged.users : [])
+            .map(u => normalizeIdentityValue((u && (u.user || u.username)) || ''))
+            .filter(Boolean)
+    );
+    merged.revokedUsers = blacklist.filter(name => !activeUserTokens.has(normalizeIdentityValue(name)));
 
     return merged;
 }
@@ -1862,15 +2292,107 @@ async function fetchSystemStatus() {
         for(let key in localStorage) {
             if(localStorage.hasOwnProperty(key)) storageSize += localStorage[key].length;
         }
-        
-        const now = Date.now();
-        const activeUsers = Object.values(window.ACTIVE_USERS_CACHE || {}).filter(u => (now - (u.local_received_at || 0)) < 90000);
-        
+
         // Dummy query to measure latency accurately
         await window.supabaseClient.from('app_documents').select('key').limit(1);
 
         const end = Date.now();
         const latency = end - start;
+
+        const now = Date.now();
+        const presenceUsers = Object.values(window.ACTIVE_USERS_CACHE || {}).filter(u => (now - (u.local_received_at || 0)) < 90000);
+        let sessionUsers = [];
+        try {
+            const recentIso = new Date(now - 180000).toISOString();
+            const { data: sessionRows, error: sessionErr } = await window.supabaseClient
+                .from('sessions')
+                .select('*')
+                .gt('lastSeen', recentIso)
+                .order('lastSeen', { ascending: false })
+                .limit(500);
+            if (!sessionErr && Array.isArray(sessionRows)) sessionUsers = sessionRows;
+        } catch (sessionReadError) {
+            console.warn('Session fallback read failed:', sessionReadError);
+        }
+
+        const toIdentity = (value) => String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[._-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/\s+/g, '');
+
+        const mergedMap = new Map();
+        presenceUsers.forEach(p => {
+            const name = p.username || p.user;
+            const key = toIdentity(name);
+            if (!key) return;
+            mergedMap.set(key, {
+                ...p,
+                username: name,
+                user: name
+            });
+        });
+
+        const idleThreshold = (typeof IDLE_THRESHOLD !== 'undefined' && Number.isFinite(IDLE_THRESHOLD)) ? IDLE_THRESHOLD : 60000;
+        sessionUsers.forEach(row => {
+            const name = row.username || row.user;
+            const key = toIdentity(name);
+            if (!key) return;
+
+            const lastSeenTs = row.lastSeen ? new Date(row.lastSeen).getTime() : 0;
+            if (!lastSeenTs || (now - lastSeenTs) > 180000) return;
+
+            const existing = mergedMap.get(key);
+            const idleFromLastSeen = Math.max(0, now - lastSeenTs);
+            const sessionItem = {
+                username: name,
+                user: name,
+                role: row.role || (existing && existing.role) || '-',
+                idleTime: Number.isFinite(row.idleTime) ? row.idleTime : ((existing && Number.isFinite(existing.idleTime)) ? existing.idleTime : idleFromLastSeen),
+                isIdle: typeof row.isIdle === 'boolean' ? row.isIdle : ((existing && typeof existing.isIdle === 'boolean') ? existing.isIdle : (idleFromLastSeen > idleThreshold)),
+                version: row.version || (existing && existing.version) || '-',
+                clientId: row.clientId || (existing && existing.clientId) || 'Unknown',
+                activity: row.activity || (existing && existing.activity) || '-',
+                lastSeen: row.lastSeen || (existing && existing.lastSeen) || new Date(lastSeenTs).toISOString(),
+                local_received_at: (existing && existing.local_received_at) || now
+            };
+
+            if (!existing) {
+                mergedMap.set(key, sessionItem);
+                return;
+            }
+
+            const existingLastSeen = existing.lastSeen ? new Date(existing.lastSeen).getTime() : 0;
+            mergedMap.set(key, (lastSeenTs >= existingLastSeen) ? { ...existing, ...sessionItem } : { ...sessionItem, ...existing });
+        });
+
+        const activeUsers = Array.from(mergedMap.values())
+            .filter(u => {
+                const lastSeenTs = u.lastSeen ? new Date(u.lastSeen).getTime() : 0;
+                if (u.local_received_at && (now - u.local_received_at) < 90000) return true;
+                return !!lastSeenTs && (now - lastSeenTs) < 180000;
+            })
+            .sort((a, b) => {
+                const aTs = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+                const bTs = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+                return bTs - aTs;
+            });
+
+        // If presence tunnel is degraded, seed cache from sessions fallback.
+        if (presenceUsers.length === 0 && activeUsers.length > 0) {
+            const fallbackCache = {};
+            activeUsers.forEach(u => {
+                const key = u.username || u.user;
+                if (!key) return;
+                fallbackCache[key] = {
+                    ...u,
+                    local_received_at: now
+                };
+            });
+            window.ACTIVE_USERS_CACHE = fallbackCache;
+        }
 
         renderSystemHealthUI({
             storageSize,
@@ -2105,15 +2627,29 @@ async function sendHeartbeat(forceInit = false) {
             window.PRESENCE_CHANNEL.track(payload).catch(()=>{});
         }
         
-        // 2. BACKUP DB WRITE (Every 10 mins to persist row for remote commands)
+        // 2. BACKUP DB WRITE (Frequent enough to keep active monitor live even if Presence tunnel degrades)
         const lastDbWrite = parseInt(sessionStorage.getItem('last_db_heartbeat') || '0');
-        if ((typeof forceInit !== 'undefined' && forceInit) || Date.now() - lastDbWrite > 600000) {
+        if ((typeof forceInit !== 'undefined' && forceInit) || Date.now() - lastDbWrite > 15000) {
             sessionStorage.setItem('last_db_heartbeat', Date.now().toString());
-            window.supabaseClient.from('sessions').upsert({
-                username: CURRENT_USER.user, // New Schema
-                role: CURRENT_USER.role,
-                lastSeen: new Date().toISOString()
-            }).then(()=>{}).catch(()=>{});
+            try {
+                await window.supabaseClient.from('sessions').upsert({
+                    username: CURRENT_USER.user,
+                    role: CURRENT_USER.role,
+                    lastSeen: new Date().toISOString(),
+                    idleTime: Math.round(diff),
+                    isIdle: isIdle,
+                    version: window.APP_VERSION || 'Unknown',
+                    clientId: clientId,
+                    activity: safeActivity
+                });
+            } catch (sessionWriteError) {
+                // Schema fallback for older environments that only have the basic columns.
+                window.supabaseClient.from('sessions').upsert({
+                    username: CURRENT_USER.user,
+                    role: CURRENT_USER.role,
+                    lastSeen: new Date().toISOString()
+                }).then(()=>{}).catch(()=>{});
+            }
         }
             
         // 3. Remote Commands
@@ -2396,7 +2932,10 @@ function startRealtimeSync() {
     }
 
     window.NORMAL_FALLBACK_RATE = 0;
-    window.REALTIME_FAILURE_RATE = Math.max(1000, syncRate);
+    const isFastFailoverRole = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER)
+        && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin');
+    window.REALTIME_FAILURE_RATE = isFastFailoverRole ? 1000 : Math.max(1000, syncRate);
+    window.BASE_REALTIME_FAILURE_RATE = Math.max(1000, syncRate);
 
     // Start the Incoming Queue Processor (Checks every 2 seconds)
     startQueueProcessor();
@@ -2498,6 +3037,15 @@ function setupRealtimeListeners() {
                     indicator.innerHTML = '<i class="fas fa-bolt" style="color:#2ecc71;"></i> Tunnel Restored';
                     setTimeout(() => { if (indicator.innerHTML.includes('Restored')) indicator.style.opacity = '0'; }, 3000);
                 }
+                updateSyncDiagnostics({
+                    status: 'success',
+                    statusText: 'Tunnel healthy',
+                    direction: 'idle',
+                    phase: 'Realtime tunnel connected',
+                    item: 'Postgres changes stream',
+                    server: getActiveSyncServerLabel(),
+                    lastSuccessAt: Date.now()
+                });
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                 // Tunnel collapsed. Fall back to the role-based sync cadence.
                 if (window.CURRENT_FALLBACK_RATE !== window.REALTIME_FAILURE_RATE) setFallbackPollingRate(window.REALTIME_FAILURE_RATE);
@@ -2506,6 +3054,15 @@ function setupRealtimeListeners() {
                     indicator.style.opacity = '1';
                     indicator.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#f1c40f;"></i> Tunnel Dropped (Polling Active)';
                 }
+                updateSyncDiagnostics({
+                    status: 'error',
+                    statusText: 'Tunnel dropped (polling active)',
+                    direction: 'process',
+                    phase: 'Realtime tunnel reconnecting',
+                    item: 'Fallback polling enabled',
+                    server: getActiveSyncServerLabel(),
+                    lastError: `Realtime status: ${status}`
+                });
                 
                 if (!window.REALTIME_RECONNECT_TIMER && navigator.onLine) {
                     window.REALTIME_RECONNECT_TIMER = setInterval(() => { console.warn("Attempting tunnel reconnect..."); setupRealtimeListeners(); }, 15000);
@@ -2551,6 +3108,15 @@ function updateQueueIndicator() {
         el.style.transition = 'none';
         el.style.opacity = '1';
         el.innerHTML = `<i class="fas fa-inbox" style="color:#3498db;"></i> Queued: ${INCOMING_DATA_QUEUE.length}`;
+        updateSyncDiagnostics({
+            status: 'processing_queue',
+            statusText: 'Realtime queue waiting',
+            direction: 'process',
+            phase: 'Queued incoming updates',
+            item: `${INCOMING_DATA_QUEUE.length} waiting`,
+            progressDone: 0,
+            progressTotal: INCOMING_DATA_QUEUE.length
+        });
     } else {
         // If queue is empty, and we are not in another permanent state like 'error', show success.
         const isError = el.innerHTML.includes('Offline') || el.innerHTML.includes('Sync Failed');
@@ -2558,11 +3124,28 @@ function updateQueueIndicator() {
     }
 }
 
+function isHighPriorityIncomingPayload(item) {
+    if (!item || !item.type) return false;
+
+    if (item.type === 'app_documents') {
+        const rawKey = String(item.payload?.new?.key || '').trim();
+        const key = IS_DEMO_MODE ? rawKey.replace(/^demo_/, '') : rawKey;
+        return ['users', 'rosters', 'schedules', 'tests', 'liveSchedules', 'system_config'].includes(key);
+    }
+
+    if (item.type === 'generic_rows') {
+        const table = String(item.payload?.table || '').trim();
+        return ['users', 'records', 'submissions', 'live_bookings', 'attendance', 'sessions'].includes(table);
+    }
+
+    return ['monitor', 'attendance', 'bookings'].includes(item.type);
+}
+
 // --- NEW: QUEUE PROCESSOR ---
 function startQueueProcessor() {
     if (QUEUE_PROCESSOR_INTERVAL) clearInterval(QUEUE_PROCESSOR_INTERVAL);
-    // Run frequently (2s) to keep data fresh, but gives a buffer window
-    QUEUE_PROCESSOR_INTERVAL = setInterval(processIncomingDataQueue, 2000);
+    // Run every second so edits from other clients appear faster.
+    QUEUE_PROCESSOR_INTERVAL = setInterval(processIncomingDataQueue, 1000);
 }
 
 function processIncomingDataQueue() {
@@ -2586,7 +3169,8 @@ function processIncomingDataQueue() {
     // Since Vetting/Live Arena handle their own high-priority updates instantly, 
     // it is absolutely safe to block this background queue to prevent DOM wipes and cursor stealing.
     if (isUserTyping() && timeSinceInteraction < 30000) {
-        return;
+        const hasHighPriority = INCOMING_DATA_QUEUE.some(isHighPriorityIncomingPayload);
+        if (!hasHighPriority) return;
     }
 
     IS_PROCESSING_INCOMING_QUEUE = true;
@@ -2605,6 +3189,15 @@ function processIncomingDataQueue() {
             el.innerHTML = `<i class="fas fa-cogs fa-spin" style="color:var(--primary);"></i> Processing: ${queue.length}`;
         }
     }
+    updateSyncDiagnostics({
+        status: 'processing_queue',
+        statusText: 'Processing realtime queue',
+        direction: 'process',
+        phase: 'Applying queued realtime changes',
+        item: queuedRemaining > 0 ? `${queue.length} now, ${queuedRemaining} queued` : `${queue.length} now`,
+        progressDone: queue.length,
+        progressTotal: queue.length + queuedRemaining
+    });
 
     try {
         // Batch updates by type to prevent multiple writes/renders
@@ -2697,6 +3290,7 @@ function processIncomingDataQueue() {
                     if (!IS_DEMO_MODE && rawKey.startsWith('demo_')) return;
                     
                     const key = IS_DEMO_MODE ? rawKey.replace('demo_', '') : rawKey;
+                    if (ROW_MAP[key]) return;
                     const content = p.new.content;
                     
                     // Trainee Data Minimization (Security)
@@ -3077,13 +3671,37 @@ function executePendingSessionAction(rawAction) {
 }
 
 function handleSessionRealtime(payload) {
-    const row = payload.new;
+    const eventType = payload.eventType;
+    const row = payload.new || payload.old;
     if (row && (row.username || row.user)) {
         const uName = row.username || row.user;
+
+        if (eventType === 'DELETE') {
+            if (window.ACTIVE_USERS_CACHE && window.ACTIVE_USERS_CACHE[uName]) {
+                delete window.ACTIVE_USERS_CACHE[uName];
+            }
+        } else {
+            if (!window.ACTIVE_USERS_CACHE) window.ACTIVE_USERS_CACHE = {};
+            window.ACTIVE_USERS_CACHE[uName] = {
+                ...(window.ACTIVE_USERS_CACHE[uName] || {}),
+                username: uName,
+                user: uName,
+                role: row.role || (window.ACTIVE_USERS_CACHE[uName] && window.ACTIVE_USERS_CACHE[uName].role) || '-',
+                idleTime: Number.isFinite(row.idleTime) ? row.idleTime : ((window.ACTIVE_USERS_CACHE[uName] && window.ACTIVE_USERS_CACHE[uName].idleTime) || 0),
+                isIdle: typeof row.isIdle === 'boolean' ? row.isIdle : ((window.ACTIVE_USERS_CACHE[uName] && window.ACTIVE_USERS_CACHE[uName].isIdle) || false),
+                version: row.version || (window.ACTIVE_USERS_CACHE[uName] && window.ACTIVE_USERS_CACHE[uName].version) || '-',
+                clientId: row.clientId || (window.ACTIVE_USERS_CACHE[uName] && window.ACTIVE_USERS_CACHE[uName].clientId) || 'Unknown',
+                activity: row.activity || (window.ACTIVE_USERS_CACHE[uName] && window.ACTIVE_USERS_CACHE[uName].activity) || '-',
+                lastSeen: row.lastSeen || new Date().toISOString(),
+                local_received_at: Date.now()
+            };
+        }
+
         if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && uName === CURRENT_USER.user) {
-            if (row.pending_action) {
+            const pendingAction = payload.new && payload.new.pending_action;
+            if (pendingAction) {
                 if (window.supabaseClient) window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', uName).then(()=>{});
-                executePendingSessionAction(row.pending_action);
+                executePendingSessionAction(pendingAction);
             }
         }
     }

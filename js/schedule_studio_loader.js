@@ -35,13 +35,22 @@
             this.refresh();
         },
 
-        refresh() {
+        async refresh() {
             const frame = document.getElementById('schedule-studio-frame');
             if (!frame) return;
 
+            // Fresh pull on-demand so Studio always opens with latest server state.
+            if (typeof loadFromServer === 'function') {
+                try {
+                    await loadFromServer(true);
+                } catch (error) {
+                    console.warn('[Schedule Studio Loader] Host refresh pull failed:', error);
+                }
+            }
+
             try {
                 if (frame.contentWindow && frame.contentWindow.App && typeof frame.contentWindow.App.refresh === 'function') {
-                    frame.contentWindow.App.refresh();
+                    frame.contentWindow.App.refresh({ forcePull: false });
                     return;
                 }
             } catch (error) {

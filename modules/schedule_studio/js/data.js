@@ -18,6 +18,25 @@ const SCHEDULE_TEMPLATE_STORAGE_KEY = 'scheduleTemplates';
 const SCHEDULE_HOLIDAY_STORAGE_KEY = 'scheduleHolidays';
 
 const ScheduleData = {
+    normalizeIdentity(value) {
+        return String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[._-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    },
+
+    getIdentityToken(value) {
+        return this.normalizeIdentity(value).replace(/\s+/g, '');
+    },
+
+    identitiesMatch(left, right) {
+        const leftToken = this.getIdentityToken(left);
+        const rightToken = this.getIdentityToken(right);
+        return !!leftToken && !!rightToken && leftToken === rightToken;
+    },
+
     getStorage() {
         if (AppContext.host && AppContext.host.localStorage) return AppContext.host.localStorage;
         return window.localStorage;
@@ -369,18 +388,18 @@ const ScheduleData = {
 
     getMyScheduleId(username, schedules) {
         const rosters = this.getRosters();
-        const normalizedUser = String(username || '').trim().toLowerCase();
+        const normalizedUser = this.getIdentityToken(username);
         let myGroup = null;
 
         Object.entries(rosters).forEach(([groupId, members]) => {
             if (myGroup) return;
-            if ((members || []).some(member => String(member || '').trim().toLowerCase() === normalizedUser)) {
+            if ((members || []).some(member => this.getIdentityToken(member) === normalizedUser)) {
                 myGroup = groupId;
             }
         });
 
         if (!myGroup) return null;
-        const normalizedGroup = String(myGroup || '').trim().toLowerCase();
-        return Object.keys(schedules).find(key => String(schedules[key].assigned || '').trim().toLowerCase() === normalizedGroup) || null;
+        const normalizedGroup = this.getIdentityToken(myGroup);
+        return Object.keys(schedules).find(key => this.getIdentityToken(schedules[key].assigned || '') === normalizedGroup) || null;
     }
 };

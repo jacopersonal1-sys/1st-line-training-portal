@@ -606,6 +606,10 @@ window.updateProfileZoom = function(val) {
     } else {
         document.body.style.zoom = v;
     }
+
+    if (typeof window.refreshAdaptiveViewportLayout === 'function') {
+        window.refreshAdaptiveViewportLayout();
+    }
 };
 
 window.adjustProfileZoom = function(delta) {

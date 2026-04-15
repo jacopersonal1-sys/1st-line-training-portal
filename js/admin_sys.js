@@ -763,6 +763,10 @@ window.updateZoomPreview = function(val) {
     } else {
         document.body.style.zoom = v;
     }
+
+    if (typeof window.refreshAdaptiveViewportLayout === 'function') {
+        window.refreshAdaptiveViewportLayout();
+    }
 };
 
 window.adjustZoom = function(delta) {
@@ -846,12 +850,16 @@ async function sendRemoteCommand(username, action) {
     if(!confirm(`Are you sure you want to remote ${action} for ${username}?`)) return;
     
     if (window.supabaseClient) {
-        const { error } = await window.supabaseClient
+        const { data, error } = await window.supabaseClient
             .from('sessions')
             .update({ pending_action: action })
-            .eq('username', username);
+            .ilike('username', username)
+            .select('username');
             
         if(error) alert("Command failed: " + error.message);
+        else if (!Array.isArray(data) || data.length === 0) {
+            alert(`No active session row found for ${username}. The user may be offline.`);
+        }
         else {
             if(typeof logAuditAction === 'function') logAuditAction(CURRENT_USER.user, 'Remote Command', `Sent '${action}' to ${username}`);
             alert(`Command '${action}' sent to ${username}. It will execute on their next heartbeat.`);
@@ -2045,16 +2053,58 @@ window.toggleLockdown = async function() {
     openSuperAdminConfig(); // Refresh UI
 };
 
+function normalizeAdminIdentity(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function matchAdminIdentity(left, right) {
+    const leftNorm = normalizeAdminIdentity(left).replace(/\s+/g, '');
+    const rightNorm = normalizeAdminIdentity(right).replace(/\s+/g, '');
+    return !!leftNorm && !!rightNorm && leftNorm === rightNorm;
+}
+
+window.returnFromImpersonation = function() {
+    const realAdminRaw = sessionStorage.getItem('real_admin_identity');
+    if (!realAdminRaw) return false;
+
+    sessionStorage.setItem('currentUser', realAdminRaw);
+    sessionStorage.removeItem('real_admin_identity');
+    sessionStorage.removeItem('impersonating_user');
+    try {
+        const parsed = JSON.parse(realAdminRaw);
+        if (parsed && typeof persistAppSession === 'function') persistAppSession(parsed);
+    } catch (e) {}
+    location.reload();
+    return true;
+};
+
 window.impersonateUser = function(username) {
-    if(!confirm(`Impersonate ${username}? You will see exactly what they see.`)) return;
+    if (!CURRENT_USER || CURRENT_USER.role !== 'super_admin') {
+        alert("Only Super Admin can impersonate users.");
+        return;
+    }
+    if (!confirm(`Impersonate ${username}? You will see exactly what they see.`)) return;
     
     const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const target = users.find(u => u.user === username);
+    const target = users.find(u => matchAdminIdentity(u && (u.user || u.username), username));
     
     if(!target) return alert("User not found.");
+    if (matchAdminIdentity(target.user, CURRENT_USER.user)) return alert("You are already logged in as this user.");
     
-    // Save Real Identity
-    sessionStorage.setItem('real_admin_identity', JSON.stringify(CURRENT_USER));
+    // Preserve original admin identity only once.
+    if (!sessionStorage.getItem('real_admin_identity')) {
+        sessionStorage.setItem('real_admin_identity', JSON.stringify(CURRENT_USER));
+    }
+
+    sessionStorage.setItem('impersonating_user', JSON.stringify({
+        user: target.user,
+        startedAt: new Date().toISOString()
+    }));
     sessionStorage.setItem('currentUser', JSON.stringify(target));
     location.reload();
 };

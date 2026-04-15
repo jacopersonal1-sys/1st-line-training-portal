@@ -33,13 +33,35 @@ function readRetrainArchive() {
     return merged;
 }
 
-function findArchivedAgent(agentName) {
+function getArchivedAgentAttempts(agentName) {
     const target = String(agentName || '').toLowerCase();
-    const graduated = readGraduatedArchive().find(g => String(g.user || '').toLowerCase() === target);
-    if (graduated) return { entry: graduated, type: 'graduated' };
-    const retrain = readRetrainArchive().find(g => String(g.user || '').toLowerCase() === target);
-    if (retrain) return { entry: retrain, type: 'retrain' };
-    return null;
+    const attempts = [];
+
+    readGraduatedArchive().forEach((entry, index) => {
+        if (String(entry.user || '').toLowerCase() !== target) return;
+        attempts.push({
+            key: `archive-graduated-${index}`,
+            type: 'graduated',
+            entry
+        });
+    });
+
+    readRetrainArchive().forEach((entry, index) => {
+        if (String(entry.user || '').toLowerCase() !== target) return;
+        attempts.push({
+            key: `archive-retrain-${index}`,
+            type: 'retrain',
+            entry
+        });
+    });
+
+    attempts.sort((a, b) => {
+        const aTime = Date.parse(a.entry.movedDate || a.entry.graduatedDate || 0) || 0;
+        const bTime = Date.parse(b.entry.movedDate || b.entry.graduatedDate || 0) || 0;
+        return bTime - aTime;
+    });
+
+    return attempts;
 }
 
 function loadAgentSearch() {
@@ -106,27 +128,30 @@ function loadAgentSearch() {
     // NEW: Check URL for deep link (Auto-load agent)
     const urlParams = new URLSearchParams(window.location.search);
     const agentParam = urlParams.get('agent');
+    const attemptParam = urlParams.get('attempt');
     if (agentParam && input.value !== agentParam) {
         // Validate agent exists in datalist to avoid searching garbage
         const options = Array.from(datalist.options).map(o => o.value);
         const match = options.find(o => o.toLowerCase() === agentParam.toLowerCase());
         if (match) {
             input.value = match;
-            performAgentSearch(match);
+            performAgentSearch(match, attemptParam || '');
         }
     }
 }
 
-function performAgentSearch(name) {
+function performAgentSearch(name, attemptKey = '') {
     if(!name) return;
     
     // NEW: Update URL for sharing without reloading
     const url = new URL(window.location);
     url.searchParams.set('agent', name);
+    if (attemptKey) url.searchParams.set('attempt', attemptKey);
+    else url.searchParams.delete('attempt');
     window.history.replaceState({}, '', url);
 
     // Check if archived to update loading message
-    const isArchived = !!findArchivedAgent(name);
+    const isArchived = getArchivedAgentAttempts(name).length > 0;
     
     const loadingMsg = isArchived 
         ? '<div class="spinner"></div><div style="margin-top:10px; color:var(--text-muted);">Fetching from Archive...</div>'
@@ -137,71 +162,129 @@ function performAgentSearch(name) {
     container.classList.remove('hidden');
     
     setTimeout(() => {
-        renderAgentDashboard(name);
+        renderAgentDashboard(name, attemptKey);
     }, 300);
 }
 
-function renderAgentDashboard(agentName) {
+function renderAgentDashboard(agentName, attemptKey = '') {
     const container = document.getElementById('agentSearchResults');
-    
-    // 1. Determine Source (Active vs Archived)
-    const archiveMatch = findArchivedAgent(agentName);
-    const archivedData = archiveMatch ? archiveMatch.entry : null;
-    const archiveType = archiveMatch ? archiveMatch.type : '';
-    const isArchived = !!archivedData;
+    if (!container) return;
 
-    let records, submissions, reports, reviews, attRecords, notesMap;
+    const target = String(agentName || '').toLowerCase();
+    const identityMatch = (value) => String(value || '').toLowerCase() === target;
 
-    if (isArchived) {
-        records = archivedData.records || [];
-        submissions = archivedData.submissions || [];
-        reports = archivedData.reports || [];
-        reviews = archivedData.reviews || [];
-        attRecords = archivedData.attendance || [];
-        // Notes in archive are stored as a single string, handled below
-    } else {
-        records = JSON.parse(localStorage.getItem('records') || '[]');
-        submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-        reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
-        reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
-        attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-        notesMap = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
+    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const notesMap = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+
+    const agentRecordsActive = records.filter(r => identityMatch(r.trainee || r.user || r.user_id));
+    const agentSubsActive = submissions.filter(s => identityMatch(s.trainee || s.user || s.user_id));
+    const agentReportActive = reports.find(r => identityMatch(r.trainee || r.user || r.user_id)) || null;
+    const agentReviewActive = reviews.find(r => identityMatch(r.trainee || r.user || r.user_id)) || null;
+    const agentAttActive = attRecords.filter(r => identityMatch(r.user || r.trainee || r.user_id));
+    const noteKey = Object.keys(notesMap).find(key => identityMatch(key)) || agentName;
+    const agentNotesActive = notesMap[noteKey] || [];
+
+    let activeGroup = "Unknown Group";
+    for (const [gid, members] of Object.entries(rosters)) {
+        if (!Array.isArray(members)) continue;
+        if (members.some(m => identityMatch(m))) {
+            activeGroup = gid;
+            break;
+        }
     }
 
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    // Filter Data (If active, filter from global. If archived, it's already filtered)
-    const agentRecords = isArchived ? records : records.filter(r => r.trainee.toLowerCase() === agentName.toLowerCase());
-    const agentSubs = isArchived ? submissions : submissions.filter(s => s.trainee.toLowerCase() === agentName.toLowerCase());
-    
-    // Reports/Reviews: Active uses .find(), Archive has array
-    const agentReport = isArchived ? (reports[0] || null) : reports.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
-    const agentReview = isArchived ? (reviews[0] || null) : reviews.find(r => r.trainee.toLowerCase() === agentName.toLowerCase());
-    
-    // Find Group
-    let group = "Unknown Group";
-    let gradDateHtml = "";
+    const hasActiveAttempt = users.some(u => identityMatch(u && (u.user || u.username)))
+        || agentRecordsActive.length > 0
+        || agentSubsActive.length > 0
+        || !!agentReportActive
+        || !!agentReviewActive
+        || agentAttActive.length > 0
+        || (Array.isArray(agentNotesActive) ? agentNotesActive.length > 0 : !!agentNotesActive);
 
-    if (isArchived) {
-        // Try to recover group from records, otherwise generic
+    const archiveAttempts = getArchivedAgentAttempts(agentName).map(attempt => {
+        const archivedData = attempt.entry || {};
+        const isRetrain = attempt.type === 'retrain';
+        const dateValue = archivedData.movedDate || archivedData.graduatedDate || '';
+        const dateLabel = dateValue ? new Date(dateValue).toLocaleDateString() : 'Unknown date';
+        const group = isRetrain
+            ? (archivedData.targetGroup ? `Retrain -> ${archivedData.targetGroup}` : "Retrain Archive")
+            : ((archivedData.records && archivedData.records[0] && archivedData.records[0].groupID) || "Graduated / Archived");
+        return {
+            key: attempt.key,
+            type: attempt.type,
+            isArchived: true,
+            label: isRetrain ? "Retrain Attempt" : "Graduated Attempt",
+            dateValue,
+            dateLabel,
+            group,
+            archivedData,
+            records: archivedData.records || [],
+            submissions: archivedData.submissions || [],
+            reports: archivedData.reports || [],
+            reviews: archivedData.reviews || [],
+            attendance: archivedData.attendance || [],
+            notes: archivedData.notes || []
+        };
+    });
+
+    const attempts = [];
+    if (hasActiveAttempt) {
+        attempts.push({
+            key: 'active',
+            type: 'active',
+            isArchived: false,
+            label: 'Current Attempt',
+            dateValue: '',
+            dateLabel: 'Live',
+            group: activeGroup,
+            archivedData: null,
+            records: agentRecordsActive,
+            submissions: agentSubsActive,
+            reports: agentReportActive ? [agentReportActive] : [],
+            reviews: agentReviewActive ? [agentReviewActive] : [],
+            attendance: agentAttActive,
+            notes: agentNotesActive
+        });
+    }
+    attempts.push(...archiveAttempts);
+
+    if (attempts.length === 0) {
+        container.innerHTML = '<div class="card" style="text-align:center; color:var(--text-muted); padding:30px;">No active or archived records found for this trainee.</div>';
+        return;
+    }
+
+    let selectedAttempt = attempts.find(a => a.key === attemptKey);
+    if (!selectedAttempt) selectedAttempt = attempts[0];
+
+    const url = new URL(window.location);
+    if (selectedAttempt.key === 'active') url.searchParams.delete('attempt');
+    else url.searchParams.set('attempt', selectedAttempt.key);
+    window.history.replaceState({}, '', url);
+
+    const isArchived = selectedAttempt.isArchived;
+    const archivedData = selectedAttempt.archivedData;
+    const archiveType = selectedAttempt.type;
+    const agentRecords = selectedAttempt.records;
+    const agentSubs = selectedAttempt.submissions;
+    const agentReport = selectedAttempt.reports[0] || null;
+    const agentReview = selectedAttempt.reviews[0] || null;
+
+    let group = selectedAttempt.group || "Unknown Group";
+    let gradDateHtml = "";
+    if (isArchived && archivedData) {
         if (archiveType === 'retrain') {
-            group = archivedData.targetGroup ? `Retrain -> ${archivedData.targetGroup}` : "Retrain Archive";
             const movedDate = archivedData.movedDate || archivedData.graduatedDate;
             if (movedDate) {
                 gradDateHtml = `<div style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;"><i class="fas fa-calendar-alt"></i> Moved to Retrain: ${new Date(movedDate).toLocaleDateString()}</div>`;
             }
-        } else {
-            if (agentRecords.length > 0) group = agentRecords[0].groupID || "Graduated";
-            else group = "Graduated / Archived";
-            if (archivedData.graduatedDate) {
-                gradDateHtml = `<div style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;"><i class="fas fa-calendar-check"></i> Graduated: ${new Date(archivedData.graduatedDate).toLocaleDateString()}</div>`;
-            }
-        }
-    } else {
-        for (const [gid, members] of Object.entries(rosters)) {
-            if (members.some(m => m.toLowerCase() === agentName.toLowerCase())) {
-                group = gid;
-                break;
-            }
+        } else if (archivedData.graduatedDate) {
+            gradDateHtml = `<div style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;"><i class="fas fa-calendar-check"></i> Graduated: ${new Date(archivedData.graduatedDate).toLocaleDateString()}</div>`;
         }
     }
     
@@ -237,24 +320,39 @@ function renderAgentDashboard(agentName) {
         headerBadge = '<span class="status-badge status-pass" style="margin-left:10px; font-size:0.8rem; vertical-align:middle;"><i class="fas fa-graduation-cap"></i> Graduated</span>';
     }
 
+    const safeName = agentName.replace(/'/g, "\\'");
+    const attemptTabsHtml = attempts.length > 1
+        ? `
+            <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;">
+                ${attempts.map((attempt, idx) => {
+                    const active = attempt.key === selectedAttempt.key;
+                    const tone = attempt.type === 'retrain' ? 'status-improve' : (attempt.type === 'graduated' ? 'status-pass' : '');
+                    const suffix = attempt.type === 'active' ? 'Live' : attempt.dateLabel;
+                    return `<button class="btn-secondary btn-sm ${tone}" onclick="performAgentSearch('${safeName}', '${attempt.key}')" style="${active ? 'border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset;' : ''}">
+                        Attempt ${idx + 1}: ${attempt.label} (${suffix})
+                    </button>`;
+                }).join('')}
+            </div>
+        `
+        : '';
+
     // --- ADMIN ACTIONS ---
     let adminActions = '';
     if (typeof CURRENT_USER !== 'undefined' && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin')) {
-        const safeName = agentName.replace(/'/g, "\\'");
         adminActions = `
             <div style="margin-top:15px; display:flex; gap:10px; justify-content:flex-end; border-top:1px dashed var(--border-color); padding-top:10px;">
                 <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeName}')" title="Edit User Account"><i class="fas fa-user-cog"></i> Edit Account</button>
                 <button class="btn-secondary btn-sm" onclick="printAgentProfile()" title="Print Profile"><i class="fas fa-print"></i> Print</button>
-                <button class="btn-secondary btn-sm" onclick="copyAgentLink('${safeName}')" title="Copy Link"><i class="fas fa-link"></i> Link</button>
+                <button class="btn-secondary btn-sm" onclick="copyAgentLink('${safeName}', '${selectedAttempt.key}')" title="Copy Link"><i class="fas fa-link"></i> Link</button>
             </div>
         `;
     }
 
     // --- DATA PREPARATION (Moved Up) ---
     const assessments = agentRecords.filter(r => r.phase === 'Assessment');
-    const vetting = agentRecords.filter(r => r.phase.includes('Vetting'));
+    const vetting = agentRecords.filter(r => String(r.phase || '').includes('Vetting'));
     
-    const agentAtt = isArchived ? attRecords : attRecords.filter(r => r.user.toLowerCase() === agentName.toLowerCase());
+    const agentAtt = Array.isArray(selectedAttempt.attendance) ? [...selectedAttempt.attendance] : [];
     agentAtt.sort((a,b) => new Date(b.date) - new Date(a.date)); // Newest first
 
     // --- HEADER ---
@@ -275,6 +373,7 @@ function renderAgentDashboard(agentName) {
                         </div>
                     </div>
                     <div class="progress-track" style="margin-top:15px; height:8px; background:var(--bg-input);"><div class="progress-fill" style="width:${progress}%; background:linear-gradient(90deg, var(--primary), #f39c12);"></div></div>
+                    ${attemptTabsHtml}
                     ${adminActions}
                 </div>
             </div>
@@ -483,7 +582,7 @@ function renderAgentDashboard(agentName) {
         </div>`;
 
     // --- PRIVATE NOTES ---
-    let rawNotes = isArchived ? (archivedData.notes || []) : (notesMap[agentName] || []);
+    let rawNotes = selectedAttempt.notes || [];
     
     // Normalize to array (Handle legacy string data)
     if (typeof rawNotes === 'string') {
@@ -499,8 +598,6 @@ function renderAgentDashboard(agentName) {
     
     // Sort by date desc
     rawNotes.sort((a,b) => new Date(b.date) - new Date(a.date));
-
-    const safeName = agentName.replace(/'/g, "\\'"); 
 
     let notesListHtml = rawNotes.length > 0 ? rawNotes.map(n => `
         <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-bottom:10px; border-left:3px solid var(--primary);">
@@ -594,7 +691,8 @@ async function saveAgentNote(username) {
     if(typeof showToast === 'function') showToast("Note added.", "success");
     
     // Refresh view to show new note
-    renderAgentDashboard(username);
+    const selectedAttempt = new URLSearchParams(window.location.search).get('attempt') || '';
+    renderAgentDashboard(username, selectedAttempt);
 }
 
 // --- HELPERS ---
@@ -605,9 +703,11 @@ function printAgentProfile() {
     document.body.classList.remove('printing-modal');
 }
 
-function copyAgentLink(name) {
+function copyAgentLink(name, attemptKey = '') {
     const url = new URL(window.location);
     url.searchParams.set('agent', name);
+    if (attemptKey && attemptKey !== 'active') url.searchParams.set('attempt', attemptKey);
+    else url.searchParams.delete('attempt');
     navigator.clipboard.writeText(url.toString()).then(() => {
         if(typeof showToast === 'function') showToast("Profile link copied.", "success");
     });

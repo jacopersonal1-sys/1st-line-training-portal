@@ -175,6 +175,10 @@ Maps local `localStorage` keys to Supabase tables.
     - `DataService.patchSessionUser()`: Safe per-trainee patching with retry queue.
     - `DataService.pollSessions()` / `DataService.setupRealtime()`: Dual-table session merge (`vetting_sessions_v2` + `vetting_sessions`) with realtime + fallback polling.
 
+#### `js/vetting_rework_loader.js` + `modules/vetting_rework/preload.js` (Vetting Webview Security Bridge)
+- **Responsibility:** Host-side secure injection and preload bridge for the isolated Vetting 2.0 admin runtime.
+- **Hardening Contract:** Vetting admin webview now runs with `nodeIntegration=no` + `contextIsolation=yes` and uses dedicated preload-only APIs (`get-screen-count`, `get-process-list`, kiosk/content-protection toggles).
+
 #### `js/vetting_runtime_v2.js` (Vetting Arena 2.0 Trainee Runtime Bridge)
 - **Responsibility:** Primary trainee-side secure exam flow in host app.
 - **Key Functions:**
@@ -392,7 +396,7 @@ Maps local `localStorage` keys to Supabase tables.
 ### F. Presence Engine (Realtime-First with Resilient Backup)
 Presence is handled by the Realtime presence channel rather than frequent DB writes:
 1.  Users join the `online_users` Realtime presence channel and broadcast status via `PRESENCE_CHANNEL.track()` for zero-latency presence.
-2.  The app also performs occasional resilient backup writes to the `sessions` table (roughly every 10 minutes) to persist a durable heartbeat and enable admin remote commands (`sessions.pending_action`).
+2.  The app also performs resilient backup writes to the `sessions` table (about every 15 seconds) to keep active-user monitoring + remote command delivery reliable during presence/realtime tunnel degradation.
 3.  Admin UIs read from `window.ACTIVE_USERS_CACHE` for immediate presence information without frequent DB writes.
 
 ### G. Native OS Integrations
@@ -404,6 +408,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.20 (Content Studio + User Control Release, 2026-04-15):** Finalized isolated `content-studio` rollout (View + Builder + engagement telemetry), added Super Admin Data Studio `User Control` workspace for revoke/binding/archive-reset operations, hardened auth/user identity normalization + pre-login server refresh, and shipped high-priority view sync/fallback + richer realtime sync diagnostics.
 - **v2.6.19 (Retrain Attempt Unlock Hotfix, 2026-04-14):** Patched `js/assessment_trainee.js` to classify stale pre-move attempts as legacy by combining retrain archive move timestamps with linked `records.groupID` checks, then auto-ignore/archive those legacy attempts so trainees moved to a new group can start current scheduled assessments without false "already completed" lockouts.
 - **v2.6.18 (Lifecycle + Grading Reliability Patch, 2026-04-14):** Hardened retrain/migration flow in `js/admin_users.js` with case-insensitive multi-group removal + dedupe to prevent trainees remaining in old groups after moves, and added completed-score self-healing in `js/admin_history.js` plus score fallback linking in `js/admin_grading.js` so finalized marks no longer display as `0%` after refresh/relogin when linked `records` rows are authoritative.
 - **Content Studio Module (Current Build, 2026-04-14):** Added isolated `content-studio` tab with `View` + `Builder` submenus, schedule-linked header/subject documents, play/document action controls per subject, and per-user video engagement telemetry (watch-time + skip capture) persisted in `content_studio_data`.
@@ -425,6 +430,13 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.20 - 2026-04-15
+
+- Feature: Released isolated Content Studio (`js/content_studio_loader.js` + `modules/content_studio/`) with schedule-linked header/subject authoring and per-user video engagement telemetry (`plays`, `watchSeconds`, `skips`).
+- Feature: Expanded Super Admin Data Studio (`modules/superadmin_data_studio`) with a dedicated `User Control` workspace for identity-safe profile edits, revoked/bound-client operations, archive payload editing, and one-click archive/reset lifecycle cleanup across live rows.
+- Hardening: Added auth-critical pre-login refresh (`users`, `revokedUsers`, `system_config`, `rosters`), identity-safe user/roster dedupe paths, and reinforced realtime/view sync observability with high-priority fresh-pull behavior + sync diagnostics.
+- Release: Version bump to `2.6.20` for fleet rollout.
 
 ## v2.6.17 - 2026-04-14
 
@@ -515,7 +527,7 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 1. **Context Isolation**: Main window runs with `nodeIntegration: false` and `contextIsolation: true`. Frontend OS calls must route through the secure bridge (`window.electronAPI`). Legacy `require('electron')` calls are only valid via the controlled shim in `js/main.js`, which maps to the same bridge.
 2. **No Broad Database Polling**: Do not add generic schema polling loops. Prefer realtime cache (`localStorage`) and websocket push from `data.js`.  
    **Exception:** Approved targeted reliability pollers exist for exam-critical runtimes (Live Execution and Vetting 2.0) and must remain session-scoped and lightweight.
-3. **No Database Heartbeats**: Do not write to the `sessions` table every 15 seconds. Use `window.PRESENCE_CHANNEL.track()`.
+3. **Presence-First Session Writes**: Presence must remain primary via `window.PRESENCE_CHANNEL.track()`. The `sessions` table backup heartbeat (currently ~15s) is allowed only for resilient monitoring/remote commands and must not be made more aggressive or expanded into broad polling writes.
 4. **Protect the UI**: When rendering data from WebSockets, always check `isUserTyping()` or specific input focus states to ensure you do not wipe out a user's active text field.
 5. **Mutex Saves**: If modifying `saveToServer` or `_processSaveQueue`, you must respect the `_IS_PROCESSING_SAVE` mutex to prevent concurrent database upsert corruption.
 6. **Digital Script Linking**: Do not reintroduce trainee+assessment fallback openers for digital marked scripts. Viewer routing must remain strict on `submissionId`.

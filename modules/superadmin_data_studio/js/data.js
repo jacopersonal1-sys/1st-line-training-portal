@@ -2,6 +2,9 @@ const StudioData = {
     sourceCatalog: {
         users: { id: 'users', label: 'Users', group: 'people', type: 'blob_array', docKey: 'users', keyField: 'user', icon: 'fa-users' },
         rosters: { id: 'rosters', label: 'Groups', group: 'people', type: 'blob_object', docKey: 'rosters', keyField: 'groupName', icon: 'fa-people-group' },
+        revokedUsers: { id: 'revokedUsers', label: 'Revoked Users', group: 'people', type: 'document', docKey: 'revokedUsers', icon: 'fa-user-slash' },
+        retrain_archives: { id: 'retrain_archives', label: 'Retrain Archives', group: 'people', type: 'blob_array', docKey: 'retrain_archives', keyField: 'id', icon: 'fa-rotate-left' },
+        graduated_agents: { id: 'graduated_agents', label: 'Graduated Agents', group: 'people', type: 'blob_array', docKey: 'graduated_agents', keyField: 'user', icon: 'fa-graduation-cap' },
         tests: { id: 'tests', label: 'Assessments', group: 'learning', type: 'blob_array', docKey: 'tests', keyField: 'id', icon: 'fa-file-signature' },
         system_config: { id: 'system_config', label: 'System Config', group: 'system', type: 'document', docKey: 'system_config', icon: 'fa-sliders' },
         archived_users: { id: 'archived_users', label: 'Archived Users', group: 'people', type: 'row', table: 'archived_users', keyField: 'id', packedData: true, icon: 'fa-box-archive' },
