@@ -1,12 +1,14 @@
 {
   "name": "1st-line-training-portal",
-  "version": "2.6.22",
+  "version": "2.6.23",
   "description": "Training Portal Cloud Edition",
   "main": "electron-main.js",
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder -p always",
+    "dist": "npm run dist:main",
+    "dist:main": "electron-builder -p always --config.publish.releaseType=release",
+    "dist:beta": "electron-builder -p always --config.publish.releaseType=prerelease",
     "test": "jest"
   },
   "repository": {

@@ -493,8 +493,15 @@ window.openUnifiedProfileSettings = function() {
                             <div style="font-size:0.8rem; color:var(--text-muted);">Current Version</div>
                             <div style="font-weight:bold;">v${window.APP_VERSION || 'Unknown'}</div>
                         </div>
-                        <button id="btnProfileCheckUpdate" class="btn-secondary btn-sm" onclick="triggerProfileUpdateCheck()">Check for Updates</button>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <select id="profileUpdateChannel" style="margin:0; min-width:120px;">
+                                <option value="main" ${(localStorage.getItem('profile_update_channel') || 'main') === 'main' ? 'selected' : ''}>Main (Inline)</option>
+                                <option value="beta" ${(localStorage.getItem('profile_update_channel') || 'main') === 'beta' ? 'selected' : ''}>Beta (Optional)</option>
+                            </select>
+                            <button id="btnProfileCheckUpdate" class="btn-secondary btn-sm" onclick="triggerProfileUpdateCheck()">Check for Updates</button>
+                        </div>
                     </div>
+                    <div style="font-size:0.76rem; color:var(--text-muted); margin-top:8px;">Use Beta for optional pre-release updates.</div>
                 </div>
 
                 <div class="card">
@@ -583,11 +590,16 @@ window.triggerProfileUpdateCheck = function() {
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         const btn = document.getElementById('btnProfileCheckUpdate');
+        const channelSelect = document.getElementById('profileUpdateChannel');
+        const selectedRaw = String(channelSelect ? channelSelect.value : (localStorage.getItem('profile_update_channel') || 'main')).trim().toLowerCase();
+        const channel = selectedRaw === 'beta' ? 'beta' : 'main';
+        localStorage.setItem('profile_update_channel', channel);
+
         if(btn) {
-            btn.innerText = "Checking...";
+            btn.innerText = channel === 'beta' ? "Checking Beta..." : "Checking...";
             btn.disabled = true;
         }
-        ipcRenderer.send('manual-update-check');
+        ipcRenderer.send('manual-update-check', { channel });
         // Reset if no response (timeout fallback)
         setTimeout(() => {
             if(btn && btn.disabled) { btn.innerText = "Check for Updates"; btn.disabled = false; }

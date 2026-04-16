@@ -8,6 +8,7 @@ const App = {
         activeScheduleId: 'A',
         view: 'list',
         currentMonth: new Date(),
+        expandedContent: {},
         templateEditor: {
             selectedTemplateId: '',
             templateName: '',
@@ -126,7 +127,10 @@ const App = {
                                     canEdit,
                                     totalItems: (active.items || []).length,
                                     getMaterialState: item => this.getMaterialState(item),
-                                    getAssessmentState: item => this.getAssessmentState(item)
+                                    getAssessmentState: item => this.getAssessmentState(item),
+                                    getContentModuleState: item => this.getContentModuleState(item),
+                                    isContentExpanded: index => this.isContentExpanded(index),
+                                    renderContentPreview: (item, index) => this.renderContentPreview(item, index)
                                 })}
                         </div>
                     </div>
@@ -422,6 +426,7 @@ const App = {
         const range = ScheduleData.parseRange(item);
         const inferredDuration = ScheduleData.normalizeDurationDays(item.durationDays) || ScheduleData.inferDurationDays(item);
         const tests = ScheduleData.getTests();
+        const contentModules = ScheduleData.getContentModules();
 
         document.getElementById('edit-step-index').value = index;
         document.getElementById('edit-start-date').value = this.toInputDate(range.start);
@@ -442,6 +447,16 @@ const App = {
             testSelect.add(new Option(test.title, test.id));
         });
         testSelect.value = item.linkedTestId || '';
+
+        const contentSelect = document.getElementById('edit-content-module');
+        if (contentSelect) {
+            contentSelect.innerHTML = '<option value="">-- None --</option>';
+            contentModules.forEach(module => {
+                const label = `${module.label}${module.subjects.length ? ` (${module.subjects.length} subjects)` : ''}`;
+                contentSelect.add(new Option(label, module.key));
+            });
+            contentSelect.value = item.contentModuleKey || '';
+        }
 
         document.getElementById('schedule-modal').classList.remove('hidden');
         this.previewEditorFromDuration();
@@ -491,6 +506,16 @@ const App = {
         const linkedTestId = document.getElementById('edit-linked-test').value;
         if (linkedTestId) item.linkedTestId = linkedTestId;
         else delete item.linkedTestId;
+
+        const contentModuleKey = String(document.getElementById('edit-content-module')?.value || '').trim();
+        if (contentModuleKey) {
+            const module = ScheduleData.getContentModuleByKey(contentModuleKey);
+            item.contentModuleKey = contentModuleKey;
+            item.contentModuleLabel = module ? module.label : '';
+        } else {
+            delete item.contentModuleKey;
+            delete item.contentModuleLabel;
+        }
 
         this.stampSchedule(this.state.activeScheduleId, { touchGroup: true, itemIndex: index });
         await this.persist();
@@ -978,6 +1003,129 @@ const App = {
         }
 
         return { enabled: true, label: 'Available now', buttonLabel: 'Open Assessment' };
+    },
+
+    getExpandedContentKey(index) {
+        return `${this.state.activeScheduleId}:${Number(index)}`;
+    },
+
+    isContentExpanded(index) {
+        return !!this.state.expandedContent[this.getExpandedContentKey(index)];
+    },
+
+    toggleContentPreview(index) {
+        const key = this.getExpandedContentKey(index);
+        this.state.expandedContent[key] = !this.state.expandedContent[key];
+        this.render();
+    },
+
+    getContentModuleState(item) {
+        const key = String(item?.contentModuleKey || '').trim();
+        if (!key) return { linked: false, available: false, label: 'No linked content module', module: null };
+        const module = ScheduleData.getContentModuleByKey(key);
+        if (!module) return { linked: true, available: false, label: 'Linked content module not found', module: null };
+        return {
+            linked: true,
+            available: true,
+            label: `${module.label} (${(module.subjects || []).length} subjects)`,
+            module
+        };
+    },
+
+    stripHtml(value) {
+        return String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    },
+
+    getLinkedContentSubject(index, subjectId) {
+        const item = this.getActiveSchedule().items[Number(index)];
+        if (!item) return { item: null, module: null, subject: null };
+        const state = this.getContentModuleState(item);
+        if (!state.available || !state.module) return { item, module: null, subject: null };
+        const subject = (state.module.subjects || []).find(s => String(s.id) === String(subjectId)) || null;
+        return { item, module: state.module, subject };
+    },
+
+    openContentVideo(index, subjectId) {
+        const { subject } = this.getLinkedContentSubject(index, subjectId);
+        if (!subject) return;
+        const url = String(subject.videoUrl || '').trim();
+        if (!url) {
+            alert('This subject has no video link configured.');
+            return;
+        }
+        window.open(url, '_blank');
+    },
+
+    openContentDocument(index, subjectId) {
+        const { subject } = this.getLinkedContentSubject(index, subjectId);
+        if (!subject) return;
+        const url = String(subject.docUrl || '').trim();
+        if (!url) {
+            alert('This subject has no document link configured.');
+            return;
+        }
+        window.open(url, '_blank');
+    },
+
+    openContentQuiz(index, subjectId) {
+        const { subject } = this.getLinkedContentSubject(index, subjectId);
+        if (!subject) return;
+        const testId = String(subject.questionnaireTestId || '').trim();
+        if (!testId) {
+            alert('This subject has no quiz linked.');
+            return;
+        }
+
+        if (AppContext.host && typeof AppContext.host.openTestTaker === 'function') {
+            try { if (typeof AppContext.host.showTab === 'function') AppContext.host.showTab('my-tests'); } catch (error) {}
+            AppContext.host.openTestTaker(testId);
+            return;
+        }
+
+        alert('Quiz launcher is unavailable in this runtime.');
+    },
+
+    renderContentPreview(item, index) {
+        const state = this.getContentModuleState(item);
+        if (!state.linked) return '';
+        if (!this.isContentExpanded(index)) return '';
+
+        if (!state.available || !state.module) {
+            return `
+                <div class="studio-content-mini missing">
+                    <div class="studio-content-mini-header">Linked Content</div>
+                    <div class="studio-content-mini-empty">This linked module no longer exists in Content Creator.</div>
+                </div>
+            `;
+        }
+
+        const module = state.module;
+        const subjects = Array.isArray(module.subjects) ? module.subjects : [];
+        const rows = subjects.map(subject => {
+            const showVideo = !!subject.hasVideo && !!String(subject.videoUrl || '').trim();
+            const showDoc = !!subject.hasDocument && !!String(subject.docUrl || '').trim();
+            const showQuiz = !!subject.hasQuestionnaire && !!String(subject.questionnaireTestId || '').trim();
+            return `
+                <div class="studio-content-mini-row">
+                    <div class="studio-content-mini-code">${TimelineUI.escape(subject.code || '-')}</div>
+                    <div class="studio-content-mini-text">${TimelineUI.escape(this.stripHtml(subject.textHtml || '').slice(0, 180) || 'No subject text captured.')}</div>
+                    <div class="studio-content-mini-actions">
+                        ${showVideo ? `<button class="studio-mini-icon-btn" title="Play Video" onclick="App.openContentVideo(${Number(index)}, '${TimelineUI.escape(subject.id)}')"><i class="fas fa-play"></i></button>` : ''}
+                        ${showDoc ? `<button class="studio-mini-icon-btn" title="Open Document" onclick="App.openContentDocument(${Number(index)}, '${TimelineUI.escape(subject.id)}')"><i class="fas fa-link"></i></button>` : ''}
+                        ${showQuiz ? `<button class="studio-mini-icon-btn" title="Open Quiz" onclick="App.openContentQuiz(${Number(index)}, '${TimelineUI.escape(subject.id)}')"><i class="fas fa-circle-question"></i></button>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="studio-content-mini">
+                <div class="studio-content-mini-header">${TimelineUI.escape(module.header || module.label || 'Linked Content')}</div>
+                <div class="studio-content-mini-body">
+                    ${rows || '<div class="studio-content-mini-empty">No subjects inside this module yet.</div>'}
+                </div>
+            </div>
+        `;
     },
 
     openMaterial(index) {

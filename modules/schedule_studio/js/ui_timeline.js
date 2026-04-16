@@ -91,6 +91,15 @@ const TimelineUI = {
         const durationDays = ScheduleData.normalizeDurationDays(item.durationDays) || ScheduleData.inferDurationDays(item);
         const materialState = options.getMaterialState(item);
         const assessmentState = options.getAssessmentState(item);
+        const contentState = typeof options.getContentModuleState === 'function'
+            ? options.getContentModuleState(item)
+            : { linked: false, available: false, label: 'No linked content module', module: null };
+        const isContentExpanded = contentState.linked && typeof options.isContentExpanded === 'function'
+            ? options.isContentExpanded(index)
+            : false;
+        const contentPreviewHtml = contentState.linked && typeof options.renderContentPreview === 'function'
+            ? options.renderContentPreview(item, index)
+            : '';
         const chips = [
             range.start ? `Start ${range.start}` : '',
             range.end ? `Assessment ${range.end}` : '',
@@ -98,7 +107,8 @@ const TimelineUI = {
             item.isVetting ? 'Vetting' : '',
             item.isLive ? 'Live' : '',
             item.linkedTestId ? 'Linked Test' : '',
-            item.assessmentLink ? 'External Assessment' : ''
+            item.assessmentLink ? 'External Assessment' : '',
+            contentState.linked ? 'Linked Content' : ''
         ].filter(Boolean);
 
         return `
@@ -111,18 +121,26 @@ const TimelineUI = {
                             ${chips.map(chip => `<span class="studio-chip">${this.escape(chip)}</span>`).join('')}
                         </div>
                     </div>
-                    ${options.canEdit ? `
+                    ${(options.canEdit || contentState.linked) ? `
                         <div class="studio-item-actions">
+                            ${contentState.linked ? `
+                                <button class="studio-btn secondary" onclick="App.toggleContentPreview(${index})" title="${isContentExpanded ? 'Collapse linked content' : 'Expand linked content'}">
+                                    <i class="fas fa-chevron-${isContentExpanded ? 'up' : 'down'}"></i> ${isContentExpanded ? 'Hide Content' : 'Show Content'}
+                                </button>
+                            ` : ''}
+                            ${options.canEdit ? `
                             <button class="studio-btn secondary" onclick="App.moveItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button>
                             <button class="studio-btn secondary" onclick="App.moveItem(${index}, 1)" ${index === options.totalItems - 1 ? 'disabled' : ''}><i class="fas fa-arrow-down"></i></button>
                             <button class="studio-btn secondary" onclick="App.editItem(${index})"><i class="fas fa-pen"></i> Edit</button>
                             <button class="studio-btn secondary" onclick="App.deleteItem(${index})"><i class="fas fa-trash"></i></button>
+                            ` : ''}
                         </div>
                     ` : ''}
                 </div>
 
                 ${item.materialLink ? `<div class="studio-status">Material: ${this.escape(materialState.label)}</div>` : ''}
                 ${(item.linkedTestId || item.assessmentLink) ? `<div class="studio-status">Assessment: ${this.escape(assessmentState.label)}</div>` : ''}
+                ${contentState.linked ? `<div class="studio-status">Content Module: ${this.escape(contentState.label)}</div>` : ''}
 
                 <div class="studio-item-actions">
                     ${item.materialLink ? `
@@ -136,6 +154,7 @@ const TimelineUI = {
                         </button>
                     ` : ''}
                 </div>
+                ${contentPreviewHtml}
             </div>
         `;
     },

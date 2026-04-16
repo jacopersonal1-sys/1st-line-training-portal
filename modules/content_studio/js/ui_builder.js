@@ -19,12 +19,15 @@ const BuilderUI = {
             docMode: 'url',
             docUrl: '',
             docPath: '',
-            docBucket: ''
+            docBucket: '',
+            hasQuestionnaire: false,
+            questionnaireTestId: '',
+            questionnaireTestTitle: ''
         }
     },
 
     initDefault: function() {
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         if (!this.state.form.code) {
             const base = (entry && entry.subjects && entry.subjects.length + 1) || 1;
             this.state.form.code = `1.1.${base}`;
@@ -40,6 +43,7 @@ const BuilderUI = {
         const docInput = document.getElementById('cs-subject-doc');
         const videoUploaded = document.getElementById('cs-subject-video-uploaded');
         const docUploaded = document.getElementById('cs-subject-doc-uploaded');
+        const quizSelect = document.getElementById('cs-subject-questionnaire-test');
 
         if (codeInput) this.state.form.code = codeInput.value;
         if (editor) this.state.form.textHtml = editor.innerHTML;
@@ -59,14 +63,30 @@ const BuilderUI = {
         } else {
             if (docUploaded) this.state.form.docUrl = docUploaded.value;
         }
+
+        if (this.state.form.hasQuestionnaire && quizSelect) {
+            this.state.form.questionnaireTestId = String(quizSelect.value || '').trim();
+            const opt = quizSelect.selectedOptions && quizSelect.selectedOptions[0] ? quizSelect.selectedOptions[0] : null;
+            this.state.form.questionnaireTestTitle = opt ? String(opt.getAttribute('data-title') || opt.textContent || '').trim() : '';
+        } else {
+            this.state.form.questionnaireTestId = '';
+            this.state.form.questionnaireTestTitle = '';
+        }
     },
 
     saveHeader: async function() {
+        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
+        if (!activeEntry) {
+            alert('No active module selected.');
+            return;
+        }
         const headerInput = document.getElementById('cs-header-input');
+        const moduleNameInput = document.getElementById('cs-module-name-input');
         const header = headerInput ? headerInput.value : '';
+        const moduleName = moduleNameInput ? String(moduleNameInput.value || '').trim() : '';
         const result = await DataService.upsertEntryMeta({
-            scheduleKey: 'content_creator_default',
-            scheduleLabel: 'Content Creator',
+            scheduleKey: activeEntry.scheduleKey,
+            scheduleLabel: moduleName || activeEntry.scheduleLabel || 'Untitled Module',
             header
         });
         if (!result.ok) {
@@ -76,8 +96,66 @@ const BuilderUI = {
         App.render();
     },
 
+    saveModuleName: async function() {
+        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
+        if (!activeEntry) return;
+        const moduleNameInput = document.getElementById('cs-module-name-input');
+        const nextName = String(moduleNameInput?.value || '').trim();
+        if (!nextName) {
+            alert('Enter a module name first.');
+            return;
+        }
+
+        const result = await DataService.renameModule(activeEntry.scheduleKey, nextName);
+        if (!result.ok) {
+            alert(result.message || 'Could not rename module.');
+            return;
+        }
+        App.setActiveModule(result.entry.scheduleKey);
+    },
+
+    saveAsNewModule: async function() {
+        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
+        if (!activeEntry) return;
+
+        const moduleNameInput = document.getElementById('cs-module-name-input');
+        const headerInput = document.getElementById('cs-header-input');
+        const newName = String(moduleNameInput?.value || '').trim();
+        if (!newName) {
+            alert('Enter a module name before saving as new.');
+            return;
+        }
+
+        const result = await DataService.createModule(newName, {
+            header: String(headerInput?.value || '').trim() || newName,
+            cloneFromScheduleKey: activeEntry.scheduleKey
+        });
+        if (!result.ok) {
+            alert(result.message || 'Could not create module.');
+            return;
+        }
+
+        this.resetSubjectForm();
+        App.setActiveModule(result.entry.scheduleKey);
+    },
+
+    deleteActiveModule: async function() {
+        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
+        if (!activeEntry) return;
+        if (!confirm(`Delete module "${activeEntry.scheduleLabel || activeEntry.header || activeEntry.scheduleKey}"?`)) return;
+
+        const result = await DataService.deleteModule(activeEntry.scheduleKey);
+        if (!result.ok) {
+            alert(result.message || 'Could not delete module.');
+            return;
+        }
+
+        this.resetSubjectForm();
+        App.render();
+    },
+
     editSubject: function(subjectId) {
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         if (!entry) return;
         const subject = DataService.getSubjectById(entry.scheduleKey, subjectId);
         if (!subject) return;
@@ -95,7 +173,10 @@ const BuilderUI = {
             docMode: subject.docMode || (subject.docPath ? 'upload' : 'url'),
             docUrl: subject.docUrl || '',
             docPath: subject.docPath || '',
-            docBucket: subject.docBucket || ''
+            docBucket: subject.docBucket || '',
+            hasQuestionnaire: !!subject.hasQuestionnaire,
+            questionnaireTestId: subject.questionnaireTestId || '',
+            questionnaireTestTitle: subject.questionnaireTestTitle || ''
         };
         App.render();
         const editor = document.getElementById('cs-subject-editor');
@@ -116,7 +197,10 @@ const BuilderUI = {
             docMode: 'url',
             docUrl: '',
             docPath: '',
-            docBucket: ''
+            docBucket: '',
+            hasQuestionnaire: false,
+            questionnaireTestId: '',
+            questionnaireTestTitle: ''
         };
         this.state.uploading.video = false;
         this.state.uploading.document = false;
@@ -140,6 +224,16 @@ const BuilderUI = {
             this.state.form.docUrl = '';
             this.state.form.docPath = '';
             this.state.form.docBucket = '';
+        }
+        App.render();
+    },
+
+    setHasQuestionnaire: function(flag) {
+        this._syncFormFromInputs();
+        this.state.form.hasQuestionnaire = !!flag;
+        if (!flag) {
+            this.state.form.questionnaireTestId = '';
+            this.state.form.questionnaireTestTitle = '';
         }
         App.render();
     },
@@ -230,6 +324,11 @@ const BuilderUI = {
     saveSubject: async function() {
         this._syncFormFromInputs();
 
+        if (this.state.form.hasQuestionnaire && !String(this.state.form.questionnaireTestId || '').trim()) {
+            alert('Select a quiz test for the questionnaire section.');
+            return;
+        }
+
         const payload = {
             id: this.state.form.id || '',
             code: this.state.form.code,
@@ -243,20 +342,24 @@ const BuilderUI = {
             docMode: this.state.form.docMode,
             docUrl: this.state.form.docUrl,
             docPath: this.state.form.docPath,
-            docBucket: this.state.form.docBucket
+            docBucket: this.state.form.docBucket,
+            hasQuestionnaire: !!this.state.form.hasQuestionnaire,
+            questionnaireTestId: this.state.form.questionnaireTestId,
+            questionnaireTestTitle: this.state.form.questionnaireTestTitle
         };
 
         const headerInput = document.getElementById('cs-header-input');
-        const currentEntry = DataService.getPrimaryEntry();
+        const moduleNameInput = document.getElementById('cs-module-name-input');
+        const currentEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         if (!currentEntry) {
             await DataService.upsertEntryMeta({
                 scheduleKey: 'content_creator_default',
-                scheduleLabel: 'Content Creator',
+                scheduleLabel: (moduleNameInput && moduleNameInput.value) ? moduleNameInput.value : 'Content Creator',
                 header: (headerInput && headerInput.value) ? headerInput.value : 'Content Creator'
             });
         }
 
-        const targetEntry = DataService.getPrimaryEntry();
+        const targetEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         const targetKey = targetEntry ? targetEntry.scheduleKey : 'content_creator_default';
         const result = await DataService.upsertSubject(targetKey, payload);
         if (!result.ok) {
@@ -270,7 +373,7 @@ const BuilderUI = {
 
     deleteSubject: async function(subjectId) {
         if (!confirm('Delete this subject?')) return;
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         if (!entry) return;
         const result = await DataService.deleteSubject(entry.scheduleKey, subjectId);
         if (!result.ok) {
@@ -296,8 +399,18 @@ const BuilderUI = {
     render: function() {
         this.initDefault();
         const esc = App.escapeHtml;
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         const subjects = entry ? (entry.subjects || []) : [];
+        const quizTests = DataService.getQuizTests();
+        const quizOptions = quizTests.slice();
+        if (this.state.form.questionnaireTestId && !quizOptions.some(t => String(t.id) === String(this.state.form.questionnaireTestId))) {
+            quizOptions.unshift({
+                id: String(this.state.form.questionnaireTestId),
+                title: this.state.form.questionnaireTestTitle || 'Previously Linked Quiz (Not Found)',
+                type: 'quiz',
+                questions: []
+            });
+        }
 
         const currentCode = this.state.form.code || `1.1.${subjects.length + 1}`;
         const currentHtml = this.state.form.textHtml || '';
@@ -310,6 +423,9 @@ const BuilderUI = {
 
             const videoStatus = subject.hasVideo ? (subject.videoUrl ? 'Enabled' : 'Enabled (No Link)') : 'Disabled';
             const docStatus = subject.hasDocument ? (subject.docUrl ? 'Enabled' : 'Enabled (No Link)') : 'Disabled';
+            const quizStatus = subject.hasQuestionnaire
+                ? (subject.questionnaireTestId ? (subject.questionnaireTestTitle || 'Linked') : 'Enabled (No Quiz)')
+                : 'Disabled';
 
             return `
                 <tr>
@@ -318,6 +434,7 @@ const BuilderUI = {
                     <td>${esc(ContentStudioUtils.stripHtml(subject.textHtml).slice(0, 120))}</td>
                     <td>${esc(videoStatus)}</td>
                     <td>${esc(docStatus)}</td>
+                    <td>${esc(quizStatus)}</td>
                     <td>Plays ${plays} | Watch ${Math.round(watch)}s | Skips ${skips}</td>
                     <td class="cs-actions-cell">
                         <button class="btn-secondary btn-sm" onclick="BuilderUI.editSubject('${esc(subject.id)}')"><i class="fas fa-pen"></i></button>
@@ -357,6 +474,23 @@ const BuilderUI = {
             </div>
         ` : '';
 
+        const questionnaireControls = this.state.form.hasQuestionnaire ? `
+            <div class="cs-upload-box">
+                <div class="cs-field">
+                    <label>Linked Quiz (from Test Engine)</label>
+                    <select id="cs-subject-questionnaire-test">
+                        <option value="">-- Select Quiz Test --</option>
+                        ${quizOptions.map(test => `
+                            <option value="${esc(test.id)}" data-title="${esc(test.title)}" ${String(this.state.form.questionnaireTestId || '') === String(test.id) ? 'selected' : ''}>
+                                ${esc(test.title)}
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+                ${quizTests.length === 0 ? '<div class="cs-muted">No quiz tests found yet. Create one in Test Engine with type "Quiz".</div>' : ''}
+            </div>
+        ` : '';
+
         const documentControls = this.state.form.hasDocument ? `
             <div class="cs-upload-box">
                 <div class="cs-toggle-row">
@@ -391,10 +525,17 @@ const BuilderUI = {
             <div class="cs-shell">
                 <div class="cs-toolbar">
                     <div class="cs-field">
+                        <label>Module Name</label>
+                        <input id="cs-module-name-input" type="text" value="${esc((entry && entry.scheduleLabel) || 'Content Creator')}" placeholder="Module name">
+                    </div>
+                    <div class="cs-field">
                         <label>Header</label>
                         <input id="cs-header-input" type="text" value="${esc((entry && entry.header) || 'Content Creator')}" placeholder="Header goes here">
                     </div>
                     <div class="cs-field cs-field-end">
+                        <button class="btn-secondary" onclick="BuilderUI.saveModuleName()"><i class="fas fa-pen"></i> Rename Module</button>
+                        <button class="btn-secondary" onclick="BuilderUI.saveAsNewModule()"><i class="fas fa-copy"></i> Save As New Module</button>
+                        <button class="btn-danger" onclick="BuilderUI.deleteActiveModule()"><i class="fas fa-trash"></i> Delete Module</button>
                         <button class="btn-primary" onclick="BuilderUI.saveHeader()"><i class="fas fa-save"></i> Save Header</button>
                     </div>
                 </div>
@@ -419,6 +560,8 @@ const BuilderUI = {
                             ${videoControls}
                             ${this._renderToggleButtons('Include Document', this.state.form.hasDocument, 'BuilderUI.setHasDocument(true)', 'BuilderUI.setHasDocument(false)')}
                             ${documentControls}
+                            ${this._renderToggleButtons('Include Questionnaire', this.state.form.hasQuestionnaire, 'BuilderUI.setHasQuestionnaire(true)', 'BuilderUI.setHasQuestionnaire(false)')}
+                            ${questionnaireControls}
                         </div>
 
                         <div class="cs-actions-row">
@@ -429,7 +572,7 @@ const BuilderUI = {
 
                     <div class="cs-builder-card">
                         <h3>Subjects Built</h3>
-                        <p class="cs-muted">Play/Document icons in View appear only when enabled and linked.</p>
+                        <p class="cs-muted">Video, document, and quiz icons in View appear only when enabled and linked.</p>
                         <div class="cs-table-wrap">
                             <table class="admin-table">
                                 <thead>
@@ -439,12 +582,13 @@ const BuilderUI = {
                                         <th>Subject</th>
                                         <th>Video</th>
                                         <th>Document</th>
+                                        <th>Questionnaire</th>
                                         <th>Engagement</th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${subjectRows || '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No subjects yet.</td></tr>'}
+                                    ${subjectRows || '<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No subjects yet.</td></tr>'}
                                 </tbody>
                             </table>
                         </div>

@@ -731,6 +731,8 @@
                             <label for="builderTestType">Test Type <span class="field-pill">Required</span></label>
                             <select id="builderTestType">
                                 <option value="standard">Standard Assessment (Schedule Based)</option>
+                                <option value="quiz">Quiz (Questionnaire)</option>
+                                <option value="live">Live Assessment (Interactive)</option>
                                 <option value="vetting">Vetting Test (Timer Based)</option>
                             </select>
                         </div>
@@ -1141,8 +1143,12 @@
                 <div id="updateStatusContainer" style="margin:20px 0;">
                     <div style="font-size:0.9rem; color:var(--text-muted); margin-bottom:5px;">Current Version</div>
                     <div id="currentVersionDisplay" style="font-size:1.5rem; font-weight:bold; color:var(--primary); margin-bottom:20px;">Loading...</div>
-                    
-                    <button id="btnCheckUpdates" class="btn-primary btn-lg" onclick="triggerManualUpdate()"><i class="fas fa-sync"></i> Check for Updates</button>
+
+                    <div id="updateChannelDisplay" style="font-size:0.9rem; margin-bottom:10px; color:var(--primary);">Active Channel: Main (Inline)</div>
+                    <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                        <button id="btnCheckMainUpdates" class="btn-primary btn-lg" onclick="triggerManualUpdate('main')"><i class="fas fa-rocket"></i> Check Main Update</button>
+                        <button id="btnCheckBetaUpdates" class="btn-secondary btn-lg" onclick="triggerManualUpdate('beta')"><i class="fas fa-flask"></i> Check Beta Update</button>
+                    </div>
                     <button id="btnInstallUpdate" class="btn-success btn-lg hidden" onclick="restartAndInstall()"><i class="fas fa-arrow-circle-up"></i> Restart & Install</button>
                 </div>
 

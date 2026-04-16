@@ -22,7 +22,12 @@ const App = {
         traineeSession: null,
         isCheckingCompliance: false,
         securityWarningCount: 0,
-        localPoller: null
+        localPoller: null,
+        complianceConsecutiveErrors: 0,
+        complianceConsecutivePasses: 0,
+        lastEnterAttempt: 0,
+        preflightScanRateMs: 2000,
+        preflightSessionKey: ''
     },
 
     resolveCurrentUser: function() {
@@ -785,24 +790,47 @@ const App = {
         this.state.localPoller = null;
     },
 
+    setPreFlightPollerInterval: function(intervalMs) {
+        const nextRate = Number(intervalMs) > 0 ? Number(intervalMs) : 2000;
+        if (this.state.localPoller) clearInterval(this.state.localPoller);
+        this.state.localPoller = setInterval(() => this.checkSystemCompliance().catch(() => {}), nextRate);
+        this.state.preflightScanRateMs = nextRate;
+    },
+
     startTraineePreFlight: function() {
+        const PREFLIGHT_FAST_SCAN_MS = 2000;
         this.stopTraineePollers();
-        this.checkSystemCompliance();
-        // Poll every 2s for background app closures
-        this.state.localPoller = setInterval(() => this.checkSystemCompliance(), 2000);
+        const sessionKey = String((this.state.traineeSession && this.state.traineeSession.sessionId) || '');
+        if (this.state.preflightSessionKey !== sessionKey) {
+            this.state.preflightSessionKey = sessionKey;
+            this.state.complianceConsecutiveErrors = 0;
+            this.state.complianceConsecutivePasses = 0;
+        }
+        this.setPreFlightPollerInterval(PREFLIGHT_FAST_SCAN_MS);
+        this.checkSystemCompliance().catch(() => {});
     },
 
     startActiveTestMonitoring: function() {
         this.stopTraineePollers();
         // Aggressive polling during active test
+        this.state.complianceConsecutiveErrors = 0;
+        this.state.complianceConsecutivePasses = 0;
+        this.state.preflightSessionKey = '';
+        this.state.preflightScanRateMs = 2000;
         this.state.localPoller = setInterval(() => this.checkActiveSecurity(), 3000);
     },
 
-    checkSystemCompliance: async function() {
+    checkSystemCompliance: async function(options = {}) {
         if (this.state.isCheckingCompliance) return;
         this.state.isCheckingCompliance = true;
         
         try {
+            const strictMode = !!(options && options.strict);
+            const PREFLIGHT_FAST_SCAN_MS = 2000;
+            const PREFLIGHT_SLOW_SCAN_MS = 7000;
+            const PREFLIGHT_BLOCK_THRESHOLD = 2;
+            const ENTER_ATTEMPT_GRACE_MS = 8000;
+
             const session = this.state.traineeSession;
             if (!session) return;
             const username = this.getMyUsername();
@@ -814,30 +842,33 @@ const App = {
             const isRelaxed = (myData && myData.relaxed) && !forceGlobalKiosk;
             
             let errors = [];
+            let scannerWarning = '';
             
             // Call the core Electron IPC (Inherits WhatsApp/Edge logic automatically)
             if (!isRelaxed) {
                 try {
-                    let screenCount = 0;
-                    if (window.electronAPI && typeof window.electronAPI.getScreenCount === 'function') {
-                        screenCount = await window.electronAPI.getScreenCount();
+                    let ipcInvoke = null;
+                    if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.invoke === 'function') {
+                        ipcInvoke = window.electronAPI.ipcRenderer.invoke;
                     } else if (typeof require !== 'undefined') {
                         const { ipcRenderer } = require('electron');
-                        screenCount = await ipcRenderer.invoke('get-screen-count');
+                        ipcInvoke = ipcRenderer.invoke.bind(ipcRenderer);
                     }
+
+                    if (!ipcInvoke) {
+                        scannerWarning = 'Security scanner unavailable. Click Enter to run an immediate check.';
+                    } else {
+                    let screenCount = 0;
+                    screenCount = await ipcInvoke('get-screen-count');
                     if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
 
                     const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
                     let apps = [];
-                    if (window.electronAPI && typeof window.electronAPI.getProcessList === 'function') {
-                        apps = await window.electronAPI.getProcessList(forbidden.length > 0 ? forbidden : null);
-                    } else if (typeof require !== 'undefined') {
-                        const { ipcRenderer } = require('electron');
-                        apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
-                    }
+                    apps = await ipcInvoke('get-process-list', forbidden.length > 0 ? forbidden : null);
                     if (apps && apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
+                    }
                 } catch (e) {
-                    console.warn('[Vetting] IPC check failed', e);
+                    scannerWarning = 'Security scanner failed temporarily. Rechecking in the background.';
                 }
             }
 
@@ -846,17 +877,44 @@ const App = {
             if (!logBox || !btn) return;
 
             let status = 'ready';
-            if (errors.length > 0 && !isOverridden && !isRelaxed) status = 'blocked';
+            const hasBlockingViolations = errors.length > 0 && !isOverridden && !isRelaxed;
+            const withinEnterGrace = (Date.now() - this.state.lastEnterAttempt) < ENTER_ATTEMPT_GRACE_MS;
+            let shouldBlock = false;
+
+            if (hasBlockingViolations) {
+                this.state.complianceConsecutivePasses = 0;
+                this.state.complianceConsecutiveErrors += 1;
+                shouldBlock = strictMode || (!withinEnterGrace && this.state.complianceConsecutiveErrors >= PREFLIGHT_BLOCK_THRESHOLD);
+            } else {
+                this.state.complianceConsecutiveErrors = 0;
+                this.state.complianceConsecutivePasses += 1;
+            }
+
+            status = shouldBlock ? 'blocked' : 'ready';
 
             if (errors.length === 0) {
                 logBox.innerHTML = `<div style="color:#2ecc71; font-weight:bold;"><i class="fas fa-check-circle" style="font-size:1.5rem; vertical-align:middle; margin-right:10px;"></i> System Secure. Ready to start.</div>`;
+                if (scannerWarning) {
+                    logBox.innerHTML += `<div style="margin-top:10px; color:#f1c40f; font-size:0.9rem;">${scannerWarning}</div>`;
+                }
                 btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; btn.style.animation = 'pulse 2s infinite';
             } else if (isOverridden) {
                 logBox.innerHTML = `<div style="color:#f1c40f; font-weight:bold; margin-bottom:10px;"><i class="fas fa-exclamation-triangle"></i> Admin Override Active</div>` + errors.map(e => `<div style="color:var(--text-muted); font-size:0.85rem;">- ${e} (Ignored)</div>`).join('');
                 btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; btn.style.animation = 'none';
+            } else if (!shouldBlock) {
+                logBox.innerHTML = `<div style="color:#f1c40f; font-weight:bold; margin-bottom:10px;"><i class="fas fa-exclamation-circle"></i> Potential Issue Detected</div>` + errors.map(e => `<div style="color:var(--text-muted); font-size:0.85rem;">- ${e}</div>`).join('');
+                btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; btn.style.animation = 'pulse 2s infinite';
             } else {
                 logBox.innerHTML = errors.map(e => `<div style="color:#ff5252; padding:5px 0;"><i class="fas fa-ban"></i> ${e}</div>`).join('');
                 btn.disabled = true; btn.style.opacity = '0.5'; btn.style.cursor = 'not-allowed'; btn.style.animation = 'none';
+            }
+
+            if (!strictMode) {
+                if (shouldBlock && this.state.preflightScanRateMs !== PREFLIGHT_FAST_SCAN_MS) {
+                    this.setPreFlightPollerInterval(PREFLIGHT_FAST_SCAN_MS);
+                } else if (!shouldBlock && this.state.preflightScanRateMs !== PREFLIGHT_SLOW_SCAN_MS) {
+                    this.setPreFlightPollerInterval(PREFLIGHT_SLOW_SCAN_MS);
+                }
             }
 
             // Auto-report status change to Admin
@@ -932,9 +990,15 @@ const App = {
     },
 
     enterArena: async function() {
+        await this.checkSystemCompliance({ strict: true });
+        const btn = document.getElementById('btnEnterSandbox');
+        if (btn && btn.disabled) return;
         this.stopTraineePollers(); // Stop pre-flight
         const username = this.getMyUsername();
         if (!username || !this.state.traineeSession) return;
+        this.state.lastEnterAttempt = Date.now();
+        this.state.complianceConsecutiveErrors = 0;
+        this.state.complianceConsecutivePasses = 0;
         const myData = this.getMyTraineeData(this.state.traineeSession);
         const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);

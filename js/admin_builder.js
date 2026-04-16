@@ -6,6 +6,19 @@ let BUILDER_QUESTIONS = [];
 let EDITING_TEST_ID = null; 
 let BUILDER_DRAG_STATE = { fromIdx: null };
 
+function getBuilderLinkedTitleFromInputs() {
+    const type = document.getElementById('builderTestType')?.value || 'standard';
+    if (type === 'vetting') {
+        const ph = document.getElementById('builderVettingPhase')?.value || '';
+        const tp = document.getElementById('builderVettingTopic')?.value || '';
+        return tp ? `${ph} - ${tp}` : '';
+    }
+    if (type === 'quiz') {
+        return String(document.getElementById('builderCustomTitle')?.value || '').trim();
+    }
+    return String(document.getElementById('builderAssessmentSelect')?.value || '').trim();
+}
+
 function loadTestBuilder(existingId = null, targetQIdx = null) {
     BUILDER_QUESTIONS = [];
     document.getElementById('questionContainer').innerHTML = '';
@@ -21,6 +34,10 @@ function loadTestBuilder(existingId = null, targetQIdx = null) {
         if (!typeSelect.querySelector('option[value="live"]')) {
             const opt = new Option("Live Assessment (Interactive)", "live");
             typeSelect.add(opt);
+        }
+        if (!typeSelect.querySelector('option[value="quiz"]')) {
+            const quizOpt = new Option("Quiz (Questionnaire)", "quiz");
+            typeSelect.add(quizOpt);
         }
         typeSelect.value = 'standard'; // Default
         typeSelect.onchange = function() {
@@ -47,6 +64,15 @@ function loadTestBuilder(existingId = null, targetQIdx = null) {
                 if(lbl) lbl.innerText = "Link to Live Assessment Booking";
                 if(sel) sel.classList.remove('hidden');
                 if(inp) inp.classList.add('hidden');
+                if(vetWrap) vetWrap.classList.add('hidden');
+            } else if (val === 'quiz') {
+                durWrap.classList.add('hidden');
+                if(lbl) lbl.innerText = "Questionnaire Name";
+                if(sel) sel.classList.add('hidden');
+                if(inp) {
+                    inp.classList.remove('hidden');
+                    inp.placeholder = "Enter Questionnaire Name";
+                }
                 if(vetWrap) vetWrap.classList.add('hidden');
             } else {
                 durWrap.classList.add('hidden');
@@ -89,6 +115,8 @@ function loadTestBuilder(existingId = null, targetQIdx = null) {
                     }, 100);
                 }
                 document.getElementById('builderCustomTitle').value = test.title; // Fallback
+            } else if (test.type === 'quiz') {
+                document.getElementById('builderCustomTitle').value = test.title || '';
             } else {
                 select.value = test.title;
             }
@@ -385,7 +413,7 @@ function saveBuilderDraft() {
     const draft = {
         questions: BUILDER_QUESTIONS,
         id: EDITING_TEST_ID,
-        title: document.getElementById('builderAssessmentSelect').value,
+        title: getBuilderLinkedTitleFromInputs(),
         type: document.getElementById('builderTestType').value,
         duration: document.getElementById('builderDuration').value
     };
@@ -404,7 +432,6 @@ function restoreBuilderDraft() {
     // Restore UI
     showTab('test-builder');
     
-    document.getElementById('builderAssessmentSelect').value = draft.title;
     document.getElementById('builderTestType').value = draft.type;
     document.getElementById('builderDuration').value = draft.duration;
     
@@ -412,6 +439,19 @@ function restoreBuilderDraft() {
     const typeSelect = document.getElementById('builderTestType');
     if (typeSelect && typeof typeSelect.onchange === 'function') {
         typeSelect.onchange();
+    }
+
+    if (draft.type === 'vetting') {
+        const parts = String(draft.title || '').split(' - ');
+        if (parts.length >= 2) {
+            document.getElementById('builderVettingPhase').value = parts[0];
+            document.getElementById('builderVettingTopic').value = parts.slice(1).join(' - ');
+        }
+        document.getElementById('builderCustomTitle').value = draft.title || '';
+    } else if (draft.type === 'quiz') {
+        document.getElementById('builderCustomTitle').value = draft.title || '';
+    } else {
+        document.getElementById('builderAssessmentSelect').value = draft.title;
     }
     
     renderBuilder();
@@ -533,8 +573,14 @@ async function saveTest() {
             return;
         }
         linked = `${ph} - ${tp}`;
+    } else if (type === 'quiz') {
+        linked = String(document.getElementById('builderCustomTitle').value || '').trim();
+        if (!linked) {
+            if(typeof showToast === 'function') showToast("Please enter a questionnaire name.", "warning");
+            return;
+        }
     } else {
-        linked = document.getElementById('builderAssessmentSelect').value;
+        linked = String(document.getElementById('builderAssessmentSelect').value || '').trim();
     }
     
     const dur = document.getElementById('builderDuration').value;
@@ -666,6 +712,7 @@ function loadManageTests() {
             <option value="standard">Standard</option>
             <option value="live">Live Assessment</option>
             <option value="vetting">Vetting Test</option>
+            <option value="quiz">Quiz</option>
         `;
         searchInput.parentNode.insertBefore(select, searchInput);
     }
@@ -713,6 +760,7 @@ function loadManageTests() {
         let typeLabel = 'Standard';
         if (t.type === 'vetting') { icon = '<i class="fas fa-shield-alt" style="color:#9b59b6;"></i>'; typeLabel = 'Vetting'; }
         if (t.type === 'live') { icon = '<i class="fas fa-satellite-dish" style="color:var(--primary);"></i>'; typeLabel = 'Live'; }
+        if (t.type === 'quiz') { icon = '<i class="fas fa-circle-question" style="color:#3498db;"></i>'; typeLabel = 'Quiz'; }
 
         html += `
             <tr>

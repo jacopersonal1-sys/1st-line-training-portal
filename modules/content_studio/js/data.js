@@ -2,6 +2,7 @@
 
 const CONTENT_STUDIO_DATA_KEY = 'content_studio_data';
 const CONTENT_STUDIO_LOCAL_CACHE_KEY = 'content_studio_data_local';
+const CONTENT_STUDIO_TESTS_CACHE_KEY = 'content_studio_tests_cache';
 const CONTENT_CREATOR_DEFAULT_KEY = 'content_creator_default';
 const CONTENT_CREATOR_DEFAULT_LABEL = 'Content Creator';
 const CONTENT_CREATOR_VIDEO_BUCKET = 'content_creator_videos';
@@ -42,6 +43,11 @@ function sanitizeStorageSegment(value) {
         .slice(0, 120) || 'file';
 }
 
+function buildContentModuleKey(name = '') {
+    const safe = sanitizeStorageSegment(name || 'module');
+    return `content_module_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${safe.slice(0, 30)}`;
+}
+
 function buildScheduleKey(groupId, item) {
     const courseName = String(item.courseName || item.item || item.title || '').trim();
     const dateRange = String(item.dateRange || item.date || '').trim();
@@ -72,6 +78,21 @@ const DataService = {
             updatedAt: now,
             editedBy: getEditorName()
         };
+    },
+
+    _normalizeTests: function(raw) {
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .filter(t => t && typeof t === 'object')
+            .map(t => ({
+                id: String(t.id || ''),
+                title: String(t.title || '').trim(),
+                type: String(t.type || 'standard').toLowerCase(),
+                duration: t.duration || null,
+                questions: Array.isArray(t.questions) ? t.questions : []
+            }))
+            .filter(t => !!t.id && !!t.title)
+            .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base', numeric: true }));
     },
 
     _getDefaultEntryIndex: function(store) {
@@ -134,6 +155,9 @@ const DataService = {
                     docUrl: String(subject.docUrl || '').trim(),
                     docPath: String(subject.docPath || '').trim(),
                     docBucket: String(subject.docBucket || '').trim(),
+                    hasQuestionnaire: typeof subject.hasQuestionnaire === 'boolean' ? subject.hasQuestionnaire : !!subject.questionnaireTestId,
+                    questionnaireTestId: String(subject.questionnaireTestId || '').trim(),
+                    questionnaireTestTitle: String(subject.questionnaireTestTitle || '').trim(),
                     createdAt: subject.createdAt || nowIso(),
                     updatedAt: subject.updatedAt || nowIso()
                 });
@@ -181,6 +205,9 @@ const DataService = {
                     docUrl: String(s.docUrl || '').trim(),
                     docPath: String(s.docPath || '').trim(),
                     docBucket: String(s.docBucket || '').trim(),
+                    hasQuestionnaire: typeof s.hasQuestionnaire === 'boolean' ? s.hasQuestionnaire : !!s.questionnaireTestId,
+                    questionnaireTestId: String(s.questionnaireTestId || '').trim(),
+                    questionnaireTestTitle: String(s.questionnaireTestTitle || '').trim(),
                     createdAt: s.createdAt || nowIso(),
                     updatedAt: s.updatedAt || nowIso()
                 })) : [],
@@ -232,19 +259,36 @@ const DataService = {
             localStorage.setItem(CONTENT_STUDIO_LOCAL_CACHE_KEY, JSON.stringify(local));
         }
 
+        const localTests = this._normalizeTests(JSON.parse(localStorage.getItem(CONTENT_STUDIO_TESTS_CACHE_KEY) || '[]'));
+        if (!localStorage.getItem(CONTENT_STUDIO_TESTS_CACHE_KEY)) {
+            localStorage.setItem(CONTENT_STUDIO_TESTS_CACHE_KEY, JSON.stringify(localTests));
+        }
+
         if (!AppContext.supabase) return local;
 
         try {
-            const { data, error } = await AppContext.supabase
-                .from('app_documents')
-                .select('content')
-                .eq('key', CONTENT_STUDIO_DATA_KEY)
-                .maybeSingle();
+            const [contentRes, testsRes] = await Promise.all([
+                AppContext.supabase
+                    .from('app_documents')
+                    .select('content')
+                    .eq('key', CONTENT_STUDIO_DATA_KEY)
+                    .maybeSingle(),
+                AppContext.supabase
+                    .from('app_documents')
+                    .select('content')
+                    .eq('key', 'tests')
+                    .maybeSingle()
+            ]);
 
-            if (error) throw error;
-            if (data && data.content) {
-                local = this._normalizeStore(data.content);
+            if (contentRes && contentRes.error) throw contentRes.error;
+            if (contentRes && contentRes.data && contentRes.data.content) {
+                local = this._normalizeStore(contentRes.data.content);
                 localStorage.setItem(CONTENT_STUDIO_LOCAL_CACHE_KEY, JSON.stringify(local));
+            }
+
+            if (testsRes && !testsRes.error && testsRes.data && Array.isArray(testsRes.data.content)) {
+                const normalizedTests = this._normalizeTests(testsRes.data.content);
+                localStorage.setItem(CONTENT_STUDIO_TESTS_CACHE_KEY, JSON.stringify(normalizedTests));
             }
         } catch (err) {
             console.warn('[Content Studio] Initial cloud load failed:', err);
@@ -255,6 +299,20 @@ const DataService = {
 
     getStore: function() {
         return this._normalizeStore(JSON.parse(localStorage.getItem(CONTENT_STUDIO_LOCAL_CACHE_KEY) || '{}'));
+    },
+
+    getTestsCache: function() {
+        return this._normalizeTests(JSON.parse(localStorage.getItem(CONTENT_STUDIO_TESTS_CACHE_KEY) || '[]'));
+    },
+
+    getQuizTests: function() {
+        return this.getTestsCache().filter(t => String(t.type || '').toLowerCase() === 'quiz');
+    },
+
+    getTestById: function(testId) {
+        const key = String(testId || '').trim();
+        if (!key) return null;
+        return this.getTestsCache().find(t => String(t.id) === key) || null;
     },
 
     saveStore: async function(store, deferSync = false) {
@@ -382,8 +440,11 @@ const DataService = {
     },
 
     getScheduleOptions: function() {
-        // Legacy compatibility: Content Creator is now a single workspace document.
-        return [{ key: CONTENT_CREATOR_DEFAULT_KEY, label: CONTENT_CREATOR_DEFAULT_LABEL }];
+        const entries = this.getEntries();
+        return entries.map(entry => ({
+            key: String(entry.scheduleKey || ''),
+            label: String(entry.scheduleLabel || entry.header || 'Unnamed Module').trim() || 'Unnamed Module'
+        }));
     },
 
     getEntries: function() {
@@ -403,6 +464,102 @@ const DataService = {
         const entry = this.getEntries().find(e => e.scheduleKey === key);
         if (entry) return entry;
         return this.getPrimaryEntry();
+    },
+
+    _cloneSubjectsForEntry: function(subjects) {
+        const now = nowIso();
+        if (!Array.isArray(subjects)) return [];
+        return subjects.map((subject, idx) => ({
+            id: 'cs_sub_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + idx,
+            code: String(subject.code || '').trim(),
+            textHtml: sanitizeRichHtml(subject.textHtml || ''),
+            hasVideo: !!subject.hasVideo,
+            videoMode: String(subject.videoMode || (subject.videoPath ? 'upload' : 'url')).toLowerCase() === 'upload' ? 'upload' : 'url',
+            videoUrl: String(subject.videoUrl || '').trim(),
+            videoPath: String(subject.videoPath || '').trim(),
+            videoBucket: String(subject.videoBucket || '').trim(),
+            hasDocument: !!subject.hasDocument,
+            docMode: String(subject.docMode || (subject.docPath ? 'upload' : 'url')).toLowerCase() === 'upload' ? 'upload' : 'url',
+            docUrl: String(subject.docUrl || '').trim(),
+            docPath: String(subject.docPath || '').trim(),
+            docBucket: String(subject.docBucket || '').trim(),
+            hasQuestionnaire: !!subject.hasQuestionnaire,
+            questionnaireTestId: String(subject.questionnaireTestId || '').trim(),
+            questionnaireTestTitle: String(subject.questionnaireTestTitle || '').trim(),
+            createdAt: now,
+            updatedAt: now
+        }));
+    },
+
+    createModule: async function(moduleName, options = {}) {
+        const cleanName = String(moduleName || '').trim() || 'New Module';
+        const cleanHeader = String(options.header || cleanName).trim() || cleanName;
+
+        const store = this.getStore();
+        this._ensureDefaultEntry(store);
+
+        const sourceKey = String(options.cloneFromScheduleKey || '').trim();
+        const sourceEntry = sourceKey ? store.entries.find(e => String(e.scheduleKey) === sourceKey) : null;
+        const subjectsToClone = sourceEntry ? this._cloneSubjectsForEntry(sourceEntry.subjects || []) : [];
+        const now = nowIso();
+        const moduleKey = buildContentModuleKey(cleanName);
+
+        const newEntry = {
+            id: 'cs_entry_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            scheduleKey: moduleKey,
+            scheduleLabel: cleanName,
+            header: cleanHeader,
+            subjects: subjectsToClone,
+            createdAt: now,
+            updatedAt: now,
+            editedBy: getEditorName()
+        };
+
+        store.entries.push(newEntry);
+        await this.saveStore(store);
+        return { ok: true, entry: this.getEntryByScheduleKey(moduleKey) };
+    },
+
+    renameModule: async function(scheduleKey, moduleName) {
+        const key = String(scheduleKey || '').trim();
+        const label = String(moduleName || '').trim();
+        if (!key) return { ok: false, message: 'Module key is required.' };
+        if (!label) return { ok: false, message: 'Module name is required.' };
+
+        const store = this.getStore();
+        this._ensureDefaultEntry(store);
+        const idx = store.entries.findIndex(e => String(e.scheduleKey || '') === key);
+        if (idx < 0) return { ok: false, message: 'Module not found.' };
+
+        store.entries[idx].scheduleLabel = label;
+        store.entries[idx].updatedAt = nowIso();
+        store.entries[idx].editedBy = getEditorName();
+        await this.saveStore(store);
+        return { ok: true, entry: this.getEntryByScheduleKey(key) };
+    },
+
+    deleteModule: async function(scheduleKey) {
+        const key = String(scheduleKey || '').trim();
+        if (!key) return { ok: false, message: 'Module key is required.' };
+
+        const store = this.getStore();
+        this._ensureDefaultEntry(store);
+        if ((store.entries || []).length <= 1) {
+            return { ok: false, message: 'At least one module must remain.' };
+        }
+
+        const idx = store.entries.findIndex(e => String(e.scheduleKey || '') === key);
+        if (idx < 0) return { ok: false, message: 'Module not found.' };
+        const removed = store.entries[idx];
+        store.entries.splice(idx, 1);
+
+        if (removed && removed.id) {
+            store.analytics = (store.analytics || []).filter(a => String(a.entryId || '') !== String(removed.id));
+            store.annotations = (store.annotations || []).filter(n => String(n.entryId || '') !== String(removed.id));
+        }
+
+        await this.saveStore(store);
+        return { ok: true };
     },
 
     upsertEntryMeta: async function(payload) {
@@ -448,6 +605,7 @@ const DataService = {
         const textHtml = sanitizeRichHtml(payload.textHtml || '');
         const hasVideo = !!payload.hasVideo;
         const hasDocument = !!payload.hasDocument;
+        const hasQuestionnaire = !!payload.hasQuestionnaire;
         const videoMode = String(payload.videoMode || 'url').toLowerCase() === 'upload' ? 'upload' : 'url';
         const docMode = String(payload.docMode || 'url').toLowerCase() === 'upload' ? 'upload' : 'url';
 
@@ -457,6 +615,12 @@ const DataService = {
         const docUrl = hasDocument ? String(payload.docUrl || '').trim() : '';
         const docPath = hasDocument ? String(payload.docPath || '').trim() : '';
         const docBucket = hasDocument ? String(payload.docBucket || '').trim() : '';
+        const questionnaireTestId = hasQuestionnaire ? String(payload.questionnaireTestId || '').trim() : '';
+        let questionnaireTestTitle = hasQuestionnaire ? String(payload.questionnaireTestTitle || '').trim() : '';
+        if (hasQuestionnaire && questionnaireTestId) {
+            const linkedQuiz = this.getTestById(questionnaireTestId);
+            if (linkedQuiz) questionnaireTestTitle = linkedQuiz.title;
+        }
 
         const store = this.getStore();
         this._ensureDefaultEntry(store);
@@ -483,6 +647,9 @@ const DataService = {
                 docUrl,
                 docPath,
                 docBucket,
+                hasQuestionnaire,
+                questionnaireTestId,
+                questionnaireTestTitle,
                 updatedAt: now
             };
         } else {
@@ -501,6 +668,9 @@ const DataService = {
                 docUrl,
                 docPath,
                 docBucket,
+                hasQuestionnaire,
+                questionnaireTestId,
+                questionnaireTestTitle,
                 createdAt: now,
                 updatedAt: now
             });

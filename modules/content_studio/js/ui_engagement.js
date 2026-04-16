@@ -26,7 +26,7 @@ const EngagementUI = {
 
     render: function() {
         const esc = App.escapeHtml;
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         if (!entry) {
             return `<div class="cs-empty"><h3>No content yet</h3><p>Build subjects first to start tracking engagement.</p></div>`;
         }

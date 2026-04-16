@@ -2,6 +2,7 @@
 
 const App = {
     currentView: 'view',
+    activeModuleKey: '',
 
     init: async function() {
         const root = document.getElementById('content-studio-app');
@@ -31,6 +32,30 @@ const App = {
     canAccessModule: function() {
         const role = AppContext && AppContext.user ? AppContext.user.role : '';
         return role === 'admin' || role === 'super_admin';
+    },
+
+    ensureActiveModule: function() {
+        const entries = DataService.getEntries();
+        if (!entries.length) {
+            this.activeModuleKey = '';
+            return null;
+        }
+
+        if (!this.activeModuleKey || !entries.some(entry => String(entry.scheduleKey) === String(this.activeModuleKey))) {
+            this.activeModuleKey = String(entries[0].scheduleKey || '');
+        }
+        return entries.find(entry => String(entry.scheduleKey) === String(this.activeModuleKey)) || entries[0];
+    },
+
+    getActiveEntry: function() {
+        const active = this.ensureActiveModule();
+        if (!active) return null;
+        return DataService.getEntryByScheduleKey(active.scheduleKey);
+    },
+
+    setActiveModule: function(scheduleKey) {
+        this.activeModuleKey = String(scheduleKey || '').trim();
+        this.render();
     },
 
     setView: function(view) {
@@ -72,6 +97,12 @@ const App = {
         if (this.currentView === 'engagement' && !this.canViewEngagement()) {
             this.currentView = 'view';
         }
+        const activeEntry = this.ensureActiveModule();
+        const moduleOptions = DataService.getEntries().map(entry => {
+            const key = String(entry.scheduleKey || '');
+            const label = String(entry.scheduleLabel || entry.header || 'Unnamed Module').trim() || 'Unnamed Module';
+            return `<option value="${this.escapeHtml(key)}" ${String(this.activeModuleKey) === key ? 'selected' : ''}>${this.escapeHtml(label)}</option>`;
+        }).join('');
 
         let viewHtml = '';
         if (this.currentView === 'builder') {
@@ -102,7 +133,10 @@ const App = {
                             </button>
                         ` : ''}
                     </div>
-                    <div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <select id="cs-module-select" onchange="App.setActiveModule(this.value)" ${moduleOptions ? '' : 'disabled'}>
+                            ${moduleOptions || '<option value="">No Modules</option>'}
+                        </select>
                         <button class="btn-secondary btn-sm" onclick="App.refresh()"><i class="fas fa-rotate-right"></i> Refresh</button>
                     </div>
                 </div>

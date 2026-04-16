@@ -141,7 +141,9 @@ function loadTraineeTests() {
             ? '<span class="test-type-pill vetting"><i class="fas fa-shield-alt"></i> Vetting</span>'
             : t.type === 'live'
                 ? '<span class="test-type-pill live"><i class="fas fa-satellite-dish"></i> Live</span>'
-                : '<span class="test-type-pill standard"><i class="fas fa-file-alt"></i> Standard</span>';
+                : t.type === 'quiz'
+                    ? '<span class="test-type-pill quiz"><i class="fas fa-circle-question"></i> Quiz</span>'
+                    : '<span class="test-type-pill standard"><i class="fas fa-file-alt"></i> Standard</span>';
 
         return `
         <div class="test-card-row">
@@ -340,6 +342,8 @@ function renderTestPaper(containerId = 'takingQuestions') {
         ? 'Vetting Test'
         : window.CURRENT_TEST.type === 'live'
             ? 'Live Assessment'
+            : window.CURRENT_TEST.type === 'quiz'
+                ? 'Quiz'
             : 'Standard Assessment';
 
     let html = `

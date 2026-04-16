@@ -430,6 +430,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.20 (Content Creator + User Control Release, 2026-04-15):** Finalized isolated `content-studio` runtime and reworked it into Content Creator (View + Builder + engagement telemetry), removed schedule timeline selector dependency, kept Header + Subject Builder flows with optional inputs, and aligned module theming with the main app while preserving Super Admin Data Studio `User Control` and sync hardening updates.
 - **v2.6.19 (Retrain Attempt Unlock Hotfix, 2026-04-14):** Patched `js/assessment_trainee.js` to classify stale pre-move attempts as legacy by combining retrain archive move timestamps with linked `records.groupID` checks, then auto-ignore/archive those legacy attempts so trainees moved to a new group can start current scheduled assessments without false "already completed" lockouts.
 - **v2.6.18 (Lifecycle + Grading Reliability Patch, 2026-04-14):** Hardened retrain/migration flow in `js/admin_users.js` with case-insensitive multi-group removal + dedupe to prevent trainees remaining in old groups after moves, and added completed-score self-healing in `js/admin_history.js` plus score fallback linking in `js/admin_grading.js` so finalized marks no longer display as `0%` after refresh/relogin when linked `records` rows are authoritative.
+- **v2.6.23 (Update Channel Split, 2026-04-16):** Added explicit Main (inline) vs Beta (pre-release) update channel handling in Electron updater flow, plus Admin Tools controls to trigger channel-specific checks without changing code.
 - **Content Creator Module (Current Build, 2026-04-16):** Isolated `content-studio` tab now operates as Content Creator with a single default workspace (`content_creator_default`), no schedule timeline dropdown dependency, retained Header + Subject Builder authoring, optional media toggles with `HTTP Link`/upload source modes, app-aligned themed UI, admin-only Engagement breakdowns, and per-user telemetry + timestamped video notes/questions persisted in `content_studio_data`.
 - **v2.6.17 (Targeted Submission Recovery Rollout, 2026-04-14):** Added a new `sessions.pending_action` command `recover_submission:<payload>` in `js/data.js` that targets the logged-in trainee, scans local `submissions` for matching criteria, auto-rebuilds missing linked `records` rows, and force-syncs `submissions` + `records` on next heartbeat/realtime command tick.
 - **v2.6.16 (Release Rollout, 2026-04-13):** Version increment for production rollout delivery so clients already on `2.6.15` can receive the latest hardening package. Reinforces strict `submissionId` linking, vetted completion-gate semantics, and atomic disk-cache recovery as active release contracts.
@@ -449,6 +450,13 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.23 - 2026-04-16
+
+- Feature Added: Split updater checks into Main (inline) and Beta (pre-release) channels.
+- Improvement: Admin Tools > System Updates now exposes separate Main/Beta check actions with active channel status.
+- Bug Fix: Updater channel routing now accepts `main`/`beta` naming directly and keeps messaging channel-aware.
+- Release: Version bumped to `2.6.23`.
 
 ## v2.6.22 - 2026-04-16
 
@@ -521,12 +529,13 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 - `force-final-sync` / `final-sync-complete`: Handshake for the Intercepted Safe Quit flow.
 - `os-resume`: Triggers instant WebSocket reconnection when PC wakes from sleep.
 - `get-app-version`: Returns `package.json` version.
-- `manual-update-check`: Triggers auto-updater.
+- `manual-update-check`: Triggers auto-updater (supports channel-aware checks via `main`/`beta` payload).
+- `get-update-channel`: Returns the currently active updater channel (`main` or `beta`).
 - `set-kiosk-mode`: Toggles Kiosk mode.
 - `get-process-list`: Returns running processes (for Vetting).
 - `get-screen-count`: Returns the number of connected displays.
 - `get-active-window`: Returns title of foreground window (for Study Monitor).
-- `set-update-channel`: Switches between 'prod' and 'staging' (beta) update channels.
+- `set-update-channel`: Switches update checks between `main` (inline release) and `beta` (pre-release).
 - `perform-network-test`: Pings a target IP/Host and returns latency in ms.
 - `get-system-stats`: Returns CPU load, RAM usage, Disk usage (C:), and Connection Type (Ethernet/Wireless).
 - `open-devtools`: Opens the Chromium Developer Tools.
@@ -537,22 +546,40 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 
 ## 7. Release & Update Protocol (AI Instructions)
 
-> **AI INSTRUCTION:** When the user asks to "Push this update" or "Release version X.X.X", follow this strict protocol:
-> **AI INSTRUCTION:** When the user asks to "Push this update" or "Release version X.X.X", follow this strict protocol:
+> **AI INSTRUCTION:** When the user asks to push an update, first confirm release type intent as either `main` (inline) or `beta` (pre-release), then follow this protocol.
 
-1.  **Update Version Numbers:**
+1.  **Release Type Rules:**
+    *   `main` update: publish with stable release channel.
+    *   `beta` update: publish as pre-release channel (optional adoption flow).
+    *   Admin/Super Admin can manually check both channels from **Admin Tools > System Updates**.
+    *   Trainee/Team Leader continue receiving normal app update prompts from the standard in-app updater flow.
+
+2.  **Version + Changelog Rules:**
     *   Increment `version` in `package.json`.
-    *   Add a new entry to `getChangelog()` in `js/main.js` summarizing recent changes.
+    *   Add one short changelog entry in `js/main.js` `getChangelog()` only.
+    *   Keep changelog wording concise: use only high-level labels such as `Bug Fix`, `Improvement`, `Feature Added` (no deep technical breakdown).
 
-2.  **Update Documentation:**
-    *   Update `README.md` "Recent Major Updates" section.
-    *   **CRITICAL:** Update this file (`AI_CONTEXT.md`) if any architectural changes, new files, or schema changes occurred.
+3.  **Build Command Rules (Token-Based):**
+    *   Ensure scripts are ready so user only needs to provide token:
+        ```bash
+        $env:GH_TOKEN="<token>"
+        npm run dist:main
+        ```
+        or
+        ```bash
+        $env:GH_TOKEN="<token>"
+        npm run dist:beta
+        ```
 
-3.  **Generate Git Commands:**
-    *   Prefer a scoped/safe commit over blanket staging:
+4.  **Documentation Rules:**
+    *   Update `AI_CONTEXT.md` whenever release workflow behavior changes.
+    *   Add a short release note block for the new version.
+
+5.  **Scoped Git Commands:**
+    *   Prefer scoped commits:
         ```bash
         git add <only-relevant-files>
-        git commit -m "feat: vX.X.X - Summary of changes"
+        git commit -m "chore: vX.X.X release prep"
         git push origin main
         ```
 

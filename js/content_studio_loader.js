@@ -48,6 +48,30 @@ const ContentStudioLoader = {
                 allowpopups
             ></webview>
         `;
+
+        const webview = document.getElementById('content-studio-webview');
+        if (!webview) return;
+
+        webview.addEventListener('ipc-message', (event) => {
+            if (!event || event.channel !== 'content-studio-open-quiz') return;
+            const payload = Array.isArray(event.args) ? event.args[0] : null;
+            const testId = payload && payload.testId ? String(payload.testId) : '';
+            if (!testId) return;
+
+            const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+            const linked = tests.find(t => String(t.id) === testId);
+            if (!linked) {
+                if (typeof showToast === 'function') showToast('Linked quiz test was not found in Test Engine.', 'warning');
+                return;
+            }
+
+            if (typeof openTestTaker === 'function') {
+                try { showTab('my-tests'); } catch (e) {}
+                openTestTaker(testId);
+            } else if (typeof showToast === 'function') {
+                showToast('Quiz launcher is unavailable in this runtime.', 'error');
+            }
+        });
     }
 };
 

@@ -26,11 +26,45 @@ const gotTheLock = app.requestSingleInstanceLock();
 let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
 let updateReady = false; // Track if update is downloaded
+let currentUpdateChannel = 'main';
 let studySessionConfigured = false;
 let isFlushingStudySession = false;
 let isSafeToQuit = false;
 const STUDY_SESSION_PARTITION = 'persist:study_session';
 const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0';
+
+autoUpdater.allowPrerelease = false;
+
+function normalizeUpdateChannel(channel) {
+    const raw = String(channel || '').trim().toLowerCase();
+    if (raw === 'beta' || raw === 'staging' || raw === 'prerelease' || raw === 'pre-release') {
+        return 'beta';
+    }
+    return 'main';
+}
+
+function applyUpdateChannel(channel, options = {}) {
+    const normalized = normalizeUpdateChannel(channel);
+    const allowPrerelease = normalized === 'beta';
+    const changed = (autoUpdater.allowPrerelease !== allowPrerelease) || currentUpdateChannel !== normalized;
+
+    currentUpdateChannel = normalized;
+    autoUpdater.allowPrerelease = allowPrerelease;
+
+    if (changed) {
+        console.log(`Update channel set to: ${normalized === 'beta' ? 'Beta (Pre-release)' : 'Main (Inline)'}`);
+    }
+
+    if (mainWindow && options.notifyRenderer !== false) {
+        mainWindow.webContents.send('update-channel-changed', { channel: currentUpdateChannel });
+    }
+
+    if (options.checkNow && app.isPackaged) {
+        autoUpdater.checkForUpdates();
+    }
+
+    return currentUpdateChannel;
+}
 
 function isTrustedStudyUrl(rawUrl = '') {
     try {
@@ -359,11 +393,18 @@ ipcMain.handle('get-update-status', () => {
     return updateReady;
 });
 
+ipcMain.handle('get-update-channel', () => {
+    return currentUpdateChannel;
+});
+
 // IPC Listener for Manual Update Check
-ipcMain.on('manual-update-check', () => {
+ipcMain.on('manual-update-check', (event, payload) => {
+    const requestedChannel = (payload && typeof payload === 'object') ? payload.channel : payload;
+    if (requestedChannel) applyUpdateChannel(requestedChannel, { notifyRenderer: true });
+
     if (!app.isPackaged) {
         // In Dev Mode, just show a message so we know the button works
-        if(mainWindow) mainWindow.webContents.send('update-message', { text: '[DEV] Update check triggered', type: 'info' });
+        if(mainWindow) mainWindow.webContents.send('update-message', { text: `[DEV] ${currentUpdateChannel.toUpperCase()} update check triggered`, type: 'info' });
     } else {
         // In Production, trigger the actual check
         autoUpdater.checkForUpdates();
@@ -382,15 +423,9 @@ ipcMain.on('force-restart', () => {
     app.exit(0);
 });
 
-// IPC Listener for Update Channel (Staging vs Prod)
+// IPC Listener for Update Channel (Main vs Beta)
 ipcMain.on('set-update-channel', (event, channel) => {
-    const isStaging = (channel === 'staging');
-    if (autoUpdater.allowPrerelease !== isStaging) {
-        console.log(`Update Channel switched to: ${isStaging ? 'Staging (Pre-release)' : 'Production'}`);
-        autoUpdater.allowPrerelease = isStaging;
-        // Trigger a fresh check immediately if we just switched modes
-        autoUpdater.checkForUpdatesAndNotify();
-    }
+    applyUpdateChannel(channel, { checkNow: false, notifyRenderer: true });
 });
 
 // IPC Listener for DevTools (Super Admin Only)
@@ -435,15 +470,15 @@ ipcMain.handle('invoke-gemini-api', async (event, { endpoint, apiKey, promptText
 // Send status updates to the renderer to show in Toasts
 
 autoUpdater.on('checking-for-update', () => {
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Checking for updates...', type: 'info' });
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: `Checking for ${currentUpdateChannel} updates...`, type: 'info' });
 });
 
 autoUpdater.on('update-available', (info) => {
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Update available. Downloading...', type: 'info' });
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: `${currentUpdateChannel === 'beta' ? 'Beta' : 'Main'} update available. Downloading...`, type: 'info' });
 });
 
 autoUpdater.on('update-not-available', (info) => {
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'You are on the latest version.', type: 'success' });
+    if(mainWindow) mainWindow.webContents.send('update-message', { text: `No ${currentUpdateChannel} update found. You are on the latest version.`, type: 'success' });
 });
 
 autoUpdater.on('error', (err) => {

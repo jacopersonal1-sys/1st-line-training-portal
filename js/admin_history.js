@@ -47,6 +47,9 @@ function loadCompletedHistory() {
     if (!container) return;
 
     let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const testsById = {};
+    tests.forEach(t => { testsById[String(t.id)] = String(t.type || 'standard').toLowerCase(); });
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const recordBySubmissionId = new Map();
     records.forEach(record => {
@@ -104,6 +107,19 @@ function loadCompletedHistory() {
     const testFilter = document.getElementById('historyTestFilter') ? document.getElementById('historyTestFilter').value : '';
     const phaseFilter = document.getElementById('historyPhaseFilter') ? document.getElementById('historyPhaseFilter').value : '';
 
+    const getSubmissionType = (submission) => {
+        const snapshotType = String(submission?.testSnapshot?.type || '').toLowerCase();
+        if (snapshotType) return snapshotType;
+        if (submission && submission.testId !== undefined && testsById[String(submission.testId)]) {
+            return testsById[String(submission.testId)];
+        }
+        const title = String(submission?.testTitle || '').toLowerCase();
+        if (title.includes('vetting')) return 'vetting';
+        if (title.includes('live')) return 'live';
+        if (title.includes('quiz')) return 'quiz';
+        return 'standard';
+    };
+
     // Filter for Completed items
     let completed = subs.filter(s => s.status === 'completed' && !s.archived);
 
@@ -118,9 +134,14 @@ function loadCompletedHistory() {
     // Apply Phase Filter
     if (phaseFilter) {
         if (phaseFilter === 'standard') {
-            completed = completed.filter(s => !s.testTitle.toLowerCase().includes('vetting'));
+            completed = completed.filter(s => {
+                const subType = getSubmissionType(s);
+                return subType !== 'vetting' && subType !== 'live' && subType !== 'quiz';
+            });
+        } else if (phaseFilter === 'live' || phaseFilter === 'quiz') {
+            completed = completed.filter(s => getSubmissionType(s) === phaseFilter);
         } else {
-            completed = completed.filter(s => s.testTitle.toLowerCase().includes(phaseFilter));
+            completed = completed.filter(s => getSubmissionType(s) === 'vetting' && s.testTitle.toLowerCase().includes(phaseFilter));
         }
     }
 
@@ -208,6 +229,8 @@ function populateHistoryFilters() {
         phaseSel.innerHTML = `
             <option value="">All Phases</option>
             <option value="standard">Standard</option>
+            <option value="quiz">Quiz</option>
+            <option value="live">Live</option>
             <option value="1st vetting">1st Vetting</option>
             <option value="final vetting">Final Vetting</option>
         `;
@@ -367,7 +390,7 @@ function initUniversalSearch() {
                     <button class="btn-primary" onclick="runUniversalSearch()" style="width: 10%; min-width: 120px; height: 56px; font-size: 1.1rem; white-space: nowrap; padding: 0;">Search</button>
                 </div>
                 <div id="univSearchResults" style="min-height:60vh;">
-                    <div style="text-align:center; color:var(--text-muted); padding:20px;">Enter text to search across Vetting, Live, and Standard assessments.</div>
+                    <div style="text-align:center; color:var(--text-muted); padding:20px;">Enter text to search across Vetting, Live, Quiz, and Standard assessments.</div>
                 </div>
             </div>
         `;
@@ -423,7 +446,13 @@ function runUniversalSearch() {
             container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No results found.</div>';
         } else {
             container.innerHTML = results.map(r => {
-                const icon = r.test.type === 'vetting' ? '<i class="fas fa-shield-alt" style="color:#9b59b6;"></i>' : (r.test.type === 'live' ? '<i class="fas fa-satellite-dish" style="color:var(--primary);"></i>' : '<i class="fas fa-file-alt"></i>');
+                const icon = r.test.type === 'vetting'
+                    ? '<i class="fas fa-shield-alt" style="color:#9b59b6;"></i>'
+                    : (r.test.type === 'live'
+                        ? '<i class="fas fa-satellite-dish" style="color:var(--primary);"></i>'
+                        : (r.test.type === 'quiz'
+                            ? '<i class="fas fa-circle-question" style="color:#3498db;"></i>'
+                            : '<i class="fas fa-file-alt"></i>'));
                 const context = r.qIdx !== null ? `Question ${r.qIdx + 1}` : 'Test Settings';
                 
                 return `

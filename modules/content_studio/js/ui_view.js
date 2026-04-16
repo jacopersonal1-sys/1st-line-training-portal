@@ -14,7 +14,7 @@ const ViewUI = {
     },
 
     initDefaultSelection: function() {
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         if (entry && entry.subjects && entry.subjects.length) {
             const exists = entry.subjects.some(s => s.id === this.state.selectedSubjectId);
             if (!exists) this.state.selectedSubjectId = entry.subjects[0].id;
@@ -40,7 +40,7 @@ const ViewUI = {
     },
 
     openDocument: async function(subjectId) {
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         const subject = entry ? (entry.subjects || []).find(s => s.id === subjectId) : null;
         if (!subject || !subject.hasDocument) return;
 
@@ -78,6 +78,43 @@ const ViewUI = {
         App.render();
         this.bindVideoTracker();
         this.renderAnnotationList();
+    },
+
+    requestHostQuizLaunch: function(testId) {
+        const id = String(testId || '').trim();
+        if (!id) return false;
+        try {
+            if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                if (ipcRenderer && typeof ipcRenderer.sendToHost === 'function') {
+                    ipcRenderer.sendToHost('content-studio-open-quiz', { testId: id });
+                    return true;
+                }
+            }
+        } catch (err) {}
+        return false;
+    },
+
+    openQuestionnaire: function(subjectId) {
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
+        const subject = entry ? (entry.subjects || []).find(s => s.id === subjectId) : null;
+        if (!subject || !subject.hasQuestionnaire) return;
+
+        const testId = String(subject.questionnaireTestId || '').trim();
+        if (!testId) {
+            alert('No quiz has been linked for this subject.');
+            return;
+        }
+
+        const linkedTest = DataService.getTestById(testId);
+        if (!linkedTest) {
+            alert('Linked quiz test could not be found. Refresh Content Creator or relink this subject.');
+            return;
+        }
+
+        if (!this.requestHostQuizLaunch(testId)) {
+            alert('Could not launch quiz from Content Creator in this runtime.');
+        }
     },
 
     closeVideo: function() {
@@ -232,7 +269,7 @@ const ViewUI = {
     render: function() {
         this.initDefaultSelection();
         const esc = App.escapeHtml;
-        const entry = DataService.getPrimaryEntry();
+        const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         const subjects = entry ? (entry.subjects || []) : [];
         const username = (AppContext.user && AppContext.user.user) ? AppContext.user.user : 'unknown_user';
 
@@ -242,6 +279,7 @@ const ViewUI = {
             const textHtml = ContentStudioUtils.sanitizeRichHtml(subject.textHtml || '');
             const showVideoIcon = !!subject.hasVideo && (!!subject.videoUrl || !!subject.videoPath);
             const showDocIcon = !!subject.hasDocument && (!!subject.docUrl || !!subject.docPath);
+            const showQuizIcon = !!subject.hasQuestionnaire && !!subject.questionnaireTestId;
 
             return `
                 <div class="cs-subject-row ${isActive ? 'is-active' : ''}" data-subject-id="${esc(subject.id)}">
@@ -256,6 +294,11 @@ const ViewUI = {
                         ${showDocIcon ? `
                             <button class="cs-icon-btn" title="Open Document" onclick="ViewUI.openDocument('${esc(subject.id)}')">
                                 <i class="fas fa-link"></i>
+                            </button>
+                        ` : ''}
+                        ${showQuizIcon ? `
+                            <button class="cs-icon-btn" title="Open Questionnaire" onclick="ViewUI.openQuestionnaire('${esc(subject.id)}')">
+                                <i class="fas fa-circle-question"></i>
                             </button>
                         ` : ''}
                     </div>

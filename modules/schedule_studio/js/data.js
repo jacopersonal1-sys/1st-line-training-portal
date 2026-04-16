@@ -16,6 +16,7 @@ const DEFAULT_SA_HOLIDAYS = [
 
 const SCHEDULE_TEMPLATE_STORAGE_KEY = 'scheduleTemplates';
 const SCHEDULE_HOLIDAY_STORAGE_KEY = 'scheduleHolidays';
+const CONTENT_STUDIO_LOCAL_CACHE_KEY = 'content_studio_data_local';
 
 const ScheduleData = {
     normalizeIdentity(value) {
@@ -69,6 +70,39 @@ const ScheduleData = {
 
     getTests() {
         return JSON.parse(this.getStorage().getItem('tests') || '[]');
+    },
+
+    getContentStudioStore() {
+        let parsed = null;
+        try {
+            parsed = JSON.parse(this.getStorage().getItem(CONTENT_STUDIO_LOCAL_CACHE_KEY) || '{}');
+        } catch (error) {
+            parsed = null;
+        }
+        if (!parsed || typeof parsed !== 'object') return { entries: [] };
+        if (!Array.isArray(parsed.entries)) parsed.entries = [];
+        return parsed;
+    },
+
+    getContentModules() {
+        const store = this.getContentStudioStore();
+        return (store.entries || [])
+            .filter(entry => entry && typeof entry === 'object')
+            .map(entry => ({
+                id: String(entry.id || ''),
+                key: String(entry.scheduleKey || '').trim(),
+                label: String(entry.scheduleLabel || entry.header || 'Unnamed Module').trim() || 'Unnamed Module',
+                header: String(entry.header || '').trim(),
+                subjects: Array.isArray(entry.subjects) ? entry.subjects : []
+            }))
+            .filter(entry => !!entry.key)
+            .sort((a, b) => String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base', numeric: true }));
+    },
+
+    getContentModuleByKey(moduleKey) {
+        const key = String(moduleKey || '').trim();
+        if (!key) return null;
+        return this.getContentModules().find(entry => String(entry.key) === key) || null;
     },
 
     getCurrentUser() {

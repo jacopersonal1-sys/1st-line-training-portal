@@ -979,14 +979,14 @@ window.onload = async function() {
     }
 
     // --- UPDATE CHANNEL CONFIGURATION ---
-    // Tell Electron if we want Beta/Pre-releases based on our Staging status
+    // Tell Electron if we want Main (inline) or Beta (pre-release) updates based on staging mode.
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         const target = localStorage.getItem('active_server_target');
         if (target === 'staging') {
-            ipcRenderer.send('set-update-channel', 'staging');
+            ipcRenderer.send('set-update-channel', 'beta');
         } else {
-            ipcRenderer.send('set-update-channel', 'prod');
+            ipcRenderer.send('set-update-channel', 'main');
         }
     }
 
@@ -2128,6 +2128,18 @@ function updateSidebarVisibility() {
             if (targetTab === 'my-tests') btn.classList.add('hidden');
         }
     });
+
+    const updatesSubBtn = document.getElementById('btn-sub-updates');
+    const canUseUpdateCenter = ['admin', 'super_admin'].includes(role);
+    if (updatesSubBtn) {
+        updatesSubBtn.classList.toggle('hidden', !canUseUpdateCenter);
+    }
+
+    const updatesView = document.getElementById('admin-view-updates');
+    if (!canUseUpdateCenter && updatesView && updatesView.classList.contains('active')) {
+        const fallbackBtn = document.getElementById('btn-sub-users');
+        showAdminSub('users', fallbackBtn || null);
+    }
 }
 
 let TAB_SWITCH_TIMEOUT = null;
@@ -2526,6 +2538,11 @@ function showTab(id, btn) {
 }
 
 function showAdminSub(viewName, btn) {
+  if (viewName === 'updates' && CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role)) {
+      if (typeof showToast === 'function') showToast('Update Center is available to Admin and Super Admin only.', 'warning');
+      return;
+  }
+
   document.querySelectorAll('.admin-view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('admin-view-' + viewName).classList.add('active');
@@ -2991,6 +3008,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.23": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> System Updates now supports separate Main (inline) and Beta (pre-release) checks.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Update logs now show the selected channel so rollout intent is clear.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Added channel-safe updater routing so optional beta checks do not require code edits.</li>
+            </ul>`,
         "2.6.22": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Super Admin Agent Data Explorer:</strong> User Control now includes a folder-style explorer for live and archived agent datasets with per-bucket detail views.</li>

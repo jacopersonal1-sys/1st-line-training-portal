@@ -150,6 +150,8 @@ function loadMarkingQueue() {
                 typeBadge = `<span style="font-size:0.75rem; background:rgba(155, 89, 182, 0.1); padding:2px 6px; border-radius:4px; color:#9b59b6; border:1px solid #9b59b6; margin-left:10px;"><i class="fas fa-shield-alt"></i> Vetting</span>`;
             } else if (tType === 'live') {
                 typeBadge = `<span style="font-size:0.75rem; background:rgba(243, 112, 33, 0.1); padding:2px 6px; border-radius:4px; color:var(--primary); border:1px solid var(--primary); margin-left:10px;"><i class="fas fa-satellite-dish"></i> Live</span>`;
+            } else if (tType === 'quiz') {
+                typeBadge = `<span style="font-size:0.75rem; background:rgba(52, 152, 219, 0.1); padding:2px 6px; border-radius:4px; color:#3498db; border:1px solid #3498db; margin-left:10px;"><i class="fas fa-circle-question"></i> Quiz</span>`;
             }
 
             return `

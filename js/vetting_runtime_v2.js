@@ -15,7 +15,14 @@
     let VETTING_ENFORCER_INTERVAL = null;
     // Debounce and cooldown for pre-flight checks to avoid aggressive blocking
     let COMPLIANCE_CONSECUTIVE_ERRORS = 0;
+    let COMPLIANCE_CONSECUTIVE_PASSES = 0;
     let LAST_ENTER_ATTEMPT = 0;
+    let PREFLIGHT_SESSION_KEY = '';
+    let PREFLIGHT_SCAN_RATE_MS = 2000;
+    const PREFLIGHT_FAST_SCAN_MS = 2000;
+    const PREFLIGHT_SLOW_SCAN_MS = 7000;
+    const PREFLIGHT_BLOCK_THRESHOLD = 2;
+    const ENTER_ATTEMPT_GRACE_MS = 8000;
 
     let LAST_REPORTED_STATUS = null;
     let IS_CHECKING_COMPLIANCE = false;
@@ -343,17 +350,34 @@
         SECURITY_VIOLATION_INTERVAL = null;
     }
 
-    function startTraineePreFlight() {
+    function setPreFlightPollerInterval(intervalMs) {
+        const nextRate = Number(intervalMs) > 0 ? Number(intervalMs) : PREFLIGHT_FAST_SCAN_MS;
+        if (TRAINEE_LOCAL_POLLER) clearInterval(TRAINEE_LOCAL_POLLER);
+        TRAINEE_LOCAL_POLLER = setInterval(() => { checkSystemCompliance().catch(() => {}); }, nextRate);
+        PREFLIGHT_SCAN_RATE_MS = nextRate;
+    }
+
+    function startTraineePreFlight(sessionId = '') {
         stopTraineeLocalPollers();
-        LAST_REPORTED_STATUS = null;
-        TRAINEE_LOCAL_POLLER = setInterval(checkSystemCompliance, 2000);
-        checkSystemCompliance();
+        const nextSessionKey = String(sessionId || '');
+        if (PREFLIGHT_SESSION_KEY !== nextSessionKey) {
+            LAST_REPORTED_STATUS = null;
+            COMPLIANCE_CONSECUTIVE_ERRORS = 0;
+            COMPLIANCE_CONSECUTIVE_PASSES = 0;
+            PREFLIGHT_SESSION_KEY = nextSessionKey;
+        }
+        setPreFlightPollerInterval(PREFLIGHT_FAST_SCAN_MS);
+        checkSystemCompliance().catch(() => {});
     }
 
     function startActiveTestMonitoring() {
         stopTraineeLocalPollers();
         SECURITY_WARNING_COUNT = 0;
-        SECURITY_VIOLATION_INTERVAL = setInterval(checkActiveSecurity, 3000);
+        COMPLIANCE_CONSECUTIVE_ERRORS = 0;
+        COMPLIANCE_CONSECUTIVE_PASSES = 0;
+        PREFLIGHT_SESSION_KEY = '';
+        PREFLIGHT_SCAN_RATE_MS = PREFLIGHT_FAST_SCAN_MS;
+        SECURITY_VIOLATION_INTERVAL = setInterval(() => { checkActiveSecurity().catch(() => {}); }, 3000);
     }
 
     function showSecurityViolationOverlay(message, isFatal) {
@@ -562,11 +586,12 @@
         }
     }
 
-    async function checkSystemCompliance() {
+    async function checkSystemCompliance(options = {}) {
         if (!isTrainee() || IS_CHECKING_COMPLIANCE) return;
         IS_CHECKING_COMPLIANCE = true;
 
         try {
+            const strictMode = !!(options && options.strict);
             const logBox = document.getElementById('securityCheckLog');
             const btn = document.getElementById('btnEnterArena');
             if (!logBox || !btn) return;
@@ -582,26 +607,57 @@
             const effectiveRelaxed = isRelaxed && !forceGlobalKiosk;
 
             const errors = [];
-            if (!effectiveRelaxed && typeof require !== 'undefined') {
-                const { ipcRenderer } = require('electron');
-                const screenCount = await ipcRenderer.invoke('get-screen-count');
-                if (screenCount > 1) errors.push(`Multiple monitors detected (${screenCount}).`);
-
-                let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
-                if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
-                    forbidden = window.DEFAULT_FORBIDDEN_APPS;
+            let scannerWarning = '';
+            if (!effectiveRelaxed) {
+                let ipcInvoke = null;
+                if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.invoke === 'function') {
+                    ipcInvoke = window.electronAPI.ipcRenderer.invoke;
+                } else if (typeof require !== 'undefined') {
+                    const { ipcRenderer } = require('electron');
+                    ipcInvoke = ipcRenderer.invoke.bind(ipcRenderer);
                 }
-                const apps = await ipcRenderer.invoke('get-process-list', forbidden);
-                if (apps.length > 0) errors.push(`Forbidden apps running: ${apps.join(', ')}`);
+
+                if (!ipcInvoke) {
+                    scannerWarning = 'Security scanner is not available in this runtime. Click Enter to run an immediate check.';
+                } else {
+                    try {
+                        const screenCount = await ipcInvoke('get-screen-count');
+                        if (screenCount > 1) errors.push(`Multiple monitors detected (${screenCount}).`);
+
+                        let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                        if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
+                            forbidden = window.DEFAULT_FORBIDDEN_APPS;
+                        }
+                        const apps = await ipcInvoke('get-process-list', forbidden);
+                        if (apps.length > 0) errors.push(`Forbidden apps running: ${apps.join(', ')}`);
+                    } catch (e) {
+                        scannerWarning = 'Security scanner had a temporary error. Retrying in the background.';
+                    }
+                }
             }
 
-            let currentStatus = 'ready';
-            if (errors.length > 0 && !isOverridden && !effectiveRelaxed) currentStatus = 'blocked';
+            const hasBlockingViolations = errors.length > 0 && !isOverridden && !effectiveRelaxed;
+            const withinEnterGrace = (Date.now() - LAST_ENTER_ATTEMPT) < ENTER_ATTEMPT_GRACE_MS;
+            let shouldBlock = false;
+
+            if (hasBlockingViolations) {
+                COMPLIANCE_CONSECUTIVE_PASSES = 0;
+                COMPLIANCE_CONSECUTIVE_ERRORS += 1;
+                shouldBlock = strictMode || (!withinEnterGrace && COMPLIANCE_CONSECUTIVE_ERRORS >= PREFLIGHT_BLOCK_THRESHOLD);
+            } else {
+                COMPLIANCE_CONSECUTIVE_ERRORS = 0;
+                COMPLIANCE_CONSECUTIVE_PASSES += 1;
+            }
+
+            let currentStatus = shouldBlock ? 'blocked' : 'ready';
 
             if (errors.length === 0) {
                 logBox.innerHTML = effectiveRelaxed
                     ? '<div style="color:#e67e22; background:rgba(230,126,34,0.1); padding:15px; border-radius:6px; border:1px solid #e67e22;"><strong>Security Relaxed</strong><div style="font-size:0.9rem; opacity:0.9;">Strict rules disabled by admin.</div></div>'
                     : '<div style="color:#2ecc71; background:rgba(46,204,113,0.1); padding:15px; border-radius:6px; border:1px solid #2ecc71;"><strong>System Secure</strong><div style="font-size:0.9rem; opacity:0.9;">All checks passed. Ready to start.</div></div>';
+                if (scannerWarning) {
+                    logBox.innerHTML += `<div style="margin-top:10px; color:#f1c40f; background:rgba(241,196,15,0.1); padding:12px; border-radius:6px; border:1px solid #f1c40f;">${scannerWarning}</div>`;
+                }
                 btn.disabled = false;
                 btn.style.opacity = '1';
                 btn.style.cursor = 'pointer';
@@ -613,12 +669,28 @@
                 btn.style.opacity = '1';
                 btn.style.cursor = 'pointer';
                 btn.style.animation = 'none';
+            } else if (!shouldBlock) {
+                logBox.innerHTML =
+                    '<div style="color:#f1c40f; background:rgba(241,196,15,0.1); padding:15px; border-radius:6px; border:1px solid #f1c40f;"><strong>Potential Security Issue Detected</strong><div style="font-size:0.9rem; opacity:0.9;">Rechecking to confirm before blocking access.</div></div>' +
+                    errors.map(e => `<div style="opacity:0.8; padding:8px 10px; color:var(--text-muted);">- ${e}</div>`).join('');
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                btn.style.animation = 'pulse 2s infinite';
             } else {
                 logBox.innerHTML = errors.map(e => `<div style="background:rgba(255,82,82,0.1); color:#ff5252; padding:15px; border-radius:6px; border:1px solid #ff5252; margin-bottom:10px;"><strong>Security Violation</strong><div style="font-size:0.9rem; opacity:0.9;">${e}</div></div>`).join('');
                 btn.disabled = true;
                 btn.style.opacity = '0.5';
                 btn.style.cursor = 'not-allowed';
                 btn.style.animation = 'none';
+            }
+
+            if (!strictMode) {
+                if (shouldBlock && PREFLIGHT_SCAN_RATE_MS !== PREFLIGHT_FAST_SCAN_MS) {
+                    setPreFlightPollerInterval(PREFLIGHT_FAST_SCAN_MS);
+                } else if (!shouldBlock && PREFLIGHT_SCAN_RATE_MS !== PREFLIGHT_SLOW_SCAN_MS) {
+                    setPreFlightPollerInterval(PREFLIGHT_SLOW_SCAN_MS);
+                }
             }
 
             if (currentStatus !== LAST_REPORTED_STATUS) {
@@ -632,11 +704,15 @@
 
     async function enterArena(testId) {
         if (!isTrainee()) return;
+        await checkSystemCompliance({ strict: true });
+        const preflightBtn = document.getElementById('btnEnterArena');
+        if (preflightBtn && preflightBtn.disabled) return;
 
         stopTraineeLocalPollers();
         // Mark this attempt so transient checks won't immediately block the trainee
         LAST_ENTER_ATTEMPT = Date.now();
         COMPLIANCE_CONSECUTIVE_ERRORS = 0;
+        COMPLIANCE_CONSECUTIVE_PASSES = 0;
 
         const session = getLocalSession();
         const myData = getTraineeData(session, getUsername());
@@ -823,7 +899,7 @@
                 <button id="btnEnterArena" class="btn-primary btn-lg" disabled onclick="enterArena('${session.testId}')" style="margin-top:15px; opacity:0.5; cursor:not-allowed;">ENTER ARENA & START</button>
             </div>`;
 
-        startTraineePreFlight();
+        startTraineePreFlight(session.sessionId);
     }
 
     function handleVettingUpdate(serverSession) {

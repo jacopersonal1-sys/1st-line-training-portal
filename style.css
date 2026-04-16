@@ -870,6 +870,11 @@ tr.user-idle td { color: var(--text-muted); font-style: italic; }
     border-color: rgba(155, 89, 182, 0.45);
     background: rgba(155, 89, 182, 0.12);
 }
+.test-type-pill.quiz {
+    color: #3498db;
+    border-color: rgba(52, 152, 219, 0.45);
+    background: rgba(52, 152, 219, 0.12);
+}
 
 /* Taking View */
 .taking-card { background: var(--bg-card); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border-color); }
