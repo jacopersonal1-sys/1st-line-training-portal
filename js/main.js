@@ -606,7 +606,7 @@ window.onload = async function() {
             #study-close-btn:hover { background: #ff5252; color: white; }
             #study-webview-container { flex: 1; position: relative; min-height: 0; overflow: hidden; }
             .study-webview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; pointer-events: auto; background: #fff; }
-            .study-webview.hidden { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+            .study-webview.hidden { visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; left: -200vw !important; }
             
             /* --- EXTERNAL APP WARNING --- */
             #external-app-warning-modal {
@@ -2991,12 +2991,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
-        "2.6.21": `
+        "2.6.22": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Content Creator Media Pipeline:</strong> Added optional per-subject Video/Document toggles with source selection (<code>HTTP Link</code> or direct upload), plus built-in video/PDF upload flow to Supabase storage buckets.</li>
-                <li style="margin-bottom: 8px;"><strong>Engagement Submenu (Admin Only):</strong> Added a dedicated <strong>Engagement</strong> workspace showing per-user watcher breakdown and per-subject detail (plays, watch time, skips, last activity, and notes/questions).</li>
-                <li style="margin-bottom: 8px;"><strong>Timestamp Notes/Questions:</strong> Video player now supports pausing at current time to capture a note or question tied to that exact timestamp and user, then review/jump back from the annotation list.</li>
-                <li style="margin-bottom: 8px;"><strong>Global Problem Reporting:</strong> Added always-visible in-app report button with auto console snapshot capture and Super Admin review panel for submitted problem reports.</li>
+                <li style="margin-bottom: 8px;"><strong>Super Admin Agent Data Explorer:</strong> User Control now includes a folder-style explorer for live and archived agent datasets with per-bucket detail views.</li>
+                <li style="margin-bottom: 8px;"><strong>Archive &amp; Restore By Item:</strong> You can now move specific rows live-to-archive and archive-to-live (records, submissions, live bookings, attendance, saved reports, and insight reviews) instead of only bulk attempt actions.</li>
+                <li style="margin-bottom: 8px;"><strong>Move Safety Guardrails:</strong> Each explorer move now writes backup snapshots to <code>app_documents.user_control_move_backups</code>, performs validation, and attempts rollback when a live delete fails.</li>
+                <li style="margin-bottom: 8px;"><strong>Study Browser Click-Zone Hotfix:</strong> Hardened overlay layering and webview hit-testing to reduce inconsistent unclickable zones in embedded program pages like Q-Contact.</li>
             </ul>`,
         "2.6.20": `
             <ul style="padding-left: 20px; margin: 0;">

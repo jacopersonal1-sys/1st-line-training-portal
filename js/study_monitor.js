@@ -987,6 +987,25 @@ const StudyMonitor = {
     },
 
     // --- STUDY BROWSER REWORK ---
+    setStudyOverlayInteractionState: function(isActive) {
+        if (!document.body) return;
+        document.body.classList.toggle('study-overlay-active', !!isActive);
+    },
+
+    setTabWebviewActiveState: function(tab, isActive) {
+        const webview = tab && tab.webview ? tab.webview : null;
+        if (!webview) return;
+
+        webview.classList.toggle('hidden', !isActive);
+        webview.style.pointerEvents = isActive ? 'auto' : 'none';
+        webview.style.visibility = isActive ? 'visible' : 'hidden';
+        webview.style.opacity = isActive ? '1' : '0';
+        webview.style.zIndex = isActive ? '3' : '1';
+        webview.style.left = isActive ? '0' : '-200vw';
+        webview.style.top = '0';
+        webview.style.transform = 'translate3d(0,0,0)';
+    },
+
     openStudyWindow: function(url, title, targetScrollY = null) {
         const overlay = document.getElementById('study-overlay');
         if (!overlay) return;
@@ -1022,14 +1041,16 @@ const StudyMonitor = {
                 this.addTab(url, title, true, targetScrollY);
             }
         }
-        
+
         overlay.classList.remove('hidden');
+        this.setStudyOverlayInteractionState(true);
         this.updateBrowserChrome();
     },
 
     minimizeStudyWindow: function() {
         const overlay = document.getElementById('study-overlay');
         if (overlay) overlay.classList.add('hidden');
+        this.setStudyOverlayInteractionState(false);
         this.isStudyOpen = false;
         this.track("Navigating: Dashboard (Study Minimized)");
         
@@ -1048,6 +1069,7 @@ const StudyMonitor = {
     restoreStudyWindow: function() {
         const overlay = document.getElementById('study-overlay');
         if (overlay) overlay.classList.remove('hidden');
+        this.setStudyOverlayInteractionState(true);
         this.isStudyOpen = true;
         
         const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId);
@@ -1064,6 +1086,7 @@ const StudyMonitor = {
     closeStudyWindow: function() {
         const overlay = document.getElementById('study-overlay');
         if (overlay) overlay.classList.add('hidden');
+        this.setStudyOverlayInteractionState(false);
         
         // Cleanup
         this.isStudyOpen = false;
@@ -1338,6 +1361,9 @@ const StudyMonitor = {
         webview.dataset.navReady = '0';
         webview.style.width = '100%';
         webview.style.height = '100%';
+        webview.style.position = 'absolute';
+        webview.style.top = '0';
+        webview.style.left = '0';
         // REQUIRED: Allows target="_blank" links to fire the 'new-window' event so we can intercept them.
         webview.setAttribute('allowpopups', 'true');
         // DEFUSAL 2: Strict Microsoft Edge Spoofing to bypass SSO Conditional Access blocks
@@ -1345,12 +1371,7 @@ const StudyMonitor = {
         // UX ENHANCEMENT: Force persistent session for cookies to survive app restarts
         webview.setAttribute('partition', 'persist:study_session');
         webview.classList.add('study-webview');
-        if (!activate) {
-            webview.classList.add('hidden');
-            webview.style.pointerEvents = 'none';
-        } else {
-            webview.style.pointerEvents = 'auto';
-        }
+        this.setTabWebviewActiveState({ webview }, !!activate);
 
         const container = document.getElementById('study-webview-container');
         container.appendChild(webview);
@@ -1381,9 +1402,14 @@ const StudyMonitor = {
         this.browserState.activeTabId = tabId;
         this.browserState.tabs.forEach(tab => {
             const isHidden = tab.id !== tabId;
-            tab.webview.classList.toggle('hidden', isHidden);
-            tab.webview.style.pointerEvents = isHidden ? 'none' : 'auto';
+            this.setTabWebviewActiveState(tab, !isHidden);
         });
+        const activeTab = this.browserState.tabs.find(t => t.id === tabId);
+        if (activeTab && activeTab.webview && typeof activeTab.webview.focus === 'function') {
+            setTimeout(() => {
+                try { activeTab.webview.focus(); } catch (e) {}
+            }, 50);
+        }
         this.renderTabs();
         this.updateBrowserChrome();
     },

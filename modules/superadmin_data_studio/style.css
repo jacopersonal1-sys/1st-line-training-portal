@@ -430,8 +430,129 @@ button {
     margin-bottom: 6px;
 }
 
+.studio-folder-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    gap: 16px;
+}
+
+.studio-folder-tree {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.studio-folder-group {
+    margin-bottom: 14px;
+}
+
+.studio-folder-group:last-child {
+    margin-bottom: 0;
+}
+
+.studio-folder-group-label {
+    color: var(--studio-muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+}
+
+.studio-folder-item {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--studio-text);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    text-align: left;
+}
+
+.studio-folder-item:last-child {
+    margin-bottom: 0;
+}
+
+.studio-folder-item.active {
+    border-color: rgba(255, 140, 66, 0.6);
+    background: linear-gradient(135deg, rgba(255, 140, 66, 0.22), rgba(255, 140, 66, 0.08));
+}
+
+.studio-folder-item.drop-ready {
+    border-style: dashed;
+    border-color: rgba(79, 209, 197, 0.45);
+}
+
+.studio-folder-count {
+    min-width: 28px;
+    height: 24px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+}
+
+.studio-folder-content {
+    min-height: 360px;
+}
+
+.studio-draggable-card {
+    cursor: grab;
+}
+
+.studio-draggable-card:active {
+    cursor: grabbing;
+}
+
+.studio-archive-stack {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.studio-archive-bucket {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px 12px;
+}
+
+.studio-archive-bucket summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.studio-archive-bucket summary::-webkit-details-marker {
+    display: none;
+}
+
+.studio-archive-bucket[open] summary {
+    margin-bottom: 10px;
+}
+
+.studio-archive-row-card .studio-code-preview {
+    max-height: 180px;
+}
+
 @media (max-width: 1024px) {
     .studio-split {
+        grid-template-columns: 1fr;
+    }
+
+    .studio-folder-layout {
         grid-template-columns: 1fr;
     }
 }

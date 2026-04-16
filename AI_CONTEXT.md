@@ -213,6 +213,17 @@ Maps local `localStorage` keys to Supabase tables.
     - `emergencyDataRepair()`: Clears local queues/cache and forces a fresh full download (Soft Reset).
     - `openDevTools()`: Opens Electron Developer Tools (Super Admin only).
 
+#### `js/superadmin_data_studio_loader.js` + `modules/superadmin_data_studio/` (Super Admin Data Studio - Isolated Module)
+- **Architecture:** Isolated Webview program for live Supabase operations and high-risk admin controls.
+- **Entry Point:** `modules/superadmin_data_studio/index.html` mounted by `js/superadmin_data_studio_loader.js`.
+- **Key Files:**
+    - `js/data.js`: Source catalog for blob/row/doc data, realtime subscriptions, and safe row/document save/delete helpers.
+    - `js/main.js`: Multi-tab studio shell (`Overview`, `People`, `User Control`, `Assessments`, `Operations`, `System`, `Raw Explorer`), modal editor flows, and User Control orchestration.
+        - **Agent Data Explorer:** Folder-style workspace inside User Control with live + archive folders and per-bucket row visibility.
+        - **Bi-Directional Item Moves:** Supports specific row moves live→archive and archive→live for `records`, `submissions`, `live_bookings`, `attendance`, `saved_reports`, and `insight_reviews`.
+        - **Move Safeguards:** Each move writes a backup snapshot to `app_documents.key = user_control_move_backups`, validates source row/key integrity, and attempts rollback if live-delete fails.
+    - `style.css`: Dedicated studio theme + folder/explorer visuals for bucket drilldown and row operations.
+
 #### `js/ai_core.js` (AI System Analyst)
 - **Responsibility:** Gemini Integration (`gemini-1.5-flash`). Handles natural language commands, system diagnostics, and error analysis.
 - **Key Functions:**
@@ -261,7 +272,7 @@ Maps local `localStorage` keys to Supabase tables.
 - **Responsibility:** Tracks active window titles and idle time.
 - **Key Functions:**
     - `startActivityPoller()`: **No Frontend Timers.** Listens to `activity-update` from the `electron-main.js` background thread.
-    - **Security Model:** The internal study browser (`<webview>`) allows all navigation, as there is no URL bar. Violations are only triggered by the OS-level `startActivityPoller` when the user switches to an unauthorized external application. Trainee study links must route through `window.StudyMonitor.openStudyWindow(...)` so they stay inside the secured Electron overlay instead of using raw `window.open(...)`. The browser shell now uses a dedicated control deck above the `webview` so navigation and action buttons do not compete with the embedded page for click focus, and the Electron `persist:study_session` partition is intentionally kept persistent to improve Microsoft/SharePoint study-session reliability across restarts.
+    - **Security Model:** The internal study browser (`<webview>`) allows all navigation, as there is no URL bar. Violations are only triggered by the OS-level `startActivityPoller` when the user switches to an unauthorized external application. Trainee study links must route through `window.StudyMonitor.openStudyWindow(...)` so they stay inside the secured Electron overlay instead of using raw `window.open(...)`. The browser shell now uses a dedicated control deck above the `webview`, active overlay mode temporarily disables global floating controls, and inactive webviews are forced off-canvas/non-interactive to prevent embedded-page click dead zones. The Electron `persist:study_session` partition is intentionally kept persistent to improve Microsoft/SharePoint study-session reliability across restarts.
     - `startMarkForClarity()`: Interactive drawing engine overlay injected into the `<webview>` for precision bounding-box screenshots/bookmarks.
     - `track(activity)`: Logs current activity.
     - `sync()`: Pushes `monitor_data` to server.
@@ -414,6 +425,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.22 (User Control Explorer + Study Browser Hit-Test Hardening, 2026-04-16):** Expanded Super Admin Data Studio User Control with a folder-style Agent Data Explorer and specific row-level moves both directions (live↔archive) across lifecycle buckets, backed by backup snapshots (`user_control_move_backups`) and rollback-aware move handling. Also hardened Study Browser overlay layering and hidden-tab hit-testing to reduce inconsistent unclickable hotspots in embedded apps (e.g., Q-Contact).
 - **v2.6.21 (Content Creator Media + Engagement Expansion, 2026-04-16):** Extended Content Creator with optional per-subject media toggles, dual media source modes (`HTTP Link` or Supabase upload), dedicated Engagement submenu (admin-only per-user + per-subject analytics), and in-player timestamped note/question capture tied to each watcher.
 - **v2.6.20 (Content Creator + User Control Release, 2026-04-15):** Finalized isolated `content-studio` runtime and reworked it into Content Creator (View + Builder + engagement telemetry), removed schedule timeline selector dependency, kept Header + Subject Builder flows with optional inputs, and aligned module theming with the main app while preserving Super Admin Data Studio `User Control` and sync hardening updates.
 - **v2.6.19 (Retrain Attempt Unlock Hotfix, 2026-04-14):** Patched `js/assessment_trainee.js` to classify stale pre-move attempts as legacy by combining retrain archive move timestamps with linked `records.groupID` checks, then auto-ignore/archive those legacy attempts so trainees moved to a new group can start current scheduled assessments without false "already completed" lockouts.
@@ -437,6 +449,14 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.22 - 2026-04-16
+
+- Feature: Added folder-style Agent Data Explorer inside Super Admin Data Studio User Control with explicit live/archived bucket drilldowns and row-level visibility for archived attempt payloads.
+- Feature: Added bi-directional row moves in User Control (live→archive and archive→live) for records/submissions/live bookings/attendance/saved reports/insight reviews.
+- Hardening: Added move safety backup snapshots in `app_documents` (`user_control_move_backups`) and rollback-aware handling when archive writes/live deletes fail.
+- Fix: Hardened Study Browser layering + hidden-webview hit-testing so embedded programs (for example Q-Contact) are less likely to expose intermittent unclickable regions.
+- Release: Version bump to `2.6.22` for Data Studio explorer and study-browser reliability rollout.
 
 ## v2.6.21 - 2026-04-16
 

@@ -4,6 +4,7 @@ const App = {
         searchTerm: '',
         explorerSource: 'users',
         workspaceUser: '',
+        workspaceFolder: 'live_records_assessment',
         modal: null
     },
 
@@ -293,7 +294,19 @@ const App = {
         const attendance = this.getRowsForUser(snapshot.attendance, username, ['user', 'user_id', 'trainee']);
         const savedReports = this.getRowsForUser(snapshot.savedReports, username, ['trainee', 'user', 'user_id']);
         const insightReviews = this.getRowsForUser(snapshot.insightReviews, username, ['trainee', 'user', 'user_id']);
+        const accessLogs = this.getRowsForUser(snapshot.accessLogs, username, ['user', 'user_id', 'username']);
+        const monitorHistory = this.getRowsForUser(snapshot.monitorHistory, username, ['user', 'user_id', 'username']);
         const archivedRows = this.getRowsForUser(snapshot.archivedUsers, username, ['user', 'user_id', 'username']);
+        const notesDoc = (snapshot.documents || []).find(doc => doc.key === 'agentNotes' || doc.key === 'agent_notes');
+        let notes = null;
+        let notesKey = '';
+        if (notesDoc && notesDoc.content && typeof notesDoc.content === 'object' && !Array.isArray(notesDoc.content)) {
+            const key = Object.keys(notesDoc.content).find(itemKey => this.identitiesMatch(itemKey, username));
+            if (key) {
+                notesKey = key;
+                notes = StudioData.clone(notesDoc.content[key]);
+            }
+        }
         const retrainEntries = (Array.isArray(snapshot.retrainArchives) ? snapshot.retrainArchives : [])
             .map((entry, index) => ({ entry, index }))
             .filter(item => this.identitiesMatch(item.entry && (item.entry.user || item.entry.username), username))
@@ -374,7 +387,11 @@ const App = {
             attendance,
             savedReports,
             insightReviews,
+            accessLogs,
+            monitorHistory,
             archivedRows,
+            notes,
+            notesKey,
             retrainEntries,
             graduatedEntries,
             attempts,
@@ -510,7 +527,634 @@ const App = {
         return `
             ${StudioUI.renderSection('User Data Control', 'Pull one user into one workspace and move live rows to archive attempts with one click (folder-style housekeeping).', selectorHtml + '<div style="height:12px;"></div>' + activeSummary)}
             ${StudioUI.renderSection('Live Rows (Editable)', 'These are the current live table rows for this user. Open any item to edit or delete directly in Supabase.', liveRows)}
+            ${StudioUI.renderSection('Agent Data Explorer', 'Folder-and-file style view. Drag supported live items into archive folders to move them safely.', this.renderWorkspaceExplorer(profile))}
             ${StudioUI.renderSection('Attempt Timeline', 'Each retrain/graduation archive payload is listed separately so first and second training cycles stay visible and auditable.', attemptsHtml)}
+        `;
+    },
+
+    isVettingRecord(row) {
+        const text = `${row?.phase || ''} ${row?.assessment || ''} ${row?.testName || ''}`.toLowerCase();
+        return !!row?.isVetting || text.includes('vetting');
+    },
+
+    getWorkspaceFolderCatalog(profile) {
+        const notesCount = (() => {
+            if (Array.isArray(profile.notes)) return profile.notes.length;
+            if (profile.notes && typeof profile.notes === 'object') return Object.keys(profile.notes).length;
+            return profile.notes ? 1 : 0;
+        })();
+        const assessmentRecords = (profile.records || []).filter(row => !this.isVettingRecord(row));
+        const vettingRecords = (profile.records || []).filter(row => this.isVettingRecord(row));
+
+        return [
+            { key: 'live_records_assessment', group: 'Live Data', label: 'Assessment Records', icon: 'fa-file-signature', count: assessmentRecords.length, sourceId: 'records', rows: assessmentRecords, draggableRows: true },
+            { key: 'live_records_vetting', group: 'Live Data', label: 'Vetting Records', icon: 'fa-shield-halved', count: vettingRecords.length, sourceId: 'records', rows: vettingRecords, draggableRows: true },
+            { key: 'live_submissions', group: 'Live Data', label: 'Submissions', icon: 'fa-inbox', count: (profile.submissions || []).length, sourceId: 'submissions', rows: profile.submissions || [], draggableRows: true },
+            { key: 'live_live_bookings', group: 'Live Data', label: 'Live Assessments', icon: 'fa-calendar-check', count: (profile.liveBookings || []).length, sourceId: 'live_bookings', rows: profile.liveBookings || [], draggableRows: true },
+            { key: 'live_attendance', group: 'Live Data', label: 'Attendance', icon: 'fa-user-clock', count: (profile.attendance || []).length, sourceId: 'attendance', rows: profile.attendance || [], draggableRows: true },
+            { key: 'live_saved_reports', group: 'Live Data', label: 'Saved Reports', icon: 'fa-folder-open', count: (profile.savedReports || []).length, sourceId: 'saved_reports', rows: profile.savedReports || [], draggableRows: true },
+            { key: 'live_insight_reviews', group: 'Live Data', label: 'Insight Reviews', icon: 'fa-magnifying-glass-chart', count: (profile.insightReviews || []).length, sourceId: 'insight_reviews', rows: profile.insightReviews || [], draggableRows: true },
+            { key: 'ops_access_logs', group: 'Other Agent Data', label: 'Access Logs', icon: 'fa-right-to-bracket', count: (profile.accessLogs || []).length, sourceId: 'access_logs', rows: profile.accessLogs || [], draggableRows: false },
+            { key: 'ops_monitor_history', group: 'Other Agent Data', label: 'Monitor History', icon: 'fa-eye', count: (profile.monitorHistory || []).length, sourceId: 'monitor_history', rows: profile.monitorHistory || [], draggableRows: false },
+            { key: 'archive_retrain_entries', group: 'Archived Data', label: 'Retrain Attempts', icon: 'fa-box-archive', count: (profile.retrainEntries || []).length, archiveSourceId: 'retrain_archives', rows: profile.retrainEntries || [], acceptsDrop: true },
+            { key: 'archive_graduated_entries', group: 'Archived Data', label: 'Graduated Attempts', icon: 'fa-graduation-cap', count: (profile.graduatedEntries || []).length, archiveSourceId: 'graduated_agents', rows: profile.graduatedEntries || [], acceptsDrop: true },
+            { key: 'archive_archived_users', group: 'Archived Data', label: 'Archived Users Rows', icon: 'fa-box', count: (profile.archivedRows || []).length, sourceId: 'archived_users', rows: profile.archivedRows || [], draggableRows: false },
+            { key: 'archive_notes', group: 'Archived Data', label: 'Notes', icon: 'fa-note-sticky', count: notesCount, rows: profile.notes ? [profile.notes] : [], draggableRows: false }
+        ];
+    },
+
+    getWorkspaceFolder(profile, folderKey) {
+        const folders = this.getWorkspaceFolderCatalog(profile);
+        return folders.find(folder => folder.key === folderKey) || folders[0] || null;
+    },
+
+    ensureWorkspaceFolder(profile) {
+        const folders = this.getWorkspaceFolderCatalog(profile);
+        if (!folders.length) {
+            this.state.workspaceFolder = '';
+            return;
+        }
+        if (!folders.some(folder => folder.key === this.state.workspaceFolder)) {
+            this.state.workspaceFolder = folders[0].key;
+        }
+    },
+
+    setWorkspaceFolder(folderKey) {
+        this.state.workspaceFolder = String(folderKey || '').trim();
+        this.render();
+    },
+
+    buildDragPayload(payload) {
+        try {
+            return encodeURIComponent(JSON.stringify(payload || {}));
+        } catch (error) {
+            return '';
+        }
+    },
+
+    parseDragPayload(event) {
+        const raw = (event.dataTransfer && (
+            event.dataTransfer.getData('application/json')
+            || event.dataTransfer.getData('text/plain')
+        )) || '';
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch (error) {
+            return null;
+        }
+    },
+
+    startWorkspaceDrag(event) {
+        const encoded = event?.currentTarget?.dataset?.dragPayload || '';
+        if (!encoded || !event.dataTransfer) return;
+        try {
+            const decoded = decodeURIComponent(encoded);
+            event.dataTransfer.setData('application/json', decoded);
+            event.dataTransfer.effectAllowed = 'move';
+        } catch (error) {
+            console.warn('[Studio] Failed to start drag payload:', error);
+        }
+    },
+
+    canFolderAcceptDrop(folderKey, payload = null) {
+        const target = String(folderKey || '');
+        const acceptsArchiveMove = target === 'archive_retrain_entries' || target === 'archive_graduated_entries';
+        if (!acceptsArchiveMove) return false;
+        if (!payload) return true;
+        if (payload.kind !== 'live_row') return false;
+        return ['records', 'submissions', 'live_bookings', 'attendance', 'saved_reports', 'insight_reviews'].includes(payload.sourceId);
+    },
+
+    handleWorkspaceDragOver(event, folderKey) {
+        if (!this.canFolderAcceptDrop(folderKey)) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    },
+
+    async handleWorkspaceDrop(event, folderKey) {
+        if (event) event.preventDefault();
+        const payload = this.parseDragPayload(event);
+        if (!payload) return;
+        if (!this.canFolderAcceptDrop(folderKey, payload)) {
+            alert('This move is not supported for the selected target folder.');
+            return;
+        }
+        await this.moveWorkspaceItem(payload, folderKey);
+    },
+
+    async quickMoveWorkspaceRow(sourceId, rowId, targetFolderKey) {
+        const payload = {
+            kind: 'live_row',
+            sourceId: String(sourceId || ''),
+            rowId: String(rowId || ''),
+            username: String(this.state.workspaceUser || '')
+        };
+        await this.moveWorkspaceItem(payload, targetFolderKey);
+    },
+
+    getArchiveBucketForSource(sourceId) {
+        const map = {
+            records: 'records',
+            submissions: 'submissions',
+            live_bookings: 'liveBookings',
+            attendance: 'attendance',
+            saved_reports: 'reports',
+            insight_reviews: 'reviews'
+        };
+        return map[sourceId] || '';
+    },
+
+    getSourceForArchiveBucket(bucketKey) {
+        const map = {
+            records: 'records',
+            submissions: 'submissions',
+            liveBookings: 'live_bookings',
+            attendance: 'attendance',
+            reports: 'saved_reports',
+            reviews: 'insight_reviews'
+        };
+        return map[bucketKey] || '';
+    },
+
+    getArchiveBucketDescriptors(entry) {
+        const row = entry || {};
+        return [
+            { key: 'records', label: 'Assessment / Vetting Records', sourceId: 'records', rows: Array.isArray(row.records) ? row.records : [] },
+            { key: 'submissions', label: 'Submissions', sourceId: 'submissions', rows: Array.isArray(row.submissions) ? row.submissions : [] },
+            { key: 'liveBookings', label: 'Live Assessments', sourceId: 'live_bookings', rows: Array.isArray(row.liveBookings) ? row.liveBookings : [] },
+            { key: 'attendance', label: 'Attendance', sourceId: 'attendance', rows: Array.isArray(row.attendance) ? row.attendance : [] },
+            { key: 'reports', label: 'Saved Reports', sourceId: 'saved_reports', rows: Array.isArray(row.reports) ? row.reports : [] },
+            { key: 'reviews', label: 'Insight Reviews', sourceId: 'insight_reviews', rows: Array.isArray(row.reviews) ? row.reviews : [] }
+        ];
+    },
+
+    createArchiveEntryForMove(profile, targetFolderKey, sourceId, row) {
+        const actor = AppContext.user?.user || 'super_admin';
+        const rowUser = row?.trainee || row?.user || row?.user_id || row?.username || profile.username;
+        const groupGuess = profile.rosterGroups[0] || row?.group || row?.groupID || '';
+        const bucket = this.getArchiveBucketForSource(sourceId);
+        if (!bucket) throw new Error('Unsupported source bucket for archive move.');
+
+        const entryId = `studio_move_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const base = {
+            id: entryId,
+            user: rowUser,
+            movedDate: new Date().toISOString(),
+            graduatedDate: new Date().toISOString(),
+            archiveType: targetFolderKey === 'archive_graduated_entries' ? 'graduated' : 'retrain',
+            reason: `Moved from ${sourceId} by ${actor} via Agent Data Explorer`,
+            targetGroup: groupGuess,
+            records: [],
+            submissions: [],
+            liveBookings: [],
+            attendance: [],
+            reports: [],
+            reviews: [],
+            notes: null
+        };
+        base[bucket] = [StudioData.clone(row)];
+        return base;
+    },
+
+    async appendExplorerBackup(entry) {
+        const docKey = 'user_control_move_backups';
+        const existing = StudioData.getAllDocuments().find(doc => doc.key === docKey);
+        let rows = Array.isArray(existing?.content) ? existing.content.slice() : [];
+        rows.push(entry);
+        if (rows.length > 500) rows = rows.slice(-500);
+        await StudioData.updateDocument(docKey, rows);
+    },
+
+    async removeArchiveEntry(docKey, entryId) {
+        const sourceId = docKey === 'retrain_archives' ? 'retrain_archives' : 'graduated_agents';
+        const rows = StudioData.getRows(sourceId);
+        const nextRows = rows.filter(item => String(item?.id || '') !== String(entryId));
+        await StudioData.updateDocument(docKey, nextRows);
+    },
+
+    getArchiveEntrySnapshot(archiveSourceId, archiveEntryId, archiveSourceIndex) {
+        const rows = StudioData.getRows(archiveSourceId);
+        let index = rows.findIndex(item => String(item?.id || '') === String(archiveEntryId || ''));
+        const fallback = Number(archiveSourceIndex);
+        if (index < 0 && Number.isInteger(fallback) && fallback >= 0 && fallback < rows.length) {
+            index = fallback;
+        }
+        if (index < 0) return null;
+        return {
+            rows,
+            index,
+            entry: rows[index]
+        };
+    },
+
+    async moveArchiveRowToLive(archiveSourceId, archiveEntryId, archiveSourceIndex, bucketKey, sourceRowId, sourceRowIndex) {
+        const archiveSource = String(archiveSourceId || '').trim();
+        const archiveDocKey = archiveSource === 'graduated_agents' ? 'graduated_agents' : 'retrain_archives';
+        const sourceId = this.getSourceForArchiveBucket(bucketKey);
+        if (!sourceId) {
+            alert('This archived bucket cannot be moved to live rows yet.');
+            return;
+        }
+
+        const source = StudioData.sourceCatalog[sourceId];
+        if (!source || source.type !== 'row' || !source.keyField) {
+            alert('Live target mapping is unavailable for this bucket.');
+            return;
+        }
+
+        const snapshot = this.getArchiveEntrySnapshot(archiveSource, archiveEntryId, archiveSourceIndex);
+        if (!snapshot || !snapshot.entry) {
+            alert('Archive entry no longer exists. Refresh and retry.');
+            return;
+        }
+
+        const archiveRows = Array.isArray(snapshot.entry[bucketKey]) ? snapshot.entry[bucketKey] : [];
+        let row = null;
+        const wantedRowId = String(sourceRowId || '').trim();
+        if (wantedRowId) {
+            row = archiveRows.find(item => String(item?.[source.keyField] ?? '') === wantedRowId) || null;
+        }
+        if (!row) {
+            const idx = Number(sourceRowIndex);
+            if (Number.isInteger(idx) && idx >= 0 && idx < archiveRows.length) row = archiveRows[idx];
+        }
+        if (!row) {
+            alert('Archived row no longer exists in this bucket.');
+            return;
+        }
+
+        const rowKey = row[source.keyField];
+        if (rowKey === undefined || rowKey === null || rowKey === '') {
+            alert(`Archived row is missing key field "${source.keyField}" and cannot be restored safely.`);
+            return;
+        }
+
+        const confirmText = [
+            `Move this archived item back to live ${source.label}?`,
+            '',
+            `Archive: ${archiveSource === 'graduated_agents' ? 'Graduated Attempts' : 'Retrain Attempts'}`,
+            `Bucket: ${bucketKey}`,
+            `Row ID: ${rowKey}`,
+            '',
+            'The move will:',
+            '- Create a backup snapshot entry',
+            `- Upsert the row into live table "${source.table}"`,
+            '- Remove that row from this archived attempt'
+        ].join('\n');
+        if (!confirm(confirmText)) return;
+
+        const backupEntry = {
+            id: `studio_restore_backup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            movedAt: new Date().toISOString(),
+            movedBy: AppContext.user?.user || 'super_admin',
+            direction: 'archive_to_live',
+            archiveSourceId: archiveSource,
+            archiveEntryId: snapshot.entry?.id || '',
+            archiveBucket: bucketKey,
+            sourceId: sourceId,
+            sourceTable: source.table,
+            sourceRowKey: rowKey,
+            payload: StudioData.clone(row)
+        };
+
+        try {
+            await this.appendExplorerBackup(backupEntry);
+            await StudioData.saveRow(sourceId, row);
+
+            const latest = this.getArchiveEntrySnapshot(archiveSource, archiveEntryId, archiveSourceIndex);
+            if (!latest || !latest.entry) {
+                throw new Error('Row restored to live, but archive entry no longer exists to complete cleanup.');
+            }
+
+            const latestRows = Array.isArray(latest.entry[bucketKey]) ? latest.entry[bucketKey] : [];
+            let removed = false;
+            const nextBucketRows = latestRows.filter(item => {
+                if (removed) return true;
+                const candidateKey = item?.[source.keyField];
+                if (String(candidateKey ?? '') === String(rowKey)) {
+                    removed = true;
+                    return false;
+                }
+                return true;
+            });
+
+            if (!removed) {
+                throw new Error('Live restore succeeded, but archive row was not found for cleanup.');
+            }
+
+            const nextArchiveRows = latest.rows.slice();
+            nextArchiveRows[latest.index] = {
+                ...latest.entry,
+                [bucketKey]: nextBucketRows,
+                updatedAt: new Date().toISOString()
+            };
+            await StudioData.updateDocument(archiveDocKey, nextArchiveRows);
+
+            await this.writeExplorerAudit(
+                'Workspace Folder Restore',
+                `Restored ${sourceId} row ${rowKey} from ${archiveSource} archive ${String(snapshot.entry?.id || '')} into live table ${source.table}`
+            );
+
+            await StudioData.loadAll(source.table);
+            this.render();
+            alert(`Restored row ${rowKey} from archive to live ${source.label}.`);
+        } catch (error) {
+            alert(error.message || String(error));
+        }
+    },
+
+    async writeExplorerAudit(action, details) {
+        if (!AppContext.supabase) return;
+        const actor = AppContext.user?.user || 'super_admin';
+        const baseRow = {
+            id: `studio_audit_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            user: actor,
+            action: action,
+            details: String(details || ''),
+            date: new Date().toISOString()
+        };
+        try {
+            let result = await AppContext.supabase.from('audit_logs').insert(baseRow);
+            if (result && result.error) {
+                result = await AppContext.supabase.from('audit_logs').insert({ ...baseRow, data: StudioData.clone(baseRow) });
+            }
+            if (result && result.error) {
+                console.warn('[Studio] Audit log write failed:', result.error.message || result.error);
+            }
+        } catch (error) {
+            console.warn('[Studio] Audit log write crashed:', error);
+        }
+    },
+
+    async moveWorkspaceItem(payload, targetFolderKey) {
+        const sourceId = String(payload?.sourceId || '');
+        const rowId = String(payload?.rowId || '');
+        const username = String(payload?.username || this.state.workspaceUser || '').trim();
+        if (!sourceId || !rowId || !username) {
+            alert('Move payload is incomplete. Refresh and retry.');
+            return;
+        }
+
+        const source = StudioData.sourceCatalog[sourceId];
+        if (!source || source.type !== 'row' || !source.keyField) {
+            alert('This source cannot be moved in folder view.');
+            return;
+        }
+
+        const snapshot = this.buildSnapshot();
+        const profile = this.buildWorkspaceProfile(snapshot, username);
+        if (!profile) {
+            alert('User profile is unavailable. Refresh and retry.');
+            return;
+        }
+
+        const rows = StudioData.getRows(sourceId);
+        const row = rows.find(item => String(item?.[source.keyField]) === rowId);
+        if (!row) {
+            alert('The source row no longer exists in live data.');
+            return;
+        }
+
+        if (!this.canFolderAcceptDrop(targetFolderKey, payload)) {
+            alert('This drop target does not accept the selected item.');
+            return;
+        }
+
+        const targetDocKey = targetFolderKey === 'archive_graduated_entries' ? 'graduated_agents' : 'retrain_archives';
+        const targetLabel = targetFolderKey === 'archive_graduated_entries' ? 'Graduated Attempts' : 'Retrain Attempts';
+        const bucket = this.getArchiveBucketForSource(sourceId);
+        if (!bucket) {
+            alert('This row type cannot be archived from folder view yet.');
+            return;
+        }
+
+        const confirmText = [
+            `Move this item to ${targetLabel}?`,
+            '',
+            `User: ${profile.username}`,
+            `Source: ${source.label}`,
+            `Row ID: ${rowId}`,
+            '',
+            'The move will:',
+            '- Create a backup snapshot entry',
+            `- Append the row into ${targetLabel}`,
+            '- Delete the row from the live table'
+        ].join('\n');
+        if (!confirm(confirmText)) return;
+
+        const backupEntry = {
+            id: `studio_move_backup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            movedAt: new Date().toISOString(),
+            movedBy: AppContext.user?.user || 'super_admin',
+            username: profile.username,
+            sourceId: sourceId,
+            sourceTable: source.table,
+            sourceRowKey: row[source.keyField],
+            targetFolderKey: targetFolderKey,
+            targetDocument: targetDocKey,
+            archiveBucket: bucket,
+            payload: StudioData.clone(row)
+        };
+
+        const archiveEntry = this.createArchiveEntryForMove(profile, targetFolderKey, sourceId, row);
+        try {
+            await this.appendExplorerBackup(backupEntry);
+
+            const targetSourceId = targetDocKey === 'retrain_archives' ? 'retrain_archives' : 'graduated_agents';
+            const archiveRows = StudioData.getRows(targetSourceId);
+            archiveRows.push(archiveEntry);
+            await StudioData.updateDocument(targetDocKey, archiveRows);
+
+            const { error } = await AppContext.supabase
+                .from(source.table)
+                .delete()
+                .eq(source.keyField, row[source.keyField]);
+            if (error) {
+                try {
+                    await this.removeArchiveEntry(targetDocKey, archiveEntry.id);
+                } catch (rollbackError) {
+                    console.warn('[Studio] Rollback failed after delete error:', rollbackError);
+                }
+                throw new Error(error.message || `Failed to remove live row from ${source.table}.`);
+            }
+
+            await this.writeExplorerAudit(
+                'Workspace Folder Move',
+                `${profile.username}: moved ${sourceId} row ${rowId} to ${targetLabel}`
+            );
+
+            await StudioData.loadAll(source.table);
+            this.render();
+            alert(`Moved row ${rowId} from ${source.label} into ${targetLabel}.`);
+        } catch (error) {
+            alert(error.message || String(error));
+        }
+    },
+
+    renderWorkspaceExplorer(profile) {
+        this.ensureWorkspaceFolder(profile);
+        const folders = this.getWorkspaceFolderCatalog(profile);
+        const selectedFolder = this.getWorkspaceFolder(profile, this.state.workspaceFolder);
+        if (!selectedFolder) return '<div class="studio-empty">No explorer folders available for this user.</div>';
+
+        const grouped = folders.reduce((acc, folder) => {
+            if (!acc[folder.group]) acc[folder.group] = [];
+            acc[folder.group].push(folder);
+            return acc;
+        }, {});
+
+        const folderListHtml = Object.entries(grouped).map(([groupName, list]) => `
+            <div class="studio-folder-group">
+                <div class="studio-folder-group-label">${StudioUI.escapeHtml(groupName)}</div>
+                ${list.map(folder => `
+                    <button
+                        class="studio-folder-item ${this.state.workspaceFolder === folder.key ? 'active' : ''} ${folder.acceptsDrop ? 'drop-ready' : ''}"
+                        onclick="App.setWorkspaceFolder('${StudioUI.escapeHtml(folder.key)}')"
+                        ondragover="App.handleWorkspaceDragOver(event, '${StudioUI.escapeHtml(folder.key)}')"
+                        ondrop="App.handleWorkspaceDrop(event, '${StudioUI.escapeHtml(folder.key)}')"
+                        title="${folder.acceptsDrop ? 'Drop live rows here to move into archive.' : ''}">
+                        <span><i class="fas ${StudioUI.escapeHtml(folder.icon || 'fa-folder')}"></i> ${StudioUI.escapeHtml(folder.label)}</span>
+                        <span class="studio-folder-count">${folder.count}</span>
+                    </button>
+                `).join('')}
+            </div>
+        `).join('');
+
+        return `
+            <div class="studio-folder-layout">
+                <aside class="studio-folder-tree">
+                    <div class="studio-mini-note" style="margin-bottom:10px;">Drag live row cards into archive folders to move to archive. Inside archive entries, use <strong>Move To Live</strong> on specific rows to restore them.</div>
+                    ${folderListHtml}
+                </aside>
+                <section class="studio-folder-content">
+                    ${this.renderWorkspaceFolderContent(profile, selectedFolder)}
+                </section>
+            </div>
+        `;
+    },
+
+    renderWorkspaceFolderContent(profile, folder) {
+        const rows = Array.isArray(folder.rows) ? folder.rows : [];
+        const source = folder.sourceId ? StudioData.sourceCatalog[folder.sourceId] : null;
+
+        if (folder.key === 'archive_notes') {
+            if (!profile.notes) return '<div class="studio-empty">No notes found for this user in the notes document.</div>';
+            return `
+                <article class="studio-card">
+                    <h3 class="studio-card-title">Notes Payload (${StudioUI.escapeHtml(profile.notesKey || 'matched by identity')})</h3>
+                    <div class="studio-code-preview">${StudioUI.escapeHtml(JSON.stringify(profile.notes, null, 2).slice(0, 1800))}</div>
+                </article>
+            `;
+        }
+
+        if (folder.key === 'archive_retrain_entries' || folder.key === 'archive_graduated_entries') {
+            if (!rows.length) return '<div class="studio-empty">No archived attempts currently in this folder.</div>';
+            return `
+                <div class="studio-grid cards">
+                    ${rows.map(item => {
+                        const archiveId = String(item.id || '');
+                        const sourceIndex = Number(item.__sourceIndex);
+                        const bucketDescriptors = this.getArchiveBucketDescriptors(item);
+                        return `
+                            <article class="studio-card">
+                                <h3 class="studio-card-title">${StudioUI.escapeHtml(item.id || item.user || 'Archive Entry')}</h3>
+                                <div class="studio-card-meta">${StudioUI.escapeHtml(item.movedDate || item.graduatedDate || 'No date')} | ${StudioUI.escapeHtml(item.targetGroup || item.reason || '-')}</div>
+                                <div class="studio-chip-row">
+                                    ${bucketDescriptors.map(bucket => `<span class="studio-chip">${bucket.rows.length} ${StudioUI.escapeHtml(bucket.key)}</span>`).join('')}
+                                </div>
+                                <div class="studio-card-actions">
+                                    <button class="studio-mini-btn" onclick="App.openArchiveAttemptEditor('${StudioUI.escapeHtml(folder.archiveSourceId)}', ${Number.isInteger(sourceIndex) ? sourceIndex : -1})"><i class="fas fa-box-open"></i> Open Payload</button>
+                                </div>
+
+                                <div class="studio-archive-stack">
+                                    ${bucketDescriptors.map(bucket => `
+                                        <details class="studio-archive-bucket">
+                                            <summary>
+                                                <span>${StudioUI.escapeHtml(bucket.label)}</span>
+                                                <span class="studio-folder-count">${bucket.rows.length}</span>
+                                            </summary>
+                                            ${bucket.rows.length === 0 ? `
+                                                <div class="studio-mini-note">No items in this bucket.</div>
+                                            ` : `
+                                                <div class="studio-grid cards">
+                                                    ${bucket.rows.map((bucketRow, rowIdx) => {
+                                                        const desc = StudioUI.describeRow(bucket.sourceId, bucketRow);
+                                                        const rowSource = StudioData.sourceCatalog[bucket.sourceId];
+                                                        const rowKeyField = rowSource?.keyField || 'id';
+                                                        const rowKey = String(bucketRow?.[rowKeyField] ?? '');
+                                                        return `
+                                                            <article class="studio-card studio-archive-row-card">
+                                                                <h4 class="studio-card-title">${StudioUI.escapeHtml(desc.title)}</h4>
+                                                                <div class="studio-card-meta">${StudioUI.escapeHtml(desc.meta)}</div>
+                                                                <div class="studio-chip-row">
+                                                                    ${(desc.chips || []).map(chip => StudioUI.genericChip(chip)).join('')}
+                                                                </div>
+                                                                <div class="studio-card-actions">
+                                                                    ${rowKey ? `
+                                                                        <button class="studio-mini-btn" onclick="App.moveArchiveRowToLive('${StudioUI.escapeHtml(folder.archiveSourceId)}','${StudioUI.escapeHtml(archiveId)}',${Number.isInteger(sourceIndex) ? sourceIndex : -1},'${StudioUI.escapeHtml(bucket.key)}','${StudioUI.escapeHtml(rowKey)}',${rowIdx})">
+                                                                            <i class="fas fa-right-left"></i> Move To Live
+                                                                        </button>
+                                                                    ` : `
+                                                                        <span class="studio-mini-note">Missing row key (${StudioUI.escapeHtml(rowKeyField)})</span>
+                                                                    `}
+                                                                </div>
+                                                                <div class="studio-code-preview">${StudioUI.escapeHtml(JSON.stringify(bucketRow, null, 2).slice(0, 900))}</div>
+                                                            </article>
+                                                        `;
+                                                    }).join('')}
+                                                </div>
+                                            `}
+                                        </details>
+                                    `).join('')}
+                                </div>
+                            </article>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        if (!rows.length) {
+            return '<div class="studio-empty">No rows in this folder for the selected user.</div>';
+        }
+
+        if (!source) {
+            return '<div class="studio-empty">Folder source mapping is unavailable.</div>';
+        }
+
+        return `
+            <div class="studio-grid cards">
+                ${rows.map(row => {
+                    const desc = StudioUI.describeRow(folder.sourceId, row);
+                    const rowKey = String(row[source.keyField] ?? '');
+                    const dragPayload = folder.draggableRows && rowKey
+                        ? this.buildDragPayload({
+                            kind: 'live_row',
+                            sourceId: folder.sourceId,
+                            rowId: rowKey,
+                            username: profile.username
+                        })
+                        : '';
+                    return `
+                        <article class="studio-card ${folder.draggableRows && dragPayload ? 'studio-draggable-card' : ''}"
+                            ${folder.draggableRows && dragPayload ? `draggable="true" data-drag-payload="${StudioUI.escapeHtml(dragPayload)}" ondragstart="App.startWorkspaceDrag(event)"` : ''}>
+                            <h3 class="studio-card-title">${StudioUI.escapeHtml(desc.title)}</h3>
+                            <div class="studio-card-meta">${StudioUI.escapeHtml(desc.meta)}</div>
+                            <div class="studio-chip-row">
+                                ${(desc.chips || []).map(chip => StudioUI.genericChip(chip)).join('')}
+                            </div>
+                            <div class="studio-card-actions">
+                                ${rowKey ? `<button class="studio-mini-btn" onclick="App.openRowEditor('${StudioUI.escapeHtml(folder.sourceId)}', '${StudioUI.escapeHtml(rowKey)}')"><i class="fas fa-pen"></i> Edit</button>` : ''}
+                                ${folder.draggableRows && rowKey ? `
+                                    <button class="studio-mini-btn" onclick="App.quickMoveWorkspaceRow('${StudioUI.escapeHtml(folder.sourceId)}', '${StudioUI.escapeHtml(rowKey)}', 'archive_retrain_entries')"><i class="fas fa-box-archive"></i> Move to Retrain</button>
+                                    <button class="studio-mini-btn danger" onclick="App.quickMoveWorkspaceRow('${StudioUI.escapeHtml(folder.sourceId)}', '${StudioUI.escapeHtml(rowKey)}', 'archive_graduated_entries')"><i class="fas fa-graduation-cap"></i> Move to Graduated</button>
+                                ` : ''}
+                            </div>
+                        </article>
+                    `;
+                }).join('')}
+            </div>
         `;
     },
 

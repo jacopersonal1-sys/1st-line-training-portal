@@ -1959,10 +1959,18 @@ input:checked + .slider:before {
 
 /* ================= STUDY MONITOR ================= */
 #study-overlay {
+    z-index: 13000 !important;
     transition: opacity 0.3s ease;
 }
 #study-overlay.hidden {
     display: none !important;
+}
+
+body.study-overlay-active .drag-handle-top,
+body.study-overlay-active .report-problem-fab,
+body.study-overlay-active .user-footer {
+    pointer-events: none !important;
+    opacity: 0 !important;
 }
 
 #study-browser-shell {
@@ -2215,7 +2223,10 @@ input:checked + .slider:before {
 }
 
 .study-webview.hidden {
-    display: none;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    left: -200vw !important;
 }
 
 @media (max-width: 1100px) {
