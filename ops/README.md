@@ -42,3 +42,22 @@ Usage:
 - Run:
   - `bash ops/remediate_two_trainees_20260414.sh "postgresql://postgres:YOUR_PASSWORD@HOST:PORT/postgres"`
   - confirm prompt text exactly.
+
+---
+
+# Content Creator Storage Setup (2026-04-16)
+
+Purpose: create and configure Supabase Storage buckets/policies required by the v2.6.21 Content Creator media upload flow.
+
+File:
+- `ops/content_creator_storage_20260416.sql`
+
+What it does:
+- Ensures bucket `content_creator_videos` exists (public read, video mime types, 500MB limit).
+- Ensures bucket `content_creator_documents` exists (public read, PDF mime type, 25MB limit).
+- Creates idempotent `storage.objects` policies for `select`, `insert`, `update`, and `delete` on both buckets.
+
+Usage:
+- Open Supabase SQL Editor.
+- Paste/run the file content from `ops/content_creator_storage_20260416.sql`.
+- Confirm verification query output shows both bucket IDs.
