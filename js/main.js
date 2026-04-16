@@ -3008,6 +3008,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.24": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Linked questionnaires can now open in trainee popup mode for complete-and-submit flow.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Content Creator Builder now includes a stronger Module Manager for open, search, rename, duplicate, and delete actions.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> New module actions were hardened so create and duplicate flows always execute with clear feedback.</li>
+            </ul>`,
         "2.6.23": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> System Updates now supports separate Main (inline) and Beta (pre-release) checks.</li>

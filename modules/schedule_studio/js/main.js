@@ -1077,6 +1077,16 @@ const App = {
         }
 
         if (AppContext.host && typeof AppContext.host.openTestTaker === 'function') {
+            const role = String(AppContext.user?.role || '').trim().toLowerCase();
+            if (role === 'trainee') {
+                AppContext.host.openTestTaker(testId, true, {
+                    popupMode: true,
+                    returnTab: 'assessment-schedule',
+                    source: 'content-linked-questionnaire'
+                });
+                return;
+            }
+
             try { if (typeof AppContext.host.showTab === 'function') AppContext.host.showTab('my-tests'); } catch (error) {}
             AppContext.host.openTestTaker(testId);
             return;

@@ -142,6 +142,94 @@ body {
 
 .cs-field-end { justify-content: flex-end; align-items: flex-start; }
 
+.cs-module-manager {
+    background: var(--cs-panel);
+    border: 1px solid var(--cs-border);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.cs-module-manager-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.cs-module-manager-head h3 {
+    margin: 0 0 4px;
+}
+
+.cs-module-manager-head .cs-muted {
+    margin: 0;
+    font-size: 0.82rem;
+}
+
+.cs-module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+}
+
+.cs-module-card {
+    border: 1px solid var(--cs-border);
+    border-radius: 10px;
+    background: rgba(10, 16, 24, 0.22);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cs-module-card.active {
+    border-color: var(--cs-accent);
+    box-shadow: 0 0 0 1px var(--cs-accent-soft);
+}
+
+.cs-module-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.cs-module-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--cs-text);
+}
+
+.cs-module-meta {
+    font-size: 0.75rem;
+    color: var(--cs-muted);
+    margin-top: 2px;
+}
+
+.cs-module-chip {
+    border: 1px solid rgba(243, 112, 33, 0.5);
+    background: rgba(243, 112, 33, 0.16);
+    color: #ffd4b8;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.cs-module-preview {
+    font-size: 0.81rem;
+    color: var(--cs-muted);
+    line-height: 1.35;
+    min-height: 34px;
+}
+
+.cs-module-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
 .cs-document-shell {
     background: var(--cs-panel);
     border: 1px solid var(--cs-border);
@@ -447,6 +535,7 @@ body {
 
 @media (max-width: 900px) {
     .cs-builder-grid { grid-template-columns: 1fr; }
+    .cs-module-manager-head { flex-direction: column; align-items: stretch; }
     .cs-subject-row { grid-template-columns: 74px 1fr; }
     .cs-subject-actions { grid-column: 2; justify-content: flex-start; }
     .cs-subject-metrics { grid-column: 2; }

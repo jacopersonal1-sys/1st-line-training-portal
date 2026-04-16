@@ -6,6 +6,7 @@ const BuilderUI = {
             video: false,
             document: false
         },
+        moduleSearch: '',
         form: {
             id: '',
             code: '',
@@ -74,61 +75,104 @@ const BuilderUI = {
         }
     },
 
-    saveHeader: async function() {
-        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
-        if (!activeEntry) {
-            alert('No active module selected.');
-            return;
-        }
-        const headerInput = document.getElementById('cs-header-input');
-        const moduleNameInput = document.getElementById('cs-module-name-input');
-        const header = headerInput ? headerInput.value : '';
-        const moduleName = moduleNameInput ? String(moduleNameInput.value || '').trim() : '';
-        const result = await DataService.upsertEntryMeta({
-            scheduleKey: activeEntry.scheduleKey,
-            scheduleLabel: moduleName || activeEntry.scheduleLabel || 'Untitled Module',
-            header
-        });
-        if (!result.ok) {
-            alert(result.message || 'Could not save header.');
-            return;
-        }
+    setModuleSearch: function(value) {
+        this.state.moduleSearch = String(value || '');
         App.render();
     },
 
-    saveModuleName: async function() {
-        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
-        if (!activeEntry) return;
-        const moduleNameInput = document.getElementById('cs-module-name-input');
-        const nextName = String(moduleNameInput?.value || '').trim();
-        if (!nextName) {
-            alert('Enter a module name first.');
-            return;
-        }
-
-        const result = await DataService.renameModule(activeEntry.scheduleKey, nextName);
-        if (!result.ok) {
-            alert(result.message || 'Could not rename module.');
-            return;
-        }
-        App.setActiveModule(result.entry.scheduleKey);
+    _formatModuleUpdatedAt: function(value) {
+        if (!value) return 'Unknown';
+        const dt = new Date(value);
+        if (Number.isNaN(dt.getTime())) return 'Unknown';
+        return dt.toLocaleString();
     },
 
-    saveAsNewModule: async function() {
-        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
-        if (!activeEntry) return;
-
-        const moduleNameInput = document.getElementById('cs-module-name-input');
-        const headerInput = document.getElementById('cs-header-input');
-        const newName = String(moduleNameInput?.value || '').trim();
-        if (!newName) {
-            alert('Enter a module name before saving as new.');
+    _notify: function(message, type = 'info') {
+        if (AppContext && AppContext.host && typeof AppContext.host.showToast === 'function') {
+            AppContext.host.showToast(message, type);
             return;
         }
+        if (type === 'error') {
+            alert(message);
+        } else {
+            try { console.log(`[Content Creator] ${message}`); } catch (e) {}
+        }
+    },
 
-        const result = await DataService.createModule(newName, {
-            header: String(headerInput?.value || '').trim() || newName,
-            cloneFromScheduleKey: activeEntry.scheduleKey
+    _buildUniqueModuleName: function(baseName) {
+        const raw = String(baseName || '').trim() || 'New Module';
+        const existing = DataService.getEntries().map(entry => String(entry.scheduleLabel || '').trim().toLowerCase());
+        if (!existing.includes(raw.toLowerCase())) return raw;
+
+        let i = 2;
+        let candidate = `${raw} (${i})`;
+        while (existing.includes(candidate.toLowerCase())) {
+            i += 1;
+            candidate = `${raw} (${i})`;
+        }
+        return candidate;
+    },
+
+    saveModulePackage: async function(options = {}) {
+        const opts = (options && typeof options === 'object') ? options : {};
+        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
+        const headerInput = document.getElementById('cs-header-input');
+        const moduleNameInput = document.getElementById('cs-module-name-input');
+        const header = String(headerInput ? headerInput.value : '').trim();
+        const moduleName = String(moduleNameInput ? moduleNameInput.value : '').trim();
+
+        if (!moduleName) {
+            if (!opts.silent) alert('Module name is required.');
+            return { ok: false, message: 'Module name is required.' };
+        }
+
+        let result = null;
+        if (!activeEntry) {
+            result = await DataService.createModule(moduleName, {
+                header: header || moduleName
+            });
+        } else {
+            result = await DataService.upsertEntryMeta({
+                scheduleKey: activeEntry.scheduleKey,
+                scheduleLabel: moduleName || activeEntry.scheduleLabel || 'Untitled Module',
+                header: header || activeEntry.header || moduleName
+            });
+        }
+
+        if (!result.ok) {
+            if (!opts.silent) alert(result.message || 'Could not save module package.');
+            return result;
+        }
+
+        if (result.entry && typeof App.setActiveModule === 'function') {
+            App.activeModuleKey = String(result.entry.scheduleKey || App.activeModuleKey || '');
+        }
+        if (!opts.silent) this._notify('Module package saved.', 'success');
+        if (opts.renderAfter !== false) App.render();
+        return result;
+    },
+
+    saveHeader: async function() {
+        return this.saveModulePackage();
+    },
+
+    saveModuleName: async function() {
+        return this.saveModulePackage();
+    },
+
+    openManagedModule: function(scheduleKey) {
+        if (!scheduleKey) return;
+        if (typeof App.setView === 'function') App.setView('builder');
+        App.setActiveModule(scheduleKey);
+    },
+
+    createEmptyModule: async function() {
+        const moduleNameInput = document.getElementById('cs-module-name-input');
+        const baseName = String(moduleNameInput?.value || '').trim() || 'New Module';
+        const cleanName = this._buildUniqueModuleName(baseName);
+
+        const result = await DataService.createModule(cleanName, {
+            header: cleanName
         });
         if (!result.ok) {
             alert(result.message || 'Could not create module.');
@@ -137,21 +181,106 @@ const BuilderUI = {
 
         this.resetSubjectForm();
         App.setActiveModule(result.entry.scheduleKey);
+        this._notify(`Created module package "${cleanName}".`, 'success');
     },
 
-    deleteActiveModule: async function() {
+    duplicateActiveModule: async function() {
         const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         if (!activeEntry) return;
-        if (!confirm(`Delete module "${activeEntry.scheduleLabel || activeEntry.header || activeEntry.scheduleKey}"?`)) return;
+        const moduleNameInput = document.getElementById('cs-module-name-input');
+        const sourceName = String(activeEntry.scheduleLabel || activeEntry.header || 'Module').trim() || 'Module';
+        const baseName = String(moduleNameInput?.value || '').trim() || `${sourceName} Copy`;
+        const cleanName = this._buildUniqueModuleName(baseName);
 
-        const result = await DataService.deleteModule(activeEntry.scheduleKey);
+        const result = await DataService.createModule(cleanName, {
+            header: String(activeEntry.header || cleanName).trim() || cleanName,
+            cloneFromScheduleKey: activeEntry.scheduleKey
+        });
+        if (!result.ok) {
+            alert(result.message || 'Could not duplicate module.');
+            return;
+        }
+
+        this.resetSubjectForm();
+        App.setActiveModule(result.entry.scheduleKey);
+        this._notify(`Duplicated module package as "${cleanName}".`, 'success');
+    },
+
+    duplicateModuleByKey: async function(scheduleKey) {
+        const target = DataService.getEntryByScheduleKey(scheduleKey);
+        if (!target) return;
+        const sourceName = String(target.scheduleLabel || target.header || 'Module').trim() || 'Module';
+        const cleanName = this._buildUniqueModuleName(`${sourceName} Copy`);
+
+        const result = await DataService.createModule(cleanName, {
+            header: String(target.header || cleanName).trim() || cleanName,
+            cloneFromScheduleKey: target.scheduleKey
+        });
+        if (!result.ok) {
+            alert(result.message || 'Could not duplicate module.');
+            return;
+        }
+
+        this.resetSubjectForm();
+        App.setActiveModule(result.entry.scheduleKey);
+        this._notify(`Duplicated module package as "${cleanName}".`, 'success');
+    },
+
+    saveAsNewModule: async function() {
+        return this.duplicateActiveModule();
+    },
+
+    renameManagedModule: async function(scheduleKey) {
+        const target = DataService.getEntryByScheduleKey(scheduleKey);
+        if (!target) return;
+        const current = String(target.scheduleLabel || target.header || '').trim() || 'Module';
+        const next = prompt('Rename module package:', current);
+        if (next === null) return;
+        const clean = String(next || '').trim();
+        if (!clean) {
+            alert('Module name is required.');
+            return;
+        }
+
+        const result = await DataService.renameModule(target.scheduleKey, clean);
+        if (!result.ok) {
+            alert(result.message || 'Could not rename module.');
+            return;
+        }
+
+        if (String(target.scheduleKey) === String(App.activeModuleKey)) {
+            const headerInput = document.getElementById('cs-header-input');
+            const moduleNameInput = document.getElementById('cs-module-name-input');
+            if (moduleNameInput) moduleNameInput.value = clean;
+            if (headerInput && !String(headerInput.value || '').trim()) headerInput.value = clean;
+            await this.saveModulePackage({ silent: true, renderAfter: false });
+        }
+        this._notify(`Renamed module package to "${clean}".`, 'success');
+        App.render();
+    },
+
+    deleteModuleByKey: async function(scheduleKey) {
+        const target = DataService.getEntryByScheduleKey(scheduleKey);
+        if (!target) return;
+        if (!confirm(`Delete module package "${target.scheduleLabel || target.header || target.scheduleKey}"?`)) return;
+
+        const result = await DataService.deleteModule(target.scheduleKey);
         if (!result.ok) {
             alert(result.message || 'Could not delete module.');
             return;
         }
 
-        this.resetSubjectForm();
+        if (String(App.activeModuleKey || '') === String(target.scheduleKey || '')) {
+            this.resetSubjectForm();
+        }
+        this._notify('Module package deleted.', 'success');
         App.render();
+    },
+
+    deleteActiveModule: async function() {
+        const activeEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
+        if (!activeEntry) return;
+        await this.deleteModuleByKey(activeEntry.scheduleKey);
     },
 
     editSubject: function(subjectId) {
@@ -348,19 +477,24 @@ const BuilderUI = {
             questionnaireTestTitle: this.state.form.questionnaireTestTitle
         };
 
-        const headerInput = document.getElementById('cs-header-input');
-        const moduleNameInput = document.getElementById('cs-module-name-input');
-        const currentEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
-        if (!currentEntry) {
-            await DataService.upsertEntryMeta({
-                scheduleKey: 'content_creator_default',
-                scheduleLabel: (moduleNameInput && moduleNameInput.value) ? moduleNameInput.value : 'Content Creator',
-                header: (headerInput && headerInput.value) ? headerInput.value : 'Content Creator'
-            });
+        const savedPackage = await this.saveModulePackage({
+            silent: true,
+            renderAfter: false
+        });
+        if (!savedPackage || !savedPackage.ok) {
+            alert(savedPackage?.message || 'Could not save module package.');
+            return;
         }
 
-        const targetEntry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
-        const targetKey = targetEntry ? targetEntry.scheduleKey : 'content_creator_default';
+        const targetEntry = (savedPackage && savedPackage.entry)
+            ? savedPackage.entry
+            : ((typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry());
+        const targetKey = targetEntry ? targetEntry.scheduleKey : '';
+        if (!targetKey) {
+            alert('No active module package selected.');
+            return;
+        }
+
         const result = await DataService.upsertSubject(targetKey, payload);
         if (!result.ok) {
             alert(result.message || 'Could not save subject.');
@@ -521,6 +655,42 @@ const BuilderUI = {
             </div>
         ` : '';
 
+        const moduleSearchNeedle = String(this.state.moduleSearch || '').trim().toLowerCase();
+        const moduleEntries = DataService.getEntries().filter(m => {
+            if (!moduleSearchNeedle) return true;
+            const name = String(m.scheduleLabel || '').toLowerCase();
+            const header = String(m.header || '').toLowerCase();
+            return name.includes(moduleSearchNeedle) || header.includes(moduleSearchNeedle);
+        });
+
+        const moduleCards = moduleEntries.map(m => {
+            const key = String(m.scheduleKey || '');
+            const label = String(m.scheduleLabel || m.header || 'Unnamed Module').trim() || 'Unnamed Module';
+            const header = String(m.header || '').trim();
+            const subjectCount = Array.isArray(m.subjects) ? m.subjects.length : 0;
+            const isActive = String(App.activeModuleKey || '') === key;
+            const preview = ContentStudioUtils.stripHtml(header).slice(0, 80) || 'No header text saved yet.';
+            const updated = this._formatModuleUpdatedAt(m.updatedAt || m.createdAt);
+            return `
+                <div class="cs-module-card ${isActive ? 'active' : ''}">
+                    <div class="cs-module-card-head">
+                        <div>
+                            <div class="cs-module-title">${esc(label)}</div>
+                            <div class="cs-module-meta">${subjectCount} subject${subjectCount === 1 ? '' : 's'} | Updated ${esc(updated)}</div>
+                        </div>
+                        ${isActive ? '<span class="cs-module-chip">Active</span>' : ''}
+                    </div>
+                    <div class="cs-module-preview">${esc(preview)}</div>
+                    <div class="cs-module-actions">
+                        <button class="btn-secondary btn-sm" onclick="BuilderUI.openManagedModule('${esc(key)}')"><i class="fas fa-folder-open"></i> Open</button>
+                        <button class="btn-secondary btn-sm" onclick="BuilderUI.renameManagedModule('${esc(key)}')"><i class="fas fa-pen"></i> Rename</button>
+                        <button class="btn-secondary btn-sm" onclick="BuilderUI.duplicateModuleByKey('${esc(key)}')"><i class="fas fa-copy"></i> Duplicate</button>
+                        <button class="btn-danger btn-sm" onclick="BuilderUI.deleteModuleByKey('${esc(key)}')"><i class="fas fa-trash"></i> Delete</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
         return `
             <div class="cs-shell">
                 <div class="cs-toolbar">
@@ -533,17 +703,33 @@ const BuilderUI = {
                         <input id="cs-header-input" type="text" value="${esc((entry && entry.header) || 'Content Creator')}" placeholder="Header goes here">
                     </div>
                     <div class="cs-field cs-field-end">
-                        <button class="btn-secondary" onclick="BuilderUI.saveModuleName()"><i class="fas fa-pen"></i> Rename Module</button>
-                        <button class="btn-secondary" onclick="BuilderUI.saveAsNewModule()"><i class="fas fa-copy"></i> Save As New Module</button>
-                        <button class="btn-danger" onclick="BuilderUI.deleteActiveModule()"><i class="fas fa-trash"></i> Delete Module</button>
-                        <button class="btn-primary" onclick="BuilderUI.saveHeader()"><i class="fas fa-save"></i> Save Header</button>
+                        <button class="btn-primary" onclick="BuilderUI.saveModulePackage()"><i class="fas fa-save"></i> Save Module Package</button>
+                        <button class="btn-secondary" onclick="BuilderUI.createEmptyModule()"><i class="fas fa-plus"></i> New Empty Module</button>
+                        <button class="btn-secondary" onclick="BuilderUI.duplicateActiveModule()"><i class="fas fa-copy"></i> Duplicate Active</button>
+                        <button class="btn-danger" onclick="BuilderUI.deleteActiveModule()"><i class="fas fa-trash"></i> Delete Active</button>
+                    </div>
+                </div>
+
+                <div class="cs-module-manager">
+                    <div class="cs-module-manager-head">
+                        <div>
+                            <h3>Module Manager</h3>
+                            <p class="cs-muted">Each module package saves together: header + all subjects + linked content.</p>
+                        </div>
+                        <div class="cs-field" style="max-width:320px;">
+                            <label>Find Module</label>
+                            <input type="text" value="${esc(this.state.moduleSearch || '')}" oninput="BuilderUI.setModuleSearch(this.value)" placeholder="Search by module name or header">
+                        </div>
+                    </div>
+                    <div class="cs-module-grid">
+                        ${moduleCards || '<div class="cs-muted">No modules match your search.</div>'}
                     </div>
                 </div>
 
                 <div class="cs-builder-grid">
                     <div class="cs-builder-card">
                         <h3>Subject Builder</h3>
-                        <p class="cs-muted">Create subject text, then choose optional video/document support and source type.</p>
+                        <p class="cs-muted">Build subjects under the active module package. Saving a subject updates that same module package.</p>
 
                         <div class="cs-field">
                             <label>Subject Number</label>

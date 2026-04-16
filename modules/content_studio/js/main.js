@@ -101,7 +101,9 @@ const App = {
         const moduleOptions = DataService.getEntries().map(entry => {
             const key = String(entry.scheduleKey || '');
             const label = String(entry.scheduleLabel || entry.header || 'Unnamed Module').trim() || 'Unnamed Module';
-            return `<option value="${this.escapeHtml(key)}" ${String(this.activeModuleKey) === key ? 'selected' : ''}>${this.escapeHtml(label)}</option>`;
+            const count = Array.isArray(entry.subjects) ? entry.subjects.length : 0;
+            const optionLabel = `${label} (${count})`;
+            return `<option value="${this.escapeHtml(key)}" ${String(this.activeModuleKey) === key ? 'selected' : ''}>${this.escapeHtml(optionLabel)}</option>`;
         }).join('');
 
         let viewHtml = '';

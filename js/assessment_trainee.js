@@ -56,6 +56,68 @@ function isLegacySubmissionForCurrentAttempt(submission, currentGroupId, latestM
     return false;
 }
 
+const ASSESSMENT_POPUP_MODAL_ID = 'assessmentQuizPopupModal';
+const ASSESSMENT_POPUP_CONTAINER_ID = 'assessmentQuizPopupContainer';
+
+function ensureAssessmentQuizPopup() {
+    let modal = document.getElementById(ASSESSMENT_POPUP_MODAL_ID);
+    if (modal) return modal;
+
+    const html = `
+        <div id="${ASSESSMENT_POPUP_MODAL_ID}" class="modal-overlay" style="z-index:12020; background:rgba(0,0,0,0.88);">
+            <div class="modal-box" style="width:min(1180px,96vw); max-height:92vh; overflow-y:auto; padding:14px 16px 18px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:10px;">
+                    <div>
+                        <h3 id="assessmentQuizPopupTitle" style="margin:0; color:var(--text-main);">Questionnaire</h3>
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Complete and submit without leaving your current view.</div>
+                    </div>
+                    <button class="btn-secondary btn-sm" type="button" onclick="closeAssessmentQuizPopup()"><i class="fas fa-times"></i> Close</button>
+                </div>
+                <div id="${ASSESSMENT_POPUP_CONTAINER_ID}"></div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+    modal = document.getElementById(ASSESSMENT_POPUP_MODAL_ID);
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target && e.target.id === ASSESSMENT_POPUP_MODAL_ID) closeAssessmentQuizPopup();
+        });
+    }
+    return modal;
+}
+
+function closeAssessmentQuizPopup(options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    const modal = document.getElementById(ASSESSMENT_POPUP_MODAL_ID);
+    if (!modal) return true;
+
+    const force = !!opts.force;
+    const persistDraft = opts.persistDraft !== false;
+    if (!force) {
+        const okay = confirm('Close questionnaire popup? Your current progress will remain saved as a draft.');
+        if (!okay) return false;
+    }
+
+    if (persistDraft && typeof saveAssessmentDraft === 'function') {
+        try { saveAssessmentDraft(); } catch (e) {}
+    }
+
+    if (window.TEST_TIMER) {
+        clearInterval(window.TEST_TIMER);
+        window.TEST_TIMER = null;
+    }
+    document.getElementById('test-timer-bar')?.remove();
+
+    modal.remove();
+    window.TEST_POPUP_MODE = false;
+    window.TEST_RENDER_CONTAINER_ID = '';
+    window.TEST_POPUP_RETURN_TAB = '';
+    return true;
+}
+
+window.closeAssessmentQuizPopup = closeAssessmentQuizPopup;
+
 /**
  * 3. TRAINEE: VIEWING PERSONAL TEST STATUS
  */
@@ -165,7 +227,13 @@ function loadTraineeTests() {
 /**
  * 4. TEST TAKER: UI RENDERING & SUBMISSION
  */
-function openTestTaker(testId, isArenaMode = false) {
+function openTestTaker(testId, isArenaMode = false, options = {}) {
+    const launchOptions = (options && typeof options === 'object') ? options : {};
+    const popupMode = !!launchOptions.popupMode;
+    const popupContainerId = String(launchOptions.containerId || ASSESSMENT_POPUP_CONTAINER_ID);
+    const activeSectionId = document.querySelector('section.active')?.id || '';
+    const returnTab = String(launchOptions.returnTab || activeSectionId || '').trim();
+
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == testId);
     if (!test) return;
@@ -182,11 +250,25 @@ function openTestTaker(testId, isArenaMode = false) {
         try {
             const draft = JSON.parse(draftStr);
             if (draft.test && draft.test.id == testId && draft.user === CURRENT_USER.user) {
+                if (popupMode) {
+                    const modal = ensureAssessmentQuizPopup();
+                    const titleEl = document.getElementById('assessmentQuizPopupTitle');
+                    if (titleEl) titleEl.innerText = test.title || 'Questionnaire';
+                    if (modal) modal.classList.remove('hidden');
+                    window.TEST_POPUP_MODE = true;
+                    window.TEST_POPUP_RETURN_TAB = returnTab;
+                } else {
+                    window.TEST_POPUP_MODE = false;
+                    window.TEST_POPUP_RETURN_TAB = '';
+                }
+
                 window.CURRENT_TEST = draft.test;
                 window.USER_ANSWERS = draft.answers || {};
                 window.IS_LIVE_ARENA = isArenaMode;
-                
-                renderTestPaper('arenaTestContainer');
+
+                const targetContainer = popupMode ? popupContainerId : 'arenaTestContainer';
+                window.TEST_RENDER_CONTAINER_ID = targetContainer;
+                renderTestPaper(targetContainer);
                 
                 return; // Prevent overwrite
             }
@@ -262,6 +344,20 @@ function openTestTaker(testId, isArenaMode = false) {
         }
     }
 
+    if (popupMode) {
+        const modal = ensureAssessmentQuizPopup();
+        const titleEl = document.getElementById('assessmentQuizPopupTitle');
+        if (titleEl) titleEl.innerText = test.title || 'Questionnaire';
+        if (modal) modal.classList.remove('hidden');
+        window.TEST_POPUP_MODE = true;
+        window.TEST_POPUP_RETURN_TAB = returnTab;
+        window.TEST_RENDER_CONTAINER_ID = popupContainerId;
+    } else {
+        window.TEST_POPUP_MODE = false;
+        window.TEST_RENDER_CONTAINER_ID = '';
+        window.TEST_POPUP_RETURN_TAB = '';
+    }
+
     window.CURRENT_TEST = JSON.parse(JSON.stringify(test)); 
     
     window.CURRENT_TEST.questions.forEach((q, i) => q._originalIndex = i);
@@ -297,8 +393,11 @@ function openTestTaker(testId, isArenaMode = false) {
     });
 
     if (isArenaMode) {
-        renderTestPaper('arenaTestContainer');
+        const targetContainer = popupMode ? popupContainerId : 'arenaTestContainer';
+        window.TEST_RENDER_CONTAINER_ID = targetContainer;
+        renderTestPaper(targetContainer);
     } else {
+        window.TEST_RENDER_CONTAINER_ID = 'takingQuestions';
         if(typeof showTab === 'function') showTab('test-take-view');
         const titleEl = document.getElementById('takingTitle');
         if(titleEl) titleEl.innerText = window.CURRENT_TEST.title;
@@ -595,14 +694,29 @@ async function submitTest(forceSubmit = false) {
     } else {
         if(typeof showToast === 'function') showToast("Submitted Successfully! Results pending Admin review.", "info");
     }
-    
-    if(typeof showTab === 'function') showTab('my-tests');
-    loadTraineeTests();
+
+    if (window.TEST_POPUP_MODE) {
+        closeAssessmentQuizPopup({ force: true, persistDraft: false });
+        const currentActive = document.querySelector('section.active')?.id || '';
+        const desiredTab = String(window.TEST_POPUP_RETURN_TAB || '').trim();
+        if (desiredTab && desiredTab !== currentActive && typeof showTab === 'function') {
+            showTab(desiredTab);
+        }
+        if (typeof loadTraineeTests === 'function') loadTraineeTests();
+    } else {
+        if(typeof showTab === 'function') showTab('my-tests');
+        loadTraineeTests();
+    }
     
     } catch (error) {
         console.error("Submission UI Error:", error);
-        alert("Your assessment was saved locally, but the screen encountered an error. Returning to dashboard.");
-        if(typeof showTab === 'function') showTab('my-tests');
+        if (window.TEST_POPUP_MODE) {
+            alert("Your assessment was saved locally, but the popup encountered an error. Please reopen the questionnaire and submit.");
+            closeAssessmentQuizPopup({ force: true, persistDraft: true });
+        } else {
+            alert("Your assessment was saved locally, but the screen encountered an error. Returning to dashboard.");
+            if(typeof showTab === 'function') showTab('my-tests');
+        }
     } finally {
         if(btn) { btn.disabled = false; btn.innerText = "Finalize & Submit"; }
         window.IS_SUBMITTING = false; // Release lock
