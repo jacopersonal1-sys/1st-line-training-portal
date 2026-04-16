@@ -1345,7 +1345,12 @@ const StudyMonitor = {
         // UX ENHANCEMENT: Force persistent session for cookies to survive app restarts
         webview.setAttribute('partition', 'persist:study_session');
         webview.classList.add('study-webview');
-        if (!activate) webview.classList.add('hidden');
+        if (!activate) {
+            webview.classList.add('hidden');
+            webview.style.pointerEvents = 'none';
+        } else {
+            webview.style.pointerEvents = 'auto';
+        }
 
         const container = document.getElementById('study-webview-container');
         container.appendChild(webview);
@@ -1377,6 +1382,7 @@ const StudyMonitor = {
         this.browserState.tabs.forEach(tab => {
             const isHidden = tab.id !== tabId;
             tab.webview.classList.toggle('hidden', isHidden);
+            tab.webview.style.pointerEvents = isHidden ? 'none' : 'auto';
         });
         this.renderTabs();
         this.updateBrowserChrome();

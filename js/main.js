@@ -70,18 +70,67 @@ if (window.electronAPI) {
 // Captures logs, warns, and errors so the AI can analyze app history.
 window.CONSOLE_HISTORY = [];
 window.UPDATE_DOWNLOADED = false; // Track update status
-const MAX_LOG_SIZE = 200; // Keep last 200 entries to manage memory
+const MAX_LOG_SIZE = 1200; // Keep deep history for incident debugging
 
 // ARCHITECTURAL FIX: Recursion lock for error reporting
 window._IS_REPORTING_ERROR = false;
+window._FETCH_LOG_WRAPPED = false;
+window._AUTO_REPORT_CACHE = window._AUTO_REPORT_CACHE || {};
+
+const AUTO_REPORT_TYPES = new Set(['error', 'fatal', 'unhandled-rejection', 'resource-error', 'silent-error', 'network-error']);
+
+function safeStringifyForLog(value) {
+    try {
+        const seen = new WeakSet();
+        return JSON.stringify(value, (key, val) => {
+            if (typeof val === 'bigint') return val.toString();
+            if (typeof val === 'object' && val !== null) {
+                if (seen.has(val)) return '[Circular]';
+                seen.add(val);
+            }
+            return val;
+        });
+    } catch (err) {
+        return `[Unserializable: ${Object.prototype.toString.call(value)}]`;
+    }
+}
+
+function formatLogArg(arg) {
+    if (arg instanceof Error) {
+        return arg.toString() + (arg.stack ? '\n' + arg.stack : '');
+    }
+    if (arg instanceof Event) {
+        const target = arg.target && arg.target.tagName ? arg.target.tagName.toLowerCase() : 'unknown';
+        return `Event(${arg.type}) target=${target}`;
+    }
+    if (typeof arg === 'object') return safeStringifyForLog(arg);
+    return String(arg);
+}
+
+function shouldAutoReport(type, msg) {
+    try {
+        const cache = window._AUTO_REPORT_CACHE || {};
+        const key = `${type}|${String(msg || '').slice(0, 280)}`;
+        const now = Date.now();
+        const last = cache[key] || 0;
+        if ((now - last) < 30000) return false; // 30s dedupe window per signature
+        cache[key] = now;
+
+        const keys = Object.keys(cache);
+        if (keys.length > 600) {
+            keys.sort((a, b) => cache[a] - cache[b]);
+            keys.slice(0, 300).forEach(k => delete cache[k]);
+        }
+        window._AUTO_REPORT_CACHE = cache;
+        return true;
+    } catch (err) {
+        return true;
+    }
+}
 
 function captureLog(type, args) {
     try {
-        const msg = args.map(a => {
-            if (a instanceof Error) return a.toString() + (a.stack ? '\n' + a.stack : '');
-            if (typeof a === 'object') return JSON.stringify(a);
-            return String(a);
-        }).join(' ');
+        const msg = (args || []).map(formatLogArg).join(' ');
         
         window.CONSOLE_HISTORY.push({ type, msg, time: new Date().toISOString() });
         if (window.CONSOLE_HISTORY.length > MAX_LOG_SIZE) window.CONSOLE_HISTORY.shift();
@@ -89,7 +138,8 @@ function captureLog(type, args) {
         // --- SILENT CLOUD REPORTING ---
         const strMsg = msg.toString();
         // ARCHITECTURAL FIX: Prevent infinite stack overflow loops if the save function itself throws an error.
-        if ((type === 'error' || type === 'fatal') && typeof reportSystemError === 'function' && !window._IS_REPORTING_ERROR &&
+        if (AUTO_REPORT_TYPES.has(type) && typeof reportSystemError === 'function' && !window._IS_REPORTING_ERROR &&
+            shouldAutoReport(type, strMsg) &&
             !strMsg.includes('Failed to fetch') && !strMsg.includes('NetworkError') && !strMsg.includes('521')) {
             window._IS_REPORTING_ERROR = true;
             reportSystemError(msg, type);
@@ -107,10 +157,188 @@ console.warn = function(...args) { captureLog('warn', args); originalConsoleWarn
 const originalConsoleError = console.error;
 console.error = function(...args) { captureLog('error', args); originalConsoleError.apply(console, args); };
 
+const originalConsoleInfo = console.info ? console.info.bind(console) : console.log.bind(console);
+console.info = function(...args) { captureLog('info', args); originalConsoleInfo(...args); };
+
+const originalConsoleDebug = console.debug ? console.debug.bind(console) : console.log.bind(console);
+console.debug = function(...args) { captureLog('debug', args); originalConsoleDebug(...args); };
+
 window.onerror = function(msg, url, line, col, error) {
     captureLog('fatal', [`${msg} (at ${url}:${line}:${col})`, error]);
     return false; // Let default handler run
 };
+
+window.addEventListener('unhandledrejection', (event) => {
+    captureLog('unhandled-rejection', ['Unhandled Promise Rejection:', event.reason]);
+});
+
+// Capture resource failures that often appear as "silent" UI issues (script/css/img/webview assets).
+window.addEventListener('error', (event) => {
+    try {
+        const target = event && event.target;
+        if (!target || target === window || !target.tagName) return;
+        const tag = String(target.tagName || '').toLowerCase();
+        const source = target.src || target.href || target.currentSrc || '(unknown source)';
+        captureLog('resource-error', [`Resource failed to load <${tag}>`, source]);
+    } catch (err) {
+        captureLog('warn', ['Resource error capture failed', err]);
+    }
+}, true);
+
+// Capture failed network responses and transport exceptions, even when callers do not console.error them.
+if (typeof window.fetch === 'function' && !window._FETCH_LOG_WRAPPED) {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async function(...args) {
+        const input = args[0];
+        const reqUrl = (typeof input === 'string')
+            ? input
+            : (input && typeof input === 'object' && input.url ? input.url : 'unknown_url');
+        try {
+            const response = await originalFetch(...args);
+            if (!response.ok) {
+                captureLog('network-error', [`HTTP ${response.status} ${response.statusText || ''}`.trim(), reqUrl]);
+            }
+            return response;
+        } catch (err) {
+            captureLog('network-error', [`Fetch failed`, reqUrl, err]);
+            throw err;
+        }
+    };
+    window._FETCH_LOG_WRAPPED = true;
+}
+
+// Optional helper for caught/swallowed errors in try/catch blocks.
+window.captureSilentError = function(error, context = 'Silent error captured') {
+    captureLog('silent-error', [context, error]);
+};
+
+const REPORT_PROBLEM_MODAL_ID = 'reportProblemModal';
+const REPORT_PROBLEM_FAB_ID = 'reportProblemFab';
+
+function formatConsoleHistorySnapshot() {
+    const history = Array.isArray(window.CONSOLE_HISTORY) ? window.CONSOLE_HISTORY : [];
+    if (history.length === 0) return 'No console history captured yet.';
+
+    return history.map(entry => {
+        const ts = entry && entry.time ? entry.time : new Date().toISOString();
+        const lvl = entry && entry.type ? String(entry.type).toUpperCase() : 'LOG';
+        const msg = entry && entry.msg ? String(entry.msg) : '';
+        return `[${ts}] [${lvl}] ${msg}`;
+    }).join('\n');
+}
+
+function ensureReportProblemUI() {
+    if (document.getElementById(REPORT_PROBLEM_FAB_ID)) return;
+
+    const html = `
+        <button id="${REPORT_PROBLEM_FAB_ID}" class="report-problem-fab" type="button" title="Report a problem" onclick="openReportProblemModal()">?</button>
+        <div id="${REPORT_PROBLEM_MODAL_ID}" class="modal-overlay hidden report-problem-overlay" style="z-index:12000;">
+            <div class="modal-box report-problem-box" role="dialog" aria-modal="true" aria-labelledby="reportProblemTitle">
+                <div class="report-problem-header">
+                    <h3 id="reportProblemTitle"><i class="fas fa-exclamation-circle"></i> Report Problem</h3>
+                    <button class="btn-secondary btn-sm" type="button" onclick="closeReportProblemModal()">&times;</button>
+                </div>
+                <p class="report-problem-copy">Tell us what happened. Console logs are captured automatically at the moment you open this report.</p>
+                <label for="reportProblemDetail" class="report-problem-label">Issue Details</label>
+                <textarea id="reportProblemDetail" class="report-problem-textarea" placeholder="Describe what you were doing, what you expected, and what happened..." rows="6"></textarea>
+                <label for="reportProblemConsole" class="report-problem-label">Console Snapshot (Auto)</label>
+                <textarea id="reportProblemConsole" class="report-problem-textarea report-problem-console" rows="10" readonly></textarea>
+                <div id="reportProblemMeta" class="report-problem-meta"></div>
+                <div class="report-problem-actions">
+                    <button class="btn-secondary" type="button" onclick="closeReportProblemModal()">Cancel</button>
+                    <button id="reportProblemSubmitBtn" class="btn-danger" type="button" onclick="submitReportProblem()"><i class="fas fa-paper-plane"></i> Submit Report</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', html);
+    const modal = document.getElementById(REPORT_PROBLEM_MODAL_ID);
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target && e.target.id === REPORT_PROBLEM_MODAL_ID) closeReportProblemModal();
+        });
+    }
+}
+
+window.openReportProblemModal = function() {
+    ensureReportProblemUI();
+    const modal = document.getElementById(REPORT_PROBLEM_MODAL_ID);
+    const detailEl = document.getElementById('reportProblemDetail');
+    const consoleEl = document.getElementById('reportProblemConsole');
+    const metaEl = document.getElementById('reportProblemMeta');
+    if (!modal || !detailEl || !consoleEl || !metaEl) return;
+
+    const snapshot = formatConsoleHistorySnapshot();
+    const activeSection = document.querySelector('section.active');
+    const activeTab = activeSection ? activeSection.id : 'unknown';
+    const user = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'Guest';
+
+    detailEl.value = '';
+    consoleEl.value = snapshot;
+    metaEl.innerText = `Captured: ${new Date().toLocaleString()} | User: ${user} | Tab: ${activeTab} | Version: ${window.APP_VERSION || 'Unknown'}`;
+
+    modal.classList.remove('hidden');
+    setTimeout(() => { detailEl.focus(); }, 10);
+};
+
+window.closeReportProblemModal = function() {
+    const modal = document.getElementById(REPORT_PROBLEM_MODAL_ID);
+    if (modal) modal.classList.add('hidden');
+};
+
+window.submitReportProblem = async function() {
+    const detailEl = document.getElementById('reportProblemDetail');
+    const consoleEl = document.getElementById('reportProblemConsole');
+    const submitBtn = document.getElementById('reportProblemSubmitBtn');
+    if (!detailEl || !consoleEl) return;
+
+    const issueDetail = detailEl.value.trim();
+    if (!issueDetail) {
+        alert("Please describe the issue before submitting.");
+        detailEl.focus();
+        return;
+    }
+
+    const activeSection = document.querySelector('section.active');
+    const activeTab = activeSection ? activeSection.id : 'unknown';
+    const summary = issueDetail.length > 240 ? `${issueDetail.substring(0, 240)}...` : issueDetail;
+    const payload = {
+        source: 'report_problem',
+        issueDetail,
+        consoleSnapshot: consoleEl.value || formatConsoleHistorySnapshot(),
+        pageUrl: window.location.href,
+        appVersion: window.APP_VERSION || 'Unknown',
+        activeTab
+    };
+
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+        if (typeof reportSystemError !== 'function') throw new Error("Reporting system unavailable.");
+        await reportSystemError(summary, 'user_report', payload);
+        if (typeof showToast === 'function') showToast("Problem report submitted.", "success");
+        closeReportProblemModal();
+    } catch (err) {
+        console.error("Problem report submission failed:", err);
+        if (typeof showToast === 'function') showToast("Failed to submit problem report.", "error");
+        else alert("Failed to submit problem report.");
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
+};
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById(REPORT_PROBLEM_MODAL_ID);
+        if (modal && !modal.classList.contains('hidden')) closeReportProblemModal();
+    }
+});
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureReportProblemUI);
+} else {
+    ensureReportProblemUI();
+}
 
 // Lock to prevent concurrent failovers destroying the boot cycle
 window._isSwitchingServers = false;
@@ -281,6 +509,7 @@ window.onload = async function() {
     if (typeof refreshAdaptiveViewportLayout === 'function') {
         refreshAdaptiveViewportLayout();
     }
+    ensureReportProblemUI();
 
     // --- INJECT GLOBAL VISUAL STYLES ---
     if (!document.getElementById('global-visuals')) {
@@ -375,9 +604,9 @@ window.onload = async function() {
             #study-quick-links { font-size: 0.9rem; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-main); cursor: pointer; font-weight: bold; }
             #study-close-btn { background: rgba(255, 82, 82, 0.1); color: #ff5252; border: 1px solid #ff5252; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
             #study-close-btn:hover { background: #ff5252; color: white; }
-            #study-webview-container { flex: 1; position: relative; }
-            .study-webview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
-            .study-webview.hidden { visibility: hidden; }
+            #study-webview-container { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+            .study-webview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; pointer-events: auto; background: #fff; }
+            .study-webview.hidden { display: none !important; visibility: hidden !important; pointer-events: none !important; }
             
             /* --- EXTERNAL APP WARNING --- */
             #external-app-warning-modal {
@@ -2022,7 +2251,7 @@ function showTab(id, btn) {
 
   if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'content-studio') {
       if (typeof showToast === 'function') {
-          showToast("Access denied: Content Studio is restricted to Admin and Super Admin.", "error");
+          showToast("Access denied: Content Creator is restricted to Admin and Super Admin.", "error");
       }
       return;
   }
@@ -2705,37 +2934,7 @@ window.performUpdateRestart = function() {
     restartAndInstall();
 };
 
-/* ================= INACTIVITY & DRAFT HANDLING ================= */
-
-window.cacheAndLogout = async function() {
-    console.log("Inactivity detected. Caching and logging out...");
-    
-    const isDemo = localStorage.getItem('DEMO_MODE') === 'true';
-
-    if (CURRENT_USER && typeof logAccessEvent === 'function') {
-        await logAccessEvent(CURRENT_USER.user, 'Timeout');
-    }
-    
-    // 1. Cache Assessment (If taking a test)
-    const takingView = document.getElementById('test-take-view');
-    if (takingView && takingView.classList.contains('active')) {
-        if (typeof saveAssessmentDraft === 'function') saveAssessmentDraft();
-    }
-    
-    // 2. Cache Test Builder (If creating a test)
-    const builderView = document.getElementById('test-builder');
-    if (builderView && builderView.classList.contains('active')) {
-        if (typeof saveBuilderDraft === 'function') saveBuilderDraft();
-    }
-
-    const limit = (CURRENT_USER && CURRENT_USER.idleTimeout) ? CURRENT_USER.idleTimeout : 15;
-    alert(`You have been logged out due to inactivity (${limit} mins).\n\nYour current work has been cached locally and will be restored when you log back in.`);
-    
-    sessionStorage.clear();
-    if (isDemo) localStorage.clear();
-    
-    window.location.reload();
-};
+/* ================= DRAFT HANDLING ================= */
 
 function checkForDrafts() {
     // If we are auto-restoring from an update, skip the prompts (handled in autoLogin)
@@ -2792,6 +2991,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.21": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Content Creator Media Pipeline:</strong> Added optional per-subject Video/Document toggles with source selection (<code>HTTP Link</code> or direct upload), plus built-in video/PDF upload flow to Supabase storage buckets.</li>
+                <li style="margin-bottom: 8px;"><strong>Engagement Submenu (Admin Only):</strong> Added a dedicated <strong>Engagement</strong> workspace showing per-user watcher breakdown and per-subject detail (plays, watch time, skips, last activity, and notes/questions).</li>
+                <li style="margin-bottom: 8px;"><strong>Timestamp Notes/Questions:</strong> Video player now supports pausing at current time to capture a note or question tied to that exact timestamp and user, then review/jump back from the annotation list.</li>
+                <li style="margin-bottom: 8px;"><strong>Global Problem Reporting:</strong> Added always-visible in-app report button with auto console snapshot capture and Super Admin review panel for submitted problem reports.</li>
+            </ul>`,
         "2.6.20": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Content Studio Module:</strong> Added a new isolated <code>content-studio</code> runtime with View + Builder flows, schedule-linked headers/subjects, and play/document controls.</li>

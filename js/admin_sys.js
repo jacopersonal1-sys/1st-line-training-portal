@@ -1059,6 +1059,7 @@ function openSuperAdminConfig() {
                             <div style="display:flex; gap:10px;">
                                 <button class="btn-secondary btn-sm" onclick="AICore.openConsole()"><i class="fas fa-terminal"></i> Launch Console</button>
                                 <button class="btn-danger btn-sm" onclick="viewSystemErrors()"><i class="fas fa-bug"></i> Error Reports</button>
+                                <button class="btn-danger btn-sm" style="background:#c0392b;" onclick="viewProblemReports()"><i class="fas fa-question-circle"></i> Problem Reports</button>
                                 <button class="btn-warning btn-sm" onclick="openDevTools()"><i class="fas fa-code"></i> DevTools</button>
                             </div>
                         </div>
@@ -2357,11 +2358,34 @@ async function unbanClient(id) {
 }
 
 // --- SYSTEM ERROR REPORTS ---
+function isProblemReportEntry(report) {
+    if (!report || typeof report !== 'object') return false;
+    return report.type === 'user_report' || report.source === 'report_problem';
+}
+
+function getErrorReportCollections() {
+    const allReports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    const problemReports = allReports.filter(isProblemReportEntry);
+    const systemReports = allReports.filter(r => !isProblemReportEntry(r));
+    return { allReports, systemReports, problemReports };
+}
+
+function escapeReportHtml(value) {
+    const str = String(value || '');
+    if (typeof escapeHTML === 'function') return escapeHTML(str);
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 async function viewSystemErrors() {
     // Force pull latest errors to ensure list is populated
     if(typeof loadFromServer === 'function') await loadFromServer(true);
 
-    const reports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    const { systemReports: reports } = getErrorReportCollections();
     
     // Update "Last Seen" count to stop notifications
     localStorage.setItem('last_seen_error_count', reports.length.toString());
@@ -2391,12 +2415,16 @@ async function viewSystemErrors() {
         // Show newest first
         reports.slice().reverse().forEach(r => {
             const time = new Date(r.timestamp).toLocaleString();
-            const safeMsg = r.error.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const rawMsg = String(r.error || 'Unknown error');
+            const safeMsg = rawMsg.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const safeDisplayMsg = escapeReportHtml(rawMsg.length > 180 ? `${rawMsg.slice(0, 180)}...` : rawMsg);
+            const safeUser = escapeReportHtml(r.user || 'Unknown');
+            const safeRole = escapeReportHtml(r.role || 'Unknown');
             
             html += `<tr>
                 <td style="font-size:0.8rem; white-space:nowrap;">${time}</td>
-                <td><strong>${r.user}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${r.role}</span></td>
-                <td style="font-family:monospace; font-size:0.8rem; color:#ff5252;">${r.error}</td>
+                <td><strong>${safeUser}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${safeRole}</span></td>
+                <td style="font-family:monospace; font-size:0.8rem; color:#ff5252;">${safeDisplayMsg}</td>
                 <td><button class="btn-primary btn-sm" onclick="AICore.analyzeError('${safeMsg}')" title="Ask AI to Diagnose"><i class="fas fa-robot"></i> Analyze</button></td>
             </tr>`;
         });
@@ -2407,19 +2435,146 @@ async function viewSystemErrors() {
 }
 
 async function clearSystemErrors() {
-    if(!confirm("Clear all error reports?")) return;
-    localStorage.setItem('error_reports', '[]');
-    
-    // FIX: Explicitly wipe the table for Row-Level Sync to ensure they don't reappear
-    if (window.supabaseClient) {
-        const { error } = await window.supabaseClient
-            .from('error_reports')
-            .delete()
-            .neq('id', 'placeholder'); // Delete all rows
+    if(!confirm("Clear all system error reports?")) return;
+    const { allReports, problemReports } = getErrorReportCollections();
+    const removed = allReports.filter(r => !isProblemReportEntry(r));
+    localStorage.setItem('error_reports', JSON.stringify(problemReports));
+
+    if (window.supabaseClient && removed.length > 0) {
+        const ids = removed.map(r => r.id).filter(Boolean);
+        const CHUNK = 100;
+        for (let i = 0; i < ids.length; i += CHUNK) {
+            const slice = ids.slice(i, i + CHUNK);
+            await window.supabaseClient.from('error_reports').delete().in('id', slice);
+        }
     }
 
-    document.getElementById('errorReportModal').remove();
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['error_reports'], true, true);
+    }
+
+    const modal = document.getElementById('errorReportModal');
+    if (modal) modal.remove();
     viewSystemErrors();
+}
+
+async function viewProblemReports() {
+    if(typeof loadFromServer === 'function') await loadFromServer(true);
+    const { problemReports: reports } = getErrorReportCollections();
+    const uniqueUsers = new Set(reports.map(r => r.user)).size;
+
+    let html = `<div class="modal-overlay" id="problemReportModal" style="z-index:10002;">
+        <div class="modal-box" style="width:980px; max-height:90vh; display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <div>
+                    <h3 style="margin:0; color:#ff6b6b;"><i class="fas fa-question-circle"></i> Problem Reports</h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} reports from ${uniqueUsers} unique users</div>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn-warning btn-sm" onclick="clearProblemReports()">Clear Problem Reports</button>
+                    <button class="btn-secondary btn-sm" onclick="document.getElementById('problemReportModal').remove()">&times;</button>
+                </div>
+            </div>
+            <div class="table-responsive" style="flex:1; overflow-y:auto;">
+                <table class="admin-table">
+                    <thead><tr><th>Time</th><th>User</th><th>Issue</th><th>Context</th><th>Action</th></tr></thead>
+                    <tbody>`;
+
+    if (reports.length === 0) {
+        html += `<tr><td colspan="5" class="text-center" style="color:var(--text-muted);">No problem reports submitted.</td></tr>`;
+    } else {
+        reports.slice().reverse().forEach(r => {
+            const time = new Date(r.timestamp).toLocaleString();
+            const safeUser = escapeReportHtml(r.user || 'Unknown');
+            const safeRole = escapeReportHtml(r.role || 'Unknown');
+            const issueRaw = String(r.issueDetail || r.error || 'No issue details provided.');
+            const issuePreview = issueRaw.length > 150 ? `${issueRaw.slice(0, 150)}...` : issueRaw;
+            const safeIssue = escapeReportHtml(issuePreview);
+            const context = `${r.activeTab || 'unknown tab'} | v${r.appVersion || 'Unknown'}`;
+            const safeContext = escapeReportHtml(context);
+            const safeId = String(r.id || '').replace(/'/g, "\\'");
+
+            html += `<tr>
+                <td style="font-size:0.8rem; white-space:nowrap;">${time}</td>
+                <td><strong>${safeUser}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${safeRole}</span></td>
+                <td style="font-size:0.85rem;">${safeIssue}</td>
+                <td style="font-size:0.78rem; color:var(--text-muted);">${safeContext}</td>
+                <td><button class="btn-primary btn-sm" onclick="viewProblemReportDetails('${safeId}')"><i class="fas fa-eye"></i> Details</button></td>
+            </tr>`;
+        });
+    }
+
+    html += `</tbody></table></div></div></div>`;
+    const existing = document.getElementById('problemReportModal');
+    if (existing) existing.remove();
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function viewProblemReportDetails(reportId) {
+    const { problemReports } = getErrorReportCollections();
+    const report = problemReports.find(r => String(r.id) === String(reportId));
+    if (!report) {
+        alert("Problem report not found.");
+        return;
+    }
+
+    const safeIssueDetail = escapeReportHtml(report.issueDetail || report.error || 'No issue details provided.');
+    const safeConsole = escapeReportHtml(report.consoleSnapshot || 'No console snapshot was included.');
+    const safeUser = escapeReportHtml(report.user || 'Unknown');
+    const safeRole = escapeReportHtml(report.role || 'Unknown');
+    const safeTab = escapeReportHtml(report.activeTab || 'unknown');
+    const safeVersion = escapeReportHtml(report.appVersion || 'Unknown');
+    const safeUrl = escapeReportHtml(report.pageUrl || 'Unknown');
+    const submittedAt = new Date(report.timestamp).toLocaleString();
+
+    const html = `<div class="modal-overlay" id="problemReportDetailModal" style="z-index:10003;">
+        <div class="modal-box" style="width:980px; max-height:92vh; display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0; color:#ff6b6b;"><i class="fas fa-file-alt"></i> Problem Report Detail</h3>
+                <button class="btn-secondary btn-sm" onclick="document.getElementById('problemReportDetailModal').remove()">&times;</button>
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">
+                <strong>User:</strong> ${safeUser} (${safeRole}) | <strong>Submitted:</strong> ${submittedAt}<br>
+                <strong>Tab:</strong> ${safeTab} | <strong>Version:</strong> ${safeVersion}<br>
+                <strong>URL:</strong> ${safeUrl}
+            </div>
+            <label style="font-weight:bold; margin-bottom:6px;">Issue Details</label>
+            <textarea readonly style="width:100%; min-height:130px; resize:vertical; margin-bottom:12px;">${safeIssueDetail}</textarea>
+            <label style="font-weight:bold; margin-bottom:6px;">Console Snapshot</label>
+            <textarea readonly style="width:100%; min-height:320px; resize:vertical; font-family:monospace; font-size:0.78rem;">${safeConsole}</textarea>
+            <div style="text-align:right; margin-top:12px;">
+                <button class="btn-secondary" onclick="document.getElementById('problemReportDetailModal').remove()">Close</button>
+            </div>
+        </div>
+    </div>`;
+
+    const existing = document.getElementById('problemReportDetailModal');
+    if (existing) existing.remove();
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function clearProblemReports() {
+    if (!confirm("Clear all problem reports?")) return;
+    const { allReports, systemReports } = getErrorReportCollections();
+    const removed = allReports.filter(isProblemReportEntry);
+    localStorage.setItem('error_reports', JSON.stringify(systemReports));
+
+    if (window.supabaseClient && removed.length > 0) {
+        const ids = removed.map(r => r.id).filter(Boolean);
+        const CHUNK = 100;
+        for (let i = 0; i < ids.length; i += CHUNK) {
+            const slice = ids.slice(i, i + CHUNK);
+            await window.supabaseClient.from('error_reports').delete().in('id', slice);
+        }
+    }
+
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['error_reports'], true, true);
+    }
+
+    const modal = document.getElementById('problemReportModal');
+    if (modal) modal.remove();
+    viewProblemReports();
 }
 
 window.testServerConnections = async function() {

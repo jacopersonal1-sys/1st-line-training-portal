@@ -2,7 +2,6 @@
 
 const ViewUI = {
     state: {
-        selectedScheduleKey: '',
         selectedSubjectId: '',
         modal: {
             open: false,
@@ -15,24 +14,13 @@ const ViewUI = {
     },
 
     initDefaultSelection: function() {
-        const options = DataService.getScheduleOptions();
-        if (!this.state.selectedScheduleKey && options.length) {
-            this.state.selectedScheduleKey = options[0].key;
-        }
-
-        const entry = DataService.getEntryByScheduleKey(this.state.selectedScheduleKey);
+        const entry = DataService.getPrimaryEntry();
         if (entry && entry.subjects && entry.subjects.length) {
             const exists = entry.subjects.some(s => s.id === this.state.selectedSubjectId);
             if (!exists) this.state.selectedSubjectId = entry.subjects[0].id;
         } else {
             this.state.selectedSubjectId = '';
         }
-    },
-
-    setScheduleKey: function(value) {
-        this.state.selectedScheduleKey = value;
-        this.state.selectedSubjectId = '';
-        App.render();
     },
 
     setSubjectId: function(value) {
@@ -42,18 +30,35 @@ const ViewUI = {
         if (row && row.scrollIntoView) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
     },
 
-    openDocument: function(url) {
-        if (!url) {
+    formatTimestamp: function(seconds) {
+        const total = Math.max(0, Math.floor(Number(seconds || 0)));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    },
+
+    openDocument: async function(subjectId) {
+        const entry = DataService.getPrimaryEntry();
+        const subject = entry ? (entry.subjects || []).find(s => s.id === subjectId) : null;
+        if (!subject || !subject.hasDocument) return;
+
+        const resolvedUrl = await DataService.resolveStorageUrl(subject.docBucket, subject.docPath, subject.docUrl);
+        if (!resolvedUrl) {
             alert('No document link configured for this subject yet.');
             return;
         }
-        window.open(url, '_blank');
+        window.open(resolvedUrl, '_blank');
     },
 
-    openVideo: function(entryId, subjectId) {
+    openVideo: async function(entryId, subjectId) {
         const entry = DataService.getEntries().find(e => e.id === entryId);
         const subject = entry ? (entry.subjects || []).find(s => s.id === subjectId) : null;
-        if (!subject || !subject.videoUrl) {
+        if (!subject || !subject.hasVideo) return;
+
+        const resolvedUrl = await DataService.resolveStorageUrl(subject.videoBucket, subject.videoPath, subject.videoUrl);
+        if (!resolvedUrl) {
             alert('No video link configured for this subject yet.');
             return;
         }
@@ -67,10 +72,12 @@ const ViewUI = {
             entryId,
             watchBuffer: 0,
             lastTime: 0,
-            seekStart: null
+            seekStart: null,
+            videoUrl: resolvedUrl
         };
         App.render();
         this.bindVideoTracker();
+        this.renderAnnotationList();
     },
 
     closeVideo: function() {
@@ -137,6 +144,77 @@ const ViewUI = {
         video.addEventListener('ended', onEnded);
     },
 
+    jumpToAnnotation: function(seconds) {
+        const video = document.getElementById('cs-video-player');
+        if (!video) return;
+        const sec = Math.max(0, Number(seconds || 0));
+        video.currentTime = sec;
+        video.play().catch(() => {});
+    },
+
+    renderAnnotationList: function() {
+        const listEl = document.getElementById('cs-video-annotation-list');
+        if (!listEl || !this.state.modal.open) return;
+
+        const username = (AppContext.user && AppContext.user.user) ? AppContext.user.user : 'unknown_user';
+        const notes = DataService.getSubjectAnnotations(this.state.modal.entryId, this.state.modal.subjectId, username);
+        if (!notes.length) {
+            listEl.innerHTML = `<div class="cs-note-empty">No notes/questions yet for this video.</div>`;
+            return;
+        }
+
+        const rows = notes.map(n => {
+            const chipClass = n.type === 'question' ? 'question' : 'note';
+            const typeLabel = n.type === 'question' ? 'Question' : 'Note';
+            const ts = this.formatTimestamp(n.timestampSec);
+            const safeText = App.escapeHtml(n.text || '');
+            const safeStamp = App.escapeHtml(this.formatDateTime ? this.formatDateTime(n.createdAt) : (n.createdAt || ''));
+            return `
+                <div class="cs-note-item">
+                    <div class="cs-note-meta">
+                        <span class="cs-note-chip ${chipClass}">${typeLabel}</span>
+                        <button type="button" class="btn-secondary btn-sm" onclick="ViewUI.jumpToAnnotation(${Number(n.timestampSec || 0)})">${ts}</button>
+                        <span class="cs-note-date">${safeStamp}</span>
+                    </div>
+                    <div class="cs-note-text">${safeText}</div>
+                </div>
+            `;
+        }).join('');
+
+        listEl.innerHTML = rows;
+    },
+
+    addNoteQuestionAtCurrentTime: async function() {
+        const video = document.getElementById('cs-video-player');
+        if (!video || !this.state.modal.open) return;
+
+        video.pause();
+        this.flushWatchBuffer(video);
+        const current = Number(video.currentTime || 0);
+        const isQuestion = confirm('Create as Question? Click OK for Question, Cancel for Note.');
+        const type = isQuestion ? 'question' : 'note';
+        const text = prompt(`Add ${type} at ${this.formatTimestamp(current)}:`, '');
+        if (text === null) return;
+
+        const clean = String(text || '').trim();
+        if (!clean) return;
+        const username = (AppContext.user && AppContext.user.user) ? AppContext.user.user : 'unknown_user';
+
+        const result = await DataService.addVideoAnnotation(
+            this.state.modal.entryId,
+            this.state.modal.subjectId,
+            username,
+            type,
+            clean,
+            current
+        );
+        if (!result.ok) {
+            alert(result.message || 'Could not save note/question.');
+            return;
+        }
+        this.renderAnnotationList();
+    },
+
     formatDuration: function(seconds) {
         const total = Math.max(0, Math.round(Number(seconds || 0)));
         const mins = Math.floor(total / 60);
@@ -144,11 +222,17 @@ const ViewUI = {
         return `${mins}m ${secs.toString().padStart(2, '0')}s`;
     },
 
+    formatDateTime: function(value) {
+        if (!value) return '-';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '-';
+        return d.toLocaleString();
+    },
+
     render: function() {
         this.initDefaultSelection();
         const esc = App.escapeHtml;
-        const options = DataService.getScheduleOptions();
-        const entry = DataService.getEntryByScheduleKey(this.state.selectedScheduleKey);
+        const entry = DataService.getPrimaryEntry();
         const subjects = entry ? (entry.subjects || []) : [];
         const username = (AppContext.user && AppContext.user.user) ? AppContext.user.user : 'unknown_user';
 
@@ -156,17 +240,24 @@ const ViewUI = {
             const userStats = DataService.getUserSubjectAnalytics(entry.id, subject.id, username);
             const isActive = this.state.selectedSubjectId === subject.id;
             const textHtml = ContentStudioUtils.sanitizeRichHtml(subject.textHtml || '');
+            const showVideoIcon = !!subject.hasVideo && (!!subject.videoUrl || !!subject.videoPath);
+            const showDocIcon = !!subject.hasDocument && (!!subject.docUrl || !!subject.docPath);
+
             return `
                 <div class="cs-subject-row ${isActive ? 'is-active' : ''}" data-subject-id="${esc(subject.id)}">
                     <div class="cs-subject-index">${esc(subject.code)}</div>
                     <div class="cs-subject-text">${textHtml || '<span class="cs-muted">No subject text captured.</span>'}</div>
                     <div class="cs-subject-actions">
-                        <button class="cs-icon-btn" title="Play Video" onclick="ViewUI.openVideo('${esc(entry.id)}', '${esc(subject.id)}')">
-                            <i class="fas fa-play"></i>
-                        </button>
-                        <button class="cs-icon-btn" title="Open Document" onclick="ViewUI.openDocument('${esc(subject.docUrl || '')}')">
-                            <i class="fas fa-link"></i>
-                        </button>
+                        ${showVideoIcon ? `
+                            <button class="cs-icon-btn" title="Play Video" onclick="ViewUI.openVideo('${esc(entry.id)}', '${esc(subject.id)}')">
+                                <i class="fas fa-play"></i>
+                            </button>
+                        ` : ''}
+                        ${showDocIcon ? `
+                            <button class="cs-icon-btn" title="Open Document" onclick="ViewUI.openDocument('${esc(subject.id)}')">
+                                <i class="fas fa-link"></i>
+                            </button>
+                        ` : ''}
                     </div>
                     <div class="cs-subject-metrics">
                         Watched ${this.formatDuration(userStats.watchSeconds)} | Skips ${userStats.skips}
@@ -188,7 +279,16 @@ const ViewUI = {
                             <h3>${esc(subject.code)} - ${esc(ContentStudioUtils.stripHtml(subject.textHtml).slice(0, 100))}</h3>
                             <button class="cs-icon-btn" onclick="ViewUI.closeVideo()"><i class="fas fa-xmark"></i></button>
                         </div>
-                        <video id="cs-video-player" controls autoplay playsinline src="${esc(subject.videoUrl || '')}" style="width:100%; border-radius:10px; background:#000;"></video>
+                        <div class="cs-video-actions">
+                            <button type="button" class="btn-secondary btn-sm" onclick="ViewUI.addNoteQuestionAtCurrentTime()">
+                                <i class="fas fa-note-sticky"></i> Add Note / Question
+                            </button>
+                        </div>
+                        <video id="cs-video-player" controls autoplay playsinline src="${esc(this.state.modal.videoUrl || '')}" style="width:100%; border-radius:10px; background:#000;"></video>
+                        <div class="cs-note-panel">
+                            <h4>My Notes & Questions</h4>
+                            <div id="cs-video-annotation-list"></div>
+                        </div>
                     </div>
                 </div>
             `;
@@ -197,13 +297,6 @@ const ViewUI = {
         return `
             <div class="cs-shell">
                 <div class="cs-toolbar">
-                    <div class="cs-field">
-                        <label>Schedule Timeline Item</label>
-                        <select onchange="ViewUI.setScheduleKey(this.value)">
-                            <option value="">-- Select Timeline Item --</option>
-                            ${options.map(opt => `<option value="${esc(opt.key)}" ${this.state.selectedScheduleKey === opt.key ? 'selected' : ''}>${esc(opt.label)}</option>`).join('')}
-                        </select>
-                    </div>
                     <div class="cs-field">
                         <label>Subjects</label>
                         <select onchange="ViewUI.setSubjectId(this.value)" ${subjects.length ? '' : 'disabled'}>
@@ -216,16 +309,16 @@ const ViewUI = {
                 ${entry ? `
                     <div class="cs-document-shell">
                         <div class="cs-doc-header">
-                            <h2>${esc(entry.header || entry.scheduleLabel || 'Header goes here')}</h2>
+                            <h2>${esc(entry.header || 'Content Creator')}</h2>
                         </div>
                         <div class="cs-doc-body">
-                            ${subjectRows || '<p class="cs-muted">No subjects have been built for this timeline item yet. Open Builder to add subjects.</p>'}
+                            ${subjectRows || '<p class="cs-muted">No subjects have been built yet. Open Builder to add subjects.</p>'}
                         </div>
                     </div>
                 ` : `
                     <div class="cs-empty">
-                        <h3>Nothing linked yet</h3>
-                        <p>Select a timeline item above. If subjects were not built yet, use the Builder tab to create the header and subject list.</p>
+                        <h3>No content yet</h3>
+                        <p>Use the Builder tab to create a header and subject list.</p>
                     </div>
                 `}
             </div>

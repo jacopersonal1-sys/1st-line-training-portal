@@ -2,51 +2,71 @@
 
 const BuilderUI = {
     state: {
-        selectedScheduleKey: '',
+        uploading: {
+            video: false,
+            document: false
+        },
         form: {
             id: '',
             code: '',
             textHtml: '',
+            hasVideo: false,
+            videoMode: 'url',
             videoUrl: '',
-            docUrl: ''
+            videoPath: '',
+            videoBucket: '',
+            hasDocument: false,
+            docMode: 'url',
+            docUrl: '',
+            docPath: '',
+            docBucket: ''
         }
     },
 
     initDefault: function() {
-        const options = DataService.getScheduleOptions();
-        if (!this.state.selectedScheduleKey && options.length) {
-            this.state.selectedScheduleKey = options[0].key;
-        }
-
-        const entry = DataService.getEntryByScheduleKey(this.state.selectedScheduleKey);
+        const entry = DataService.getPrimaryEntry();
         if (!this.state.form.code) {
             const base = (entry && entry.subjects && entry.subjects.length + 1) || 1;
             this.state.form.code = `1.1.${base}`;
         }
+        if (!this.state.form.videoMode) this.state.form.videoMode = 'url';
+        if (!this.state.form.docMode) this.state.form.docMode = 'url';
     },
 
-    setScheduleKey: function(value) {
-        this.state.selectedScheduleKey = value;
-        this.resetSubjectForm();
-        App.render();
-    },
+    _syncFormFromInputs: function() {
+        const codeInput = document.getElementById('cs-subject-code');
+        const editor = document.getElementById('cs-subject-editor');
+        const videoInput = document.getElementById('cs-subject-video');
+        const docInput = document.getElementById('cs-subject-doc');
+        const videoUploaded = document.getElementById('cs-subject-video-uploaded');
+        const docUploaded = document.getElementById('cs-subject-doc-uploaded');
 
-    getSelectedScheduleOption: function() {
-        return DataService.getScheduleOptions().find(o => o.key === this.state.selectedScheduleKey) || null;
+        if (codeInput) this.state.form.code = codeInput.value;
+        if (editor) this.state.form.textHtml = editor.innerHTML;
+
+        if (this.state.form.videoMode === 'url') {
+            if (videoInput) this.state.form.videoUrl = videoInput.value;
+            this.state.form.videoPath = '';
+            this.state.form.videoBucket = '';
+        } else {
+            if (videoUploaded) this.state.form.videoUrl = videoUploaded.value;
+        }
+
+        if (this.state.form.docMode === 'url') {
+            if (docInput) this.state.form.docUrl = docInput.value;
+            this.state.form.docPath = '';
+            this.state.form.docBucket = '';
+        } else {
+            if (docUploaded) this.state.form.docUrl = docUploaded.value;
+        }
     },
 
     saveHeader: async function() {
-        const option = this.getSelectedScheduleOption();
-        if (!option) {
-            alert('Select a schedule timeline item first.');
-            return;
-        }
-
         const headerInput = document.getElementById('cs-header-input');
         const header = headerInput ? headerInput.value : '';
         const result = await DataService.upsertEntryMeta({
-            scheduleKey: option.key,
-            scheduleLabel: option.label,
+            scheduleKey: 'content_creator_default',
+            scheduleLabel: 'Content Creator',
             header
         });
         if (!result.ok) {
@@ -57,15 +77,25 @@ const BuilderUI = {
     },
 
     editSubject: function(subjectId) {
-        const subject = DataService.getSubjectById(this.state.selectedScheduleKey, subjectId);
+        const entry = DataService.getPrimaryEntry();
+        if (!entry) return;
+        const subject = DataService.getSubjectById(entry.scheduleKey, subjectId);
         if (!subject) return;
 
         this.state.form = {
             id: subject.id,
             code: subject.code || '',
             textHtml: subject.textHtml || '',
+            hasVideo: !!subject.hasVideo,
+            videoMode: subject.videoMode || (subject.videoPath ? 'upload' : 'url'),
             videoUrl: subject.videoUrl || '',
-            docUrl: subject.docUrl || ''
+            videoPath: subject.videoPath || '',
+            videoBucket: subject.videoBucket || '',
+            hasDocument: !!subject.hasDocument,
+            docMode: subject.docMode || (subject.docPath ? 'upload' : 'url'),
+            docUrl: subject.docUrl || '',
+            docPath: subject.docPath || '',
+            docBucket: subject.docBucket || ''
         };
         App.render();
         const editor = document.getElementById('cs-subject-editor');
@@ -77,42 +107,158 @@ const BuilderUI = {
             id: '',
             code: '',
             textHtml: '',
+            hasVideo: false,
+            videoMode: 'url',
             videoUrl: '',
-            docUrl: ''
+            videoPath: '',
+            videoBucket: '',
+            hasDocument: false,
+            docMode: 'url',
+            docUrl: '',
+            docPath: '',
+            docBucket: ''
         };
+        this.state.uploading.video = false;
+        this.state.uploading.document = false;
     },
 
-    saveSubject: async function() {
-        const option = this.getSelectedScheduleOption();
-        if (!option) {
-            alert('Select a schedule timeline item first.');
+    setHasVideo: function(flag) {
+        this._syncFormFromInputs();
+        this.state.form.hasVideo = !!flag;
+        if (!flag) {
+            this.state.form.videoUrl = '';
+            this.state.form.videoPath = '';
+            this.state.form.videoBucket = '';
+        }
+        App.render();
+    },
+
+    setHasDocument: function(flag) {
+        this._syncFormFromInputs();
+        this.state.form.hasDocument = !!flag;
+        if (!flag) {
+            this.state.form.docUrl = '';
+            this.state.form.docPath = '';
+            this.state.form.docBucket = '';
+        }
+        App.render();
+    },
+
+    setVideoMode: function(mode) {
+        this._syncFormFromInputs();
+        this.state.form.videoMode = (mode === 'upload') ? 'upload' : 'url';
+        if (this.state.form.videoMode === 'url') {
+            this.state.form.videoPath = '';
+            this.state.form.videoBucket = '';
+        }
+        App.render();
+    },
+
+    setDocMode: function(mode) {
+        this._syncFormFromInputs();
+        this.state.form.docMode = (mode === 'upload') ? 'upload' : 'url';
+        if (this.state.form.docMode === 'url') {
+            this.state.form.docPath = '';
+            this.state.form.docBucket = '';
+        }
+        App.render();
+    },
+
+    uploadVideoFile: async function() {
+        this._syncFormFromInputs();
+        const fileInput = document.getElementById('cs-subject-video-file');
+        const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+        if (!file) {
+            alert('Select a video file first.');
             return;
         }
 
-        const codeInput = document.getElementById('cs-subject-code');
-        const videoInput = document.getElementById('cs-subject-video');
-        const docInput = document.getElementById('cs-subject-doc');
-        const editor = document.getElementById('cs-subject-editor');
+        this.state.uploading.video = true;
+        App.render();
+        try {
+            const res = await DataService.uploadVideoFile(file);
+            if (!res.ok) {
+                alert(res.message || 'Video upload failed.');
+                return;
+            }
+            this.state.form.hasVideo = true;
+            this.state.form.videoMode = 'upload';
+            this.state.form.videoUrl = res.url || '';
+            this.state.form.videoPath = res.path || '';
+            this.state.form.videoBucket = res.bucket || '';
+        } finally {
+            this.state.uploading.video = false;
+            App.render();
+        }
+    },
+
+    uploadDocumentFile: async function() {
+        this._syncFormFromInputs();
+        const fileInput = document.getElementById('cs-subject-doc-file');
+        const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+        if (!file) {
+            alert('Select a PDF file first.');
+            return;
+        }
+
+        const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
+            || String(file.name || '').toLowerCase().endsWith('.pdf');
+        if (!isPdf) {
+            alert('Only PDF files are allowed for document upload.');
+            return;
+        }
+
+        this.state.uploading.document = true;
+        App.render();
+        try {
+            const res = await DataService.uploadDocumentFile(file);
+            if (!res.ok) {
+                alert(res.message || 'Document upload failed.');
+                return;
+            }
+            this.state.form.hasDocument = true;
+            this.state.form.docMode = 'upload';
+            this.state.form.docUrl = res.url || '';
+            this.state.form.docPath = res.path || '';
+            this.state.form.docBucket = res.bucket || '';
+        } finally {
+            this.state.uploading.document = false;
+            App.render();
+        }
+    },
+
+    saveSubject: async function() {
+        this._syncFormFromInputs();
 
         const payload = {
             id: this.state.form.id || '',
-            code: codeInput ? codeInput.value : this.state.form.code,
-            textHtml: editor ? editor.innerHTML : this.state.form.textHtml,
-            videoUrl: videoInput ? videoInput.value : this.state.form.videoUrl,
-            docUrl: docInput ? docInput.value : this.state.form.docUrl
+            code: this.state.form.code,
+            textHtml: this.state.form.textHtml,
+            hasVideo: !!this.state.form.hasVideo,
+            videoMode: this.state.form.videoMode,
+            videoUrl: this.state.form.videoUrl,
+            videoPath: this.state.form.videoPath,
+            videoBucket: this.state.form.videoBucket,
+            hasDocument: !!this.state.form.hasDocument,
+            docMode: this.state.form.docMode,
+            docUrl: this.state.form.docUrl,
+            docPath: this.state.form.docPath,
+            docBucket: this.state.form.docBucket
         };
 
         const headerInput = document.getElementById('cs-header-input');
-        const currentEntry = DataService.getEntryByScheduleKey(option.key);
+        const currentEntry = DataService.getPrimaryEntry();
         if (!currentEntry) {
             await DataService.upsertEntryMeta({
-                scheduleKey: option.key,
-                scheduleLabel: option.label,
-                header: (headerInput && headerInput.value) ? headerInput.value : option.label
+                scheduleKey: 'content_creator_default',
+                scheduleLabel: 'Content Creator',
+                header: (headerInput && headerInput.value) ? headerInput.value : 'Content Creator'
             });
         }
 
-        const result = await DataService.upsertSubject(option.key, payload);
+        const targetEntry = DataService.getPrimaryEntry();
+        const targetKey = targetEntry ? targetEntry.scheduleKey : 'content_creator_default';
+        const result = await DataService.upsertSubject(targetKey, payload);
         if (!result.ok) {
             alert(result.message || 'Could not save subject.');
             return;
@@ -124,7 +270,9 @@ const BuilderUI = {
 
     deleteSubject: async function(subjectId) {
         if (!confirm('Delete this subject?')) return;
-        const result = await DataService.deleteSubject(this.state.selectedScheduleKey, subjectId);
+        const entry = DataService.getPrimaryEntry();
+        if (!entry) return;
+        const result = await DataService.deleteSubject(entry.scheduleKey, subjectId);
         if (!result.ok) {
             alert(result.message || 'Could not delete subject.');
             return;
@@ -133,11 +281,22 @@ const BuilderUI = {
         App.render();
     },
 
+    _renderToggleButtons: function(name, isYes, yesFn, noFn) {
+        return `
+            <div class="cs-toggle-row">
+                <span class="cs-toggle-title">${name}</span>
+                <div class="cs-toggle-group">
+                    <button type="button" class="cs-toggle-btn ${isYes ? 'active' : ''}" onclick="${yesFn}">Yes</button>
+                    <button type="button" class="cs-toggle-btn ${!isYes ? 'active' : ''}" onclick="${noFn}">No</button>
+                </div>
+            </div>
+        `;
+    },
+
     render: function() {
         this.initDefault();
         const esc = App.escapeHtml;
-        const options = DataService.getScheduleOptions();
-        const entry = DataService.getEntryByScheduleKey(this.state.selectedScheduleKey);
+        const entry = DataService.getPrimaryEntry();
         const subjects = entry ? (entry.subjects || []) : [];
 
         const currentCode = this.state.form.code || `1.1.${subjects.length + 1}`;
@@ -149,13 +308,16 @@ const BuilderUI = {
             const skips = allStats.reduce((sum, r) => sum + Number(r.skips || 0), 0);
             const plays = allStats.reduce((sum, r) => sum + Number(r.plays || 0), 0);
 
+            const videoStatus = subject.hasVideo ? (subject.videoUrl ? 'Enabled' : 'Enabled (No Link)') : 'Disabled';
+            const docStatus = subject.hasDocument ? (subject.docUrl ? 'Enabled' : 'Enabled (No Link)') : 'Disabled';
+
             return `
                 <tr>
                     <td>${idx + 1}</td>
                     <td>${esc(subject.code)}</td>
                     <td>${esc(ContentStudioUtils.stripHtml(subject.textHtml).slice(0, 120))}</td>
-                    <td>${esc(subject.videoUrl || '')}</td>
-                    <td>${esc(subject.docUrl || '')}</td>
+                    <td>${esc(videoStatus)}</td>
+                    <td>${esc(docStatus)}</td>
                     <td>Plays ${plays} | Watch ${Math.round(watch)}s | Skips ${skips}</td>
                     <td class="cs-actions-cell">
                         <button class="btn-secondary btn-sm" onclick="BuilderUI.editSubject('${esc(subject.id)}')"><i class="fas fa-pen"></i></button>
@@ -165,19 +327,72 @@ const BuilderUI = {
             `;
         }).join('');
 
+        const videoControls = this.state.form.hasVideo ? `
+            <div class="cs-upload-box">
+                <div class="cs-toggle-row">
+                    <span class="cs-toggle-title">Video Source</span>
+                    <div class="cs-toggle-group">
+                        <button type="button" class="cs-toggle-btn ${this.state.form.videoMode === 'url' ? 'active' : ''}" onclick="BuilderUI.setVideoMode('url')">HTTP Link</button>
+                        <button type="button" class="cs-toggle-btn ${this.state.form.videoMode === 'upload' ? 'active' : ''}" onclick="BuilderUI.setVideoMode('upload')">Upload</button>
+                    </div>
+                </div>
+
+                ${this.state.form.videoMode === 'url' ? `
+                    <div class="cs-field">
+                        <label>Video Link</label>
+                        <input id="cs-subject-video" type="text" value="${esc(this.state.form.videoUrl || '')}" placeholder="https://...">
+                    </div>
+                ` : `
+                    <div class="cs-upload-row">
+                        <input id="cs-subject-video-file" type="file" accept="video/*">
+                        <button type="button" class="btn-secondary" onclick="BuilderUI.uploadVideoFile()" ${this.state.uploading.video ? 'disabled' : ''}>
+                            ${this.state.uploading.video ? '<i class="fas fa-circle-notch fa-spin"></i> Uploading...' : '<i class="fas fa-upload"></i> Upload Video'}
+                        </button>
+                    </div>
+                    <div class="cs-field">
+                        <label>Uploaded Video URL</label>
+                        <input id="cs-subject-video-uploaded" type="text" value="${esc(this.state.form.videoUrl || '')}" readonly>
+                    </div>
+                `}
+            </div>
+        ` : '';
+
+        const documentControls = this.state.form.hasDocument ? `
+            <div class="cs-upload-box">
+                <div class="cs-toggle-row">
+                    <span class="cs-toggle-title">Document Source</span>
+                    <div class="cs-toggle-group">
+                        <button type="button" class="cs-toggle-btn ${this.state.form.docMode === 'url' ? 'active' : ''}" onclick="BuilderUI.setDocMode('url')">HTTP Link</button>
+                        <button type="button" class="cs-toggle-btn ${this.state.form.docMode === 'upload' ? 'active' : ''}" onclick="BuilderUI.setDocMode('upload')">Upload PDF</button>
+                    </div>
+                </div>
+
+                ${this.state.form.docMode === 'url' ? `
+                    <div class="cs-field">
+                        <label>Document Link</label>
+                        <input id="cs-subject-doc" type="text" value="${esc(this.state.form.docUrl || '')}" placeholder="https://...">
+                    </div>
+                ` : `
+                    <div class="cs-upload-row">
+                        <input id="cs-subject-doc-file" type="file" accept="application/pdf,.pdf">
+                        <button type="button" class="btn-secondary" onclick="BuilderUI.uploadDocumentFile()" ${this.state.uploading.document ? 'disabled' : ''}>
+                            ${this.state.uploading.document ? '<i class="fas fa-circle-notch fa-spin"></i> Uploading...' : '<i class="fas fa-upload"></i> Upload PDF'}
+                        </button>
+                    </div>
+                    <div class="cs-field">
+                        <label>Uploaded Document URL</label>
+                        <input id="cs-subject-doc-uploaded" type="text" value="${esc(this.state.form.docUrl || '')}" readonly>
+                    </div>
+                `}
+            </div>
+        ` : '';
+
         return `
             <div class="cs-shell">
                 <div class="cs-toolbar">
                     <div class="cs-field">
-                        <label>Schedule Timeline Item</label>
-                        <select onchange="BuilderUI.setScheduleKey(this.value)">
-                            <option value="">-- Select Timeline Item --</option>
-                            ${options.map(opt => `<option value="${esc(opt.key)}" ${this.state.selectedScheduleKey === opt.key ? 'selected' : ''}>${esc(opt.label)}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="cs-field">
                         <label>Header</label>
-                        <input id="cs-header-input" type="text" value="${esc((entry && entry.header) || (this.getSelectedScheduleOption() ? this.getSelectedScheduleOption().label : ''))}" placeholder="Header goes here">
+                        <input id="cs-header-input" type="text" value="${esc((entry && entry.header) || 'Content Creator')}" placeholder="Header goes here">
                     </div>
                     <div class="cs-field cs-field-end">
                         <button class="btn-primary" onclick="BuilderUI.saveHeader()"><i class="fas fa-save"></i> Save Header</button>
@@ -187,7 +402,7 @@ const BuilderUI = {
                 <div class="cs-builder-grid">
                     <div class="cs-builder-card">
                         <h3>Subject Builder</h3>
-                        <p class="cs-muted">Create subject text (rich formatting), video link, and document link for this timeline item.</p>
+                        <p class="cs-muted">Create subject text, then choose optional video/document support and source type.</p>
 
                         <div class="cs-field">
                             <label>Subject Number</label>
@@ -199,14 +414,11 @@ const BuilderUI = {
                             <div id="cs-subject-editor" class="cs-rich-editor" contenteditable="true">${currentHtml}</div>
                         </div>
 
-                        <div class="cs-field">
-                            <label>Video Link</label>
-                            <input id="cs-subject-video" type="text" value="${esc(this.state.form.videoUrl || '')}" placeholder="https://...">
-                        </div>
-
-                        <div class="cs-field">
-                            <label>Document Link</label>
-                            <input id="cs-subject-doc" type="text" value="${esc(this.state.form.docUrl || '')}" placeholder="https://...">
+                        <div class="cs-feature-section">
+                            ${this._renderToggleButtons('Include Video', this.state.form.hasVideo, 'BuilderUI.setHasVideo(true)', 'BuilderUI.setHasVideo(false)')}
+                            ${videoControls}
+                            ${this._renderToggleButtons('Include Document', this.state.form.hasDocument, 'BuilderUI.setHasDocument(true)', 'BuilderUI.setHasDocument(false)')}
+                            ${documentControls}
                         </div>
 
                         <div class="cs-actions-row">
@@ -217,7 +429,7 @@ const BuilderUI = {
 
                     <div class="cs-builder-card">
                         <h3>Subjects Built</h3>
-                        <p class="cs-muted">This list becomes the View document body with play and document buttons.</p>
+                        <p class="cs-muted">Play/Document icons in View appear only when enabled and linked.</p>
                         <div class="cs-table-wrap">
                             <table class="admin-table">
                                 <thead>

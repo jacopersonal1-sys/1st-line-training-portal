@@ -984,7 +984,7 @@ function applySystemConfig() {
 }
 
 // --- ERROR REPORTING SYSTEM ---
-async function reportSystemError(msg, type) {
+async function reportSystemError(msg, type, meta = null) {
     // Attempt to resolve user identity if global CURRENT_USER is missing
     let user = 'Guest';
     let role = 'Unknown';
@@ -1016,14 +1016,21 @@ async function reportSystemError(msg, type) {
         } catch(e) {}
     }
 
+    const normalizedMeta = (meta && typeof meta === 'object') ? meta : {};
     const report = {
         id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
         user: user,
         role: role,
-        error: msg,
-        type: type,
+        error: String(msg || ''),
+        type: String(type || 'error'),
         timestamp: new Date().toISOString(),
-        userAgent: navigator.userAgent
+        userAgent: navigator.userAgent,
+        source: normalizedMeta.source || 'system',
+        issueDetail: normalizedMeta.issueDetail ? String(normalizedMeta.issueDetail) : '',
+        consoleSnapshot: normalizedMeta.consoleSnapshot ? String(normalizedMeta.consoleSnapshot) : '',
+        pageUrl: normalizedMeta.pageUrl ? String(normalizedMeta.pageUrl) : (typeof location !== 'undefined' ? location.href : ''),
+        activeTab: normalizedMeta.activeTab ? String(normalizedMeta.activeTab) : '',
+        appVersion: normalizedMeta.appVersion ? String(normalizedMeta.appVersion) : (window.APP_VERSION || 'Unknown')
     };
 
     // Optimistic Load & Save
@@ -1044,7 +1051,7 @@ async function reportSystemError(msg, type) {
 function checkErrorAlerts() {
     if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || CURRENT_USER.role !== 'super_admin') return;
     
-    const reports = safeLocalParse('error_reports', []) || [];
+    const reports = (safeLocalParse('error_reports', []) || []).filter(r => (r.type || '') !== 'user_report');
     const lastCount = parseInt(localStorage.getItem('last_seen_error_count') || '0');
     
     if (reports.length > lastCount) {
@@ -2949,26 +2956,6 @@ function startRealtimeSync() {
     // Fast updates for "Active User" dashboard status
     HEARTBEAT_INTERVAL_ID = setInterval(() => {
         sendHeartbeat();
-
-        // --- AUTO LOGOUT CHECK ---
-        if (CURRENT_USER) {
-            const last = window.LAST_INTERACTION || Date.now();
-            const idleConf = config.idle_thresholds || { logout: 900000 };
-            let limitMs = idleConf.logout;
-            
-            // FIX: Respect User Override (Minutes to Ms)
-            if (CURRENT_USER.idleTimeout && CURRENT_USER.idleTimeout > 0) {
-                limitMs = CURRENT_USER.idleTimeout * 60 * 1000;
-            }
-            
-            // EXCEPTION: Vetting Arena (Prevent Logout while waiting)
-            const vSession = safeLocalParse('vettingSession', {}) || {};
-            const isVetting = vSession && vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user];
-
-            if (!isVetting && (Date.now() - last) > limitMs) {
-                if (typeof window.cacheAndLogout === 'function') window.cacheAndLogout();
-            }
-        }
         
         if(CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin')) {
             const statusView = document.getElementById('admin-view-status');

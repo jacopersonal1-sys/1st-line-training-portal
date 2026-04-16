@@ -1,11 +1,11 @@
-/* ================= CONTENT STUDIO LOADER ================= */
-/* HOST LOADER: Launches the isolated Content Studio module */
+/* ================= CONTENT CREATOR LOADER ================= */
+/* HOST LOADER: Launches the isolated Content Creator module */
 
 const ContentStudioLoader = {
     renderUI: function() {
         const container = document.getElementById('content-studio-content');
         if (!container) {
-            console.error('[Content Studio Loader] Container not found.');
+            console.error('[Content Creator Loader] Container not found.');
             return;
         }
 
@@ -13,7 +13,7 @@ const ContentStudioLoader = {
             container.innerHTML = `
                 <div class="card" style="max-width:760px; margin:24px auto; text-align:center; border-color:#ff5252;">
                     <h3 style="color:#ff5252; margin-bottom:8px;">Session Required</h3>
-                    <p style="color:var(--text-muted); margin:0;">Please sign in to open Content Studio.</p>
+                    <p style="color:var(--text-muted); margin:0;">Please sign in to open Content Creator.</p>
                 </div>
             `;
             return;
@@ -24,7 +24,7 @@ const ContentStudioLoader = {
             container.innerHTML = `
                 <div class="card" style="max-width:760px; margin:24px auto; text-align:center; border-color:#ff5252;">
                     <h3 style="color:#ff5252; margin-bottom:8px;">Access Denied</h3>
-                    <p style="color:var(--text-muted); margin:0;">Content Studio is available to Admin and Super Admin only.</p>
+                    <p style="color:var(--text-muted); margin:0;">Content Creator is available to Admin and Super Admin only.</p>
                 </div>
             `;
             return;

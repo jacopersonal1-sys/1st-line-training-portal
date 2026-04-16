@@ -31,7 +31,7 @@
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
 | `system_tombstones` | Array | Blob | Persistent blacklist of deleted item IDs used to prevent deleted items from being resurrected during sync. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
-| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`, `opl_hub_data`, `content_studio_data`. |
+| `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`, `opl_hub_data`, `content_studio_data` (Content Creator workspace). |
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
@@ -318,19 +318,25 @@ Maps local `localStorage` keys to Supabase tables.
     - `js/ui_feedback.js`: Renders the multi-question "Agent Production Feedback" capture form.
     - `js/ui_feedback_review.js`: Renders the "Feedback Review Dashboard" with Roster, History, and Analytics views.
 
-#### `js/content_studio_loader.js` + `modules/content_studio/` (Content Studio - Isolated Module)
-- **Architecture:** "Program within a Program" loaded in a dedicated `<webview>` tab (`content-studio`) with internal submenus (`View`, `Builder`).
+#### `js/content_studio_loader.js` + `modules/content_studio/` (Content Creator - Isolated Module)
+- **Architecture:** "Program within a Program" loaded in a dedicated `<webview>` tab (`content-studio`) with internal submenus (`View`, `Builder`) and themed to match the main app shell.
 - **Entry Point:** `modules/content_studio/index.html` mounted by `js/content_studio_loader.js`.
 - **Data Key:** `app_documents.key = content_studio_data` (local mirror key: `content_studio_data_local`).
 - **Files:**
-    - `js/main.js`: Module shell, subnav routing, and role-gated Builder access.
-    - `js/data.js`: Isolated data + sync layer for timeline entries and engagement analytics.
-        - **Timeline Linkage:** Binds content entries to schedule timeline items from `localStorage.schedules` using deterministic `scheduleKey`.
-        - **Content Model:** Each entry stores header + subject list (`code`, rich text HTML, video link, document link).
-        - **Engagement Model:** Tracks per-user subject analytics (`plays`, `watchSeconds`, `skips`, `skippedSeconds`, `skipEvents`, `lastPosition`).
-    - `js/ui_view.js`: Renders document-style header + subject rows with play/document actions and subject dropdown.
+    - `js/main.js`: Module shell, subnav routing (`View`, `Builder`, `Engagement`), and role-gated Builder/Engagement access.
+    - `js/data.js`: Isolated data + sync layer for content entries, media upload metadata, engagement analytics, and annotations.
+        - **Single Workspace Model:** Uses a default workspace entry (`content_creator_default`) instead of schedule-timeline binding.
+        - **Legacy Migration:** Legacy schedule-linked entries are merged into the default workspace for backward compatibility.
+        - **Content Model:** Stores header + subject list (`code`, rich text HTML), optional media toggles (`hasVideo`, `hasDocument`), source mode (`url` or `upload`), and resolved storage paths/URLs for video + PDF.
+        - **Storage Integration:** Direct uploads target Supabase Storage buckets `content_creator_videos` and `content_creator_documents`, with signed/public URL resolution on open.
+        - **Engagement Model:** Tracks per-user subject analytics (`plays`, `watchSeconds`, `skips`, `skippedSeconds`, `skipEvents`, `lastPosition`, `lastPlayedAt`) and timestamped annotations (`note`/`question`) per user.
+    - `js/ui_view.js`: Renders document-style header + subject rows with play/document actions and a subject selector.
+        - **Conditional Actions:** Play/Document icons render only when subject media is enabled and linked.
         - **Tracking:** Video playback records watch-time deltas and forward-seek skip events (TikTok-style engagement intent).
-    - `js/ui_builder.js`: Builder for header + subjects (custom rich text, video link, document link) with edit/delete + engagement summary.
+        - **In-Player Annotation:** Video modal includes `Add Note / Question`, pauses at current timestamp, saves annotation, and supports timestamp jump-back.
+    - `js/ui_builder.js`: Builder for header + subjects (custom rich text + optional media) with edit/delete + engagement summary; schedule timeline selector removed.
+        - **Media Controls:** Includes yes/no media toggles, source switchers (`HTTP Link` vs `Upload`), video upload, and PDF-only document upload.
+    - `js/ui_engagement.js`: Admin/Super Admin engagement workspace for per-user and per-subject breakdown (watch time, plays, skips, notes/questions, last activity).
 
 ---
 
@@ -408,10 +414,11 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
-- **v2.6.20 (Content Studio + User Control Release, 2026-04-15):** Finalized isolated `content-studio` rollout (View + Builder + engagement telemetry), added Super Admin Data Studio `User Control` workspace for revoke/binding/archive-reset operations, hardened auth/user identity normalization + pre-login server refresh, and shipped high-priority view sync/fallback + richer realtime sync diagnostics.
+- **v2.6.21 (Content Creator Media + Engagement Expansion, 2026-04-16):** Extended Content Creator with optional per-subject media toggles, dual media source modes (`HTTP Link` or Supabase upload), dedicated Engagement submenu (admin-only per-user + per-subject analytics), and in-player timestamped note/question capture tied to each watcher.
+- **v2.6.20 (Content Creator + User Control Release, 2026-04-15):** Finalized isolated `content-studio` runtime and reworked it into Content Creator (View + Builder + engagement telemetry), removed schedule timeline selector dependency, kept Header + Subject Builder flows with optional inputs, and aligned module theming with the main app while preserving Super Admin Data Studio `User Control` and sync hardening updates.
 - **v2.6.19 (Retrain Attempt Unlock Hotfix, 2026-04-14):** Patched `js/assessment_trainee.js` to classify stale pre-move attempts as legacy by combining retrain archive move timestamps with linked `records.groupID` checks, then auto-ignore/archive those legacy attempts so trainees moved to a new group can start current scheduled assessments without false "already completed" lockouts.
 - **v2.6.18 (Lifecycle + Grading Reliability Patch, 2026-04-14):** Hardened retrain/migration flow in `js/admin_users.js` with case-insensitive multi-group removal + dedupe to prevent trainees remaining in old groups after moves, and added completed-score self-healing in `js/admin_history.js` plus score fallback linking in `js/admin_grading.js` so finalized marks no longer display as `0%` after refresh/relogin when linked `records` rows are authoritative.
-- **Content Studio Module (Current Build, 2026-04-14):** Added isolated `content-studio` tab with `View` + `Builder` submenus, schedule-linked header/subject documents, play/document action controls per subject, and per-user video engagement telemetry (watch-time + skip capture) persisted in `content_studio_data`.
+- **Content Creator Module (Current Build, 2026-04-16):** Isolated `content-studio` tab now operates as Content Creator with a single default workspace (`content_creator_default`), no schedule timeline dropdown dependency, retained Header + Subject Builder authoring, optional media toggles with `HTTP Link`/upload source modes, app-aligned themed UI, admin-only Engagement breakdowns, and per-user telemetry + timestamped video notes/questions persisted in `content_studio_data`.
 - **v2.6.17 (Targeted Submission Recovery Rollout, 2026-04-14):** Added a new `sessions.pending_action` command `recover_submission:<payload>` in `js/data.js` that targets the logged-in trainee, scans local `submissions` for matching criteria, auto-rebuilds missing linked `records` rows, and force-syncs `submissions` + `records` on next heartbeat/realtime command tick.
 - **v2.6.16 (Release Rollout, 2026-04-13):** Version increment for production rollout delivery so clients already on `2.6.15` can receive the latest hardening package. Reinforces strict `submissionId` linking, vetted completion-gate semantics, and atomic disk-cache recovery as active release contracts.
 - **v2.6.15 (Rollout Hardening Addendum, 2026-04-13):** Added strict `submissionId`-only digital script viewing in reporting/admin/search flows, removed trainee+assessment fallback linking in digital record upserts, added vetting completion gate (`submitting` -> `completed`) that verifies authoritative submission pipeline state (including retry continuity across restart), hardened native disk-cache persistence with atomic writes + backup recovery, and widened `performSmartMerge` scope to merge on the union of schema/server/local keys.
@@ -431,9 +438,16 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
 
+## v2.6.21 - 2026-04-16
+
+- Feature: Added optional subject-level media flags and source selectors in Content Creator (`hasVideo`/`hasDocument`, `url`/`upload`) with direct Supabase storage upload support for video and PDF assets.
+- Feature: Added dedicated admin-only Engagement submenu (`modules/content_studio/js/ui_engagement.js`) with per-user watcher analytics and per-subject drilldown, including notes/question totals.
+- Feature: Added in-player `Add Note / Question` flow in `modules/content_studio/js/ui_view.js` to pause video, capture note/question at current timestamp, and jump playback to saved markers.
+- Release: Version bump to `2.6.21` for media + engagement rollout.
+
 ## v2.6.20 - 2026-04-15
 
-- Feature: Released isolated Content Studio (`js/content_studio_loader.js` + `modules/content_studio/`) with schedule-linked header/subject authoring and per-user video engagement telemetry (`plays`, `watchSeconds`, `skips`).
+- Feature: Released isolated Content Creator (`js/content_studio_loader.js` + `modules/content_studio/`) with header/subject authoring, optional builder inputs, single-workspace data model, and per-user video engagement telemetry (`plays`, `watchSeconds`, `skips`).
 - Feature: Expanded Super Admin Data Studio (`modules/superadmin_data_studio`) with a dedicated `User Control` workspace for identity-safe profile edits, revoked/bound-client operations, archive payload editing, and one-click archive/reset lifecycle cleanup across live rows.
 - Hardening: Added auth-critical pre-login refresh (`users`, `revokedUsers`, `system_config`, `rosters`), identity-safe user/roster dedupe paths, and reinforced realtime/view sync observability with high-priority fresh-pull behavior + sync diagnostics.
 - Release: Version bump to `2.6.20` for fleet rollout.

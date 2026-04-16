@@ -10,7 +10,7 @@ const App = {
         root.innerHTML = `
             <div class="cs-card" style="text-align:center; padding:46px;">
                 <i class="fas fa-circle-notch fa-spin fa-2x"></i>
-                <p style="margin-top:14px;">Loading Content Studio...</p>
+                <p style="margin-top:14px;">Loading Content Creator...</p>
             </div>
         `;
 
@@ -19,6 +19,11 @@ const App = {
     },
 
     canBuild: function() {
+        const role = AppContext && AppContext.user ? AppContext.user.role : '';
+        return role === 'admin' || role === 'super_admin';
+    },
+
+    canViewEngagement: function() {
         const role = AppContext && AppContext.user ? AppContext.user.role : '';
         return role === 'admin' || role === 'super_admin';
     },
@@ -55,17 +60,31 @@ const App = {
             root.innerHTML = `
                 <div class="cs-empty">
                     <h3>Access Denied</h3>
-                    <p>Content Studio is restricted to Admin and Super Admin sessions.</p>
+                    <p>Content Creator is restricted to Admin and Super Admin sessions.</p>
                 </div>
             `;
             return;
         }
 
-        const viewHtml = this.currentView === 'builder'
-            ? (this.canBuild()
+        if (!['view', 'builder', 'engagement'].includes(this.currentView)) {
+            this.currentView = 'view';
+        }
+        if (this.currentView === 'engagement' && !this.canViewEngagement()) {
+            this.currentView = 'view';
+        }
+
+        let viewHtml = '';
+        if (this.currentView === 'builder') {
+            viewHtml = this.canBuild()
                 ? BuilderUI.render()
-                : `<div class="cs-empty"><h3>Builder Restricted</h3><p>Builder is available to Admin and Super Admin sessions.</p></div>`)
-            : ViewUI.render();
+                : `<div class="cs-empty"><h3>Builder Restricted</h3><p>Builder is available to Admin and Super Admin sessions.</p></div>`;
+        } else if (this.currentView === 'engagement') {
+            viewHtml = this.canViewEngagement()
+                ? EngagementUI.render()
+                : `<div class="cs-empty"><h3>Engagement Restricted</h3><p>Engagement is available to Admin and Super Admin sessions.</p></div>`;
+        } else {
+            viewHtml = ViewUI.render();
+        }
 
         root.innerHTML = `
             <div class="cs-shell-root">
@@ -77,6 +96,11 @@ const App = {
                         <button class="sub-tab-btn ${this.currentView === 'builder' ? 'active' : ''}" onclick="App.setView('builder')">
                             <i class="fas fa-screwdriver-wrench"></i> Builder
                         </button>
+                        ${this.canViewEngagement() ? `
+                            <button class="sub-tab-btn ${this.currentView === 'engagement' ? 'active' : ''}" onclick="App.setView('engagement')">
+                                <i class="fas fa-chart-line"></i> Engagement
+                            </button>
+                        ` : ''}
                     </div>
                     <div>
                         <button class="btn-secondary btn-sm" onclick="App.refresh()"><i class="fas fa-rotate-right"></i> Refresh</button>
