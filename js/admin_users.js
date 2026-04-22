@@ -61,6 +61,11 @@ function mergeUserEntries(existingUser, incomingUser) {
         merged.traineeData = { ...(existingUser.traineeData || {}), ...incomingUser.traineeData };
     }
 
+    if (typeof incomingUser.blocked !== 'undefined') merged.blocked = !!incomingUser.blocked;
+    if (typeof existingUser.blocked !== 'undefined' && typeof incomingUser.blocked === 'undefined') merged.blocked = !!existingUser.blocked;
+    if (incomingUser.status) merged.status = incomingUser.status;
+    if (!merged.status) merged.status = merged.blocked ? 'blocked' : 'active';
+
     if (incomingUser.boundClientId) merged.boundClientId = incomingUser.boundClientId;
 
     const incomingTs = new Date(incomingUser.lastModified || incomingUser.updatedAt || 0).getTime() || 0;
@@ -697,12 +702,130 @@ function renderAdminUsersHeaderStats(stats) {
     `).join('');
 }
 
-function loadAdminUsers() { 
-    if(document.activeElement && 
-       (document.activeElement.id === 'userSearch' || 
-        document.activeElement.id === 'newUserName' || 
-        document.activeElement.id === 'newUserPass')) {
-        return; 
+function isUserBlockedAccount(user) {
+    if (!user || typeof user !== 'object') return false;
+    if (user.blocked === true) return true;
+    return String(user.status || '').toLowerCase().trim() === 'blocked';
+}
+
+function getUserRoleBadge(role) {
+    const normalizedRole = String(role || '').toLowerCase().trim();
+    if (normalizedRole === 'super_admin') {
+        return `<span style="color:#9b59b6; font-weight:bold; background:rgba(155, 89, 182, 0.1); padding:2px 8px; border-radius:999px;"><i class="fas fa-user-astronaut"></i> Super Admin</span>`;
+    }
+    if (normalizedRole === 'admin') {
+        return `<span style="color:var(--primary); font-weight:bold; background:rgba(243, 112, 33, 0.1); padding:2px 8px; border-radius:999px;"><i class="fas fa-user-shield"></i> Admin</span>`;
+    }
+    if (normalizedRole === 'teamleader') {
+        return `<span style="color:#2ecc71; font-weight:bold; background:rgba(46, 204, 113, 0.1); padding:2px 8px; border-radius:999px;"><i class="fas fa-users"></i> Team Leader</span>`;
+    }
+    if (normalizedRole === 'special_viewer') {
+        return `<span style="color:#00bcd4; font-weight:bold; background:rgba(0, 188, 212, 0.1); padding:2px 8px; border-radius:999px;"><i class="fas fa-eye"></i> Special Viewer</span>`;
+    }
+    return `<span style="color:var(--text-muted); font-size:0.85rem;">Trainee</span>`;
+}
+
+function getUserBucketByRole(role) {
+    const normalizedRole = String(role || '').toLowerCase().trim();
+    if (normalizedRole === 'trainee') return 'trainees';
+    if (normalizedRole === 'teamleader') return 'teamleaders';
+    return 'admins';
+}
+
+function getUserGroupLabels(username, rosters) {
+    const labels = [];
+    Object.entries(rosters || {}).forEach(([gid, members]) => {
+        if (!Array.isArray(members)) return;
+        if (!members.some(member => userIdentityMatches(member, username))) return;
+        labels.push(typeof getGroupLabel === 'function' ? getGroupLabel(gid, members.length) : gid);
+    });
+    return labels;
+}
+
+function renderAdminUserCard(u, idx, rosters, savedReports) {
+    const safeUser = String(u.user || '').replace(/'/g, "\\'");
+    const displayUser = (typeof escapeHTML === 'function') ? escapeHTML(String(u.user || '')) : String(u.user || '');
+    const normalizedRole = String(u.role || '').toLowerCase().trim();
+    const isBlocked = isUserBlockedAccount(u);
+    const isSelf = userIdentityMatches(u.user, CURRENT_USER.user);
+    const isCoreAdmin = userIdentityMatches(u.user, 'admin');
+    const canManage = CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin';
+    const groups = getUserGroupLabels(u.user, rosters);
+
+    const initials = String(u.user || '').substring(0, 2).toUpperCase();
+    let hash = 0;
+    for (let j = 0; j < String(u.user || '').length; j++) hash = String(u.user || '').charCodeAt(j) + ((hash << 5) - hash);
+    const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    const color = "#" + "00000".substring(0, 6 - c.length) + c;
+    const avatarHtml = `<span style="width:28px; height:28px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.2);">${initials || 'U'}</span>`;
+
+    const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '';
+    const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '';
+    const roleChip = getUserRoleBadge(normalizedRole);
+    const statusChip = `<span class="admin-user-status-pill ${isBlocked ? 'blocked' : 'active'}">${isBlocked ? 'Blocked' : 'Active'}</span>`;
+    const groupText = groups.length > 0 ? groups.join(', ') : 'No Group';
+    const contactText = [email, phone].filter(Boolean).join(' | ') || 'No Contact';
+
+    let passDisplay = '';
+    const isHashed = u.pass && u.pass.length === 64 && /^[0-9a-fA-F]+$/.test(u.pass);
+    if (isHashed) {
+        passDisplay = `<span style="color:var(--text-muted); font-style:italic;"><i class="fas fa-lock"></i> Encrypted Password</span>`;
+    } else {
+        const passId = `pass-display-${getUserIdentityToken(u.user || `user_${idx}`)}-${idx}`;
+        const safeRealPass = String(u.pass || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        passDisplay = `
+            <span id="${passId}" data-real="${safeRealPass}" style="font-family:monospace; margin-right:5px; color:var(--primary);">******</span>
+            <button class="btn-secondary btn-sm" style="padding:2px 5px;" onclick="togglePasswordView('${passId}')"><i class="fas fa-eye"></i></button>
+        `;
+    }
+
+    let actions = '';
+    if (canManage && !isCoreAdmin) {
+        const hasReport = savedReports.some(r => userIdentityMatches(r && r.trainee, u.user));
+        const moveBtn = hasReport
+            ? `<button class="btn-warning btn-sm" onclick="openMoveUserModal('${safeUser}')" title="Move to another group"><i class="fas fa-exchange-alt"></i></button>`
+            : `<button class="btn-secondary btn-sm" disabled title="Onboard Report Required to Move"><i class="fas fa-exchange-alt" style="opacity:0.5;"></i></button>`;
+        const impBtn = (CURRENT_USER.role === 'super_admin' && !isSelf)
+            ? `<button class="btn-primary btn-sm" onclick="impersonateUser('${safeUser}')" title="Impersonate"><i class="fas fa-mask"></i></button>`
+            : '';
+        let demoteBtn = '';
+        if (CURRENT_USER.role === 'super_admin' && normalizedRole === 'super_admin' && !isSelf) {
+            demoteBtn = `<button class="btn-warning btn-sm" onclick="demoteSuperAdmin('${safeUser}')" title="Demote to Admin"><i class="fas fa-level-down-alt"></i></button>`;
+        }
+        const blockBtn = !isSelf
+            ? `<button class="${isBlocked ? 'btn-success' : 'btn-warning'} btn-sm" onclick="toggleBlockUser('${safeUser}')" title="${isBlocked ? 'Unblock User' : 'Block User'}"><i class="fas ${isBlocked ? 'fa-unlock' : 'fa-ban'}"></i></button>`
+            : '';
+        actions = `${demoteBtn} ${impBtn} ${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')" title="Advanced Edit"><i class="fas fa-user-edit"></i></button> ${blockBtn} <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')" title="Delete User"><i class="fas fa-trash"></i></button>`;
+    } else if (CURRENT_USER.role === 'special_viewer') {
+        actions = `<span style="color:var(--text-muted); font-style:italic;">View Only</span>`;
+    } else if (isSelf) {
+        actions = `<button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i> Edit Password</button>`;
+    }
+
+    return `
+        <div class="admin-user-row ${isBlocked ? 'row-error' : ''}">
+            <div class="admin-user-row-header">
+                <div class="admin-user-name">${avatarHtml}<span>${displayUser}</span></div>
+                <div class="admin-user-header-right">${roleChip}${statusChip}</div>
+            </div>
+            <div class="admin-user-meta">
+                <span class="admin-user-chip"><i class="fas fa-layer-group"></i> ${groupText}</span>
+                <span class="admin-user-chip"><i class="fas fa-address-card"></i> ${contactText}</span>
+                <span class="admin-user-chip admin-user-pass-wrap">${passDisplay}</span>
+            </div>
+            <div class="admin-user-actions">${actions}</div>
+        </div>
+    `;
+}
+
+function loadAdminUsers(forceRender = false) {
+    if (!CURRENT_USER) return;
+
+    if (!forceRender && document.activeElement &&
+       (document.activeElement.id === 'userSearch' ||
+        document.activeElement.id === 'addUserNameModal' ||
+        document.activeElement.id === 'addUserPassModal')) {
+        return;
     }
 
     restrictTraineeMenu();
@@ -712,112 +835,67 @@ function loadAdminUsers() {
     const users = sanitized.users;
     const savedReports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const rosters = sanitized.rosters;
+
     if (sanitized.usersChanged || sanitized.rostersChanged) {
         if (typeof saveToServer === 'function') {
             const keys = [];
             if (sanitized.usersChanged) keys.push('users');
             if (sanitized.rostersChanged) keys.push('rosters');
-            if (keys.length > 0) {
-                saveToServer(keys, true, true).catch(() => {});
-            }
+            if (keys.length > 0) saveToServer(keys, true, true).catch(() => {});
         }
     }
-    const search = document.getElementById('userSearch') ? document.getElementById('userSearch').value.toLowerCase() : '';
-    const roleFilter = document.getElementById('userRoleFilter') ? document.getElementById('userRoleFilter').value : '';
-    
-    // --- INJECT GROUP FILTER ---
-    const controls = document.getElementById('admin-user-controls');
-    if (controls && !document.getElementById('userGroupFilter')) {
-        const sel = document.createElement('select');
-        sel.id = 'userGroupFilter';
-        sel.style.cssText = "padding: 5px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-main); max-width: 150px;";
-        sel.onchange = () => loadAdminUsers();
-        
-        // Insert before search input
-        const searchInput = document.getElementById('userSearch');
-        if(searchInput) controls.insertBefore(sel, searchInput);
-        else controls.appendChild(sel);
-    }
-    
-    // Populate Filter
+
+    const search = String(document.getElementById('userSearch')?.value || '').toLowerCase().trim();
+    const roleFilter = String(document.getElementById('userRoleFilter')?.value || '').toLowerCase().trim();
     const groupSelect = document.getElementById('userGroupFilter');
+
     let groupFilter = '';
     if (groupSelect) {
-        if (document.activeElement !== groupSelect) {
-            const val = groupSelect.value;
-            groupSelect.innerHTML = '<option value="">All Groups</option>';
+        const existingValue = groupSelect.value;
+        if (document.activeElement !== groupSelect || forceRender) {
+            groupSelect.innerHTML = '<option value="">All Trainee Groups</option>';
             Object.keys(rosters).sort().reverse().forEach(gid => {
-                const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
+                const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, (rosters[gid] || []).length) : gid;
                 groupSelect.add(new Option(label, gid));
             });
-            groupSelect.value = val;
+            groupSelect.value = existingValue;
         }
         groupFilter = groupSelect.value;
     }
-    // ---------------------------
 
-    let createContainer = document.getElementById('createUserContainer');
-    if (!createContainer) {
-        const input = document.getElementById('newUserName');
-        if (input) createContainer = input.closest('div');
-    }
-    const scanBtn = document.getElementById('btnScanUsers');
+    const canManage = CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin';
+    const addBtn = document.getElementById('btnAddUserPopup');
+    if (addBtn) addBtn.classList.toggle('hidden', !canManage);
 
     let displayUsers = [];
-    
-    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
-        if(createContainer) createContainer.classList.remove('hidden');
-        if(scanBtn) scanBtn.classList.remove('hidden');
-        
-        // Inject "My Profile" button if missing
-        if (!document.getElementById('btnMyProfileAdmin')) {
-            const btnHtml = `<button id="btnMyProfileAdmin" class="btn-secondary btn-sm" onclick="openUnifiedProfileSettings()" style="margin-left:10px; vertical-align:middle;"><i class="fas fa-user-cog"></i> My Profile Settings</button>`;
-            
-            if (scanBtn && scanBtn.parentNode) {
-                scanBtn.insertAdjacentHTML('afterend', btnHtml);
-            } else if (createContainer) {
-                createContainer.insertAdjacentHTML('beforeend', btnHtml);
-            } else {
-                const searchBox = document.getElementById('userSearch');
-                if(searchBox) searchBox.insertAdjacentHTML('afterend', btnHtml);
-            }
-        }
-        displayUsers = users.filter(u => {
-            const matchesSearch = u.user.toLowerCase().includes(search);
-            const matchesRole = roleFilter ? u.role === roleFilter : true;
-            
-            let matchesGroup = true;
-            if (groupFilter) {
-                const members = rosters[groupFilter] || [];
-                matchesGroup = members.some(m => userIdentityMatches(m, u.user));
-            }
-
-            return matchesSearch && matchesRole && matchesGroup;
-        });
+    if (canManage) {
+        displayUsers = users;
     } else if (CURRENT_USER.role === 'special_viewer') {
-        if(createContainer) createContainer.classList.add('hidden');
-        if(scanBtn) scanBtn.classList.add('hidden');
-        // Special viewer sees all users but cannot edit
-        displayUsers = users.filter(u => {
-            const matchesSearch = u.user.toLowerCase().includes(search);
-            const matchesRole = roleFilter ? u.role === roleFilter : true;
-            // Note: Group filter logic duplicated here for consistency if needed, 
-            // but special viewer logic often simpler. Adding it for completeness:
-            let matchesGroup = true;
-            if (groupFilter) {
-                const members = rosters[groupFilter] || [];
-                matchesGroup = members.some(m => userIdentityMatches(m, u.user));
-            }
-            return matchesSearch && matchesRole && matchesGroup;
-        });
-    } 
-    else {
-        if(createContainer) createContainer.classList.add('hidden');
-        if(scanBtn) scanBtn.classList.add('hidden');
+        displayUsers = users;
+    } else {
         displayUsers = users.filter(u => userIdentityMatches(u.user, CURRENT_USER.user));
     }
 
-    displayUsers.sort((a,b) => {
+    displayUsers = displayUsers.filter(u => {
+        const role = String(u.role || '').toLowerCase().trim();
+        const email = String((u.traineeData && u.traineeData.email) || '').toLowerCase();
+        const phone = String((u.traineeData && u.traineeData.phone) || '').toLowerCase();
+        const groupLabels = getUserGroupLabels(u.user, rosters).join(' ').toLowerCase();
+        const statusText = isUserBlockedAccount(u) ? 'blocked' : 'active';
+        const matchesSearch = !search || [u.user, role, email, phone, groupLabels, statusText].some(v => String(v || '').toLowerCase().includes(search));
+        const matchesRole = !roleFilter || role === roleFilter;
+
+        let matchesGroup = true;
+        if (groupFilter) {
+            const members = rosters[groupFilter] || [];
+            const inTargetGroup = members.some(member => userIdentityMatches(member, u.user));
+            if (role === 'trainee') matchesGroup = inTargetGroup;
+            else if (roleFilter === 'trainee') matchesGroup = false;
+        }
+        return matchesSearch && matchesRole && matchesGroup;
+    });
+
+    displayUsers.sort((a, b) => {
         const aRank = getRoleRank(a.role);
         const bRank = getRoleRank(b.role);
         if (aRank !== bRank) return bRank - aRank;
@@ -834,91 +912,34 @@ function loadAdminUsers() {
         activeNow
     });
 
-    const userList = document.getElementById('userList');
-    if(userList) {
-        // SECURITY: Inject Super Admin option into Create dropdown ONLY if current user is Super Admin
-        const createRoleSelect = document.getElementById('newUserRole');
-        if (createRoleSelect) {
-            const existingOpt = createRoleSelect.querySelector('option[value="super_admin"]');
-            if (existingOpt) existingOpt.remove(); // Reset
+    const bucketEls = {
+        admins: document.getElementById('adminUserBucketAdmins'),
+        trainees: document.getElementById('adminUserBucketTrainees'),
+        teamleaders: document.getElementById('adminUserBucketTeamleaders')
+    };
 
-            if (CURRENT_USER.role === 'super_admin') {
-                const opt = document.createElement('option');
-                opt.value = 'super_admin';
-                opt.innerText = 'Super Admin';
-                createRoleSelect.appendChild(opt);
-            }
-        }
-
-        userList.innerHTML = displayUsers.map((u,i) => {
-            let actions = '';
-            // Escape single quotes for onclick handler safety
-            const safeUser = u.user.replace(/'/g, "\\'");
-            const displayUser = (typeof escapeHTML === 'function') ? escapeHTML(u.user) : u.user;
-            
-            // Generate Avatar
-            const initials = u.user.substring(0, 2).toUpperCase();
-            let hash = 0;
-            for (let j = 0; j < u.user.length; j++) hash = u.user.charCodeAt(j) + ((hash << 5) - hash);
-            const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
-            const color = "#" + "00000".substring(0, 6 - c.length) + c;
-            const avatarHtml = `<div style="width:28px; height:28px; border-radius:50%; background:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:bold; margin-right:10px; vertical-align:middle; box-shadow:0 2px 4px rgba(0,0,0,0.2);">${initials}</div>`;
-
-            if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && !userIdentityMatches(u.user, 'admin')) {
-                const hasReport = savedReports.some(r => userIdentityMatches(r && r.trainee, u.user));
-                const moveBtn = hasReport 
-                    ? `<button class="btn-warning btn-sm" onclick="openMoveUserModal('${safeUser}')" title="Move to another group"><i class="fas fa-exchange-alt"></i></button>`
-                    : `<button class="btn-secondary btn-sm" disabled title="Onboard Report Required to Move"><i class="fas fa-exchange-alt" style="opacity:0.5;"></i></button>`;
-                
-                const impBtn = (CURRENT_USER.role === 'super_admin' && !userIdentityMatches(CURRENT_USER.user, u.user))
-                    ? `<button class="btn-primary btn-sm" onclick="impersonateUser('${safeUser}')" title="Impersonate"><i class="fas fa-mask"></i></button>`
-                    : '';
-
-                // NEW: Demote Button (Super Admin Only)
-                let demoteBtn = '';
-                if (CURRENT_USER.role === 'super_admin' && u.role === 'super_admin' && !userIdentityMatches(CURRENT_USER.user, u.user)) {
-                    demoteBtn = `<button class="btn-warning btn-sm" onclick="demoteSuperAdmin('${safeUser}')" title="Demote to Admin"><i class="fas fa-level-down-alt"></i></button>`;
-                }
-
-                // FIX: Pass username instead of index to prevent deleting wrong user when sorted
-                actions = `${demoteBtn} ${impBtn} ${moveBtn} <button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i></button> <button class="btn-danger btn-sm" onclick="remUser('${safeUser}')"><i class="fas fa-trash"></i></button>`;
-            } 
-            else if (CURRENT_USER.role === 'special_viewer') {
-                actions = `<span style="color:var(--text-muted); font-style:italic;">View Only</span>`;
-            } else if (userIdentityMatches(u.user, CURRENT_USER.user)) {
-                actions = `<button class="btn-secondary btn-sm" onclick="openUserEdit('${safeUser}')"><i class="fas fa-pen"></i> Edit Password</button>`;
-            }
-            
-            let passDisplay = '';
-            const isHashed = u.pass && u.pass.length === 64 && /^[0-9a-fA-F]+$/.test(u.pass);
-
-            if (isHashed) {
-                passDisplay = `<span style="color:var(--text-muted); font-style:italic; font-size:0.8rem;"><i class="fas fa-lock"></i> Encrypted</span>`;
-            } else {
-                const passId = `pass-display-${i}`;
-                passDisplay = `
-                    <span id="${passId}" data-real="${u.pass}" style="font-family:monospace; margin-right:5px; color:var(--primary);">******</span>
-                    <button class="btn-secondary btn-sm" style="padding:2px 5px;" onclick="togglePasswordView('${passId}')"><i class="fas fa-eye"></i></button>
-                `;
-            }
-
-            const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '-';
-            const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '-';
-
-            let roleDisplay = u.role;
-            if (u.role === 'super_admin') {
-                roleDisplay = `<span style="color:#9b59b6; font-weight:bold; background:rgba(155, 89, 182, 0.1); padding:2px 6px; border-radius:4px;"><i class="fas fa-user-astronaut"></i> Super Admin</span>`;
-            } else if (u.role === 'admin') {
-                roleDisplay = `<span style="color:var(--primary); font-weight:bold; background:rgba(243, 112, 33, 0.1); padding:2px 6px; border-radius:4px;"><i class="fas fa-user-shield"></i> Admin</span>`;
-            } else if (u.role === 'teamleader') {
-                roleDisplay = `<span style="color:#2ecc71; font-weight:bold; background:rgba(46, 204, 113, 0.1); padding:2px 6px; border-radius:4px;"><i class="fas fa-users"></i> Team Leader</span>`;
-            } else if (u.role === 'trainee') {
-                roleDisplay = `<span style="color:var(--text-muted); font-size:0.9rem;">Trainee</span>`;
-            }
-
-            return `<tr><td>${avatarHtml}${displayUser}</td><td>${roleDisplay}</td><td>${email}</td><td>${phone}</td><td>${passDisplay}</td><td>${actions}</td></tr>`;
-        }).join(''); 
+    if (!bucketEls.admins || !bucketEls.trainees || !bucketEls.teamleaders) {
+        const userList = document.getElementById('userList');
+        if (userList) userList.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">New user manager layout unavailable in this runtime.</td></tr>';
+        return;
     }
+
+    const buckets = { admins: [], trainees: [], teamleaders: [] };
+    displayUsers.forEach((u, i) => {
+        const key = getUserBucketByRole(u.role);
+        buckets[key].push(renderAdminUserCard(u, i, rosters, savedReports));
+    });
+
+    bucketEls.admins.innerHTML = buckets.admins.length > 0 ? buckets.admins.join('') : '<div class="admin-user-empty">No users in this list.</div>';
+    bucketEls.trainees.innerHTML = buckets.trainees.length > 0 ? buckets.trainees.join('') : '<div class="admin-user-empty">No users in this list.</div>';
+    bucketEls.teamleaders.innerHTML = buckets.teamleaders.length > 0 ? buckets.teamleaders.join('') : '<div class="admin-user-empty">No users in this list.</div>';
+
+    const countAdmins = document.getElementById('adminUserCountAdmins');
+    const countTrainees = document.getElementById('adminUserCountTrainees');
+    const countTeamleaders = document.getElementById('adminUserCountTeamleaders');
+    if (countAdmins) countAdmins.innerText = String(buckets.admins.length);
+    if (countTrainees) countTrainees.innerText = String(buckets.trainees.length);
+    if (countTeamleaders) countTeamleaders.innerText = String(buckets.teamleaders.length);
 }
 
 function togglePasswordView(elementId) {
@@ -965,20 +986,42 @@ async function confirmMoveUser() {
     if(btn) { btn.innerText = "Moving & Archiving..."; btn.disabled = true; }
 
     try {
+        const targetToken = normalizedUserToMove;
+        const currentRosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        let previousGroup = 'Ungrouped';
+        Object.keys(currentRosters).forEach((gid) => {
+            const members = Array.isArray(currentRosters[gid]) ? currentRosters[gid] : [];
+            if (members.some(member => getUserIdentityToken(member) === targetToken)) previousGroup = gid;
+        });
+
         // 1. ARCHIVE DATA (Snapshot)
+        const existingAttempts = readRetrainArchives().filter(entry => getUserIdentityToken(entry && entry.user) === targetToken).length;
+        const attemptNumber = existingAttempts + 1;
         const archiveData = {
             id: `retrain_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
             user: userToMove,
             movedDate: new Date().toISOString(),
+            attemptNumber,
+            attemptLabel: `Attempt ${attemptNumber}`,
             archiveType: 'retrain',
             reason: 'Moved to ' + targetGid,
+            fromGroup: previousGroup,
             targetGroup: targetGid,
-            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => r.trainee === userToMove),
-            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => s.trainee === userToMove),
-            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => r.user === userToMove),
-            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => r.trainee === userToMove),
-            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => r.trainee === userToMove),
-            notes: (JSON.parse(localStorage.getItem('agentNotes') || '{}'))[userToMove] || null
+            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => getUserIdentityToken(s && s.trainee) === targetToken),
+            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => getUserIdentityToken(r && r.user) === targetToken),
+            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            exemptions: (JSON.parse(localStorage.getItem('exemptions') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            liveBookings: (JSON.parse(localStorage.getItem('liveBookings') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            linkRequests: (JSON.parse(localStorage.getItem('linkRequests') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            monitorHistory: (JSON.parse(localStorage.getItem('monitor_history') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.user_id)) === targetToken),
+            tlTaskSubmissions: (JSON.parse(localStorage.getItem('tl_task_submissions') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.trainee)) === targetToken),
+            notes: (() => {
+                const allNotes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+                const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
+                return key ? allNotes[key] : null;
+            })()
         };
 
         let archives = readRetrainArchives();
@@ -997,6 +1040,11 @@ async function confirmMoveUser() {
         wipe('attendance_records', 'user');
         wipe('savedReports', 'trainee');
         wipe('insightReviews', 'trainee');
+        wipe('exemptions', 'trainee');
+        wipe('liveBookings', 'trainee');
+        wipe('linkRequests', 'trainee');
+        wipe('monitor_history', 'user');
+        wipe('tl_task_submissions', 'user');
         
         let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
         const noteKey = Object.keys(notes).find(k => getUserIdentityToken(k) === normalizedUserToMove);
@@ -1018,7 +1066,11 @@ async function confirmMoveUser() {
 
         // 4. SYNC EVERYTHING
         if(typeof saveToServer === 'function') {
-            await saveToServer(['rosters', 'retrain_archives', 'records', 'submissions', 'attendance_records', 'savedReports', 'insightReviews', 'agentNotes'], true);
+            await saveToServer([
+                'rosters', 'retrain_archives', 'records', 'submissions', 'attendance_records',
+                'savedReports', 'insightReviews', 'agentNotes', 'exemptions', 'liveBookings',
+                'linkRequests', 'monitor_history', 'tl_task_submissions'
+            ], true);
         }
 
         alert(`${userToMove} moved to ${targetGid}. Previous data archived.`);
@@ -1049,7 +1101,7 @@ async function demoteSuperAdmin(username) {
     }
 }
 
-function generatePassword() { 
+function generatePassword(targetInputId = '') {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$";
     let pass = "";
     const arr = new Uint8Array(12);
@@ -1057,23 +1109,81 @@ function generatePassword() {
     for(let i=0; i<12; i++) {
         pass += chars.charAt(arr[i] % chars.length);
     }
-    document.getElementById('newUserPass').value = pass; 
+    const targetId = targetInputId || (document.getElementById('addUserPassModal') ? 'addUserPassModal' : 'newUserPass');
+    const field = document.getElementById(targetId);
+    if (field) field.value = pass;
+    return pass;
 }
 
-async function addUser() { 
-    const u = document.getElementById('newUserName').value.trim();
-    const p = document.getElementById('newUserPass').value;
-    const r = document.getElementById('newUserRole').value; 
+function openAddUserModal() {
+    if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
+        alert("You do not have permission to create users.");
+        return;
+    }
+
+    const allowSuperAdmin = CURRENT_USER.role === 'super_admin';
+    const roleOptions = [
+        '<option value="trainee">Trainee</option>',
+        '<option value="teamleader">Team Leader</option>',
+        '<option value="admin">Admin</option>',
+        '<option value="special_viewer">Special Viewer</option>',
+        allowSuperAdmin ? '<option value="super_admin">Super Admin</option>' : ''
+    ].join('');
+
+    document.getElementById('adminEditTitle').innerHTML = 'Add User';
+    document.getElementById('adminEditContent').innerHTML = `
+        <label>Username</label>
+        <input type="text" id="addUserNameModal" placeholder="Username">
+        <label>Role</label>
+        <select id="addUserRoleModal">${roleOptions}</select>
+        <label>Password</label>
+        <div style="display:flex; gap:6px;">
+            <input type="text" id="addUserPassModal" placeholder="Password" autocomplete="off">
+            <button class="btn-secondary" style="width:auto;" onclick="generatePassword('addUserPassModal')">Gen</button>
+        </div>
+        <label>Email (Optional)</label>
+        <input type="text" id="addUserEmailModal" placeholder="name@example.com">
+        <label>Phone (Optional)</label>
+        <input type="text" id="addUserPhoneModal" placeholder="082...">
+    `;
+    document.getElementById('adminEditModal').classList.remove('hidden');
+    document.getElementById('adminEditSaveBtn').onclick = async () => {
+        const userPayload = {
+            user: document.getElementById('addUserNameModal')?.value || '',
+            pass: document.getElementById('addUserPassModal')?.value || '',
+            role: document.getElementById('addUserRoleModal')?.value || 'trainee',
+            email: document.getElementById('addUserEmailModal')?.value || '',
+            phone: document.getElementById('addUserPhoneModal')?.value || ''
+        };
+        const created = await addUser(userPayload);
+        if (created) document.getElementById('adminEditModal').classList.add('hidden');
+    };
+}
+
+async function addUser(payload = null) {
+    const fromPayload = payload && typeof payload === 'object';
+    const u = String(fromPayload ? payload.user : (document.getElementById('newUserName')?.value || '')).trim();
+    const p = String(fromPayload ? payload.pass : (document.getElementById('newUserPass')?.value || ''));
+    const r = String(fromPayload ? payload.role : (document.getElementById('newUserRole')?.value || 'trainee')).toLowerCase().trim();
+    const email = String(fromPayload ? payload.email : '').trim();
+    const phone = String(fromPayload ? payload.phone : '').trim();
     const normalizedUser = getUserIdentityToken(u);
     
     // SECURITY: Prevent Privilege Escalation
     if (r === 'super_admin' && CURRENT_USER.role !== 'super_admin') {
-        return alert("Access Denied: Only Super Admins can create Super Admins.");
+        alert("Access Denied: Only Super Admins can create Super Admins.");
+        return false;
     }
 
-    if(!u || !p) return; 
+    if(!u || !p) {
+        alert("Username and password are required.");
+        return false;
+    }
     const users = JSON.parse(localStorage.getItem('users') || '[]'); 
-    if(findUserByIdentityIndex(users, u) > -1) return alert("User exists"); 
+    if(findUserByIdentityIndex(users, u) > -1) {
+        alert("User exists");
+        return false;
+    }
     
     // --- TOMBSTONE CHECK ---
     // If this user was previously deleted (revoked), remove them from blacklist
@@ -1090,17 +1200,88 @@ async function addUser() {
     if (typeof hashPassword === 'function') {
         finalPass = await hashPassword(p);
     }
-    
-    users.push({user:u, pass:finalPass, role:r}); 
+
+    const newUser = {
+        user: u,
+        pass: finalPass,
+        role: r,
+        blocked: false,
+        status: 'active',
+        lastModified: new Date().toISOString(),
+        modifiedBy: CURRENT_USER.user
+    };
+
+    if (email || phone) {
+        newUser.traineeData = {
+            email,
+            phone,
+            contact: `${email} | ${phone}`.trim()
+        };
+    }
+
+    users.push(newUser);
     localStorage.setItem('users', JSON.stringify(users)); 
     
     await secureUserSave(revokedChanged);
-    
-    document.getElementById('newUserName').value = '';
-    document.getElementById('newUserPass').value = '';
+
+    const oldName = document.getElementById('newUserName');
+    const oldPass = document.getElementById('newUserPass');
+    if (oldName) oldName.value = '';
+    if (oldPass) oldPass.value = '';
 
     loadAdminUsers(); 
-    populateTraineeDropdown(); 
+    populateTraineeDropdown();
+    if (typeof showToast === 'function') showToast(`${u} created successfully.`, "success");
+    return true;
+}
+
+async function setUserBlocked(username, shouldBlock) {
+    const target = String(username || '').trim();
+    if (!target) return false;
+    if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
+        alert("You do not have permission to change user status.");
+        return false;
+    }
+    if (userIdentityMatches(target, CURRENT_USER.user)) {
+        alert("You cannot block your own account.");
+        return false;
+    }
+    if (userIdentityMatches(target, 'admin')) {
+        alert("The default admin account cannot be blocked.");
+        return false;
+    }
+
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const idx = findUserByIdentityIndex(users, target);
+    if (idx === -1) {
+        alert("User not found.");
+        return false;
+    }
+
+    users[idx].blocked = !!shouldBlock;
+    users[idx].status = shouldBlock ? 'blocked' : 'active';
+    users[idx].lastModified = new Date().toISOString();
+    users[idx].modifiedBy = CURRENT_USER.user;
+
+    localStorage.setItem('users', JSON.stringify(users));
+    await secureUserSave();
+    loadAdminUsers(true);
+    return true;
+}
+
+async function toggleBlockUser(username) {
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const idx = findUserByIdentityIndex(users, username);
+    if (idx === -1) return;
+
+    const currentlyBlocked = isUserBlockedAccount(users[idx]);
+    const actionLabel = currentlyBlocked ? 'unblock' : 'block';
+    if (!confirm(`Are you sure you want to ${actionLabel} '${users[idx].user}'?`)) return;
+
+    const changed = await setUserBlocked(users[idx].user, !currentlyBlocked);
+    if (changed && typeof showToast === 'function') {
+        showToast(`${users[idx].user} ${currentlyBlocked ? 'unblocked' : 'blocked'}.`, currentlyBlocked ? "success" : "warning");
+    }
 }
 
 // FIXED: Now uses Tombstone (Blacklist) and Instant Save
@@ -1191,31 +1372,71 @@ function openUserEdit(username) {
     editTargetIndex = index;
     editTargetUsername = users[index].user;
     const u = users[index];
-    
+
     const isSuper = CURRENT_USER.role === 'super_admin';
+    const canManage = CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin';
     const safeUser = u.user.replace(/'/g, "\\'");
+    const safeAttr = (value) => String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '';
+    const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '';
+    const status = isUserBlockedAccount(u) ? 'blocked' : 'active';
+    const groups = getUserGroupLabels(u.user, JSON.parse(localStorage.getItem('rosters') || '{}'));
+    const groupDisplay = groups.length > 0 ? groups.join(', ') : 'No Group';
+    const lastModified = u.lastModified ? new Date(u.lastModified).toLocaleString() : 'Unknown';
+    const modifiedBy = u.modifiedBy || 'Unknown';
 
     const bindingInfo = u.boundClientId 
         ? `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">Bound to Client: <code>${u.boundClientId}</code> <button class="btn-danger btn-sm" onclick="unbindUserClient('${safeUser}')" style="padding:0 5px; margin-left:5px;">Unbind</button></div>` 
         : `<div style="margin-bottom:10px; font-size:0.8rem; color:var(--text-muted);">No Client Binding (Will bind on next login)</div>`;
 
-    document.getElementById('adminEditTitle').innerHTML = `Edit User: ${u.user} <button class="btn-secondary btn-sm" onclick="renameUser('${u.user.replace(/'/g, "\\'")}')" style="font-size:0.7rem; margin-left:10px; padding:2px 8px;">Rename</button>`;
+    document.getElementById('adminEditTitle').innerHTML = `Advanced Edit: ${u.user} <button class="btn-secondary btn-sm" onclick="renameUser('${u.user.replace(/'/g, "\\'")}')" style="font-size:0.7rem; margin-left:10px; padding:2px 8px;">Rename</button>`;
     
     document.getElementById('adminEditContent').innerHTML = `
-        <label>Email Address</label>
-        <input type="text" id="editUserEmail" value="${(u.traineeData && u.traineeData.email) ? u.traineeData.email : ''}" placeholder="name@example.com">
-        <label>Phone Number</label>
-        <input type="text" id="editUserPhone" value="${(u.traineeData && u.traineeData.phone) ? u.traineeData.phone : ''}" placeholder="082...">
-        <label>Password</label>
-        <input type="text" id="editUserPass" placeholder="Enter new password to change..." autocomplete="off">
-        <label>Role</label>
-        <select id="editUserRole">
-            <option value="trainee">Trainee</option>
-            <option value="teamleader">Team Leader</option>
-            <option value="admin">Admin</option>
-            <option value="special_viewer">Special Viewer</option>
-            ${isSuper ? '<option value="super_admin">Super Admin</option>' : ''}
-        </select>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div>
+                <label>Email Address</label>
+                <input type="text" id="editUserEmail" value="${safeAttr(email)}" placeholder="name@example.com">
+            </div>
+            <div>
+                <label>Phone Number</label>
+                <input type="text" id="editUserPhone" value="${safeAttr(phone)}" placeholder="082...">
+            </div>
+            <div>
+                <label>Password Reset</label>
+                <input type="text" id="editUserPass" placeholder="Enter new password to change..." autocomplete="off">
+            </div>
+            <div>
+                <label>Role</label>
+                <select id="editUserRole">
+                    <option value="trainee">Trainee</option>
+                    <option value="teamleader">Team Leader</option>
+                    <option value="admin">Admin</option>
+                    <option value="special_viewer">Special Viewer</option>
+                    ${isSuper ? '<option value="super_admin">Super Admin</option>' : ''}
+                </select>
+            </div>
+            <div>
+                <label>Account Status</label>
+                <select id="editUserStatus">
+                    <option value="active">Active</option>
+                    <option value="blocked">Blocked</option>
+                </select>
+            </div>
+            <div>
+                <label>Primary Group(s)</label>
+                <input type="text" value="${safeAttr(groupDisplay)}" disabled>
+            </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            ${canManage && !userIdentityMatches(u.user, CURRENT_USER.user) && !userIdentityMatches(u.user, 'admin')
+                ? `<button class="${status === 'blocked' ? 'btn-success' : 'btn-warning'} btn-sm" onclick="document.getElementById('editUserStatus').value='${status === 'blocked' ? 'active' : 'blocked'}'">${status === 'blocked' ? 'Mark As Active' : 'Mark As Blocked'}</button>`
+                : ''
+            }
+            <button class="btn-secondary btn-sm" onclick="generatePassword('editUserPass')">Generate Password</button>
+        </div>
+        <div style="margin-top:10px; font-size:0.8rem; color:var(--text-muted); border-top:1px solid var(--border-color); padding-top:8px;">
+            Last Modified: <strong>${safeAttr(lastModified)}</strong> by <strong>${safeAttr(modifiedBy)}</strong>
+        </div>
         ${bindingInfo}`;
     
     if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
@@ -1227,6 +1448,8 @@ function openUserEdit(username) {
     }
 
     document.getElementById('editUserRole').value = u.role;
+    const editStatus = document.getElementById('editUserStatus');
+    if (editStatus) editStatus.value = status;
     document.getElementById('adminEditModal').classList.remove('hidden');
     document.getElementById('adminEditSaveBtn').onclick = saveUserEdit;
 }
@@ -1357,14 +1580,25 @@ async function saveUserEdit() {
     
     if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
         const newRole = document.getElementById('editUserRole').value;
+        const newStatus = String(document.getElementById('editUserStatus')?.value || 'active').toLowerCase().trim();
         
         // SECURITY: Prevent Privilege Escalation
         if (newRole === 'super_admin' && CURRENT_USER.role !== 'super_admin') {
             alert("Security Alert: Only existing Super Admins can promote users to Super Admin.");
             return;
         }
+        if (newStatus === 'blocked' && userIdentityMatches(users[liveIndex].user, CURRENT_USER.user)) {
+            alert("You cannot block your own account.");
+            return;
+        }
+        if (newStatus === 'blocked' && userIdentityMatches(users[liveIndex].user, 'admin')) {
+            alert("The default admin account cannot be blocked.");
+            return;
+        }
         
         users[liveIndex].role = newRole;
+        users[liveIndex].status = (newStatus === 'blocked') ? 'blocked' : 'active';
+        users[liveIndex].blocked = users[liveIndex].status === 'blocked';
     }
 
     // Update Contact Info (traineeData)
@@ -1518,16 +1752,26 @@ async function graduateTrainee(username) {
 
     try {
         const targetToken = getUserIdentityToken(username);
+        const existingAttempts = (JSON.parse(localStorage.getItem('graduated_agents') || '[]') || [])
+            .filter(entry => getUserIdentityToken(entry && entry.user) === targetToken).length;
+        const attemptNumber = existingAttempts + 1;
         // 1. ARCHIVE DATA (Snapshot)
         const archiveData = {
             user: username,
             graduatedDate: new Date().toISOString(),
+            attemptNumber,
+            attemptLabel: `Attempt ${attemptNumber}`,
             reason: 'Graduated',
             records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
             submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => getUserIdentityToken(s && s.trainee) === targetToken),
             attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => getUserIdentityToken(r && r.user) === targetToken),
             reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
             reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            exemptions: (JSON.parse(localStorage.getItem('exemptions') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            liveBookings: (JSON.parse(localStorage.getItem('liveBookings') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            linkRequests: (JSON.parse(localStorage.getItem('linkRequests') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            monitorHistory: (JSON.parse(localStorage.getItem('monitor_history') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.user_id)) === targetToken),
+            tlTaskSubmissions: (JSON.parse(localStorage.getItem('tl_task_submissions') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.trainee)) === targetToken),
             notes: (() => {
                 const allNotes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
                 const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
@@ -1557,6 +1801,8 @@ async function graduateTrainee(username) {
         wipe('liveBookings', 'trainee');
         wipe('linkRequests', 'trainee');
         wipe('exemptions', 'trainee');
+        wipe('monitor_history', 'user');
+        wipe('tl_task_submissions', 'user');
         
         let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
         Object.keys(notes).forEach(noteKey => {
@@ -1594,7 +1840,7 @@ async function graduateTrainee(username) {
                 'rosters', 'graduated_agents', 'records', 'submissions', 
                 'attendance_records', 'savedReports', 'insightReviews', 
                 'agentNotes', 'users', 'revokedUsers', 'liveBookings', 
-                'linkRequests', 'exemptions', 'monitor_data'
+                'linkRequests', 'exemptions', 'monitor_data', 'monitor_history', 'tl_task_submissions'
             ], true);
         }
 

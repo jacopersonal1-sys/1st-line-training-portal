@@ -154,11 +154,20 @@ window.NetworkDiag = {
         // 1. Get System Stats
         const sys = await ipcRenderer.invoke('get-system-stats');
         this.stats = sys;
-        
-        document.getElementById('nd_cpu').innerText = sys.cpu + '%';
-        document.getElementById('nd_ram').innerText = `${sys.ram} / ${sys.ramTotal} GB`;
-        document.getElementById('nd_disk').innerText = sys.disk || 'N/A';
-        document.getElementById('nd_conn_type').innerText = sys.connType;
+
+        const cpuEl = document.getElementById('nd_cpu');
+        const ramEl = document.getElementById('nd_ram');
+        const diskEl = document.getElementById('nd_disk');
+        const connTypeEl = document.getElementById('nd_conn_type');
+        if (!cpuEl || !ramEl || !diskEl || !connTypeEl) {
+            this.stopTests();
+            return;
+        }
+
+        cpuEl.innerText = sys.cpu + '%';
+        ramEl.innerText = `${sys.ram} / ${sys.ramTotal} GB`;
+        diskEl.innerText = sys.disk || 'N/A';
+        connTypeEl.innerText = sys.connType;
 
         // 2. Perform Pings
         const pGate = await ipcRenderer.invoke('perform-network-test', this.config.gateway); // Note: 8.8.8.8 isn't gateway, ideally we'd detect gateway IP via 'route print' but keeping simple for now
@@ -176,6 +185,7 @@ window.NetworkDiag = {
         const valEl = document.getElementById(`nd_${key}_val`);
         const statEl = document.getElementById(`nd_${key}_stat`);
         const hist = this.history[key === 'gate' ? 'gateway' : (key === 'net' ? 'internet' : 'server')];
+        if (!valEl || !statEl || !hist) return;
 
         if (!result.success) {
             valEl.innerText = "TIMEOUT";
@@ -204,6 +214,7 @@ window.NetworkDiag = {
 
     analyze: function() {
         const el = document.getElementById('nd_analysis');
+        if (!el) return;
         const hGate = this.history.gateway;
         const hNet = this.history.internet;
         const hSrv = this.history.server;

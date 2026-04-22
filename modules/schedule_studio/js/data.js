@@ -17,6 +17,9 @@ const DEFAULT_SA_HOLIDAYS = [
 const SCHEDULE_TEMPLATE_STORAGE_KEY = 'scheduleTemplates';
 const SCHEDULE_HOLIDAY_STORAGE_KEY = 'scheduleHolidays';
 const CONTENT_STUDIO_LOCAL_CACHE_KEY = 'content_studio_data_local';
+const CONTENT_STUDIO_DATA_KEY = 'content_studio_data';
+const CONTENT_CREATOR_DEFAULT_KEY = 'content_creator_default';
+const CONTENT_CREATOR_DEFAULT_LABEL = 'Content Creator';
 
 const ScheduleData = {
     normalizeIdentity(value) {
@@ -74,20 +77,169 @@ const ScheduleData = {
 
     getContentStudioStore() {
         let parsed = null;
+        let localEntriesCount = 0;
         try {
             parsed = JSON.parse(this.getStorage().getItem(CONTENT_STUDIO_LOCAL_CACHE_KEY) || '{}');
+            localEntriesCount = (parsed && Array.isArray(parsed.entries)) ? parsed.entries.length : 0;
         } catch (error) {
             parsed = null;
+            localEntriesCount = 0;
         }
-        if (!parsed || typeof parsed !== 'object') return { entries: [] };
+
+        // Fallback: host runtime persists the canonical document as `content_studio_data`.
+        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.entries) || localEntriesCount === 0) {
+            let canonical = null;
+            try {
+                canonical = JSON.parse(this.getStorage().getItem(CONTENT_STUDIO_DATA_KEY) || '{}');
+            } catch (error) {
+                canonical = null;
+            }
+
+            if (canonical && typeof canonical === 'object' && Array.isArray(canonical.entries) && canonical.entries.length > 0) {
+                parsed = canonical;
+            }
+        }
+
+        if (!parsed || typeof parsed !== 'object') return { entries: [], analytics: [], annotations: [] };
         if (!Array.isArray(parsed.entries)) parsed.entries = [];
+        if (!Array.isArray(parsed.analytics)) parsed.analytics = [];
+        if (!Array.isArray(parsed.annotations)) parsed.annotations = [];
         return parsed;
+    },
+
+    saveContentStudioStore(store, forceSync = false) {
+        if (!store || typeof store !== 'object') return;
+
+        const safeStore = {
+            entries: Array.isArray(store.entries) ? store.entries : [],
+            analytics: Array.isArray(store.analytics) ? store.analytics : [],
+            annotations: Array.isArray(store.annotations) ? store.annotations : []
+        };
+
+        const storage = this.getStorage();
+        storage.setItem(CONTENT_STUDIO_LOCAL_CACHE_KEY, JSON.stringify(safeStore));
+        storage.setItem(CONTENT_STUDIO_DATA_KEY, JSON.stringify(safeStore));
+
+        if (AppContext.host && typeof AppContext.host.saveToServer === 'function') {
+            Promise.resolve(AppContext.host.saveToServer(['content_studio_data'], Boolean(forceSync)))
+                .catch(() => {});
+        }
+
+        const hostClient = AppContext.host && AppContext.host.supabaseClient ? AppContext.host.supabaseClient : null;
+        if (hostClient && typeof hostClient.from === 'function') {
+            Promise.resolve(
+                hostClient.from('app_documents').upsert({
+                    key: CONTENT_STUDIO_DATA_KEY,
+                    content: safeStore,
+                    updated_at: new Date().toISOString()
+                })
+            ).catch(() => {});
+        }
+    },
+
+    getContentAnalyticsRow(store, entryId, subjectId, username, create = false) {
+        if (!store || !Array.isArray(store.analytics)) return null;
+        const key = `${entryId}:${subjectId}:${username}`;
+        let row = store.analytics.find(item => String(item.id || '') === key);
+        if (!row && create) {
+            row = {
+                id: key,
+                entryId: String(entryId || '').trim(),
+                subjectId: String(subjectId || '').trim(),
+                username: String(username || '').trim(),
+                plays: 0,
+                watchSeconds: 0,
+                skips: 0,
+                skippedSeconds: 0,
+                skipEvents: [],
+                lastPosition: 0,
+                lastPlayedAt: null,
+                updatedAt: new Date().toISOString()
+            };
+            store.analytics.push(row);
+        }
+        return row || null;
+    },
+
+    recordContentPlay(entryId, subjectId, username) {
+        const cleanEntry = String(entryId || '').trim();
+        const cleanSubject = String(subjectId || '').trim();
+        const cleanUser = String(username || '').trim();
+        if (!cleanEntry || !cleanSubject || !cleanUser) return;
+
+        const store = this.getContentStudioStore();
+        const row = this.getContentAnalyticsRow(store, cleanEntry, cleanSubject, cleanUser, true);
+        if (!row) return;
+
+        row.plays = Number(row.plays || 0) + 1;
+        row.lastPlayedAt = new Date().toISOString();
+        row.updatedAt = row.lastPlayedAt;
+        this.saveContentStudioStore(store, false);
+    },
+
+    recordContentWatchDelta(entryId, subjectId, username, seconds, lastPosition) {
+        const cleanEntry = String(entryId || '').trim();
+        const cleanSubject = String(subjectId || '').trim();
+        const cleanUser = String(username || '').trim();
+        const delta = Number(seconds || 0);
+        if (!cleanEntry || !cleanSubject || !cleanUser || !(delta > 0)) return;
+
+        const store = this.getContentStudioStore();
+        const row = this.getContentAnalyticsRow(store, cleanEntry, cleanSubject, cleanUser, true);
+        if (!row) return;
+
+        row.watchSeconds = Number(row.watchSeconds || 0) + delta;
+        row.lastPosition = Math.max(Number(row.lastPosition || 0), Number(lastPosition || 0));
+        row.updatedAt = new Date().toISOString();
+        this.saveContentStudioStore(store, false);
+    },
+
+    recordContentSkip(entryId, subjectId, username, fromTime, toTime) {
+        const cleanEntry = String(entryId || '').trim();
+        const cleanSubject = String(subjectId || '').trim();
+        const cleanUser = String(username || '').trim();
+        const from = Number(fromTime || 0);
+        const to = Number(toTime || 0);
+        const diff = to - from;
+        if (!cleanEntry || !cleanSubject || !cleanUser || !(diff > 2)) return;
+
+        const store = this.getContentStudioStore();
+        const row = this.getContentAnalyticsRow(store, cleanEntry, cleanSubject, cleanUser, true);
+        if (!row) return;
+
+        row.skips = Number(row.skips || 0) + 1;
+        row.skippedSeconds = Number(row.skippedSeconds || 0) + diff;
+        row.lastPosition = Math.max(Number(row.lastPosition || 0), to);
+        row.skipEvents = Array.isArray(row.skipEvents) ? row.skipEvents : [];
+        row.skipEvents.push({
+            from: Number(from.toFixed(1)),
+            to: Number(to.toFixed(1)),
+            skipped: Number(diff.toFixed(1)),
+            at: new Date().toISOString()
+        });
+        if (row.skipEvents.length > 40) row.skipEvents = row.skipEvents.slice(-40);
+        row.updatedAt = new Date().toISOString();
+        this.saveContentStudioStore(store, false);
     },
 
     getContentModules() {
         const store = this.getContentStudioStore();
-        return (store.entries || [])
-            .filter(entry => entry && typeof entry === 'object')
+        const entries = (store.entries || [])
+            .filter(entry => entry && typeof entry === 'object');
+
+        const hasDefault = entries.some(entry => String(entry.scheduleKey || '').trim() === CONTENT_CREATOR_DEFAULT_KEY);
+        const normalizedEntries = entries.map((entry, idx) => {
+            const safeKey = String(entry.scheduleKey || '').trim();
+            const fallbackKey = (!safeKey && !hasDefault && idx === 0) ? CONTENT_CREATOR_DEFAULT_KEY : safeKey;
+            const safeLabel = String(entry.scheduleLabel || entry.header || '').trim();
+            return {
+                ...entry,
+                scheduleKey: fallbackKey,
+                scheduleLabel: safeLabel || (fallbackKey === CONTENT_CREATOR_DEFAULT_KEY ? CONTENT_CREATOR_DEFAULT_LABEL : 'Unnamed Module')
+            };
+        });
+
+        return normalizedEntries
             .map(entry => ({
                 id: String(entry.id || ''),
                 key: String(entry.scheduleKey || '').trim(),

@@ -26,12 +26,25 @@ const gotTheLock = app.requestSingleInstanceLock();
 let vettingLockdown = false; // Track lockdown state
 let mainWindow; // Define globally so updater events can access it
 let updateReady = false; // Track if update is downloaded
+let updateReadyChannel = 'main';
 let currentUpdateChannel = 'main';
+let updateCheckInProgress = false;
+let queuedUpdateChannel = null;
+let latestYmlRetryTimer = null;
+let latestYmlRetryAttempts = 0;
+let suppressNextLatestYmlErrorToast = false;
 let studySessionConfigured = false;
 let isFlushingStudySession = false;
 let isSafeToQuit = false;
 const STUDY_SESSION_PARTITION = 'persist:study_session';
 const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0';
+const UPDATE_RETRY_DELAY_MS = 15000;
+const UPDATE_MAX_RETRY_ATTEMPTS = 2;
+const UPDATE_FEED_CONFIG = {
+    provider: 'github',
+    owner: 'jacopersonal1-sys',
+    repo: '1st-line-training-portal'
+};
 
 autoUpdater.allowPrerelease = false;
 
@@ -43,6 +56,30 @@ function normalizeUpdateChannel(channel) {
     return 'main';
 }
 
+function isLatestYmlMissingError(err) {
+    const text = String(err && (err.message || err.stack || err) || '').toLowerCase();
+    return text.includes('cannot find latest.yml') || (text.includes('latest.yml') && text.includes('404'));
+}
+
+function applyUpdateFeedForChannel(channel) {
+    if (!app.isPackaged) return;
+    const releaseType = channel === 'beta' ? 'prerelease' : 'release';
+    try {
+        autoUpdater.setFeedURL({ ...UPDATE_FEED_CONFIG, releaseType });
+    } catch (error) {
+        console.error(`Failed to apply updater feed for ${channel}:`, error);
+    }
+}
+
+function resetLatestYmlRetryState() {
+    latestYmlRetryAttempts = 0;
+    suppressNextLatestYmlErrorToast = false;
+    if (latestYmlRetryTimer) {
+        clearTimeout(latestYmlRetryTimer);
+        latestYmlRetryTimer = null;
+    }
+}
+
 function applyUpdateChannel(channel, options = {}) {
     const normalized = normalizeUpdateChannel(channel);
     const allowPrerelease = normalized === 'beta';
@@ -50,6 +87,7 @@ function applyUpdateChannel(channel, options = {}) {
 
     currentUpdateChannel = normalized;
     autoUpdater.allowPrerelease = allowPrerelease;
+    applyUpdateFeedForChannel(normalized);
 
     if (changed) {
         console.log(`Update channel set to: ${normalized === 'beta' ? 'Beta (Pre-release)' : 'Main (Inline)'}`);
@@ -64,6 +102,41 @@ function applyUpdateChannel(channel, options = {}) {
     }
 
     return currentUpdateChannel;
+}
+
+async function runUpdateCheck(requestedChannel, options = {}) {
+    const isRetry = !!options.isRetry;
+    const desiredChannel = requestedChannel ? applyUpdateChannel(requestedChannel, { notifyRenderer: true }) : currentUpdateChannel;
+    if (!isRetry) latestYmlRetryAttempts = 0;
+
+    if (!app.isPackaged) {
+        if (mainWindow) {
+            mainWindow.webContents.send('update-message', { text: `[DEV] ${desiredChannel.toUpperCase()} update check triggered`, type: 'info' });
+        }
+        return;
+    }
+
+    if (updateCheckInProgress) {
+        queuedUpdateChannel = desiredChannel;
+        if (mainWindow) {
+            mainWindow.webContents.send('update-message', { text: `An update check is already running. Queued ${desiredChannel} check...`, type: 'info' });
+        }
+        return;
+    }
+
+    updateCheckInProgress = true;
+    try {
+        await autoUpdater.checkForUpdates();
+    } catch (err) {
+        // Error toasts/retries are handled in the shared `error` listener below.
+    } finally {
+        updateCheckInProgress = false;
+        if (queuedUpdateChannel) {
+            const nextChannel = queuedUpdateChannel;
+            queuedUpdateChannel = null;
+            setTimeout(() => { runUpdateCheck(nextChannel); }, 350);
+        }
+    }
 }
 
 function isTrustedStudyUrl(rawUrl = '') {
@@ -202,7 +275,7 @@ function createWindow() {
 
     // AUTO-UPDATE: Check for updates when the window is ready to show
     mainWindow.once('ready-to-show', () => {
-        autoUpdater.checkForUpdatesAndNotify();
+        runUpdateCheck(currentUpdateChannel);
     });
 
     // SECURITY: Block DevTools shortcuts in Production
@@ -390,7 +463,10 @@ ipcMain.handle('get-app-version', () => {
 
 // IPC Listener for Update Status (Check on Load)
 ipcMain.handle('get-update-status', () => {
-    return updateReady;
+    return {
+        ready: updateReady,
+        channel: updateReadyChannel
+    };
 });
 
 ipcMain.handle('get-update-channel', () => {
@@ -400,15 +476,7 @@ ipcMain.handle('get-update-channel', () => {
 // IPC Listener for Manual Update Check
 ipcMain.on('manual-update-check', (event, payload) => {
     const requestedChannel = (payload && typeof payload === 'object') ? payload.channel : payload;
-    if (requestedChannel) applyUpdateChannel(requestedChannel, { notifyRenderer: true });
-
-    if (!app.isPackaged) {
-        // In Dev Mode, just show a message so we know the button works
-        if(mainWindow) mainWindow.webContents.send('update-message', { text: `[DEV] ${currentUpdateChannel.toUpperCase()} update check triggered`, type: 'info' });
-    } else {
-        // In Production, trigger the actual check
-        autoUpdater.checkForUpdates();
-    }
+    runUpdateCheck(requestedChannel || currentUpdateChannel);
 });
 
 // IPC Listener for Restart
@@ -474,15 +542,52 @@ autoUpdater.on('checking-for-update', () => {
 });
 
 autoUpdater.on('update-available', (info) => {
+    resetLatestYmlRetryState();
     if(mainWindow) mainWindow.webContents.send('update-message', { text: `${currentUpdateChannel === 'beta' ? 'Beta' : 'Main'} update available. Downloading...`, type: 'info' });
 });
 
 autoUpdater.on('update-not-available', (info) => {
+    resetLatestYmlRetryState();
     if(mainWindow) mainWindow.webContents.send('update-message', { text: `No ${currentUpdateChannel} update found. You are on the latest version.`, type: 'success' });
 });
 
 autoUpdater.on('error', (err) => {
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Update error: ' + (err.message || err), type: 'error' });
+    if (!mainWindow) return;
+
+    if (suppressNextLatestYmlErrorToast && isLatestYmlMissingError(err)) {
+        suppressNextLatestYmlErrorToast = false;
+        return;
+    }
+
+    if (isLatestYmlMissingError(err) && latestYmlRetryAttempts < UPDATE_MAX_RETRY_ATTEMPTS) {
+        latestYmlRetryAttempts += 1;
+        mainWindow.webContents.send('update-message', {
+            text: `Update metadata is still publishing. Retrying in ${Math.round(UPDATE_RETRY_DELAY_MS / 1000)}s (${latestYmlRetryAttempts}/${UPDATE_MAX_RETRY_ATTEMPTS})...`,
+            type: 'info'
+        });
+
+        if (latestYmlRetryTimer) {
+            clearTimeout(latestYmlRetryTimer);
+            latestYmlRetryTimer = null;
+        }
+
+        latestYmlRetryTimer = setTimeout(() => {
+            latestYmlRetryTimer = null;
+            suppressNextLatestYmlErrorToast = true;
+            runUpdateCheck(currentUpdateChannel, { isRetry: true });
+        }, UPDATE_RETRY_DELAY_MS);
+        return;
+    }
+
+    if (isLatestYmlMissingError(err)) {
+        mainWindow.webContents.send('update-message', {
+            text: 'Update metadata is not available on GitHub yet. Please retry in 1-2 minutes.',
+            type: 'error'
+        });
+        return;
+    }
+
+    mainWindow.webContents.send('update-message', { text: 'Update error: ' + (err.message || err), type: 'error' });
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
@@ -492,8 +597,10 @@ autoUpdater.on('download-progress', (progressObj) => {
 });
 
 autoUpdater.on('update-downloaded', (info) => {
+    resetLatestYmlRetryState();
     updateReady = true;
-    if(mainWindow) mainWindow.webContents.send('update-downloaded');
+    updateReadyChannel = currentUpdateChannel;
+    if(mainWindow) mainWindow.webContents.send('update-downloaded', { channel: updateReadyChannel });
 });
 
 // --- VETTING ARENA SECURITY IPC ---

@@ -6,6 +6,7 @@ if (typeof window.CURRENT_TEST === 'undefined') window.CURRENT_TEST = null;
 if (typeof window.USER_ANSWERS === 'undefined') window.USER_ANSWERS = {};
 if (typeof window.TEST_TIMER === 'undefined') window.TEST_TIMER = null;
 if (typeof window.IS_LIVE_ARENA === 'undefined') window.IS_LIVE_ARENA = false;
+if (typeof window.CURRENT_TEST_CONTEXT === 'undefined') window.CURRENT_TEST_CONTEXT = null;
 
 function toSafePoints(rawPoints) {
     const parsed = parseFloat(rawPoints);
@@ -24,6 +25,39 @@ function clampAssessmentScore(value, max) {
 
 function isManualAssessmentQuestion(questionType) {
     return questionType === 'text' || questionType === 'live_practical';
+}
+
+function stripAssessmentHtml(value) {
+    return String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getQuestionReviewSubject(question, fallback = '') {
+    const direct = String(question?.reviewSubject || '').trim();
+    if (direct) return direct;
+    return String(fallback || '').trim();
+}
+
+function isAssessmentAnswerProvided(question, answer) {
+    if (!question) return false;
+    const type = question.type || 'multiple_choice';
+
+    if (type === 'multi_select' || type === 'drag_drop' || type === 'ranking') {
+        return Array.isArray(answer) && answer.length > 0;
+    }
+
+    if (type === 'matching') {
+        const expected = Array.isArray(question.pairs) ? question.pairs.length : 0;
+        return Array.isArray(answer) &&
+            answer.length >= expected &&
+            answer.every(val => String(val || '').trim() !== '');
+    }
+
+    if (type === 'matrix') {
+        const expected = Array.isArray(question.rows) ? question.rows.length : 0;
+        return !!answer && typeof answer === 'object' && Object.keys(answer).length >= expected;
+    }
+
+    return !(answer === undefined || answer === null || answer === '');
 }
 
 function normalizeUniqueNumberArray(values) {
@@ -251,6 +285,9 @@ function updateCardVisual(qIdx, val) {
 function recordAnswer(qIdx, val) { 
     window.USER_ANSWERS[qIdx] = val;
     updateCardVisual(qIdx, val);
+    if (typeof saveAssessmentDraft === 'function') {
+        try { saveAssessmentDraft(); } catch (error) {}
+    }
     // Live Arena: Persist answer locally to session immediately
     if (window.IS_LIVE_ARENA) {
         const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
@@ -273,6 +310,9 @@ function updateMatchingAnswer(qIdx, rowIdx, val) {
     if(!window.USER_ANSWERS[qIdx]) window.USER_ANSWERS[qIdx] = [];
     window.USER_ANSWERS[qIdx][rowIdx] = val;
     updateCardVisual(qIdx, window.USER_ANSWERS[qIdx]);
+    if (typeof saveAssessmentDraft === 'function') {
+        try { saveAssessmentDraft(); } catch (error) {}
+    }
     // Live Arena: Persist
     if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
@@ -280,6 +320,9 @@ function updateMatrixAnswer(qIdx, rowIdx, colIdx) {
     if(!window.USER_ANSWERS[qIdx]) window.USER_ANSWERS[qIdx] = {};
     window.USER_ANSWERS[qIdx][rowIdx] = colIdx;
     updateCardVisual(qIdx, window.USER_ANSWERS[qIdx]);
+    if (typeof saveAssessmentDraft === 'function') {
+        try { saveAssessmentDraft(); } catch (error) {}
+    }
     // Live Arena: Persist
     if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
@@ -294,6 +337,9 @@ function updateMultiSelect(qIdx, optIdx, isChecked) {
         window.USER_ANSWERS[qIdx] = window.USER_ANSWERS[qIdx].filter(i => i !== optIdx);
     }
     updateCardVisual(qIdx, window.USER_ANSWERS[qIdx]);
+    if (typeof saveAssessmentDraft === 'function') {
+        try { saveAssessmentDraft(); } catch (error) {}
+    }
     // Live Arena: Persist
     if (window.IS_LIVE_ARENA) recordAnswer(qIdx, window.USER_ANSWERS[qIdx]);
 }
@@ -306,6 +352,9 @@ function moveRankingItem(qIdx, itemIdx, direction) {
     list[newIdx] = temp;
     const area = document.getElementById(`q_area_${qIdx}`);
     if(area) area.innerHTML = renderRankingList(qIdx, list);
+    if (typeof saveAssessmentDraft === 'function') {
+        try { saveAssessmentDraft(); } catch (error) {}
+    }
 }
 function renderRankingList(qIdx, list) {
     if (!list || !Array.isArray(list)) return '<div style="color:var(--text-muted); font-style:italic;">List not initialized.</div>';

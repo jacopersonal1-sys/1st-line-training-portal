@@ -478,7 +478,7 @@ async function attemptLogin() {
              document.getElementById('loginError').innerText = `Update Required. Min Version: ${config.security.min_version}`;
              // Force check for updates if outdated
              if (typeof require !== 'undefined') {
-                 try { require('electron').ipcRenderer.send('manual-update-check'); } catch(e){}
+                 try { require('electron').ipcRenderer.send('manual-update-check', { channel: 'main' }); } catch(e){}
              }
              return;
           }
@@ -524,6 +524,12 @@ async function attemptLogin() {
   });
   
   if(validUser) {
+    const isBlocked = validUser.blocked === true || String(validUser.status || '').toLowerCase().trim() === 'blocked';
+    if (isBlocked) {
+        document.getElementById('loginError').innerText = "Account is blocked. Please contact an administrator.";
+        return;
+    }
+
     // --- SECURITY CHECK 2.5: MAINTENANCE & LOCKDOWN (Requires User Role) ---
     if (config.security) {
         // Maintenance Mode
@@ -884,6 +890,7 @@ function applyRolePermissions() {
 
   // --- SUB-MENU CONTROL (New Logic) ---
   const subBtnAssess = document.getElementById('btn-sub-assessments');
+  const subBtnInsightRules = document.getElementById('btn-sub-insight-rules');
   const subBtnVetting = document.getElementById('btn-sub-vetting');
   const subBtnData = document.getElementById('btn-sub-data');
   const subBtnAccess = document.getElementById('btn-sub-access');
@@ -903,6 +910,7 @@ function applyRolePermissions() {
 
     // Admin sees all sub-tabs
     if(subBtnAssess) subBtnAssess.classList.remove('hidden');
+    if(subBtnInsightRules) subBtnInsightRules.classList.remove('hidden');
     if(subBtnVetting) subBtnVetting.classList.remove('hidden');
     if(subBtnData) subBtnData.classList.remove('hidden');
     if(subBtnAccess) subBtnAccess.classList.remove('hidden');
@@ -918,6 +926,7 @@ function applyRolePermissions() {
 
     if (CURRENT_USER.role === 'special_viewer') {
         document.getElementById('admin-create-user-card')?.classList.add('hidden');
+        if(subBtnInsightRules) subBtnInsightRules.classList.add('hidden');
         // Keep user controls visible for filtering, but actions will be hidden by admin_users.js
     } else {
         document.getElementById('admin-create-user-card')?.classList.remove('hidden');
@@ -930,6 +939,7 @@ function applyRolePermissions() {
     
     // Hide Advanced Admin Sub-Tabs
     if(subBtnAssess) subBtnAssess.classList.add('hidden');
+    if(subBtnInsightRules) subBtnInsightRules.classList.add('hidden');
     if(subBtnVetting) subBtnVetting.classList.add('hidden');
     if(subBtnData) subBtnData.classList.add('hidden');
     if(subBtnAccess) subBtnAccess.classList.add('hidden');

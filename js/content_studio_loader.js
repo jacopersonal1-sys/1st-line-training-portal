@@ -2,6 +2,50 @@
 /* HOST LOADER: Launches the isolated Content Creator module */
 
 const ContentStudioLoader = {
+    _windowMessageBound: false,
+
+    launchLinkedQuiz: function(payload) {
+        const testId = payload && payload.testId ? String(payload.testId) : '';
+        if (!testId) return;
+
+        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const linked = tests.find(t => String(t.id) === testId);
+        if (!linked) {
+            if (typeof showToast === 'function') showToast('Linked quiz test was not found in Test Engine.', 'warning');
+            return;
+        }
+
+        if (typeof openTestTaker === 'function') {
+            openTestTaker(testId, true, {
+                popupMode: true,
+                returnTab: 'content-studio',
+                source: 'content-studio-webview',
+                contentStudioContext: {
+                    source: 'content_studio',
+                    launchSurface: 'content_creator_view',
+                    entryId: payload && payload.entryId ? String(payload.entryId) : '',
+                    subjectId: payload && payload.subjectId ? String(payload.subjectId) : '',
+                    subjectCode: payload && payload.subjectCode ? String(payload.subjectCode) : '',
+                    subjectTitle: payload && payload.subjectTitle ? String(payload.subjectTitle) : '',
+                    testId: testId,
+                    testTitle: linked.title || ''
+                }
+            });
+        } else if (typeof showToast === 'function') {
+            showToast('Quiz launcher is unavailable in this runtime.', 'error');
+        }
+    },
+
+    bindWindowMessageBridge: function() {
+        if (this._windowMessageBound) return;
+        this._windowMessageBound = true;
+        window.addEventListener('message', (event) => {
+            const data = event && event.data ? event.data : null;
+            if (!data || data.type !== 'content-studio-open-quiz') return;
+            this.launchLinkedQuiz(data.payload || null);
+        });
+    },
+
     renderUI: function() {
         const container = document.getElementById('content-studio-content');
         if (!container) {
@@ -43,6 +87,7 @@ const ContentStudioLoader = {
                 id="content-studio-webview"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}"
                 style="width:100%; height:calc(100vh - 190px); border:none; background:transparent;"
+                nodeintegration
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
                 partition="persist:content_studio"
                 allowpopups
@@ -55,23 +100,10 @@ const ContentStudioLoader = {
         webview.addEventListener('ipc-message', (event) => {
             if (!event || event.channel !== 'content-studio-open-quiz') return;
             const payload = Array.isArray(event.args) ? event.args[0] : null;
-            const testId = payload && payload.testId ? String(payload.testId) : '';
-            if (!testId) return;
-
-            const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-            const linked = tests.find(t => String(t.id) === testId);
-            if (!linked) {
-                if (typeof showToast === 'function') showToast('Linked quiz test was not found in Test Engine.', 'warning');
-                return;
-            }
-
-            if (typeof openTestTaker === 'function') {
-                try { showTab('my-tests'); } catch (e) {}
-                openTestTaker(testId);
-            } else if (typeof showToast === 'function') {
-                showToast('Quiz launcher is unavailable in this runtime.', 'error');
-            }
+            this.launchLinkedQuiz(payload);
         });
+
+        this.bindWindowMessageBridge();
     }
 };
 

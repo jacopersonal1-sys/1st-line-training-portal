@@ -19,6 +19,18 @@ function getBuilderLinkedTitleFromInputs() {
     return String(document.getElementById('builderAssessmentSelect')?.value || '').trim();
 }
 
+function getBuilderCurrentType() {
+    return String(document.getElementById('builderTestType')?.value || 'standard').trim().toLowerCase();
+}
+
+function normalizeBuilderQuestion(question, fallbackReviewSubject = '') {
+    if (!question || typeof question !== 'object') return question;
+    return {
+        ...question,
+        reviewSubject: String(question.reviewSubject || fallbackReviewSubject || '').trim()
+    };
+}
+
 function loadTestBuilder(existingId = null, targetQIdx = null) {
     BUILDER_QUESTIONS = [];
     document.getElementById('questionContainer').innerHTML = '';
@@ -124,7 +136,8 @@ function loadTestBuilder(existingId = null, targetQIdx = null) {
             if(test.duration) document.getElementById('builderDuration').value = test.duration;
             
             // Load Questions
-            BUILDER_QUESTIONS = test.questions || [];
+            const fallbackReview = test.type === 'quiz' ? (test.title || '') : '';
+            BUILDER_QUESTIONS = (test.questions || []).map(q => normalizeBuilderQuestion(q, fallbackReview));
             renderBuilder();
 
             // Deep Link Scroll
@@ -149,9 +162,18 @@ function loadTestBuilder(existingId = null, targetQIdx = null) {
 }
 
 function addQuestion(type) {
+    const builderType = getBuilderCurrentType();
+    if (builderType === 'quiz' && (type === 'text' || type === 'live_practical')) {
+        if(typeof showToast === 'function') showToast("Quiz questions must be auto-marked. Use MCQ, Multi-select, Matching, Ranking, or Matrix.", "warning");
+        return;
+    }
+
     // UPDATED: Consistent String IDs
     const id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    let q = { id, type, text: "", points: 1, adminNotes: "", imageLink: "", linkedToPrevious: false }; // Default structure with points
+    const defaultReview = builderType === 'quiz'
+        ? String(getBuilderLinkedTitleFromInputs() || '').trim()
+        : '';
+    let q = { id, type, text: "", points: 1, adminNotes: "", imageLink: "", linkedToPrevious: false, reviewSubject: defaultReview }; // Default structure with points
 
     // Specific structures per type
     if (type === 'multiple_choice' || type === 'multi_select') {
@@ -183,6 +205,7 @@ function addQuestion(type) {
 function renderBuilder() {
     const container = document.getElementById('questionContainer');
     let totalPoints = 0;
+    const builderType = getBuilderCurrentType();
 
     container.innerHTML = BUILDER_QUESTIONS.map((q, idx) => {
         totalPoints += parseFloat(q.points || 0);
@@ -295,6 +318,11 @@ function renderBuilder() {
             </div>`;
         }
 
+        const reviewLabel = builderType === 'quiz' ? 'Review Subject (Required for Quiz)' : 'Review Subject (Optional)';
+        const reviewPlaceholder = builderType === 'quiz'
+            ? 'e.g. Billing Basics, Verification Flow, Product Setup'
+            : 'Optional remediation tag';
+
         return `
         <div class="question-card forms-question-card builder-draggable-card" data-qidx="${idx}">
             <div class="q-header builder-q-header">
@@ -321,6 +349,17 @@ function renderBuilder() {
                     <label>Points</label>
                     <input type="number" placeholder="1" value="${q.points}" min="1" onchange="updatePoints(${idx}, this.value)" style="margin:0;" title="Points Value">
                 </div>
+            </div>
+
+            <div class="builder-admin-notes" style="margin-bottom:10px;">
+                <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:5px;">${reviewLabel}</label>
+                <input
+                    type="text"
+                    value="${q.reviewSubject || ''}"
+                    placeholder="${reviewPlaceholder}"
+                    onchange="updateReviewSubject(${idx}, this.value)"
+                    style="width:100%; margin:0;"
+                >
             </div>
 
             <div class="builder-admin-notes" style="margin-bottom:10px;">
@@ -426,7 +465,8 @@ function restoreBuilderDraft() {
     if (!draftStr) return;
 
     const draft = JSON.parse(draftStr);
-    BUILDER_QUESTIONS = draft.questions || [];
+    const fallbackReview = draft.type === 'quiz' ? (draft.title || '') : '';
+    BUILDER_QUESTIONS = (draft.questions || []).map(q => normalizeBuilderQuestion(q, fallbackReview));
     EDITING_TEST_ID = draft.id;
 
     // Restore UI
@@ -460,6 +500,7 @@ function restoreBuilderDraft() {
 // --- BUILDER UPDATERS ---
 function updateQText(idx, val) { BUILDER_QUESTIONS[idx].text = val; }
 function updatePoints(idx, val) { BUILDER_QUESTIONS[idx].points = parseFloat(val) || 1; renderBuilder(); }
+function updateReviewSubject(idx, val) { BUILDER_QUESTIONS[idx].reviewSubject = String(val || '').trim(); }
 function updateAdminNotes(idx, val) { BUILDER_QUESTIONS[idx].adminNotes = val; }
 function updateImageLink(idx, val) { BUILDER_QUESTIONS[idx].imageLink = val; }
 function updateLinkedToPrevious(idx, val) { BUILDER_QUESTIONS[idx].linkedToPrevious = val; }
@@ -594,6 +635,29 @@ async function saveTest() {
         return;
     }
 
+    const normalizedQuestions = BUILDER_QUESTIONS.map(q => normalizeBuilderQuestion(q, type === 'quiz' ? linked : ''));
+    BUILDER_QUESTIONS = normalizedQuestions;
+    if (type === 'quiz') {
+        const manualTypes = normalizedQuestions
+            .map((q, idx) => ({ idx, type: String(q.type || '').trim().toLowerCase() }))
+            .filter(item => item.type === 'text' || item.type === 'live_practical')
+            .map(item => item.idx + 1);
+        if (manualTypes.length > 0) {
+            if(typeof showToast === 'function') showToast(`Quiz questions must be auto-marked. Replace manual question(s): ${manualTypes.join(', ')}.`, "warning");
+            return;
+        }
+
+        const missingReview = normalizedQuestions
+            .map((q, idx) => ({ idx, value: String(q.reviewSubject || '').trim() }))
+            .filter(item => !item.value)
+            .map(item => item.idx + 1);
+
+        if (missingReview.length > 0) {
+            if(typeof showToast === 'function') showToast(`Add a Review Subject for question(s): ${missingReview.join(', ')}.`, "warning");
+            return;
+        }
+    }
+
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
 
     // Update existing or create new
@@ -604,7 +668,7 @@ async function saveTest() {
             tests[idx].title = linked;
             tests[idx].type = type;
             tests[idx].duration = type === 'vetting' ? dur : null;
-            tests[idx].questions = BUILDER_QUESTIONS;
+            tests[idx].questions = normalizedQuestions;
             tests[idx].lastModified = new Date().toISOString();
             tests[idx].modifiedBy = CURRENT_USER.user;
         } else {
@@ -615,7 +679,7 @@ async function saveTest() {
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
-                questions: BUILDER_QUESTIONS,
+                questions: normalizedQuestions,
                 lastModified: new Date().toISOString(),
                 modifiedBy: CURRENT_USER.user
             };
@@ -628,7 +692,7 @@ async function saveTest() {
              if(!confirm("A test with this name already exists. Overwrite?")) return;
              tests[existingIdx].type = type;
              tests[existingIdx].duration = type === 'vetting' ? dur : null;
-             tests[existingIdx].questions = BUILDER_QUESTIONS;
+             tests[existingIdx].questions = normalizedQuestions;
              tests[existingIdx].lastModified = new Date().toISOString();
              tests[existingIdx].modifiedBy = CURRENT_USER.user;
         } else {
@@ -637,7 +701,7 @@ async function saveTest() {
                 title: linked,
                 type: type, 
                 duration: type === 'vetting' ? dur : null,
-                questions: BUILDER_QUESTIONS,
+                questions: normalizedQuestions,
                 lastModified: new Date().toISOString(),
                 modifiedBy: CURRENT_USER.user
             };

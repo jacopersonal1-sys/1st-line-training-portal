@@ -61,6 +61,9 @@ const App = {
     setView: function(view) {
         this.currentView = view;
         this.render();
+        if (view === 'engagement' || view === 'files') {
+            DataService.loadInitialData().then(() => this.render()).catch(() => {});
+        }
     },
 
     refresh: async function() {
@@ -91,7 +94,7 @@ const App = {
             return;
         }
 
-        if (!['view', 'builder', 'engagement'].includes(this.currentView)) {
+        if (!['view', 'builder', 'engagement', 'files'].includes(this.currentView)) {
             this.currentView = 'view';
         }
         if (this.currentView === 'engagement' && !this.canViewEngagement()) {
@@ -115,6 +118,10 @@ const App = {
             viewHtml = this.canViewEngagement()
                 ? EngagementUI.render()
                 : `<div class="cs-empty"><h3>Engagement Restricted</h3><p>Engagement is available to Admin and Super Admin sessions.</p></div>`;
+        } else if (this.currentView === 'files') {
+            viewHtml = this.canBuild()
+                ? FilesUI.render()
+                : `<div class="cs-empty"><h3>File Manager Restricted</h3><p>File Manager is available to Admin and Super Admin sessions.</p></div>`;
         } else {
             viewHtml = ViewUI.render();
         }
@@ -132,6 +139,11 @@ const App = {
                         ${this.canViewEngagement() ? `
                             <button class="sub-tab-btn ${this.currentView === 'engagement' ? 'active' : ''}" onclick="App.setView('engagement')">
                                 <i class="fas fa-chart-line"></i> Engagement
+                            </button>
+                        ` : ''}
+                        ${this.canBuild() ? `
+                            <button class="sub-tab-btn ${this.currentView === 'files' ? 'active' : ''}" onclick="App.setView('files')">
+                                <i class="fas fa-folder-open"></i> Files
                             </button>
                         ` : ''}
                     </div>

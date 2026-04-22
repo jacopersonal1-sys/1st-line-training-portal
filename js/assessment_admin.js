@@ -679,6 +679,16 @@ async function openAdminMarking(subId, options = {}) {
         const noteText = q.adminNotes || 'No note added';
         const editBtn = `<button class="btn-secondary btn-sm" onclick="editMarkerNote('${sub.testId}', ${lookupIdx}, '${sub.id}')" style="margin-left:10px; padding:2px 6px; font-size:0.7rem;"><i class="fas fa-edit"></i> Edit Note</button>`;
         let adminNoteHtml = `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> <span id="marker-note-text-${lookupIdx}">${noteText}</span> ${editBtn}</div>`;
+        const reviewSubject = String(q.reviewSubject || '').trim();
+        const safeReviewSubject = reviewSubject
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        const reviewSubjectHtml = reviewSubject
+            ? `<div style="margin-bottom:10px; padding:8px; background:rgba(52, 152, 219, 0.08); border-left:3px solid #3498db; font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-route"></i> Review Subject:</strong> ${safeReviewSubject}</div>`
+            : '';
         
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
@@ -812,7 +822,7 @@ async function openAdminMarking(subId, options = {}) {
         questionStack.innerHTML += `
             <div class="marking-item" style="margin-bottom:25px;">
                 <div style="font-weight:600;">Q${idx + 1}: ${q.text} ${refBtn} <span style="float:right; font-size:0.8rem; color:var(--text-muted);">(${pointsMax} pts)</span></div>
-                ${adminNoteHtml}${markHtml}
+                ${reviewSubjectHtml}${adminNoteHtml}${markHtml}
             </div>`;
     });
 

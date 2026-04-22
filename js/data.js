@@ -111,6 +111,13 @@ window.REALTIME_RECONNECT_TIMER = null;
 window.CURRENT_FALLBACK_RATE = 600000;
 window.NORMAL_FALLBACK_RATE = 0;
 window.REALTIME_FAILURE_RATE = 30000;
+window.REALTIME_FAILURE_STREAK = 0;
+window.REALTIME_LAST_STATUS = null;
+window.REALTIME_RETRY_DELAY = 15000;
+window.REALTIME_MAX_RETRY_DELAY = 120000;
+window.REALTIME_COOLDOWN_UNTIL = 0;
+window.REALTIME_COOLDOWN_MS = 180000;
+window.REALTIME_COOLDOWN_TRIGGER = 8;
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -258,6 +265,7 @@ window.addEventListener('online', () => {
     }, 1500);
 });
 window.addEventListener('offline', () => {
+    if (typeof clearRealtimeReconnectTimer === 'function') clearRealtimeReconnectTimer();
     updateSyncUI('error');
 });
 
@@ -1033,19 +1041,33 @@ async function reportSystemError(msg, type, meta = null) {
         appVersion: normalizedMeta.appVersion ? String(normalizedMeta.appVersion) : (window.APP_VERSION || 'Unknown')
     };
 
-    // Optimistic Load & Save
-    const reports = safeLocalParse('error_reports', []) || [];
+    // Optimistic local-first write. Never throw from reporting path.
+    const rawReports = safeLocalParse('error_reports', []);
+    const reports = Array.isArray(rawReports) ? rawReports : [];
     reports.push(report);
-    
+
     // Keep size manageable (Last 500 errors) - Increased to ensure multi-user history is kept
     if (reports.length > 500) reports.shift();
-    
-    localStorage.setItem('error_reports', JSON.stringify(reports));
-    
-    // Silent Sync to Cloud
-    if (typeof saveToServer === 'function') {
-        await saveToServer(['error_reports'], false, true);
+
+    try {
+        localStorage.setItem('error_reports', JSON.stringify(reports));
+    } catch (storageErr) {
+        console.warn("reportSystemError: local write failed", storageErr);
+        return { saved: false, synced: false, report };
     }
+
+    // Silent sync best-effort. Local save is still considered success if sync fails.
+    let synced = true;
+    if (typeof saveToServer === 'function') {
+        try {
+            await saveToServer(['error_reports'], false, true);
+        } catch (syncErr) {
+            synced = false;
+            console.warn("reportSystemError: sync deferred", syncErr);
+        }
+    }
+
+    return { saved: true, synced, report };
 }
 
 function checkErrorAlerts() {
@@ -2943,6 +2965,10 @@ function startRealtimeSync() {
         && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin');
     window.REALTIME_FAILURE_RATE = isFastFailoverRole ? 1000 : Math.max(1000, syncRate);
     window.BASE_REALTIME_FAILURE_RATE = Math.max(1000, syncRate);
+    window.REALTIME_FAILURE_STREAK = 0;
+    window.REALTIME_LAST_STATUS = null;
+    window.REALTIME_RETRY_DELAY = 15000;
+    window.REALTIME_COOLDOWN_UNTIL = 0;
 
     // Start the Incoming Queue Processor (Checks every 2 seconds)
     startQueueProcessor();
@@ -2975,6 +3001,30 @@ function startRealtimeSync() {
     setupRealtimeListeners();
     
     console.log("Real-time sync & heartbeat engine started (High Performance Mode).");
+}
+
+function clearRealtimeReconnectTimer() {
+    if (window.REALTIME_RECONNECT_TIMER) {
+        clearTimeout(window.REALTIME_RECONNECT_TIMER);
+        clearInterval(window.REALTIME_RECONNECT_TIMER);
+        window.REALTIME_RECONNECT_TIMER = null;
+    }
+}
+
+function scheduleRealtimeReconnect() {
+    if (window.REALTIME_RECONNECT_TIMER || !navigator.onLine) return;
+    const now = Date.now();
+    const cooldownUntil = window.REALTIME_COOLDOWN_UNTIL || 0;
+    const inCooldown = now < cooldownUntil;
+    const retryDelay = Math.max(3000, window.REALTIME_RETRY_DELAY || 15000);
+    const delay = inCooldown ? Math.max(3000, cooldownUntil - now) : retryDelay;
+
+    window.REALTIME_RECONNECT_TIMER = setTimeout(() => {
+        window.REALTIME_RECONNECT_TIMER = null;
+        if (!navigator.onLine) return;
+        console.warn(`[Realtime Tunnel] Reconnect attempt (${Math.round(delay / 1000)}s wait).`);
+        setupRealtimeListeners();
+    }, delay);
 }
 
 // --- REALTIME LISTENERS (The Fix for Live Updates) ---
@@ -3010,11 +3060,17 @@ function setupRealtimeListeners() {
             }
         })
         .subscribe((status, err) => {
-            console.log(`[Realtime Tunnel] Data Channel Status: ${status}`, err || '');
+            if (status !== window.REALTIME_LAST_STATUS || err) {
+                console.log(`[Realtime Tunnel] Data Channel Status: ${status}`, err || '');
+                window.REALTIME_LAST_STATUS = status;
+            }
             const indicator = document.getElementById('sync-indicator');
             
             if (status === 'SUBSCRIBED') {
-                if (window.REALTIME_RECONNECT_TIMER) { clearInterval(window.REALTIME_RECONNECT_TIMER); window.REALTIME_RECONNECT_TIMER = null; }
+                clearRealtimeReconnectTimer();
+                window.REALTIME_FAILURE_STREAK = 0;
+                window.REALTIME_RETRY_DELAY = 15000;
+                window.REALTIME_COOLDOWN_UNTIL = 0;
                 
                 // Zero-polling when the realtime tunnel is healthy.
                 if (window.CURRENT_FALLBACK_RATE !== window.NORMAL_FALLBACK_RATE) setFallbackPollingRate(window.NORMAL_FALLBACK_RATE);
@@ -3034,6 +3090,19 @@ function setupRealtimeListeners() {
                     lastSuccessAt: Date.now()
                 });
             } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                window.REALTIME_FAILURE_STREAK = (window.REALTIME_FAILURE_STREAK || 0) + 1;
+                window.REALTIME_RETRY_DELAY = Math.min(
+                    window.REALTIME_MAX_RETRY_DELAY || 120000,
+                    Math.round((window.REALTIME_RETRY_DELAY || 15000) * 1.6)
+                );
+                if (
+                    window.REALTIME_FAILURE_STREAK >= (window.REALTIME_COOLDOWN_TRIGGER || 8)
+                    && Date.now() >= (window.REALTIME_COOLDOWN_UNTIL || 0)
+                ) {
+                    window.REALTIME_COOLDOWN_UNTIL = Date.now() + (window.REALTIME_COOLDOWN_MS || 180000);
+                    console.warn('[Realtime Tunnel] Entering cooldown mode while server is unreachable.');
+                }
+
                 // Tunnel collapsed. Fall back to the role-based sync cadence.
                 if (window.CURRENT_FALLBACK_RATE !== window.REALTIME_FAILURE_RATE) setFallbackPollingRate(window.REALTIME_FAILURE_RATE);
                 
@@ -3051,9 +3120,7 @@ function setupRealtimeListeners() {
                     lastError: `Realtime status: ${status}`
                 });
                 
-                if (!window.REALTIME_RECONNECT_TIMER && navigator.onLine) {
-                    window.REALTIME_RECONNECT_TIMER = setInterval(() => { console.warn("Attempting tunnel reconnect..."); setupRealtimeListeners(); }, 15000);
-                }
+                scheduleRealtimeReconnect();
             }
         });
         
@@ -3622,7 +3689,7 @@ function executePendingSessionAction(rawAction) {
     if (action === 'force_update') {
         if (typeof require !== 'undefined') {
             sessionStorage.setItem('force_update_active', 'true');
-            require('electron').ipcRenderer.send('manual-update-check');
+            require('electron').ipcRenderer.send('manual-update-check', { channel: 'main' });
             if(typeof showToast === 'function') showToast("System Update Check Initiated by Admin", "info");
         }
         return true;

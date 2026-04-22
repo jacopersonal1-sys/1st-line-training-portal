@@ -341,9 +341,86 @@ async function generateAIResponse(systemPrompt, userPrompt) {
 }
 
 // --- PROFILE SETTINGS MODAL (Global) ---
+function getProfileIdentityToken(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\s+/g, '');
+}
+
+function findCurrentProfileUserSnapshot() {
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const currentToken = getProfileIdentityToken(CURRENT_USER && CURRENT_USER.user);
+    const idx = users.findIndex(u => getProfileIdentityToken(u && (u.user || u.username)) === currentToken);
+    return { users, idx, user: idx > -1 ? users[idx] : null };
+}
+
+function getCurrentProfileGroups(username) {
+    const labels = [];
+    try {
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const target = getProfileIdentityToken(username);
+        Object.entries(rosters || {}).forEach(([gid, members]) => {
+            if (!Array.isArray(members)) return;
+            const inGroup = members.some(m => getProfileIdentityToken(m) === target);
+            if (!inGroup) return;
+            labels.push((typeof getGroupLabel === 'function') ? getGroupLabel(gid, members.length) : gid);
+        });
+    } catch (e) {}
+    return labels;
+}
+
+function isPasswordHashValue(pass) {
+    return !!pass && String(pass).length === 64 && /^[0-9a-fA-F]+$/.test(String(pass));
+}
+
+function getProfileCompletionMeta(user) {
+    const data = (user && user.traineeData && typeof user.traineeData === 'object') ? user.traineeData : {};
+    const isTrainee = String((user && user.role) || '').toLowerCase() === 'trainee';
+    const checks = [
+        !!String(data.email || '').trim(),
+        !!String(data.phone || '').trim(),
+        !!String(data.contactPreference || '').trim()
+    ];
+    if (isTrainee) checks.push(!!String(data.knowledge || '').trim());
+    const completed = checks.filter(Boolean).length;
+    const total = checks.length;
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { completed, total, percentage };
+}
+
+async function verifyProfileCurrentPassword(inputPass, storedPass) {
+    const current = String(inputPass || '');
+    const stored = String(storedPass || '');
+    if (!current || !stored) return false;
+    if (stored === current) return true;
+    if (typeof hashPassword === 'function') {
+        const hashed = await hashPassword(current);
+        if (hashed && hashed === stored) return true;
+        const doubleHashed = await hashPassword(hashed);
+        if (doubleHashed && doubleHashed === stored) return true;
+    }
+    return false;
+}
+
+function validateEnterprisePassword(password) {
+    const p = String(password || '');
+    const errors = [];
+    if (p.length < 10) errors.push("At least 10 characters");
+    if (!/[A-Z]/.test(p)) errors.push("At least one uppercase letter");
+    if (!/[a-z]/.test(p)) errors.push("At least one lowercase letter");
+    if (!/[0-9]/.test(p)) errors.push("At least one number");
+    if (!/[^A-Za-z0-9]/.test(p)) errors.push("At least one symbol");
+    return errors;
+}
+
 window.openUnifiedProfileSettings = function() {
     const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
     const expTheme = localStorage.getItem('experimental_theme') || '';
+    const selectedChannel = (localStorage.getItem('profile_update_channel') || 'main') === 'beta' ? 'beta' : 'main';
     const expLabels = {
         '': 'Original',
         'theme-custom-lab': 'Custom Lab',
@@ -379,33 +456,93 @@ window.openUnifiedProfileSettings = function() {
         }
     } catch (e) {}
 
-    let myGroup = 'Not Assigned';
-    try {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-        const normalizedUser = String((CURRENT_USER && CURRENT_USER.user) || '').toLowerCase();
-        for (const [gid, members] of Object.entries(rosters)) {
-            if (Array.isArray(members) && members.some(m => String(m || '').toLowerCase() === normalizedUser)) {
-                myGroup = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, members.length).split('[')[0].trim() : gid;
-                break;
-            }
-        }
-    } catch (e) {}
+    const profileSnapshot = findCurrentProfileUserSnapshot();
+    const profileUser = profileSnapshot.user || CURRENT_USER || {};
+    const role = String((profileUser && profileUser.role) || (CURRENT_USER && CURRENT_USER.role) || '').toLowerCase().trim();
+    const isTrainee = role === 'trainee';
+    const isTeamLeader = role === 'teamleader';
+    const groups = getCurrentProfileGroups(profileUser.user || CURRENT_USER.user);
+    const myGroup = groups.length > 0 ? groups.join(', ') : 'Not Assigned';
+    const profileData = (profileUser.traineeData && typeof profileUser.traineeData === 'object') ? profileUser.traineeData : {};
+    const profileEmail = String(profileData.email || '').trim();
+    const profilePhone = String(profileData.phone || '').trim();
+    const profileContactPreference = String(profileData.contactPreference || '').trim().toLowerCase();
+    const defaultContactPreference = profileContactPreference || (profileEmail ? 'email' : (profilePhone ? 'phone' : 'email'));
+    const roleSpecificLabel = isTrainee ? 'Training Background' : 'Role Notes';
+    const roleSpecificPlaceholder = isTrainee
+        ? 'Summarize your prior knowledge so trainers can support your pace.'
+        : 'Capture your current team leader focus, coaching, or operational priorities.';
+    const roleSpecificValue = isTrainee
+        ? String(profileData.knowledge || '').trim()
+        : String(profileData.roleNotes || profileData.knowledge || '').trim();
+    const accountStatus = (profileUser.blocked === true || String(profileUser.status || '').toLowerCase() === 'blocked') ? 'Blocked' : 'Active';
+    const clientId = String(localStorage.getItem('client_id') || '').trim() || 'Not Available';
+    const boundClient = String(profileUser.boundClientId || '').trim() || 'Unbound';
+    const passwordState = isPasswordHashValue(profileUser.pass) ? 'Encrypted' : 'Legacy (Needs Update)';
+    const completion = getProfileCompletionMeta(profileUser);
+    const completionTone = completion.percentage >= 100 ? '#2ecc71' : (completion.percentage >= 60 ? '#f1c40f' : '#ff5252');
+    const helpText = isTrainee
+        ? 'Keep this profile current to improve assignment support, communication, and coaching relevance.'
+        : (isTeamLeader
+            ? 'Keep this profile current so admin and operations teams can coordinate escalation and communication quickly.'
+            : 'Maintain your profile details for secure access and support.');
     
     const modalHtml = `
         <div id="profileSettingsModal" class="modal-overlay" style="z-index:10005;">
-            <div class="modal-box" style="width:680px; max-width:95%; max-height:90vh; overflow-y:auto;">
+            <div class="modal-box" style="width:820px; max-width:96%; max-height:92vh; overflow-y:auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-                    <h3 style="margin:0;"><i class="fas fa-user-circle"></i> Profile & Settings</h3>
+                    <h3 style="margin:0;"><i class="fas fa-user-shield"></i> Profile & Workspace Settings</h3>
                     <button class="btn-secondary" onclick="document.getElementById('profileSettingsModal').remove()">&times;</button>
                 </div>
                 
                 <div class="card" style="margin-bottom:15px; background:var(--bg-input); border:1px solid var(--border-color);">
                     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:10px; font-size:0.86rem;">
-                        <div><strong>User:</strong> ${safeAttr(CURRENT_USER?.user || 'Unknown')}</div>
-                        <div><strong>Role:</strong> ${safeAttr(CURRENT_USER?.role || 'Unknown')}</div>
+                        <div><strong>User:</strong> ${safeAttr(profileUser.user || CURRENT_USER?.user || 'Unknown')}</div>
+                        <div><strong>Role:</strong> ${safeAttr(role || 'Unknown')}</div>
                         <div><strong>Group:</strong> ${safeAttr(myGroup)}</div>
                         <div><strong>Theme:</strong> ${safeAttr(expLabels[expTheme] || 'Original')}</div>
+                        <div><strong>Account Status:</strong> ${safeAttr(accountStatus)}</div>
+                        <div><strong>Password State:</strong> ${safeAttr(passwordState)}</div>
+                        <div><strong>Device ID:</strong> <code>${safeAttr(clientId)}</code></div>
+                        <div><strong>Bound Device:</strong> <code>${safeAttr(boundClient)}</code></div>
                     </div>
+                    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <span style="font-size:0.8rem; color:var(--text-muted);">Profile Completeness</span>
+                        <span style="padding:2px 9px; border-radius:999px; border:1px solid ${completionTone}; color:${completionTone}; font-size:0.78rem; font-weight:700;">
+                            ${completion.percentage}% (${completion.completed}/${completion.total})
+                        </span>
+                        <span style="font-size:0.78rem; color:var(--text-muted);">${safeAttr(helpText)}</span>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:15px;">
+                    <h4 style="margin-top:0;"><i class="fas fa-id-card"></i> Account Profile</h4>
+                    <div class="grid-2" style="margin-bottom:8px;">
+                        <div>
+                            <label style="font-size:0.8rem;">Work Email</label>
+                            <input type="text" id="profEmail" value="${safeAttr(profileEmail)}" placeholder="name@example.com">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem;">Phone Number</label>
+                            <input type="text" id="profPhone" value="${safeAttr(profilePhone)}" placeholder="082...">
+                        </div>
+                    </div>
+                    <div class="grid-2" style="margin-bottom:8px;">
+                        <div>
+                            <label style="font-size:0.8rem;">Preferred Contact Channel</label>
+                            <select id="profContactPreference">
+                                <option value="email" ${defaultContactPreference === 'email' ? 'selected' : ''}>Email</option>
+                                <option value="phone" ${defaultContactPreference === 'phone' ? 'selected' : ''}>Phone</option>
+                                <option value="teams" ${defaultContactPreference === 'teams' ? 'selected' : ''}>Teams / Chat</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem;">Assigned Group(s)</label>
+                            <input type="text" value="${safeAttr(myGroup)}" disabled>
+                        </div>
+                    </div>
+                    <label style="font-size:0.8rem;">${roleSpecificLabel}</label>
+                    <textarea id="profKnowledge" placeholder="${safeAttr(roleSpecificPlaceholder)}" style="min-height:90px;">${safeAttr(roleSpecificValue)}</textarea>
                 </div>
 
                 <div class="card" style="margin-bottom:15px;">
@@ -487,7 +624,7 @@ window.openUnifiedProfileSettings = function() {
                 </div>
 
                 <div class="card" style="margin-bottom:15px;">
-                    <h4 style="margin-top:0;"><i class="fas fa-cloud-download-alt"></i> System Update</h4>
+                    <h4 style="margin-top:0;"><i class="fas fa-cloud-download-alt"></i> Update Preferences</h4>
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <div>
                             <div style="font-size:0.8rem; color:var(--text-muted);">Current Version</div>
@@ -495,8 +632,8 @@ window.openUnifiedProfileSettings = function() {
                         </div>
                         <div style="display:flex; gap:8px; align-items:center;">
                             <select id="profileUpdateChannel" style="margin:0; min-width:120px;">
-                                <option value="main" ${(localStorage.getItem('profile_update_channel') || 'main') === 'main' ? 'selected' : ''}>Main (Inline)</option>
-                                <option value="beta" ${(localStorage.getItem('profile_update_channel') || 'main') === 'beta' ? 'selected' : ''}>Beta (Optional)</option>
+                                <option value="main" ${selectedChannel === 'main' ? 'selected' : ''}>Main (Inline)</option>
+                                <option value="beta" ${selectedChannel === 'beta' ? 'selected' : ''}>Beta (Optional)</option>
                             </select>
                             <button id="btnProfileCheckUpdate" class="btn-secondary btn-sm" onclick="triggerProfileUpdateCheck()">Check for Updates</button>
                         </div>
@@ -506,11 +643,22 @@ window.openUnifiedProfileSettings = function() {
 
                 <div class="card">
                     <h4 style="margin-top:0;"><i class="fas fa-key"></i> Security</h4>
-                    <label style="font-size:0.8rem;">Change Password</label>
-                    <div style="display:flex; gap:10px;">
-                        <input type="password" id="profNewPass" placeholder="New Password" style="margin:0; flex:1;">
-                        <button class="btn-warning btn-sm" onclick="saveProfilePassword()">Update</button>
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
+                        <div>
+                            <label style="font-size:0.8rem;">Current Password</label>
+                            <input type="password" id="profCurrentPass" placeholder="Current Password" autocomplete="current-password">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem;">New Password</label>
+                            <input type="password" id="profNewPass" placeholder="New Password" autocomplete="new-password">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem;">Confirm New Password</label>
+                            <input type="password" id="profConfirmPass" placeholder="Confirm New Password" autocomplete="new-password">
+                        </div>
                     </div>
+                    <div style="font-size:0.76rem; color:var(--text-muted); margin-top:8px;">Password policy: 10+ chars, uppercase, lowercase, number, symbol.</div>
+                    <div style="margin-top:10px;"><button class="btn-warning btn-sm" onclick="saveProfilePassword()">Update Password</button></div>
                 </div>
 
                 <div style="text-align:right; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
@@ -642,7 +790,7 @@ window.resetProfileZoom = function() {
     }
 };
 
-window.saveProfileSettings = function() {
+window.saveProfileSettings = async function() {
     try {
         const getVal = (id) => { const el = document.getElementById(id); return el ? el.value : null; };
         const getChecked = (id) => { const el = document.getElementById(id); return el ? el.checked : false; };
@@ -656,6 +804,9 @@ window.saveProfileSettings = function() {
         };
         
         localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));
+        const selectedChannelRaw = String(getVal('profileUpdateChannel') || 'main').trim().toLowerCase();
+        const selectedChannel = selectedChannelRaw === 'beta' ? 'beta' : 'main';
+        localStorage.setItem('profile_update_channel', selectedChannel);
 
         // Experimental Theme Preference (Profile-side access for trainees too)
         const selectedExpTheme = getVal('profExperimentalTheme') || '';
@@ -684,6 +835,46 @@ window.saveProfileSettings = function() {
                 : customDraft;
             localStorage.setItem('experimental_theme_custom', JSON.stringify(safeDraft));
         }
+
+        // Account profile details (trainee + teamleader self-service)
+        const profileSnapshot = findCurrentProfileUserSnapshot();
+        const users = profileSnapshot.users;
+        if (profileSnapshot.idx > -1) {
+            if (!users[profileSnapshot.idx].traineeData || typeof users[profileSnapshot.idx].traineeData !== 'object') {
+                users[profileSnapshot.idx].traineeData = {};
+            }
+
+            const email = String(getVal('profEmail') || '').trim();
+            const phone = String(getVal('profPhone') || '').trim();
+            const contactPref = String(getVal('profContactPreference') || 'email').trim().toLowerCase();
+            const knowledge = String(getVal('profKnowledge') || '').trim();
+
+            users[profileSnapshot.idx].traineeData.email = email;
+            users[profileSnapshot.idx].traineeData.phone = phone;
+            users[profileSnapshot.idx].traineeData.contactPreference = contactPref;
+            users[profileSnapshot.idx].traineeData.contact = [email, phone].filter(Boolean).join(' | ');
+            users[profileSnapshot.idx].traineeData.knowledge = knowledge;
+            if (role !== 'trainee') users[profileSnapshot.idx].traineeData.roleNotes = knowledge;
+            users[profileSnapshot.idx].lastModified = new Date().toISOString();
+            users[profileSnapshot.idx].modifiedBy = (CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'self';
+
+            const role = String(users[profileSnapshot.idx].role || '').toLowerCase().trim();
+            if (role === 'trainee') {
+                const complete = !!email && !!phone && !!knowledge;
+                users[profileSnapshot.idx].hasFilledQuestionnaire = complete;
+            }
+
+            localStorage.setItem('users', JSON.stringify(users));
+
+            if (CURRENT_USER) {
+                CURRENT_USER = { ...CURRENT_USER, ...users[profileSnapshot.idx] };
+                if (window) window.CURRENT_USER = CURRENT_USER;
+                sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
+            }
+
+            if (typeof secureAuthSave === 'function') await secureAuthSave();
+            else if (typeof saveToServer === 'function') await saveToServer(['users'], true);
+        }
         
         if (typeof applyUserTheme === 'function') applyUserTheme();
         if (typeof applyExperimentalTheme === 'function') applyExperimentalTheme(selectedExpTheme || null);
@@ -697,34 +888,64 @@ window.saveProfileSettings = function() {
 };
 
 window.saveProfilePassword = async function() {
-    const newPass = document.getElementById('profNewPass').value;
-    if(!newPass) return alert("Please enter a new password.");
+    const currentPass = String(document.getElementById('profCurrentPass') ? document.getElementById('profCurrentPass').value : '');
+    const newPass = String(document.getElementById('profNewPass') ? document.getElementById('profNewPass').value : '');
+    const confirmPass = String(document.getElementById('profConfirmPass') ? document.getElementById('profConfirmPass').value : '');
+    if (!currentPass || !newPass || !confirmPass) return alert("Please complete all password fields.");
+    if (newPass !== confirmPass) return alert("New password and confirmation do not match.");
     
     if(!confirm("Are you sure you want to change your password?")) return;
+
+    const profileSnapshot = findCurrentProfileUserSnapshot();
+    if (profileSnapshot.idx === -1 || !profileSnapshot.user) {
+        alert("Error: User record not found.");
+        return;
+    }
+
+    const passValid = await verifyProfileCurrentPassword(currentPass, profileSnapshot.user.pass);
+    if (!passValid) {
+        alert("Current password is incorrect.");
+        return;
+    }
+
+    const policyErrors = validateEnterprisePassword(newPass);
+    if (policyErrors.length > 0) {
+        alert("Password does not meet policy:\n- " + policyErrors.join("\n- "));
+        return;
+    }
+
+    const sameAsCurrent = await verifyProfileCurrentPassword(newPass, profileSnapshot.user.pass);
+    if (sameAsCurrent) {
+        alert("New password must be different from the current password.");
+        return;
+    }
+
+    let finalPass = newPass;
+    if (typeof hashPassword === 'function') {
+        finalPass = await hashPassword(newPass);
+    }
+
+    profileSnapshot.users[profileSnapshot.idx].pass = finalPass;
+    profileSnapshot.users[profileSnapshot.idx].lastModified = new Date().toISOString();
+    profileSnapshot.users[profileSnapshot.idx].modifiedBy = (CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'self';
+    localStorage.setItem('users', JSON.stringify(profileSnapshot.users));
     
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const idx = users.findIndex(u => u.user === CURRENT_USER.user);
-    
-    if(idx > -1) {
-        let finalPass = newPass;
-        if (typeof hashPassword === 'function') {
-            finalPass = await hashPassword(newPass);
-        }
-        
-        users[idx].pass = finalPass;
-        localStorage.setItem('users', JSON.stringify(users));
-        
-        // Update current session
+    // Update current session
+    if (CURRENT_USER) {
         CURRENT_USER.pass = finalPass;
         sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
-        
-        // Sync
-        if(typeof secureAuthSave === 'function') await secureAuthSave();
-        else if(typeof saveToServer === 'function') await saveToServer(['users'], false);
-        
-        alert("Password updated successfully.");
-        document.getElementById('profNewPass').value = '';
-    } else {
-        alert("Error: User record not found.");
     }
+    
+    // Sync
+    if(typeof secureAuthSave === 'function') await secureAuthSave();
+    else if(typeof saveToServer === 'function') await saveToServer(['users'], true);
+    
+    alert("Password updated successfully.");
+    const clearField = (id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    };
+    clearField('profCurrentPass');
+    clearField('profNewPass');
+    clearField('profConfirmPass');
 };

@@ -312,18 +312,59 @@ window.submitReportProblem = async function() {
         activeTab
     };
 
-    if (submitBtn) submitBtn.disabled = true;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Submitting...';
+    }
     try {
-        if (typeof reportSystemError !== 'function') throw new Error("Reporting system unavailable.");
-        await reportSystemError(summary, 'user_report', payload);
-        if (typeof showToast === 'function') showToast("Problem report submitted.", "success");
+        let result = null;
+        if (typeof reportSystemError === 'function') {
+            result = await reportSystemError(summary, 'user_report', payload);
+        } else {
+            const report = {
+                id: Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+                user: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'Guest',
+                role: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role) ? CURRENT_USER.role : 'Unknown',
+                error: summary,
+                type: 'user_report',
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                source: 'report_problem',
+                issueDetail: issueDetail,
+                consoleSnapshot: payload.consoleSnapshot,
+                pageUrl: payload.pageUrl,
+                activeTab: payload.activeTab,
+                appVersion: payload.appVersion
+            };
+            const rawReports = (typeof safeLocalParse === 'function') ? safeLocalParse('error_reports', []) : JSON.parse(localStorage.getItem('error_reports') || '[]');
+            const reports = Array.isArray(rawReports) ? rawReports : [];
+            reports.push(report);
+            if (reports.length > 500) reports.shift();
+            localStorage.setItem('error_reports', JSON.stringify(reports));
+            result = { saved: true, synced: false, report };
+        }
+
+        const saved = !result || result.saved !== false;
+        const synced = !result || result.synced !== false;
+        if (!saved) throw new Error("Local report write failed.");
+
+        if (typeof showToast === 'function') {
+            showToast(
+                synced ? "Problem report submitted." : "Problem report saved locally. Cloud sync will retry automatically.",
+                synced ? "success" : "warning"
+            );
+        }
         closeReportProblemModal();
     } catch (err) {
         console.error("Problem report submission failed:", err);
         if (typeof showToast === 'function') showToast("Failed to submit problem report.", "error");
         else alert("Failed to submit problem report.");
     } finally {
-        if (submitBtn) submitBtn.disabled = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = submitBtn.dataset.originalText || '<i class="fas fa-paper-plane"></i> Submit Report';
+        }
     }
 };
 
@@ -339,6 +380,12 @@ if (document.readyState === 'loading') {
 } else {
     ensureReportProblemUI();
 }
+
+// Self-heal in case third-party rendering or modal cleanup removes the FAB unexpectedly.
+window.ensureReportProblemUI = ensureReportProblemUI;
+window.addEventListener('focus', () => {
+    if (!document.getElementById(REPORT_PROBLEM_FAB_ID)) ensureReportProblemUI();
+});
 
 // Lock to prevent concurrent failovers destroying the boot cycle
 window._isSwitchingServers = false;
@@ -960,34 +1007,48 @@ window.onload = async function() {
         });
 
         // NEW: Check if update is ALREADY waiting (Handle Reloads/Logouts)
-        ipcRenderer.invoke('get-update-status').then(isReady => {
+        ipcRenderer.invoke('get-update-status').then(status => {
+            const isReady = (status && typeof status === 'object') ? !!status.ready : !!status;
+            const readyChannel = (status && typeof status === 'object')
+                ? normalizeClientUpdateChannel(status.channel)
+                : normalizeClientUpdateChannel(sessionStorage.getItem('update_ready_channel'));
+
+            window.UPDATE_READY_CHANNEL = readyChannel;
+            sessionStorage.setItem('update_ready_channel', readyChannel);
+
             if (isReady) {
                 window.UPDATE_DOWNLOADED = true;
-                // Transform Login Button immediately if visible
-                const loginBtn = document.querySelector('#login-screen button[type="submit"]');
-                if(loginBtn) {
-                    loginBtn.innerText = "Restart & Install Update";
-                    loginBtn.onclick = (e) => { e.preventDefault(); performUpdateRestart(); };
-                    loginBtn.classList.remove('btn-primary');
-                    loginBtn.classList.add('btn-success');
-                    loginBtn.classList.add('pulse-anim');
+                sessionStorage.setItem('update_ready', 'true');
+                if (typeof updateNotifications === 'function') updateNotifications();
+
+                if (readyChannel === 'main') {
+                    // Transform Login Button immediately if visible (Main updates only)
+                    const loginBtn = document.querySelector('#login-screen button[type="submit"]');
+                    if(loginBtn) {
+                        loginBtn.innerText = "Restart & Install Update";
+                        loginBtn.onclick = (e) => { e.preventDefault(); performUpdateRestart(); };
+                        loginBtn.classList.remove('btn-primary');
+                        loginBtn.classList.add('btn-success');
+                        loginBtn.classList.add('pulse-anim');
+                    }
+                    const err = document.getElementById('loginError');
+                    if(err) { err.innerText = "Update Ready. Please restart."; err.style.color = "#2ecc71"; }
+                } else {
+                    const err = document.getElementById('loginError');
+                    if(err) { err.innerText = "Optional beta update is ready in Notifications."; err.style.color = "#f1c40f"; }
                 }
-                const err = document.getElementById('loginError');
-                if(err) { err.innerText = "Update Ready. Please restart."; err.style.color = "#2ecc71"; }
             }
         });
     }
 
     // --- UPDATE CHANNEL CONFIGURATION ---
-    // Tell Electron if we want Main (inline) or Beta (pre-release) updates based on staging mode.
+    // Main is default. Beta remains opt-in via profile selector, except staging which is always beta.
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         const target = localStorage.getItem('active_server_target');
-        if (target === 'staging') {
-            ipcRenderer.send('set-update-channel', 'beta');
-        } else {
-            ipcRenderer.send('set-update-channel', 'main');
-        }
+        const preferred = normalizeClientUpdateChannel(localStorage.getItem('profile_update_channel'));
+        const desiredChannel = target === 'staging' ? 'beta' : preferred;
+        ipcRenderer.send('set-update-channel', desiredChannel);
     }
 
     // --- IMPERSONATION CHECK ---
@@ -1323,7 +1384,10 @@ window.onload = async function() {
     if (typeof require !== 'undefined') {
         setInterval(() => {
             const { ipcRenderer } = require('electron');
-            ipcRenderer.send('manual-update-check');
+            const target = localStorage.getItem('active_server_target');
+            const preferred = normalizeClientUpdateChannel(localStorage.getItem('profile_update_channel'));
+            const channel = target === 'staging' ? 'beta' : preferred;
+            ipcRenderer.send('manual-update-check', { channel });
         }, 1800000); // 30 mins
     }
 
@@ -2080,6 +2144,11 @@ function updateSidebarVisibility() {
             return;
         }
 
+        if ((targetTab === 'insight-studio' || targetTab === 'insights') && !['admin', 'super_admin'].includes(role)) {
+            btn.classList.add('hidden');
+            return;
+        }
+
         // OPL Hub is admin + super_admin only.
         if (targetTab === 'opl-hub' && !['admin', 'super_admin'].includes(role)) {
             btn.classList.add('hidden');
@@ -2095,7 +2164,7 @@ function updateSidebarVisibility() {
         // Rules
         if (role === 'trainee') {
             // Trainees hide Admin, Manage, Capture, Monthly, Insights
-            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework', 'superadmin-studio'];
+            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'insight-studio', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework', 'superadmin-studio'];
             const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly'];
             
             // Special Check for Arena
@@ -2120,7 +2189,7 @@ function updateSidebarVisibility() {
         else if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'insight-studio', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -2148,6 +2217,7 @@ const VIEW_SYNC_LAST_RUN = {};
 const HIGH_PRIORITY_SYNC_VIEWS = new Set([
     'assessment-schedule',
     'insights',
+    'insight-studio',
     'test-manage',
     'test-records',
     'admin-panel',
@@ -2184,6 +2254,10 @@ function rerenderActiveViewAfterFreshPull(id) {
     }
     if (id === 'insights' && typeof renderInsightDashboard === 'function') {
         renderInsightDashboard();
+        return;
+    }
+    if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
+        InsightStudioLoader.refresh();
         return;
     }
     if (id === 'test-manage') {
@@ -2251,7 +2325,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
+      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'insight-studio', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -2264,6 +2338,13 @@ function showTab(id, btn) {
   if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'content-studio') {
       if (typeof showToast === 'function') {
           showToast("Access denied: Content Creator is restricted to Admin and Super Admin.", "error");
+      }
+      return;
+  }
+
+  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && (id === 'insight-studio' || id === 'insights')) {
+      if (typeof showToast === 'function') {
+          showToast("Access denied: Insight is restricted to Admin and Super Admin.", "error");
       }
       return;
   }
@@ -2438,6 +2519,14 @@ function showTab(id, btn) {
           }
       }
 
+      if(id === 'insight-studio') {
+          if(typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.renderUI === 'function') {
+              InsightStudioLoader.renderUI();
+          } else {
+              console.error("InsightStudioLoader module not loaded. Check js/insight_studio_loader.js");
+          }
+      }
+
       if(id === 'live-assessment') {
           if(typeof renderLiveTable === 'function') renderLiveTable();
       }
@@ -2481,6 +2570,11 @@ function showTab(id, btn) {
           const gradView = document.getElementById('admin-view-graduated');
           if(gradView && gradView.classList.contains('active')) {
               if(typeof loadGraduatedAgents === 'function') loadGraduatedAgents();
+          }
+
+          const insightRulesView = document.getElementById('admin-view-insight-rules');
+          if(insightRulesView && insightRulesView.classList.contains('active')) {
+              if(typeof loadAdminInsightRules === 'function') loadAdminInsightRules();
           }
       }
       
@@ -2542,6 +2636,10 @@ function showAdminSub(viewName, btn) {
       if (typeof showToast === 'function') showToast('Update Center is available to Admin and Super Admin only.', 'warning');
       return;
   }
+  if (viewName === 'insight-rules' && CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role)) {
+      if (typeof showToast === 'function') showToast('Insight trigger presets are available to Admin and Super Admin only.', 'warning');
+      return;
+  }
 
   document.querySelectorAll('.admin-view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
@@ -2551,6 +2649,9 @@ function showAdminSub(viewName, btn) {
   // Trigger specific refresh for sub-tabs
   if(viewName === 'status' && typeof refreshSystemStatus === 'function') {
       refreshSystemStatus();
+  }
+  if(viewName === 'insight-rules' && typeof loadAdminInsightRules === 'function') {
+      loadAdminInsightRules();
   }
   if(viewName === 'updates' && typeof loadAdminUpdates === 'function') {
       loadAdminUpdates();
@@ -2643,6 +2744,7 @@ async function refreshApp() {
             if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
             if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
             if (id === 'insights' && typeof renderInsightDashboard === 'function') renderInsightDashboard();
+            if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh();
             if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
             if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
             if (id === 'admin-panel' && typeof loadAdminUsers === 'function') loadAdminUsers();
@@ -2708,14 +2810,16 @@ function updateNotifications() {
 
     // 1. SYSTEM UPDATE NOTIFICATION (Global for all roles)
     if (sessionStorage.getItem('update_ready') === 'true') {
+        const readyChannel = normalizeClientUpdateChannel(sessionStorage.getItem('update_ready_channel'));
+        const isBetaReady = readyChannel === 'beta';
         count++;
         notifList.innerHTML += `
         <div class="notif-item" onclick="restartAndInstall()" style="background:rgba(46, 204, 113, 0.1); border-left:3px solid #2ecc71; cursor:pointer;">
             <div style="display:flex; align-items:center; gap:10px;">
                 <i class="fas fa-arrow-circle-up" style="color:#2ecc71; font-size:1.2rem;"></i>
                 <div>
-                    <strong>Update Ready</strong>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Click to Restart & Install</div>
+                    <strong>${isBetaReady ? 'Beta Update Ready' : 'Update Ready'}</strong>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">${isBetaReady ? 'Optional: click to Restart & Install' : 'Click to Restart & Install'}</div>
                 </div>
             </div>
         </div>`;
@@ -2834,6 +2938,12 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+function normalizeClientUpdateChannel(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'beta' || raw === 'staging' || raw === 'prerelease' || raw === 'pre-release') return 'beta';
+    return 'main';
+}
+
 // --- GLOBAL UPDATE LISTENERS ---
 if (typeof require !== 'undefined') {
     const { ipcRenderer } = require('electron');
@@ -2845,12 +2955,27 @@ if (typeof require !== 'undefined') {
         }
     });
 
-    ipcRenderer.on('update-downloaded', (event) => {
+    ipcRenderer.on('update-channel-changed', (event, payload) => {
+        const activeChannel = normalizeClientUpdateChannel(payload && payload.channel);
+        window.UPDATE_READY_CHANNEL = activeChannel;
+    });
+
+    ipcRenderer.on('update-downloaded', (event, payload) => {
+        const readyChannel = normalizeClientUpdateChannel(payload && payload.channel);
         window.UPDATE_DOWNLOADED = true;
+        window.UPDATE_READY_CHANNEL = readyChannel;
         
         // NEW: Set flag for notification bell
         sessionStorage.setItem('update_ready', 'true');
+        sessionStorage.setItem('update_ready_channel', readyChannel);
         if(typeof updateNotifications === 'function') updateNotifications();
+
+        // Beta remains optional. Do not block login or force restart.
+        if (readyChannel === 'beta') {
+            sessionStorage.removeItem('force_update_active');
+            if (typeof showToast === 'function') showToast("Optional beta update downloaded. Install when ready from Notifications.", "info");
+            return;
+        }
 
         // 1. IF LOGGED IN: INTRUSIVE MODAL
         if (CURRENT_USER) {
@@ -3008,6 +3133,24 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.27": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Released the new Insight workspace with Agent Triggers and Agent Progress flows for admin operations.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Content-linked training playback and linked quiz/document launch reliability were improved across schedule and content runtime paths.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Realtime tunnel fallback and diagnostics handling were hardened to prevent timeout reconnect storms and modal metric crashes.</li>
+            </ul>`,
+        "2.6.26": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Schedule timelines now load linked Content Creator modules from both canonical and local cache sources for stronger module visibility.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Linked content document and video launch now use resolved storage URLs for more reliable playback and document opening.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Questionnaire launch from Content Creator now includes runtime bridge fallbacks so linked quizzes open correctly across embed contexts.</li>
+            </ul>`,
+        "2.6.25": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Beta updater flow is now strict opt-in so only users who select beta receive beta-channel checks.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Update notifications now clearly label Beta updates as optional installs.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Forced and minimum-version update checks are now pinned to Main channel to prevent accidental beta enforcement.</li>
+            </ul>`,
         "2.6.24": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Linked questionnaires can now open in trainee popup mode for complete-and-submit flow.</li>

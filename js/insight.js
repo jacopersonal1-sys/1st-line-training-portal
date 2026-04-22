@@ -569,7 +569,9 @@ function calculateAgentStatus(records) {
     // LOGIC FIX: If no records exist, status is Pending, not Pass
     if (!records || records.length === 0) return { status: 'Pending', failedItems: [] };
 
-    const limit = (typeof IMPROVE !== 'undefined') ? IMPROVE : 80;
+    const defaultLimit = (typeof getInsightScoreThreshold === 'function')
+        ? getInsightScoreThreshold()
+        : ((typeof IMPROVE !== 'undefined') ? IMPROVE : 80);
 
     // NEW: Deduplicate by Assessment Name (Keep Highest Score)
     // This ensures that if a trainee retakes a test and passes, the old failure is ignored.
@@ -583,9 +585,17 @@ function calculateAgentStatus(records) {
     });
 
     Object.values(bestScores).forEach(r => {
+        const name = r.assessment;
+        const limit = (typeof getInsightThresholdForAssessment === 'function')
+            ? getInsightThresholdForAssessment(name)
+            : defaultLimit;
         if (r.score < limit) {
-            const name = r.assessment;
-            if (typeof INSIGHT_CONFIG !== 'undefined') {
+            if (typeof classifyInsightAssessment === 'function') {
+                const severity = classifyInsightAssessment(name);
+                if (severity === 'critical') failedCritical.push(`${name} (${r.score}%)`);
+                else if (severity === 'semi') failedSemi.push(`${name} (${r.score}%)`);
+                else failedImprove.push(`${name} (${r.score}%)`);
+            } else if (typeof INSIGHT_CONFIG !== 'undefined') {
                 if (INSIGHT_CONFIG.CRITICAL.some(k => name.includes(k))) failedCritical.push(`${name} (${r.score}%)`);
                 else if (INSIGHT_CONFIG.SEMI_CRITICAL.some(k => name.includes(k))) failedSemi.push(`${name} (${r.score}%)`);
                 else failedImprove.push(`${name} (${r.score}%)`);

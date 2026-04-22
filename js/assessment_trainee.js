@@ -118,6 +118,95 @@ function closeAssessmentQuizPopup(options = {}) {
 
 window.closeAssessmentQuizPopup = closeAssessmentQuizPopup;
 
+function normalizeContentStudioContext(rawContext, test) {
+    if (!rawContext || typeof rawContext !== 'object') return null;
+
+    const entryId = String(rawContext.entryId || '').trim();
+    const subjectId = String(rawContext.subjectId || '').trim();
+    if (!entryId || !subjectId) return null;
+
+    const context = {
+        source: String(rawContext.source || 'content_studio').trim().toLowerCase(),
+        launchSurface: String(rawContext.launchSurface || rawContext.source || '').trim().toLowerCase(),
+        entryId,
+        subjectId,
+        subjectCode: String(rawContext.subjectCode || '').trim(),
+        subjectTitle: String(rawContext.subjectTitle || '').trim(),
+        testId: String(rawContext.testId || (test && test.id) || '').trim(),
+        testTitle: String(rawContext.testTitle || (test && test.title) || '').trim()
+    };
+
+    return context;
+}
+
+function buildQuizSubmissionMeta(test, answers, autoResult) {
+    const questions = Array.isArray(test?.questions) ? test.questions : [];
+    const ctx = window.CURRENT_TEST_CONTEXT || null;
+    const fallbackSubject = (function() {
+        if (!ctx) return '';
+        const code = String(ctx.subjectCode || '').trim();
+        const title = String(ctx.subjectTitle || '').trim();
+        if (code && title) return `${code} - ${title}`;
+        return code || title || '';
+    })();
+
+    const failedQuestions = [];
+    const questionOutcomes = [];
+    const reviewSubjectsSet = new Set();
+
+    questions.forEach((question, currentIdx) => {
+        const answer = answers[currentIdx];
+        const result = (typeof calculateQuestionAutoScore === 'function')
+            ? calculateQuestionAutoScore(question, answer)
+            : { score: 0, pointsMax: 0, requiresManual: false };
+
+        const originalIndex = Number.isFinite(Number(question?._originalIndex))
+            ? Number(question._originalIndex)
+            : currentIdx;
+        const questionId = String(question?.id || `q_${originalIndex}`).trim();
+        const reviewSubject = getQuestionReviewSubject(question, fallbackSubject);
+        const isCorrect = !result.requiresManual && Number(result.score || 0) >= Number(result.pointsMax || 0);
+
+        const outcome = {
+            questionId,
+            questionIndex: originalIndex + 1,
+            text: stripAssessmentHtml(question?.text || ''),
+            reviewSubject,
+            score: Number(result.score || 0),
+            pointsMax: Number(result.pointsMax || 0),
+            isCorrect,
+            requiresManual: !!result.requiresManual
+        };
+
+        questionOutcomes.push(outcome);
+
+        if (!outcome.requiresManual && !outcome.isCorrect) {
+            failedQuestions.push({
+                questionId: outcome.questionId,
+                questionIndex: outcome.questionIndex,
+                text: outcome.text,
+                reviewSubject: outcome.reviewSubject || fallbackSubject || ''
+            });
+            const key = String(outcome.reviewSubject || fallbackSubject || '').trim().toLowerCase();
+            if (key) reviewSubjectsSet.add(String(outcome.reviewSubject || fallbackSubject || '').trim());
+        }
+    });
+
+    return {
+        type: 'quiz',
+        mode: 'sequential',
+        percent: Number(autoResult?.percent || 0),
+        autoPoints: Number(autoResult?.autoPoints || 0),
+        maxPoints: Number(autoResult?.maxPoints || 0),
+        needsManual: !!autoResult?.needsManual,
+        reviewSubjects: [...reviewSubjectsSet],
+        failedQuestions,
+        questionOutcomes,
+        context: ctx,
+        completedAt: new Date().toISOString()
+    };
+}
+
 /**
  * 3. TRAINEE: VIEWING PERSONAL TEST STATUS
  */
@@ -187,7 +276,9 @@ function loadTraineeTests() {
         if (sub) {
             if (sub.status === 'pending') {
                 statusHtml = '<span class="status-badge status-semi">Pending Review</span>';
-                actionBtn = `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">In Review</button>`;
+                actionBtn = (String(t.type || '').toLowerCase() === 'quiz' && !isLocked)
+                    ? `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}', true, { popupMode: true, returnTab: 'my-tests' })">Retake Quiz</button>`
+                    : `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">In Review</button>`;
             } else {
                 let passLabel = "Fail";
                 let passClass = "status-fail";
@@ -195,7 +286,9 @@ function loadTraineeTests() {
                 else if(sub.score >= (typeof IMPROVE !== 'undefined' ? IMPROVE : 60)) { passLabel = "Improve"; passClass = "status-improve"; }
                 
                 statusHtml = `<span class="status-badge ${passClass}">${passLabel} (${sub.score}%)</span>`;
-                actionBtn = `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">Completed</button>`;
+                actionBtn = (String(t.type || '').toLowerCase() === 'quiz' && !isLocked)
+                    ? `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}', true, { popupMode: true, returnTab: 'my-tests' })">Retake Quiz</button>`
+                    : `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">Completed</button>`;
             }
         }
 
@@ -237,6 +330,8 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const test = tests.find(t => t.id == testId);
     if (!test) return;
+    const contentStudioContext = normalizeContentStudioContext(launchOptions.contentStudioContext, test);
+    const isRepeatableQuiz = String(test.type || '').trim().toLowerCase() === 'quiz';
 
     if (test.type === 'vetting' && !isArenaMode && CURRENT_USER.role === 'trainee') {
         if(typeof showToast === 'function') showToast("Vetting tests must be taken in the Vetting Arena.", "error");
@@ -264,6 +359,7 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
 
                 window.CURRENT_TEST = draft.test;
                 window.USER_ANSWERS = draft.answers || {};
+                window.CURRENT_TEST_CONTEXT = normalizeContentStudioContext(draft.contentStudioContext, draft.test) || contentStudioContext;
                 window.IS_LIVE_ARENA = isArenaMode;
 
                 const targetContainer = popupMode ? popupContainerId : 'arenaTestContainer';
@@ -324,20 +420,24 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     const existing = subs.find(s => 
         s.testId && testId && 
         s.testId.toString() === testId.toString() && 
-        s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase()
+        s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
+        !s.archived
     );
     
-    if (existing && !existing.archived) {
+    if (existing) {
         // If this is a legacy pre-move attempt, auto-archive and continue.
         if (isLegacySubmissionForCurrentAttempt(existing, myGroupId, latestMoveTs, records)) {
             existing.archived = true;
             existing.status = existing.status === 'completed' ? 'retake_allowed' : existing.status;
+            existing.lastModified = new Date().toISOString();
             localStorage.setItem('submissions', JSON.stringify(subs));
             if (typeof saveToServer === 'function') saveToServer(['submissions'], true, true);
-        } else if (isArenaMode) {
-        // FIX: Allow Vetting Arena to override/archive previous attempts automatically
-             existing.archived = true;
-             localStorage.setItem('submissions', JSON.stringify(subs));
+        } else if (isArenaMode || isRepeatableQuiz) {
+            // Quiz questionnaires are repeatable by design.
+            existing.archived = true;
+            existing.lastModified = new Date().toISOString();
+            localStorage.setItem('submissions', JSON.stringify(subs));
+            if (typeof saveToServer === 'function') saveToServer(['submissions'], true, true);
         } else {
             if(typeof showToast === 'function') showToast("You have already completed this assessment. Please contact your Admin if you require a retake.", "info");
             return;
@@ -359,8 +459,10 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     }
 
     window.CURRENT_TEST = JSON.parse(JSON.stringify(test)); 
+    window.CURRENT_TEST_CONTEXT = contentStudioContext;
     
     window.CURRENT_TEST.questions.forEach((q, i) => q._originalIndex = i);
+    window.CURRENT_TEST.quizRuntimeState = null;
 
     if (window.CURRENT_TEST.shuffle) {
         const questions = window.CURRENT_TEST.questions;
@@ -436,6 +538,11 @@ function renderTestPaper(containerId = 'takingQuestions') {
         }
     }
 
+    if (window.CURRENT_TEST.type === 'quiz' && typeof QuizFlow !== 'undefined' && QuizFlow && typeof QuizFlow.render === 'function') {
+        QuizFlow.render(containerId);
+        return;
+    }
+
     const totalQuestions = Array.isArray(window.CURRENT_TEST.questions) ? window.CURRENT_TEST.questions.length : 0;
     const typeName = window.CURRENT_TEST.type === 'vetting'
         ? 'Vetting Test'
@@ -500,6 +607,7 @@ function saveAssessmentDraft() {
         user: CURRENT_USER.user,
         test: window.CURRENT_TEST,
         answers: window.USER_ANSWERS,
+        contentStudioContext: window.CURRENT_TEST_CONTEXT || null,
         // Timer state is saved inside window.CURRENT_TEST.remainingSeconds by startTestTimer
         timestamp: Date.now()
     };
@@ -526,6 +634,7 @@ function restoreAssessmentDraft() {
 
     window.CURRENT_TEST = draft.test;
     window.USER_ANSWERS = draft.answers || {};
+    window.CURRENT_TEST_CONTEXT = normalizeContentStudioContext(draft.contentStudioContext, draft.test);
     
     if(typeof showTab === 'function') showTab('test-take-view');
     const titleEl = document.getElementById('takingTitle');
@@ -535,12 +644,15 @@ function restoreAssessmentDraft() {
 }
 
 // UPDATED: Async Submit
-async function submitTest(forceSubmit = false) {
+async function submitTest(forceSubmit = false, options = {}) {
+    const submitOptions = (options && typeof options === 'object') ? options : {};
+    const skipConfirm = !!submitOptions.skipConfirm;
+
     // CONCURRENCY LOCK: Prevent double-execution if Timer and User click at the same time
     if (window.IS_SUBMITTING) return;
     window.IS_SUBMITTING = true;
 
-    const btn = document.querySelector('button[onclick="submitTest()"]');
+    const btn = document.querySelector('button[onclick="submitTest()"], button[onclick*="submitTest(false"]');
     if(btn) { btn.disabled = true; btn.innerText = "Processing..."; }
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
@@ -553,29 +665,38 @@ async function submitTest(forceSubmit = false) {
         s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && 
         !s.archived
     );
+    const isRepeatableQuiz = String(window.CURRENT_TEST?.type || '').trim().toLowerCase() === 'quiz';
     if (existing) {
         // If the test was already successfully completed, DO NOT archive it on a forced timeout/kick
         // This prevents the system from overwriting a good test with a blank/partial one.
-        if (forceSubmit && existing.status === 'completed') {
+        if (!isRepeatableQuiz && forceSubmit && existing.status === 'completed') {
             if (window.TEST_TIMER) clearInterval(window.TEST_TIMER);
             return; // Silently exit, their data is already safe.
         }
 
-        // If forcing (e.g. timeout), we proceed to archive/overwrite instead of blocking
-        if (!forceSubmit) { 
+        // Quiz submissions are repeatable, so archive previous active attempt and continue.
+        if (isRepeatableQuiz) {
+            existing.archived = true;
+            existing.lastModified = new Date().toISOString();
+            localStorage.setItem('submissions', JSON.stringify(subs));
+            if (typeof saveToServer === 'function') {
+                await saveToServer(['submissions'], true);
+            }
+        } else if (!forceSubmit) {
             alert("Error: Active submission already exists. Ask your Admin to click 'Allow Retake' on your previous attempt."); 
             if(btn) { btn.disabled = false; btn.innerText = "Finalize & Submit"; }
             return; 
+        } else {
+            // If forcing, archive the existing one so we can save the new final state
+            existing.archived = true;
+            existing.lastModified = new Date().toISOString();
+            localStorage.setItem('submissions', JSON.stringify(subs));
         }
-        
-        // If forcing, archive the existing one so we can save the new final state
-        existing.archived = true;
-        localStorage.setItem('submissions', JSON.stringify(subs));
         
         document.getElementById('test-timer-bar')?.remove();
     }
 
-    if (!forceSubmit && !confirm("Finalize your assessment? Answers will be locked for review.")) {
+    if (!forceSubmit && !skipConfirm && !confirm("Finalize your assessment? Answers will be locked for review.")) {
         if(btn) { btn.disabled = false; btn.innerText = "Finalize & Submit"; }
         return;
     }
@@ -590,6 +711,9 @@ async function submitTest(forceSubmit = false) {
 
     const finalPercent = autoResult.percent;
     const finalStatus = autoResult.needsManual ? 'pending' : 'completed';
+    const quizMeta = String(window.CURRENT_TEST?.type || '').toLowerCase() === 'quiz'
+        ? buildQuizSubmissionMeta(window.CURRENT_TEST, window.USER_ANSWERS, autoResult)
+        : null;
 
     const remappedAnswers = {};
     window.CURRENT_TEST.questions.forEach((q, currentIdx) => {
@@ -610,6 +734,8 @@ async function submitTest(forceSubmit = false) {
         status: finalStatus, 
         score: finalStatus === 'completed' ? finalPercent : 0,
         testSnapshot: originalTestDef || window.CURRENT_TEST,
+        quizMeta: quizMeta,
+        contentStudioContext: window.CURRENT_TEST_CONTEXT || null,
         createdAt: submissionTime,
         lastModified: submissionTime,
         modifiedBy: CURRENT_USER.user
@@ -685,7 +811,13 @@ async function submitTest(forceSubmit = false) {
     }
 
     if (finalStatus === 'completed') {
-        if(typeof showToast === 'function') showToast(`Assessment Complete! You scored: ${finalPercent}%`, "success");
+        if (String(window.CURRENT_TEST?.type || '').toLowerCase() === 'quiz') {
+            const reviewCount = Array.isArray(quizMeta?.reviewSubjects) ? quizMeta.reviewSubjects.length : 0;
+            const extra = reviewCount > 0 ? ` | Review ${reviewCount} subject${reviewCount === 1 ? '' : 's'}` : '';
+            if(typeof showToast === 'function') showToast(`Quiz Complete: ${finalPercent}%${extra}`, "success");
+        } else {
+            if(typeof showToast === 'function') showToast(`Assessment Complete! You scored: ${finalPercent}%`, "success");
+        }
         
         // --- TRIGGER NPS SURVEY ---
         if (typeof NPSSystem !== 'undefined') {
@@ -706,6 +838,11 @@ async function submitTest(forceSubmit = false) {
     } else {
         if(typeof showTab === 'function') showTab('my-tests');
         loadTraineeTests();
+    }
+
+    window.CURRENT_TEST_CONTEXT = null;
+    if (window.CURRENT_TEST && window.CURRENT_TEST.quizRuntimeState) {
+        window.CURRENT_TEST.quizRuntimeState = null;
     }
     
     } catch (error) {

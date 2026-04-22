@@ -3,6 +3,7 @@
 const CONTENT_STUDIO_DATA_KEY = 'content_studio_data';
 const CONTENT_STUDIO_LOCAL_CACHE_KEY = 'content_studio_data_local';
 const CONTENT_STUDIO_TESTS_CACHE_KEY = 'content_studio_tests_cache';
+const CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY = 'content_studio_submissions_cache';
 const CONTENT_CREATOR_DEFAULT_KEY = 'content_creator_default';
 const CONTENT_CREATOR_DEFAULT_LABEL = 'Content Creator';
 const CONTENT_CREATOR_VIDEO_BUCKET = 'content_creator_videos';
@@ -93,6 +94,64 @@ const DataService = {
             }))
             .filter(t => !!t.id && !!t.title)
             .sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base', numeric: true }));
+    },
+
+    _normalizeSubmissions: function(raw) {
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .filter(s => s && typeof s === 'object')
+            .map(s => {
+                const rawContext = (s.contentStudioContext && typeof s.contentStudioContext === 'object')
+                    ? s.contentStudioContext
+                    : ((s.quizMeta && typeof s.quizMeta === 'object' && s.quizMeta.context && typeof s.quizMeta.context === 'object')
+                        ? s.quizMeta.context
+                        : null);
+                const context = rawContext
+                    ? {
+                        source: String(rawContext.source || '').trim().toLowerCase(),
+                        launchSurface: String(rawContext.launchSurface || '').trim().toLowerCase(),
+                        entryId: String(rawContext.entryId || '').trim(),
+                        subjectId: String(rawContext.subjectId || '').trim(),
+                        subjectCode: String(rawContext.subjectCode || '').trim(),
+                        subjectTitle: String(rawContext.subjectTitle || '').trim(),
+                        testId: String(rawContext.testId || '').trim(),
+                        testTitle: String(rawContext.testTitle || '').trim()
+                    }
+                    : null;
+
+                const quizMeta = s.quizMeta && typeof s.quizMeta === 'object'
+                    ? {
+                        percent: Number(s.quizMeta.percent || 0),
+                        reviewSubjects: Array.isArray(s.quizMeta.reviewSubjects)
+                            ? s.quizMeta.reviewSubjects.map(v => String(v || '').trim()).filter(Boolean)
+                            : [],
+                        failedQuestions: Array.isArray(s.quizMeta.failedQuestions)
+                            ? s.quizMeta.failedQuestions.map(q => ({
+                                questionId: String(q.questionId || '').trim(),
+                                questionIndex: Number(q.questionIndex || 0),
+                                text: String(q.text || '').trim(),
+                                reviewSubject: String(q.reviewSubject || '').trim()
+                            }))
+                            : []
+                    }
+                    : null;
+
+                return {
+                    id: String(s.id || ''),
+                    testId: String(s.testId || '').trim(),
+                    testTitle: String(s.testTitle || '').trim(),
+                    trainee: String(s.trainee || '').trim(),
+                    status: String(s.status || '').trim().toLowerCase(),
+                    score: Number(s.score || 0),
+                    archived: !!s.archived,
+                    date: String(s.date || '').trim(),
+                    createdAt: s.createdAt || null,
+                    lastModified: s.lastModified || null,
+                    contentStudioContext: context,
+                    quizMeta: quizMeta
+                };
+            })
+            .filter(s => !!s.id && !!s.trainee);
     },
 
     _getDefaultEntryIndex: function(store) {
@@ -264,10 +323,17 @@ const DataService = {
             localStorage.setItem(CONTENT_STUDIO_TESTS_CACHE_KEY, JSON.stringify(localTests));
         }
 
+        const localSubmissions = this._normalizeSubmissions(JSON.parse(localStorage.getItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY) || '[]'));
+        if (!localStorage.getItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY)) {
+            localStorage.setItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY, JSON.stringify(localSubmissions));
+        }
+
         if (!AppContext.supabase) return local;
 
         try {
-            const [contentRes, testsRes] = await Promise.all([
+            let testsHydrated = false;
+            let submissionsHydrated = false;
+            const [contentRes, testsRes, submissionsRes] = await Promise.all([
                 AppContext.supabase
                     .from('app_documents')
                     .select('content')
@@ -277,6 +343,11 @@ const DataService = {
                     .from('app_documents')
                     .select('content')
                     .eq('key', 'tests')
+                    .maybeSingle(),
+                AppContext.supabase
+                    .from('app_documents')
+                    .select('content')
+                    .eq('key', 'submissions')
                     .maybeSingle()
             ]);
 
@@ -289,6 +360,34 @@ const DataService = {
             if (testsRes && !testsRes.error && testsRes.data && Array.isArray(testsRes.data.content)) {
                 const normalizedTests = this._normalizeTests(testsRes.data.content);
                 localStorage.setItem(CONTENT_STUDIO_TESTS_CACHE_KEY, JSON.stringify(normalizedTests));
+                testsHydrated = true;
+            }
+
+            if (submissionsRes && !submissionsRes.error && submissionsRes.data && Array.isArray(submissionsRes.data.content)) {
+                const normalizedSubmissions = this._normalizeSubmissions(submissionsRes.data.content);
+                localStorage.setItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY, JSON.stringify(normalizedSubmissions));
+                submissionsHydrated = true;
+            }
+
+            // Fallback for runtimes where tests/submissions are stored in row tables instead of app_documents blobs.
+            if (!testsHydrated) {
+                try {
+                    const { data: testsRows, error: testsRowsErr } = await AppContext.supabase.from('tests').select('*');
+                    if (!testsRowsErr && Array.isArray(testsRows)) {
+                        const normalizedTests = this._normalizeTests(testsRows);
+                        localStorage.setItem(CONTENT_STUDIO_TESTS_CACHE_KEY, JSON.stringify(normalizedTests));
+                    }
+                } catch (err) {}
+            }
+
+            if (!submissionsHydrated) {
+                try {
+                    const { data: submissionRows, error: submissionRowsErr } = await AppContext.supabase.from('submissions').select('*');
+                    if (!submissionRowsErr && Array.isArray(submissionRows)) {
+                        const normalizedSubmissions = this._normalizeSubmissions(submissionRows);
+                        localStorage.setItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY, JSON.stringify(normalizedSubmissions));
+                    }
+                } catch (err) {}
             }
         } catch (err) {
             console.warn('[Content Studio] Initial cloud load failed:', err);
@@ -303,6 +402,10 @@ const DataService = {
 
     getTestsCache: function() {
         return this._normalizeTests(JSON.parse(localStorage.getItem(CONTENT_STUDIO_TESTS_CACHE_KEY) || '[]'));
+    },
+
+    getQuizSubmissionsCache: function() {
+        return this._normalizeSubmissions(JSON.parse(localStorage.getItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY) || '[]'));
     },
 
     getQuizTests: function() {
@@ -426,6 +529,148 @@ const DataService = {
                 message: err && err.message ? err.message : 'Document upload failed.'
             };
         }
+    },
+
+    getLinkedUploadedFiles: function() {
+        const entries = this.getEntries();
+        const map = {};
+
+        const registerAsset = (entry, subject, type, bucket, path, url) => {
+            const cleanBucket = String(bucket || '').trim();
+            const cleanPath = String(path || '').trim();
+            if (!cleanBucket || !cleanPath) return;
+
+            const key = `${type}:${cleanBucket}:${cleanPath}`.toLowerCase();
+            if (!map[key]) {
+                const parts = cleanPath.split('/');
+                map[key] = {
+                    key,
+                    type,
+                    bucket: cleanBucket,
+                    path: cleanPath,
+                    fileName: parts.length ? parts[parts.length - 1] : cleanPath,
+                    url: String(url || '').trim(),
+                    references: [],
+                    updatedAt: null
+                };
+            }
+
+            const title = stripHtml(subject.textHtml || '').slice(0, 120);
+            map[key].references.push({
+                entryId: String(entry.id || '').trim(),
+                entryLabel: String(entry.scheduleLabel || entry.header || 'Unnamed Module').trim(),
+                subjectId: String(subject.id || '').trim(),
+                subjectCode: String(subject.code || '').trim(),
+                subjectTitle: title
+            });
+
+            const refUpdatedAt = String(subject.updatedAt || entry.updatedAt || '').trim();
+            if (!map[key].updatedAt || refUpdatedAt > map[key].updatedAt) {
+                map[key].updatedAt = refUpdatedAt || map[key].updatedAt;
+            }
+        };
+
+        entries.forEach(entry => {
+            const subjects = Array.isArray(entry.subjects) ? entry.subjects : [];
+            subjects.forEach(subject => {
+                if (subject && (subject.videoMode === 'upload' || (subject.videoBucket && subject.videoPath))) {
+                    registerAsset(entry, subject, 'video', subject.videoBucket, subject.videoPath, subject.videoUrl);
+                }
+                if (subject && (subject.docMode === 'upload' || (subject.docBucket && subject.docPath))) {
+                    registerAsset(entry, subject, 'document', subject.docBucket, subject.docPath, subject.docUrl);
+                }
+            });
+        });
+
+        return Object.values(map).sort((a, b) => {
+            const timeDiff = String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+            if (timeDiff !== 0) return timeDiff;
+            return String(a.fileName || '').localeCompare(String(b.fileName || ''), undefined, { sensitivity: 'base', numeric: true });
+        });
+    },
+
+    deleteUploadedAsset: async function(bucket, path, assetType = '') {
+        const cleanBucket = String(bucket || '').trim();
+        const cleanPath = String(path || '').trim();
+        const cleanType = String(assetType || '').trim().toLowerCase();
+        if (!cleanBucket || !cleanPath) {
+            return { ok: false, message: 'Bucket and path are required.' };
+        }
+
+        let storageDeleteError = null;
+        if (AppContext.supabase) {
+            try {
+                const { error } = await AppContext.supabase.storage.from(cleanBucket).remove([cleanPath]);
+                if (error) throw error;
+            } catch (err) {
+                storageDeleteError = err && err.message ? err.message : 'Storage delete failed.';
+            }
+        }
+
+        const store = this.getStore();
+        this._ensureDefaultEntry(store);
+        let unlinkedCount = 0;
+        const now = nowIso();
+
+        (store.entries || []).forEach(entry => {
+            let entryTouched = false;
+            (entry.subjects || []).forEach(subject => {
+                if (!subject || typeof subject !== 'object') return;
+
+                const isVideoMatch = String(subject.videoBucket || '').trim() === cleanBucket
+                    && String(subject.videoPath || '').trim() === cleanPath
+                    && (!cleanType || cleanType === 'video');
+                const isDocMatch = String(subject.docBucket || '').trim() === cleanBucket
+                    && String(subject.docPath || '').trim() === cleanPath
+                    && (!cleanType || cleanType === 'document');
+
+                if (isVideoMatch) {
+                    subject.hasVideo = false;
+                    subject.videoMode = 'url';
+                    subject.videoUrl = '';
+                    subject.videoPath = '';
+                    subject.videoBucket = '';
+                    subject.updatedAt = now;
+                    entryTouched = true;
+                    unlinkedCount += 1;
+                }
+
+                if (isDocMatch) {
+                    subject.hasDocument = false;
+                    subject.docMode = 'url';
+                    subject.docUrl = '';
+                    subject.docPath = '';
+                    subject.docBucket = '';
+                    subject.updatedAt = now;
+                    entryTouched = true;
+                    unlinkedCount += 1;
+                }
+            });
+
+            if (entryTouched) {
+                entry.updatedAt = now;
+                entry.editedBy = getEditorName();
+            }
+        });
+
+        if (unlinkedCount > 0) {
+            await this.saveStore(store);
+        }
+
+        if (storageDeleteError && unlinkedCount === 0) {
+            return { ok: false, message: storageDeleteError, removedFromStorage: false, unlinkedCount: 0 };
+        }
+
+        const message = storageDeleteError
+            ? `File links removed from ${unlinkedCount} subject(s), but storage delete returned: ${storageDeleteError}`
+            : `Deleted file and removed links from ${unlinkedCount} subject(s).`;
+
+        return {
+            ok: true,
+            message,
+            removedFromStorage: !storageDeleteError,
+            unlinkedCount
+        };
     },
 
     resolveStorageUrl: async function(bucket, path, fallbackUrl = '') {
@@ -789,11 +1034,27 @@ const DataService = {
             });
     },
 
+    _getContentQuizSubmissions: function(entryId, username = '') {
+        const targetEntry = String(entryId || '').trim();
+        const targetUser = String(username || '').trim().toLowerCase();
+        return this.getQuizSubmissionsCache().filter(submission => {
+            const context = submission && submission.contentStudioContext ? submission.contentStudioContext : null;
+            if (!context) return false;
+            if (!context.entryId || !context.subjectId) return false;
+            if (targetEntry && context.entryId !== targetEntry) return false;
+            if (targetUser && String(submission.trainee || '').trim().toLowerCase() !== targetUser) return false;
+            const status = String(submission.status || '').trim().toLowerCase();
+            if (!['completed', 'retake_allowed'].includes(status)) return false;
+            return !!submission.quizMeta;
+        });
+    },
+
     getEngagementUserBreakdown: function(entryId) {
         const targetEntry = String(entryId || '').trim();
         const store = this.getStore();
         const rows = (store.analytics || []).filter(a => !targetEntry || a.entryId === targetEntry);
         const notes = (store.annotations || []).filter(n => !targetEntry || n.entryId === targetEntry);
+        const quizSubmissions = this._getContentQuizSubmissions(targetEntry);
         const byUser = {};
 
         rows.forEach(row => {
@@ -808,7 +1069,12 @@ const DataService = {
                     skippedSeconds: 0,
                     subjects: new Set(),
                     lastPlayedAt: null,
-                    annotations: 0
+                    annotations: 0,
+                    quizAttempts: 0,
+                    quizBestScore: null,
+                    quizLastScore: null,
+                    quizLastAttemptAt: null,
+                    quizFailedQuestions: 0
                 };
             }
             byUser[key].plays += Number(row.plays || 0);
@@ -833,11 +1099,54 @@ const DataService = {
                     skippedSeconds: 0,
                     subjects: new Set(),
                     lastPlayedAt: null,
-                    annotations: 0
+                    annotations: 0,
+                    quizAttempts: 0,
+                    quizBestScore: null,
+                    quizLastScore: null,
+                    quizLastAttemptAt: null,
+                    quizFailedQuestions: 0
                 };
             }
             byUser[key].annotations += 1;
             byUser[key].subjects.add(String(note.subjectId || ''));
+        });
+
+        quizSubmissions.forEach(submission => {
+            const key = String(submission.trainee || '').trim();
+            const context = submission.contentStudioContext || {};
+            if (!key || !context.subjectId) return;
+            if (!byUser[key]) {
+                byUser[key] = {
+                    username: key,
+                    plays: 0,
+                    watchSeconds: 0,
+                    skips: 0,
+                    skippedSeconds: 0,
+                    subjects: new Set(),
+                    lastPlayedAt: null,
+                    annotations: 0,
+                    quizAttempts: 0,
+                    quizBestScore: null,
+                    quizLastScore: null,
+                    quizLastAttemptAt: null,
+                    quizFailedQuestions: 0
+                };
+            }
+
+            const attemptAt = submission.lastModified || submission.createdAt || null;
+            const score = Number(submission.score || submission.quizMeta?.percent || 0);
+            const failed = Array.isArray(submission.quizMeta?.failedQuestions) ? submission.quizMeta.failedQuestions.length : 0;
+
+            byUser[key].quizAttempts += 1;
+            byUser[key].quizFailedQuestions += failed;
+            byUser[key].subjects.add(String(context.subjectId || ''));
+            if (!Number.isFinite(Number(byUser[key].quizBestScore)) || score > Number(byUser[key].quizBestScore || 0)) {
+                byUser[key].quizBestScore = score;
+            }
+            if (!byUser[key].quizLastAttemptAt || String(attemptAt || '') > String(byUser[key].quizLastAttemptAt || '')) {
+                byUser[key].quizLastAttemptAt = attemptAt;
+                byUser[key].quizLastScore = score;
+            }
         });
 
         return Object.values(byUser)
@@ -865,6 +1174,7 @@ const DataService = {
         const store = this.getStore();
         const rows = (store.analytics || []).filter(a => a.entryId === targetEntry && String(a.username || '').toLowerCase() === targetUser);
         const notes = (store.annotations || []).filter(n => n.entryId === targetEntry && String(n.username || '').toLowerCase() === targetUser);
+        const quizSubmissions = this._getContentQuizSubmissions(targetEntry, targetUser);
 
         const bySubject = {};
         rows.forEach(row => {
@@ -879,7 +1189,12 @@ const DataService = {
                     skippedSeconds: 0,
                     lastPosition: 0,
                     lastPlayedAt: null,
-                    annotations: 0
+                    annotations: 0,
+                    quizAttempts: 0,
+                    quizBestScore: null,
+                    quizLastScore: null,
+                    quizLastAttemptAt: null,
+                    failedQuestions: {}
                 };
             }
             bySubject[id].plays += Number(row.plays || 0);
@@ -904,22 +1219,89 @@ const DataService = {
                     skippedSeconds: 0,
                     lastPosition: 0,
                     lastPlayedAt: null,
-                    annotations: 0
+                    annotations: 0,
+                    quizAttempts: 0,
+                    quizBestScore: null,
+                    quizLastScore: null,
+                    quizLastAttemptAt: null,
+                    failedQuestions: {}
                 };
             }
             bySubject[id].annotations += 1;
         });
 
+        quizSubmissions.forEach(submission => {
+            const context = submission.contentStudioContext || {};
+            const id = String(context.subjectId || '').trim();
+            if (!id) return;
+            if (!bySubject[id]) {
+                bySubject[id] = {
+                    subjectId: id,
+                    plays: 0,
+                    watchSeconds: 0,
+                    skips: 0,
+                    skippedSeconds: 0,
+                    lastPosition: 0,
+                    lastPlayedAt: null,
+                    annotations: 0,
+                    quizAttempts: 0,
+                    quizBestScore: null,
+                    quizLastScore: null,
+                    quizLastAttemptAt: null,
+                    failedQuestions: {}
+                };
+            }
+
+            const score = Number(submission.score || submission.quizMeta?.percent || 0);
+            const attemptAt = submission.lastModified || submission.createdAt || null;
+            bySubject[id].quizAttempts += 1;
+
+            if (!Number.isFinite(Number(bySubject[id].quizBestScore)) || score > Number(bySubject[id].quizBestScore || 0)) {
+                bySubject[id].quizBestScore = score;
+            }
+            if (!bySubject[id].quizLastAttemptAt || String(attemptAt || '') > String(bySubject[id].quizLastAttemptAt || '')) {
+                bySubject[id].quizLastAttemptAt = attemptAt;
+                bySubject[id].quizLastScore = score;
+            }
+
+            const failedQuestions = Array.isArray(submission.quizMeta?.failedQuestions) ? submission.quizMeta.failedQuestions : [];
+            failedQuestions.forEach((failedQuestion, failedIdx) => {
+                const keyBase = String(failedQuestion.questionId || '').trim()
+                    || `q_${Number(failedQuestion.questionIndex || failedIdx + 1)}`;
+                const key = `${keyBase}`.toLowerCase();
+                if (!bySubject[id].failedQuestions[key]) {
+                    bySubject[id].failedQuestions[key] = {
+                        key,
+                        questionId: String(failedQuestion.questionId || '').trim(),
+                        questionIndex: Number(failedQuestion.questionIndex || 0),
+                        text: String(failedQuestion.text || '').trim(),
+                        reviewSubject: String(failedQuestion.reviewSubject || '').trim(),
+                        failCount: 0
+                    };
+                }
+                bySubject[id].failedQuestions[key].failCount += 1;
+            });
+        });
+
         return Object.values(bySubject)
             .map(row => {
                 const subject = subjectMap[row.subjectId] || {};
+                const failedQuestions = Object.values(row.failedQuestions || {}).sort((a, b) => {
+                    const diff = Number(b.failCount || 0) - Number(a.failCount || 0);
+                    if (diff !== 0) return diff;
+                    return String(a.text || '').localeCompare(String(b.text || ''));
+                });
                 return {
                     ...row,
                     code: String(subject.code || ''),
-                    title: stripHtml(subject.textHtml || '').slice(0, 120)
+                    title: stripHtml(subject.textHtml || '').slice(0, 120),
+                    failedQuestions,
+                    failedQuestionCount: failedQuestions.reduce((sum, item) => sum + Number(item.failCount || 0), 0)
                 };
             })
             .sort((a, b) => {
+                const quizDiff = Number(b.quizAttempts || 0) - Number(a.quizAttempts || 0);
+                if (quizDiff !== 0) return quizDiff;
                 const watchDiff = Number(b.watchSeconds || 0) - Number(a.watchSeconds || 0);
                 if (watchDiff !== 0) return watchDiff;
                 return String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true, sensitivity: 'base' });

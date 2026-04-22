@@ -425,7 +425,9 @@ body {
 }
 
 .cs-modal {
-    width: min(920px, 94vw);
+    width: min(1380px, 98vw);
+    max-height: 94vh;
+    overflow: auto;
     background: var(--cs-panel);
     border: 1px solid var(--cs-border);
     border-radius: 12px;
@@ -461,6 +463,34 @@ body {
     justify-content: flex-end;
     gap: 8px;
     margin-bottom: 8px;
+}
+
+.cs-file-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(70px, 1fr));
+    gap: 8px;
+    align-items: stretch;
+}
+
+.cs-file-stat {
+    border: 1px solid var(--cs-border);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.14);
+    padding: 8px 10px;
+    min-width: 82px;
+}
+
+.cs-file-stat span {
+    display: block;
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.cs-file-stat small {
+    display: block;
+    color: var(--cs-muted);
+    font-size: 0.74rem;
+    margin-top: 3px;
 }
 
 .cs-note-panel {
@@ -545,4 +575,5 @@ body {
     .cs-upload-row { grid-template-columns: 1fr; }
     .cs-toggle-row { flex-direction: column; align-items: flex-start; }
     .cs-note-meta { flex-wrap: wrap; }
+    .cs-file-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

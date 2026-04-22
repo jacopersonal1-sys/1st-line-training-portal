@@ -2364,7 +2364,10 @@ function isProblemReportEntry(report) {
 }
 
 function getErrorReportCollections() {
-    const allReports = JSON.parse(localStorage.getItem('error_reports') || '[]');
+    const parsed = (typeof safeLocalParse === 'function')
+        ? safeLocalParse('error_reports', [])
+        : JSON.parse(localStorage.getItem('error_reports') || '[]');
+    const allReports = Array.isArray(parsed) ? parsed : [];
     const problemReports = allReports.filter(isProblemReportEntry);
     const systemReports = allReports.filter(r => !isProblemReportEntry(r));
     return { allReports, systemReports, problemReports };

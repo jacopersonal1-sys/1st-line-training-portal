@@ -8,6 +8,7 @@ let LIVE_CONN_INTERVAL = null;
 let LIVE_TIMER_INTERVAL = null;
 let LIVE_DATA_EVENT_DEBOUNCE = null;
 window.LIVE_DATA_EVENT_HANDLER = window.LIVE_DATA_EVENT_HANDLER || null;
+window.LIVE_ADMIN_GAMES = window.LIVE_ADMIN_GAMES || null;
 
 function normalizeLiveText(value) {
     return String(value || '').trim().toLowerCase();
@@ -360,6 +361,488 @@ window.updateGlobalLiveAlert = function(session) {
     }
 }
 
+function ensureLiveAdminGamesState() {
+    if (window.LIVE_ADMIN_GAMES) return window.LIVE_ADMIN_GAMES;
+
+    const createBoard = (rows, cols) => Array.from({ length: rows }, () => Array(cols).fill(0));
+    const tetrisPieces = [
+        [[1, 1, 1, 1]],
+        [[1, 0, 0], [1, 1, 1]],
+        [[0, 0, 1], [1, 1, 1]],
+        [[1, 1], [1, 1]],
+        [[0, 1, 1], [1, 1, 0]],
+        [[0, 1, 0], [1, 1, 1]],
+        [[1, 1, 0], [0, 1, 1]]
+    ];
+
+    window.LIVE_ADMIN_GAMES = {
+        keybound: false,
+        tetris: {
+            rows: 20,
+            cols: 10,
+            cell: 18,
+            board: createBoard(20, 10),
+            active: false,
+            paused: true,
+            score: 0,
+            lines: 0,
+            dropInterval: 500,
+            gameOver: false,
+            lastTs: 0,
+            rafId: null,
+            current: null,
+            pieces: tetrisPieces,
+            colors: ['#2ecc71', '#3498db', '#f39c12', '#f1c40f', '#1abc9c', '#9b59b6', '#e74c3c']
+        },
+        snake: {
+            size: 15,
+            cell: 14,
+            active: false,
+            paused: true,
+            score: 0,
+            gameOver: false,
+            timerId: null,
+            speed: 135,
+            direction: 'right',
+            nextDirection: 'right',
+            snake: [{ x: 4, y: 7 }, { x: 3, y: 7 }, { x: 2, y: 7 }],
+            food: { x: 10, y: 7 }
+        }
+    };
+
+    return window.LIVE_ADMIN_GAMES;
+}
+
+function renderAdminMiniGamesPanel() {
+    return `
+        <div id="live-admin-mini-games" style="border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input); padding:10px;">
+            <div style="font-weight:700; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                <span><i class="fas fa-gamepad"></i> Trainer Break Arcade</span>
+                <span style="font-size:0.75rem; color:var(--text-muted);">Local-only mini games</span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px;">
+                <div style="border:1px solid var(--border-color); border-radius:8px; padding:8px; background:var(--bg-card);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <strong>Tetris</strong>
+                        <span id="live-tetris-status" style="font-size:0.75rem; color:var(--text-muted);">Paused</span>
+                    </div>
+                    <canvas id="live-tetris-canvas" width="180" height="360" style="display:block; margin:0 auto 6px; border:1px solid #1f1f1f; background:#0a0a0a;"></canvas>
+                    <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:6px;">
+                        <span>Score: <strong id="live-tetris-score">0</strong></span>
+                        <span>Lines: <strong id="live-tetris-lines">0</strong></span>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px;">
+                        <button class="btn-secondary btn-sm" onclick="liveAdminTetrisMove(-1)"><i class="fas fa-arrow-left"></i></button>
+                        <button class="btn-secondary btn-sm" onclick="liveAdminTetrisRotate()"><i class="fas fa-rotate"></i></button>
+                        <button class="btn-secondary btn-sm" onclick="liveAdminTetrisMove(1)"><i class="fas fa-arrow-right"></i></button>
+                        <button class="btn-secondary btn-sm" onclick="liveAdminTetrisSoftDrop()"><i class="fas fa-arrow-down"></i></button>
+                        <button class="btn-primary btn-sm" onclick="liveAdminTetrisToggle()">Start / Pause</button>
+                        <button class="btn-warning btn-sm" onclick="liveAdminTetrisReset()">Reset</button>
+                    </div>
+                </div>
+                <div style="border:1px solid var(--border-color); border-radius:8px; padding:8px; background:var(--bg-card);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <strong>Snake</strong>
+                        <span id="live-snake-status" style="font-size:0.75rem; color:var(--text-muted);">Paused</span>
+                    </div>
+                    <canvas id="live-snake-canvas" width="210" height="210" style="display:block; margin:0 auto 6px; border:1px solid #1f1f1f; background:#0a0a0a;"></canvas>
+                    <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:6px;">
+                        <span>Score: <strong id="live-snake-score">0</strong></span>
+                        <span>Controls: Arrows</span>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px;">
+                        <button class="btn-secondary btn-sm" onclick="liveAdminSnakeTurn('left')"><i class="fas fa-arrow-left"></i></button>
+                        <button class="btn-secondary btn-sm" onclick="liveAdminSnakeTurn('up')"><i class="fas fa-arrow-up"></i></button>
+                        <button class="btn-secondary btn-sm" onclick="liveAdminSnakeTurn('right')"><i class="fas fa-arrow-right"></i></button>
+                        <button class="btn-secondary btn-sm" onclick="liveAdminSnakeTurn('down')"><i class="fas fa-arrow-down"></i></button>
+                        <button class="btn-primary btn-sm" onclick="liveAdminSnakeToggle()">Start / Pause</button>
+                        <button class="btn-warning btn-sm" onclick="liveAdminSnakeReset()">Reset</button>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:8px; font-size:0.75rem; color:var(--text-muted);">
+                Keyboard: Tetris uses A/D (move), W (rotate), S (drop). Snake uses Arrow keys.
+            </div>
+        </div>
+    `;
+}
+
+function drawLiveAdminTetris() {
+    const state = ensureLiveAdminGamesState().tetris;
+    const canvas = document.getElementById('live-tetris-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const drawCell = (x, y, colorIdx) => {
+        const color = state.colors[(colorIdx - 1) % state.colors.length] || '#2ecc71';
+        ctx.fillStyle = color;
+        ctx.fillRect(x * state.cell, y * state.cell, state.cell - 1, state.cell - 1);
+    };
+
+    state.board.forEach((row, y) => row.forEach((val, x) => { if (val) drawCell(x, y, val); }));
+    if (state.current) {
+        state.current.matrix.forEach((row, y) => row.forEach((val, x) => {
+            if (val) drawCell(state.current.x + x, state.current.y + y, state.current.color);
+        }));
+    }
+
+    const scoreEl = document.getElementById('live-tetris-score');
+    const linesEl = document.getElementById('live-tetris-lines');
+    const statusEl = document.getElementById('live-tetris-status');
+    if (scoreEl) scoreEl.innerText = String(state.score);
+    if (linesEl) linesEl.innerText = String(state.lines);
+    if (statusEl) statusEl.innerText = state.gameOver ? 'Game Over' : (state.paused ? 'Paused' : 'Running');
+}
+
+function makeLiveAdminTetrisPiece() {
+    const state = ensureLiveAdminGamesState().tetris;
+    const pick = Math.floor(Math.random() * state.pieces.length);
+    const matrix = state.pieces[pick].map(r => r.slice());
+    return {
+        matrix,
+        color: pick + 1,
+        x: Math.floor((state.cols - matrix[0].length) / 2),
+        y: 0
+    };
+}
+
+function liveAdminTetrisCollision(piece) {
+    const state = ensureLiveAdminGamesState().tetris;
+    for (let y = 0; y < piece.matrix.length; y++) {
+        for (let x = 0; x < piece.matrix[y].length; x++) {
+            if (!piece.matrix[y][x]) continue;
+            const nx = piece.x + x;
+            const ny = piece.y + y;
+            if (nx < 0 || nx >= state.cols || ny >= state.rows) return true;
+            if (ny >= 0 && state.board[ny][nx]) return true;
+        }
+    }
+    return false;
+}
+
+function liveAdminMergeTetrisPiece() {
+    const state = ensureLiveAdminGamesState().tetris;
+    if (!state.current) return;
+    state.current.matrix.forEach((row, y) => row.forEach((val, x) => {
+        if (!val) return;
+        const by = state.current.y + y;
+        const bx = state.current.x + x;
+        if (by >= 0 && by < state.rows && bx >= 0 && bx < state.cols) {
+            state.board[by][bx] = state.current.color;
+        }
+    }));
+}
+
+function liveAdminClearTetrisLines() {
+    const state = ensureLiveAdminGamesState().tetris;
+    let cleared = 0;
+    for (let y = state.rows - 1; y >= 0; y--) {
+        if (state.board[y].every(cell => cell > 0)) {
+            state.board.splice(y, 1);
+            state.board.unshift(Array(state.cols).fill(0));
+            cleared++;
+            y++;
+        }
+    }
+    if (cleared > 0) {
+        state.lines += cleared;
+        state.score += (cleared * cleared) * 100;
+        state.dropInterval = Math.max(120, 500 - Math.floor(state.lines / 4) * 30);
+    }
+}
+
+function liveAdminSpawnTetrisPiece() {
+    const state = ensureLiveAdminGamesState().tetris;
+    state.current = makeLiveAdminTetrisPiece();
+    if (liveAdminTetrisCollision(state.current)) {
+        state.gameOver = true;
+        state.paused = true;
+        state.active = false;
+        if (state.rafId) cancelAnimationFrame(state.rafId);
+        state.rafId = null;
+    }
+}
+
+function liveAdminTetrisDropStep() {
+    const state = ensureLiveAdminGamesState().tetris;
+    if (!state.current || state.gameOver) return;
+    state.current.y += 1;
+    if (liveAdminTetrisCollision(state.current)) {
+        state.current.y -= 1;
+        liveAdminMergeTetrisPiece();
+        liveAdminClearTetrisLines();
+        liveAdminSpawnTetrisPiece();
+    }
+}
+
+function liveAdminRotateMatrix(matrix) {
+    const h = matrix.length;
+    const w = matrix[0].length;
+    const rotated = Array.from({ length: w }, () => Array(h).fill(0));
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            rotated[x][h - 1 - y] = matrix[y][x];
+        }
+    }
+    return rotated;
+}
+
+function runLiveAdminTetrisLoop(ts) {
+    const panel = document.getElementById('live-admin-mini-games');
+    const state = ensureLiveAdminGamesState().tetris;
+    if (!panel) {
+        state.active = false;
+        state.paused = true;
+        state.rafId = null;
+        return;
+    }
+    if (!state.active || state.paused || state.gameOver) {
+        state.rafId = null;
+        drawLiveAdminTetris();
+        return;
+    }
+
+    if (!state.lastTs) state.lastTs = ts;
+    if (ts - state.lastTs >= state.dropInterval) {
+        state.lastTs = ts;
+        liveAdminTetrisDropStep();
+        drawLiveAdminTetris();
+    }
+    state.rafId = requestAnimationFrame(runLiveAdminTetrisLoop);
+}
+
+function liveAdminTetrisToggle() {
+    const state = ensureLiveAdminGamesState().tetris;
+    if (state.gameOver && !state.current) liveAdminTetrisReset();
+    if (!state.current) liveAdminSpawnTetrisPiece();
+    state.active = true;
+    state.paused = !state.paused;
+    if (!state.paused && !state.rafId) {
+        state.lastTs = 0;
+        state.rafId = requestAnimationFrame(runLiveAdminTetrisLoop);
+    }
+    drawLiveAdminTetris();
+}
+
+function liveAdminTetrisReset() {
+    const state = ensureLiveAdminGamesState().tetris;
+    state.board = Array.from({ length: state.rows }, () => Array(state.cols).fill(0));
+    state.score = 0;
+    state.lines = 0;
+    state.dropInterval = 500;
+    state.gameOver = false;
+    state.active = false;
+    state.paused = true;
+    state.lastTs = 0;
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    state.rafId = null;
+    state.current = makeLiveAdminTetrisPiece();
+    drawLiveAdminTetris();
+}
+
+function liveAdminTetrisMove(delta) {
+    const state = ensureLiveAdminGamesState().tetris;
+    if (!state.current || state.paused || state.gameOver) return;
+    state.current.x += delta;
+    if (liveAdminTetrisCollision(state.current)) state.current.x -= delta;
+    drawLiveAdminTetris();
+}
+
+function liveAdminTetrisRotate() {
+    const state = ensureLiveAdminGamesState().tetris;
+    if (!state.current || state.paused || state.gameOver) return;
+    const old = state.current.matrix;
+    state.current.matrix = liveAdminRotateMatrix(old);
+    if (liveAdminTetrisCollision(state.current)) state.current.matrix = old;
+    drawLiveAdminTetris();
+}
+
+function liveAdminTetrisSoftDrop() {
+    const state = ensureLiveAdminGamesState().tetris;
+    if (!state.current || state.paused || state.gameOver) return;
+    liveAdminTetrisDropStep();
+    drawLiveAdminTetris();
+}
+
+function drawLiveAdminSnake() {
+    const state = ensureLiveAdminGamesState().snake;
+    const canvas = document.getElementById('live-snake-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(state.food.x * state.cell, state.food.y * state.cell, state.cell - 1, state.cell - 1);
+
+    state.snake.forEach((part, idx) => {
+        ctx.fillStyle = idx === 0 ? '#2ecc71' : '#27ae60';
+        ctx.fillRect(part.x * state.cell, part.y * state.cell, state.cell - 1, state.cell - 1);
+    });
+
+    const scoreEl = document.getElementById('live-snake-score');
+    const statusEl = document.getElementById('live-snake-status');
+    if (scoreEl) scoreEl.innerText = String(state.score);
+    if (statusEl) statusEl.innerText = state.gameOver ? 'Game Over' : (state.paused ? 'Paused' : 'Running');
+}
+
+function spawnLiveAdminSnakeFood() {
+    const state = ensureLiveAdminGamesState().snake;
+    const taken = new Set(state.snake.map(p => `${p.x},${p.y}`));
+    let x = 0;
+    let y = 0;
+    let guard = 0;
+    do {
+        x = Math.floor(Math.random() * state.size);
+        y = Math.floor(Math.random() * state.size);
+        guard++;
+    } while (taken.has(`${x},${y}`) && guard < 500);
+    state.food = { x, y };
+}
+
+function tickLiveAdminSnake() {
+    const panel = document.getElementById('live-admin-mini-games');
+    const state = ensureLiveAdminGamesState().snake;
+    if (!panel) {
+        liveAdminSnakePause();
+        return;
+    }
+    if (!state.active || state.paused || state.gameOver) {
+        drawLiveAdminSnake();
+        return;
+    }
+
+    state.direction = state.nextDirection;
+    const head = { ...state.snake[0] };
+    if (state.direction === 'up') head.y -= 1;
+    if (state.direction === 'down') head.y += 1;
+    if (state.direction === 'left') head.x -= 1;
+    if (state.direction === 'right') head.x += 1;
+
+    if (head.x < 0 || head.y < 0 || head.x >= state.size || head.y >= state.size) {
+        state.gameOver = true;
+        state.paused = true;
+        state.active = false;
+        liveAdminSnakePause();
+        drawLiveAdminSnake();
+        return;
+    }
+
+    if (state.snake.some(part => part.x === head.x && part.y === head.y)) {
+        state.gameOver = true;
+        state.paused = true;
+        state.active = false;
+        liveAdminSnakePause();
+        drawLiveAdminSnake();
+        return;
+    }
+
+    state.snake.unshift(head);
+    if (head.x === state.food.x && head.y === state.food.y) {
+        state.score += 10;
+        spawnLiveAdminSnakeFood();
+    } else {
+        state.snake.pop();
+    }
+
+    drawLiveAdminSnake();
+}
+
+function liveAdminSnakePause() {
+    const state = ensureLiveAdminGamesState().snake;
+    if (state.timerId) {
+        clearInterval(state.timerId);
+        state.timerId = null;
+    }
+}
+
+function liveAdminSnakeToggle() {
+    const state = ensureLiveAdminGamesState().snake;
+    if (state.gameOver) liveAdminSnakeReset();
+    state.active = true;
+    state.paused = !state.paused;
+    if (!state.paused && !state.timerId) {
+        state.timerId = setInterval(tickLiveAdminSnake, state.speed);
+    } else if (state.paused) {
+        liveAdminSnakePause();
+    }
+    drawLiveAdminSnake();
+}
+
+function liveAdminSnakeReset() {
+    const state = ensureLiveAdminGamesState().snake;
+    state.score = 0;
+    state.gameOver = false;
+    state.active = false;
+    state.paused = true;
+    state.direction = 'right';
+    state.nextDirection = 'right';
+    state.snake = [{ x: 4, y: 7 }, { x: 3, y: 7 }, { x: 2, y: 7 }];
+    spawnLiveAdminSnakeFood();
+    liveAdminSnakePause();
+    drawLiveAdminSnake();
+}
+
+function liveAdminSnakeTurn(direction) {
+    const state = ensureLiveAdminGamesState().snake;
+    const current = state.direction;
+    if ((current === 'up' && direction === 'down') ||
+        (current === 'down' && direction === 'up') ||
+        (current === 'left' && direction === 'right') ||
+        (current === 'right' && direction === 'left')) {
+        return;
+    }
+    state.nextDirection = direction;
+}
+
+function initAdminMiniGamesUI() {
+    const panel = document.getElementById('live-admin-mini-games');
+    if (!panel) return;
+    ensureLiveAdminGamesState();
+    if (!window.LIVE_ADMIN_GAMES.keybound) {
+        window.addEventListener('keydown', (event) => {
+            if (!document.getElementById('live-admin-mini-games')) return;
+            const target = event.target;
+            if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
+
+            const key = String(event.key || '').toLowerCase();
+            if (key === 'a') { event.preventDefault(); liveAdminTetrisMove(-1); return; }
+            if (key === 'd') { event.preventDefault(); liveAdminTetrisMove(1); return; }
+            if (key === 'w') { event.preventDefault(); liveAdminTetrisRotate(); return; }
+            if (key === 's') { event.preventDefault(); liveAdminTetrisSoftDrop(); return; }
+            if (key === 'arrowup') { event.preventDefault(); liveAdminSnakeTurn('up'); return; }
+            if (key === 'arrowdown') { event.preventDefault(); liveAdminSnakeTurn('down'); return; }
+            if (key === 'arrowleft') { event.preventDefault(); liveAdminSnakeTurn('left'); return; }
+            if (key === 'arrowright') { event.preventDefault(); liveAdminSnakeTurn('right'); return; }
+        });
+        window.LIVE_ADMIN_GAMES.keybound = true;
+    }
+
+    const tetrisState = window.LIVE_ADMIN_GAMES.tetris;
+    const snakeState = window.LIVE_ADMIN_GAMES.snake;
+    if (!tetrisState.current) tetrisState.current = makeLiveAdminTetrisPiece();
+    if (!snakeState.food) spawnLiveAdminSnakeFood();
+    drawLiveAdminTetris();
+    drawLiveAdminSnake();
+}
+
+function stopAdminMiniGamesLoops() {
+    const state = ensureLiveAdminGamesState();
+    if (state.tetris.rafId) cancelAnimationFrame(state.tetris.rafId);
+    state.tetris.rafId = null;
+    state.tetris.active = false;
+    state.tetris.paused = true;
+    liveAdminSnakePause();
+    state.snake.active = false;
+    state.snake.paused = true;
+}
+
 // --- ADMIN VIEW ---
 
 function renderAdminLivePanel(container) {
@@ -367,8 +850,10 @@ function renderAdminLivePanel(container) {
     if (document.getElementById('live-summary-view')) return;
 
     const session = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+    const showMiniGames = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin');
     
     if (!session.active) {
+        stopAdminMiniGamesLoops();
         container.innerHTML = `
             <div style="text-align:center; padding:50px; color:var(--text-muted);">
                 <i class="fas fa-satellite-dish" style="font-size:4rem; margin-bottom:20px;"></i>
@@ -384,6 +869,7 @@ function renderAdminLivePanel(container) {
     const test = tests.find(t => t.id == session.testId);
     
     if (!test) {
+        stopAdminMiniGamesLoops();
         container.innerHTML = `<div class="alert alert-danger">Error: Linked Test ID not found. End session and check configuration. <button class="btn-danger btn-sm" onclick="endLiveSession()">End Session</button></div>`;
         return;
     }
@@ -473,6 +959,8 @@ function renderAdminLivePanel(container) {
                         <label>Trainer Comment</label>
                         <textarea id="liveCommentInput" rows="3" spellcheck="true" onchange="saveLiveComment(${currentQ}, this.value)">${currentComment}</textarea>
                     </div>
+                    
+                    ${showMiniGames ? renderAdminMiniGamesPanel() : ''}
 
                     <div style="margin-top:auto; display:flex; justify-content:space-between;">
                         <button class="btn-secondary" onclick="adminPushQuestion(${currentQ-1})" ${currentQ===0?'disabled':''}>&lt; Prev</button>
@@ -539,6 +1027,8 @@ function renderAdminLivePanel(container) {
         mainArea.innerHTML = mainHtml;
         mainArea.dataset.currentQ = String(currentQ);
     }
+
+    if (showMiniGames && currentQ >= 0) initAdminMiniGamesUI();
 }
 
 function updateAdminLiveView() {

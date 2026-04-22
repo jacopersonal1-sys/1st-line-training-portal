@@ -95,6 +95,8 @@ Maps local `localStorage` keys to Supabase tables.
     - `applySystemConfig()`: Applies hot-reload settings (Announcements, Sync Rates).
     - `checkReleaseNotes(ver)`: Shows changelog popup on update.
     - `performUpdateRestart()`: Saves user state (drafts, active tab) and restarts the app after an update is downloaded.
+    - `ensureReportProblemUI()` / `openReportProblemModal()` / `submitReportProblem()`: Global floating Problem Report workflow with captured console snapshot + contextual metadata (`activeTab`, app version, URL).
+    - **Updater Channel Guardrails:** Renderer now treats beta payloads as optional installs and only applies intrusive restart/login-block prompts for `main` channel downloads.
     - **Native Overrides:** Intercepts `os-resume` to instantly re-establish WebSockets after a PC wakes from sleep. Intercepts `force-final-sync` to execute Safe Quits.
 
 #### `js/auth.js` (Authentication)
@@ -125,6 +127,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `handle...Realtime(payload)`: Pushes incoming realtime events into a temporary `INCOMING_DATA_QUEUE`.
     - `processIncomingDataQueue()`: Processes the queue. Uses `isUserTyping()` to prevent UI re-renders from stealing cursor focus, and re-queues the batch if processing throws so realtime updates are never lost.
     - `sendHeartbeat()`: Uses `window.PRESENCE_CHANNEL.track()` to track active users with 0 database impact.
+    - `reportSystemError(msg, type, meta)`: Local-first error/problem report writer to `error_reports` with best-effort sync (`saveToServer`) and metadata fields (`source`, `issueDetail`, `consoleSnapshot`, `pageUrl`, `activeTab`, `appVersion`).
 
 #### `js/config.js` (Configuration)
 - **Responsibility:** Supabase Client initialization.
@@ -210,6 +213,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `performOrphanCleanup()`: Removes local records that no longer exist on the server (Hard Delete sync).
     - `switchToStaging()` / `exitStaging()`: Toggles between Production and Staging environments.
     - `clearSystemErrors()`: **Hard Deletes** all error reports from the cloud table.
+    - `viewProblemReports()` / `viewProblemReportDetails()` / `clearProblemReports()`: Dedicated Problem Reports console (user-submitted reports) split from system errors.
     - `emergencyDataRepair()`: Clears local queues/cache and forces a fresh full download (Soft Reset).
     - `openDevTools()`: Opens Electron Developer Tools (Super Admin only).
 
@@ -252,8 +256,8 @@ Maps local `localStorage` keys to Supabase tables.
 - **Architecture:** Program-within-a-program schedule editor running in an isolated iframe.
 - **Entry Point:** `modules/schedule_studio/index.html`
 - **Key Files:**
-    - `js/main.js`: Timeline app controller, admin template manager/apply flow, duration-based date automation.
-    - `js/data.js`: Shared localStorage/Supabase bridge helpers, business-day date math, template serialization.
+    - `js/main.js`: Timeline app controller, admin template manager/apply flow, duration-based date automation, linked content expand/collapse previews, and signed URL asset launchers for linked module video/document playback.
+    - `js/data.js`: Shared localStorage/Supabase bridge helpers, business-day date math, template serialization, and content-module discovery that reads both `content_studio_data_local` and canonical `content_studio_data` cache keys.
     - `js/ui_timeline.js`: Timeline tabs, toolbar actions, timeline cards.
     - `js/ui_calendar.js`: Calendar view rendering.
 
@@ -345,6 +349,7 @@ Maps local `localStorage` keys to Supabase tables.
         - **Conditional Actions:** Play/Document icons render only when subject media is enabled and linked.
         - **Tracking:** Video playback records watch-time deltas and forward-seek skip events (TikTok-style engagement intent).
         - **In-Player Annotation:** Video modal includes `Add Note / Question`, pauses at current timestamp, saves annotation, and supports timestamp jump-back.
+        - **Quiz Launch Bridge:** Questionnaire launch first uses Electron webview `ipcRenderer.sendToHost('content-studio-open-quiz')`, then falls back to parent-window launch/postMessage when embedded outside webview.
     - `js/ui_builder.js`: Builder for header + subjects (custom rich text + optional media) with edit/delete + engagement summary; schedule timeline selector removed.
         - **Media Controls:** Includes yes/no media toggles, source switchers (`HTTP Link` vs `Upload`), video upload, and PDF-only document upload.
     - `js/ui_engagement.js`: Admin/Super Admin engagement workspace for per-user and per-subject breakdown (watch time, plays, skips, notes/questions, last activity).
@@ -459,6 +464,30 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Bug Fix: New/duplicate module actions were hardened so button actions always execute with visible feedback.
 - Release: Version bumped to `2.6.24`.
 
+## v2.6.26 - 2026-04-21
+
+- Improvement: Schedule Studio now resolves linked Content Creator modules from both `content_studio_data` and `content_studio_data_local` cache paths for consistent module visibility.
+- Improvement: Linked timeline content video/document launch now resolves signed storage URLs before opening to reduce asset open failures.
+- Fix: Content Creator quiz launch bridge now includes fallback host messaging paths for runtime contexts where direct `sendToHost` is unavailable.
+- Release: Version bump to `2.6.26` for linked content runtime reliability rollout.
+
+## v2.6.27 - 2026-04-22
+
+- Feature Added: New Insight workspace rollout (Agent Triggers + Agent Progress) for admin/super-admin review workflows.
+- Improvement: Linked content launch paths in Schedule/Content Creator are more reliable for module discovery and media/quiz opens.
+- Bug Fix: Realtime fallback handling and diagnostics UI guards were hardened to reduce timeout reconnect storms and null-element runtime crashes.
+- Release: Version bump to `2.6.27` for stable main channel rollout.
+
+## v2.6.25 - 2026-04-20
+
+- Improvement: Beta updater rollout is now strict opt-in, with optional install prompts only for beta payloads.
+- Fix: Forced update and min-version update checks now explicitly target the `main` channel to prevent beta enforcement.
+- Fix: Problem Report workflow is now local-first resilient (captures/saves reports even when sync is temporarily unavailable) and Problem Reports admin views now safely parse malformed local payloads.
+- Fix: Schedule Studio content linking now resolves Content Creator modules from both canonical and local cache keys so newly created modules appear reliably in timeline link selectors.
+- Improvement: Linked content document/video launchers in Schedule Studio now resolve signed storage URLs using bucket/path metadata (same reliability model as Content Creator view).
+- Fix: Content Creator questionnaire launch now includes fallback host bridges when `sendToHost` is unavailable in non-standard runtime embeddings.
+- Release: Version bump to `2.6.25` for beta rollout safety controls.
+
 ## v2.6.23 - 2026-04-16
 
 - Feature Added: Split updater checks into Main (inline) and Beta (pre-release) channels.
@@ -537,6 +566,7 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 - `force-final-sync` / `final-sync-complete`: Handshake for the Intercepted Safe Quit flow.
 - `os-resume`: Triggers instant WebSocket reconnection when PC wakes from sleep.
 - `get-app-version`: Returns `package.json` version.
+- `get-update-status`: Returns updater readiness object `{ ready: boolean, channel: 'main' | 'beta' }`.
 - `manual-update-check`: Triggers auto-updater (supports channel-aware checks via `main`/`beta` payload).
 - `get-update-channel`: Returns the currently active updater channel (`main` or `beta`).
 - `set-kiosk-mode`: Toggles Kiosk mode.
@@ -558,9 +588,11 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 
 1.  **Release Type Rules:**
     *   `main` update: publish with stable release channel.
-    *   `beta` update: publish as pre-release channel (optional adoption flow).
+    *   `beta` update: publish as pre-release channel (strict opt-in adoption flow only).
     *   Admin/Super Admin can manually check both channels from **Admin Tools > System Updates**.
     *   Trainee/Team Leader continue receiving normal app update prompts from the standard in-app updater flow.
+    *   Beta must never become mandatory for general users: no forced restart/login block and no global forced commands tied to beta payloads.
+    *   Remote/mandatory update nudges (`force_update`, min-version enforcement) must always target `main` channel checks only.
 
 2.  **Version + Changelog Rules:**
     *   Increment `version` in `package.json`.

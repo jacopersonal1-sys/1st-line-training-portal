@@ -5,11 +5,14 @@ const ViewUI = {
         selectedSubjectId: '',
         modal: {
             open: false,
+            assetType: '',
             subjectId: '',
             entryId: '',
             watchBuffer: 0,
             lastTime: 0,
-            seekStart: null
+            seekStart: null,
+            videoUrl: '',
+            documentUrl: ''
         }
     },
 
@@ -43,19 +46,36 @@ const ViewUI = {
         const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         const subject = entry ? (entry.subjects || []).find(s => s.id === subjectId) : null;
         if (!subject || !subject.hasDocument) return;
+        this.state.selectedSubjectId = subjectId;
 
         const resolvedUrl = await DataService.resolveStorageUrl(subject.docBucket, subject.docPath, subject.docUrl);
         if (!resolvedUrl) {
             alert('No document link configured for this subject yet.');
             return;
         }
-        window.open(resolvedUrl, '_blank');
+
+        const username = (AppContext.user && AppContext.user.user) ? AppContext.user.user : 'unknown_user';
+        DataService.recordPlay(entry.id, subjectId, username);
+
+        this.state.modal = {
+            open: true,
+            assetType: 'document',
+            subjectId,
+            entryId: entry.id,
+            watchBuffer: 0,
+            lastTime: 0,
+            seekStart: null,
+            videoUrl: '',
+            documentUrl: resolvedUrl
+        };
+        App.render();
     },
 
     openVideo: async function(entryId, subjectId) {
         const entry = DataService.getEntries().find(e => e.id === entryId);
         const subject = entry ? (entry.subjects || []).find(s => s.id === subjectId) : null;
         if (!subject || !subject.hasVideo) return;
+        this.state.selectedSubjectId = subjectId;
 
         const resolvedUrl = await DataService.resolveStorageUrl(subject.videoBucket, subject.videoPath, subject.videoUrl);
         if (!resolvedUrl) {
@@ -68,30 +88,63 @@ const ViewUI = {
 
         this.state.modal = {
             open: true,
+            assetType: 'video',
             subjectId,
             entryId,
             watchBuffer: 0,
             lastTime: 0,
             seekStart: null,
-            videoUrl: resolvedUrl
+            videoUrl: resolvedUrl,
+            documentUrl: ''
         };
         App.render();
         this.bindVideoTracker();
         this.renderAnnotationList();
     },
 
-    requestHostQuizLaunch: function(testId) {
-        const id = String(testId || '').trim();
+    requestHostQuizLaunch: function(payload) {
+        const safePayload = (payload && typeof payload === 'object') ? payload : {};
+        const id = String(safePayload.testId || '').trim();
         if (!id) return false;
+
+        // Primary bridge for Electron webview guest -> host renderer.
         try {
             if (typeof require !== 'undefined') {
                 const { ipcRenderer } = require('electron');
                 if (ipcRenderer && typeof ipcRenderer.sendToHost === 'function') {
-                    ipcRenderer.sendToHost('content-studio-open-quiz', { testId: id });
+                    ipcRenderer.sendToHost('content-studio-open-quiz', safePayload);
                     return true;
                 }
             }
         } catch (err) {}
+
+        // Fallback bridge for iframe/browser embedding.
+        try {
+            if (window.parent && window.parent !== window) {
+                if (typeof window.parent.openTestTaker === 'function') {
+                    window.parent.openTestTaker(id, true, {
+                        popupMode: true,
+                        returnTab: 'content-studio',
+                        source: 'content-studio-fallback',
+                        contentStudioContext: {
+                            source: 'content_studio',
+                            launchSurface: 'content_creator_view',
+                            entryId: String(safePayload.entryId || ''),
+                            subjectId: String(safePayload.subjectId || ''),
+                            subjectCode: String(safePayload.subjectCode || ''),
+                            subjectTitle: String(safePayload.subjectTitle || ''),
+                            testId: id
+                        }
+                    });
+                    return true;
+                }
+                if (typeof window.parent.postMessage === 'function') {
+                    window.parent.postMessage({ type: 'content-studio-open-quiz', payload: safePayload }, '*');
+                    return true;
+                }
+            }
+        } catch (err) {}
+
         return false;
     },
 
@@ -99,6 +152,7 @@ const ViewUI = {
         const entry = (typeof App.getActiveEntry === 'function') ? App.getActiveEntry() : DataService.getPrimaryEntry();
         const subject = entry ? (entry.subjects || []).find(s => s.id === subjectId) : null;
         if (!subject || !subject.hasQuestionnaire) return;
+        this.state.selectedSubjectId = subjectId;
 
         const testId = String(subject.questionnaireTestId || '').trim();
         if (!testId) {
@@ -112,16 +166,25 @@ const ViewUI = {
             return;
         }
 
-        if (!this.requestHostQuizLaunch(testId)) {
+        if (!this.requestHostQuizLaunch({
+            testId,
+            entryId: entry ? entry.id : '',
+            subjectId: subject.id || '',
+            subjectCode: subject.code || '',
+            subjectTitle: ContentStudioUtils.stripHtml(subject.textHtml || '').slice(0, 120)
+        })) {
             alert('Could not launch quiz from Content Creator in this runtime.');
         }
     },
 
     closeVideo: function() {
-        this.flushWatchBuffer();
+        if (this.state.modal.assetType === 'video') this.flushWatchBuffer();
         this.state.modal.open = false;
+        this.state.modal.assetType = '';
         this.state.modal.subjectId = '';
         this.state.modal.entryId = '';
+        this.state.modal.videoUrl = '';
+        this.state.modal.documentUrl = '';
         App.render();
     },
 
@@ -136,6 +199,7 @@ const ViewUI = {
     },
 
     bindVideoTracker: function() {
+        if (this.state.modal.assetType !== 'video') return;
         const video = document.getElementById('cs-video-player');
         if (!video) return;
 
@@ -282,22 +346,22 @@ const ViewUI = {
             const showQuizIcon = !!subject.hasQuestionnaire && !!subject.questionnaireTestId;
 
             return `
-                <div class="cs-subject-row ${isActive ? 'is-active' : ''}" data-subject-id="${esc(subject.id)}">
+                <div class="cs-subject-row ${isActive ? 'is-active' : ''}" data-subject-id="${esc(subject.id)}" onclick="ViewUI.setSubjectId('${esc(subject.id)}')">
                     <div class="cs-subject-index">${esc(subject.code)}</div>
                     <div class="cs-subject-text">${textHtml || '<span class="cs-muted">No subject text captured.</span>'}</div>
                     <div class="cs-subject-actions">
                         ${showVideoIcon ? `
-                            <button class="cs-icon-btn" title="Play Video" onclick="ViewUI.openVideo('${esc(entry.id)}', '${esc(subject.id)}')">
+                            <button class="cs-icon-btn" title="Play Video" onclick="event.stopPropagation(); ViewUI.openVideo('${esc(entry.id)}', '${esc(subject.id)}')">
                                 <i class="fas fa-play"></i>
                             </button>
                         ` : ''}
                         ${showDocIcon ? `
-                            <button class="cs-icon-btn" title="Open Document" onclick="ViewUI.openDocument('${esc(subject.id)}')">
+                            <button class="cs-icon-btn" title="Open Document" onclick="event.stopPropagation(); ViewUI.openDocument('${esc(subject.id)}')">
                                 <i class="fas fa-link"></i>
                             </button>
                         ` : ''}
                         ${showQuizIcon ? `
-                            <button class="cs-icon-btn" title="Open Questionnaire" onclick="ViewUI.openQuestionnaire('${esc(subject.id)}')">
+                            <button class="cs-icon-btn" title="Open Questionnaire" onclick="event.stopPropagation(); ViewUI.openQuestionnaire('${esc(subject.id)}')">
                                 <i class="fas fa-circle-question"></i>
                             </button>
                         ` : ''}
@@ -309,12 +373,11 @@ const ViewUI = {
             `;
         }).join('');
 
-        const subjectDropdown = subjects.map(s => `<option value="${esc(s.id)}" ${this.state.selectedSubjectId === s.id ? 'selected' : ''}>${esc(`${s.code} - ${ContentStudioUtils.stripHtml(s.textHtml).slice(0, 72)}`)}</option>`).join('');
-
         const modalHtml = (() => {
             if (!this.state.modal.open || !entry) return '';
             const subject = subjects.find(s => s.id === this.state.modal.subjectId);
             if (!subject) return '';
+            const isVideo = this.state.modal.assetType === 'video';
             return `
                 <div class="cs-modal-backdrop" onclick="ViewUI.closeVideo()">
                     <div class="cs-modal" onclick="event.stopPropagation()">
@@ -322,16 +385,23 @@ const ViewUI = {
                             <h3>${esc(subject.code)} - ${esc(ContentStudioUtils.stripHtml(subject.textHtml).slice(0, 100))}</h3>
                             <button class="cs-icon-btn" onclick="ViewUI.closeVideo()"><i class="fas fa-xmark"></i></button>
                         </div>
-                        <div class="cs-video-actions">
-                            <button type="button" class="btn-secondary btn-sm" onclick="ViewUI.addNoteQuestionAtCurrentTime()">
-                                <i class="fas fa-note-sticky"></i> Add Note / Question
-                            </button>
-                        </div>
-                        <video id="cs-video-player" controls autoplay playsinline src="${esc(this.state.modal.videoUrl || '')}" style="width:100%; border-radius:10px; background:#000;"></video>
-                        <div class="cs-note-panel">
-                            <h4>My Notes & Questions</h4>
-                            <div id="cs-video-annotation-list"></div>
-                        </div>
+                        ${isVideo ? `
+                            <div class="cs-video-actions">
+                                <button type="button" class="btn-secondary btn-sm" onclick="ViewUI.addNoteQuestionAtCurrentTime()">
+                                    <i class="fas fa-note-sticky"></i> Add Note / Question
+                                </button>
+                            </div>
+                            <video id="cs-video-player" controls controlsList="nodownload noplaybackrate" disablePictureInPicture oncontextmenu="return false;" autoplay playsinline src="${esc(this.state.modal.videoUrl || '')}" style="width:100%; max-height:68vh; border-radius:10px; background:#000;"></video>
+                            <div class="cs-note-panel">
+                                <h4>My Notes & Questions</h4>
+                                <div id="cs-video-annotation-list"></div>
+                            </div>
+                        ` : `
+                            <iframe src="${esc(this.state.modal.documentUrl || '')}" style="width:100%; height:80vh; border:1px solid var(--cs-border); border-radius:10px; background:#fff;" title="Document Viewer"></iframe>
+                            <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+                                <a class="btn-secondary btn-sm" href="${esc(this.state.modal.documentUrl || '')}" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> Open in New Tab</a>
+                            </div>
+                        `}
                     </div>
                 </div>
             `;
@@ -339,16 +409,6 @@ const ViewUI = {
 
         return `
             <div class="cs-shell">
-                <div class="cs-toolbar">
-                    <div class="cs-field">
-                        <label>Subjects</label>
-                        <select onchange="ViewUI.setSubjectId(this.value)" ${subjects.length ? '' : 'disabled'}>
-                            <option value="">-- Select Subject --</option>
-                            ${subjectDropdown}
-                        </select>
-                    </div>
-                </div>
-
                 ${entry ? `
                     <div class="cs-document-shell">
                         <div class="cs-doc-header">

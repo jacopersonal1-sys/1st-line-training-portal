@@ -434,6 +434,10 @@ function runUniversalSearch() {
                     else if (q.adminNotes && q.adminNotes.toLowerCase().includes(query)) {
                         matchFound = true; matchText = `Note match: ${q.adminNotes}`;
                     }
+                    // Check Review Subject mapping
+                    else if (q.reviewSubject && q.reviewSubject.toLowerCase().includes(query)) {
+                        matchFound = true; matchText = `Review subject: ${q.reviewSubject}`;
+                    }
 
                     if (matchFound) {
                         results.push({ type: 'Question', test: test, match: matchText, qIdx: idx });

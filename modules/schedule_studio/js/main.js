@@ -9,6 +9,15 @@ const App = {
         view: 'list',
         currentMonth: new Date(),
         expandedContent: {},
+        contentVideoTracker: {
+            active: false,
+            entryId: '',
+            subjectId: '',
+            username: '',
+            watchBuffer: 0,
+            lastTime: 0,
+            seekStart: null
+        },
         templateEditor: {
             selectedTemplateId: '',
             templateName: '',
@@ -39,7 +48,7 @@ const App = {
 
         this._boundHostDataListener = (event) => {
             const changedKey = event?.detail?.key;
-            if (!['schedules', 'rosters', 'tests'].includes(changedKey)) return;
+            if (!['schedules', 'rosters', 'tests', 'content_studio_data', 'content_studio_data_local'].includes(changedKey)) return;
 
             clearTimeout(this.refreshTimer);
             this.refreshTimer = setTimeout(() => this.refresh(), 120);
@@ -1045,30 +1054,188 @@ const App = {
         return { item, module: state.module, subject };
     },
 
-    openContentVideo(index, subjectId) {
-        const { subject } = this.getLinkedContentSubject(index, subjectId);
+    closeContentAssetModal() {
+        this.flushContentWatchBuffer();
+        this.state.contentVideoTracker = {
+            active: false,
+            entryId: '',
+            subjectId: '',
+            username: '',
+            watchBuffer: 0,
+            lastTime: 0,
+            seekStart: null
+        };
+        const modal = document.getElementById('schedule-content-asset-modal');
+        if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
+    },
+
+    openContentAssetModal(title, bodyHtml) {
+        this.closeContentAssetModal();
+        const modal = document.createElement('div');
+        modal.id = 'schedule-content-asset-modal';
+        modal.className = 'modal-overlay';
+        modal.style.zIndex = '3015';
+        modal.innerHTML = `
+            <div class="modal-box" style="width:min(1520px, 98vw); max-height:94vh; overflow:auto; padding:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+                    <h3 style="margin:0;">${TimelineUI.escape(title || 'Content Preview')}</h3>
+                    <button class="studio-btn secondary" onclick="App.closeContentAssetModal()"><i class="fas fa-times"></i> Close</button>
+                </div>
+                <div>${bodyHtml || ''}</div>
+            </div>
+        `;
+        modal.addEventListener('click', (event) => {
+            if (event.target && event.target.id === 'schedule-content-asset-modal') this.closeContentAssetModal();
+        });
+        document.body.appendChild(modal);
+    },
+
+    flushContentWatchBuffer(videoEl = null) {
+        const tracker = this.state.contentVideoTracker || {};
+        if (!tracker.active || !(Number(tracker.watchBuffer || 0) > 0)) return;
+        const lastPosition = videoEl ? Number(videoEl.currentTime || 0) : Number(tracker.lastTime || 0);
+        ScheduleData.recordContentWatchDelta(
+            tracker.entryId,
+            tracker.subjectId,
+            tracker.username,
+            Number(tracker.watchBuffer || 0),
+            lastPosition
+        );
+        this.state.contentVideoTracker.watchBuffer = 0;
+        this.state.contentVideoTracker.lastTime = lastPosition;
+    },
+
+    bindContentVideoTracker(videoId) {
+        const video = document.getElementById(videoId);
+        if (!video) return;
+
+        const onPlay = () => {
+            this.state.contentVideoTracker.lastTime = Number(video.currentTime || 0);
+        };
+
+        const onTimeUpdate = () => {
+            if (video.paused || video.seeking) return;
+            const current = Number(video.currentTime || 0);
+            const delta = current - Number(this.state.contentVideoTracker.lastTime || 0);
+            if (delta > 0 && delta < 2.5) {
+                this.state.contentVideoTracker.watchBuffer += delta;
+                if (this.state.contentVideoTracker.watchBuffer >= 5) this.flushContentWatchBuffer(video);
+            }
+            this.state.contentVideoTracker.lastTime = current;
+        };
+
+        const onSeeking = () => {
+            this.state.contentVideoTracker.seekStart = Number(this.state.contentVideoTracker.lastTime || video.currentTime || 0);
+        };
+
+        const onSeeked = () => {
+            const from = Number(this.state.contentVideoTracker.seekStart || this.state.contentVideoTracker.lastTime || 0);
+            const to = Number(video.currentTime || 0);
+            if (to - from > 2.5) {
+                ScheduleData.recordContentSkip(
+                    this.state.contentVideoTracker.entryId,
+                    this.state.contentVideoTracker.subjectId,
+                    this.state.contentVideoTracker.username,
+                    from,
+                    to
+                );
+            }
+            this.state.contentVideoTracker.lastTime = to;
+            this.state.contentVideoTracker.seekStart = null;
+        };
+
+        const onPause = () => this.flushContentWatchBuffer(video);
+        const onEnded = () => this.flushContentWatchBuffer(video);
+
+        video.addEventListener('play', onPlay);
+        video.addEventListener('timeupdate', onTimeUpdate);
+        video.addEventListener('seeking', onSeeking);
+        video.addEventListener('seeked', onSeeked);
+        video.addEventListener('pause', onPause);
+        video.addEventListener('ended', onEnded);
+    },
+
+    async resolveContentAssetUrl(subject, type = 'video') {
+        if (!subject || typeof subject !== 'object') return '';
+        const bucket = type === 'document' ? String(subject.docBucket || '').trim() : String(subject.videoBucket || '').trim();
+        const path = type === 'document' ? String(subject.docPath || '').trim() : String(subject.videoPath || '').trim();
+        const fallback = type === 'document' ? String(subject.docUrl || '').trim() : String(subject.videoUrl || '').trim();
+
+        if (!bucket || !path) return fallback;
+        const hostClient = AppContext.host && AppContext.host.supabaseClient ? AppContext.host.supabaseClient : null;
+        if (!hostClient || !hostClient.storage || !hostClient.storage.from) return fallback;
+
+        try {
+            const { data, error } = await hostClient.storage.from(bucket).createSignedUrl(path, 7200);
+            if (!error && data && data.signedUrl) return String(data.signedUrl).trim();
+        } catch (error) {}
+
+        try {
+            const { data } = hostClient.storage.from(bucket).getPublicUrl(path);
+            if (data && data.publicUrl) return String(data.publicUrl).trim();
+        } catch (error) {}
+
+        return fallback;
+    },
+
+    async openContentVideo(index, subjectId) {
+        const { module, subject } = this.getLinkedContentSubject(index, subjectId);
         if (!subject) return;
-        const url = String(subject.videoUrl || '').trim();
+        const url = await this.resolveContentAssetUrl(subject, 'video');
         if (!url) {
             alert('This subject has no video link configured.');
             return;
         }
-        window.open(url, '_blank');
+        const username = String(ScheduleData.getCurrentUser()?.user || 'unknown_user').trim();
+        const entryId = String(module?.id || '').trim();
+        const cleanSubjectId = String(subject.id || '').trim();
+        ScheduleData.recordContentPlay(entryId, cleanSubjectId, username);
+
+        this.state.contentVideoTracker = {
+            active: true,
+            entryId,
+            subjectId: cleanSubjectId,
+            username,
+            watchBuffer: 0,
+            lastTime: 0,
+            seekStart: null
+        };
+
+        const safeUrl = TimelineUI.escape(url);
+        const title = `${String(subject.code || 'Subject')} - Video`;
+        this.openContentAssetModal(
+            title,
+            `<video id="schedule-content-video-player" controls controlsList="nodownload noplaybackrate" disablePictureInPicture oncontextmenu="return false;" autoplay playsinline src="${safeUrl}" style="width:100%; max-height:78vh; border-radius:10px; background:#000;"></video>`
+        );
+        this.bindContentVideoTracker('schedule-content-video-player');
     },
 
-    openContentDocument(index, subjectId) {
-        const { subject } = this.getLinkedContentSubject(index, subjectId);
+    async openContentDocument(index, subjectId) {
+        const { module, subject } = this.getLinkedContentSubject(index, subjectId);
         if (!subject) return;
-        const url = String(subject.docUrl || '').trim();
+        const url = await this.resolveContentAssetUrl(subject, 'document');
         if (!url) {
             alert('This subject has no document link configured.');
             return;
         }
-        window.open(url, '_blank');
+        const username = String(ScheduleData.getCurrentUser()?.user || 'unknown_user').trim();
+        ScheduleData.recordContentPlay(String(module?.id || '').trim(), String(subject.id || '').trim(), username);
+
+        const safeUrl = TimelineUI.escape(url);
+        const title = `${String(subject.code || 'Subject')} - Document`;
+        this.openContentAssetModal(
+            title,
+            `
+                <iframe src="${safeUrl}" style="width:100%; height:82vh; border:1px solid var(--border-color); border-radius:8px; background:#fff;" title="Document Preview"></iframe>
+                <div style="margin-top:10px; display:flex; justify-content:flex-end;">
+                    <a class="studio-btn secondary" href="${safeUrl}" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> Open in New Tab</a>
+                </div>
+            `
+        );
     },
 
     openContentQuiz(index, subjectId) {
-        const { subject } = this.getLinkedContentSubject(index, subjectId);
+        const { module, subject } = this.getLinkedContentSubject(index, subjectId);
         if (!subject) return;
         const testId = String(subject.questionnaireTestId || '').trim();
         if (!testId) {
@@ -1082,7 +1249,17 @@ const App = {
                 AppContext.host.openTestTaker(testId, true, {
                     popupMode: true,
                     returnTab: 'assessment-schedule',
-                    source: 'content-linked-questionnaire'
+                    source: 'content-linked-questionnaire',
+                    contentStudioContext: {
+                        source: 'content_studio',
+                        launchSurface: 'schedule_studio_timeline',
+                        entryId: String(module?.id || '').trim(),
+                        subjectId: String(subject.id || '').trim(),
+                        subjectCode: String(subject.code || '').trim(),
+                        subjectTitle: this.stripHtml(subject.textHtml || '').slice(0, 120),
+                        testId: testId,
+                        testTitle: String(subject.questionnaireTestTitle || '').trim()
+                    }
                 });
                 return;
             }
@@ -1092,7 +1269,10 @@ const App = {
             return;
         }
 
-        alert('Quiz launcher is unavailable in this runtime.');
+        if (AppContext.host && typeof AppContext.host.showTab === 'function') {
+            try { AppContext.host.showTab('my-tests'); } catch (error) {}
+        }
+        alert('Quiz launcher is unavailable in this runtime. Open My Assessments and launch the linked quiz there.');
     },
 
     renderContentPreview(item, index) {
@@ -1112,8 +1292,8 @@ const App = {
         const module = state.module;
         const subjects = Array.isArray(module.subjects) ? module.subjects : [];
         const rows = subjects.map(subject => {
-            const showVideo = !!subject.hasVideo && !!String(subject.videoUrl || '').trim();
-            const showDoc = !!subject.hasDocument && !!String(subject.docUrl || '').trim();
+            const showVideo = !!subject.hasVideo && (!!String(subject.videoUrl || '').trim() || !!String(subject.videoPath || '').trim());
+            const showDoc = !!subject.hasDocument && (!!String(subject.docUrl || '').trim() || !!String(subject.docPath || '').trim());
             const showQuiz = !!subject.hasQuestionnaire && !!String(subject.questionnaireTestId || '').trim();
             return `
                 <div class="studio-content-mini-row">

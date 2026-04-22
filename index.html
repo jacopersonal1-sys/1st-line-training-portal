@@ -406,6 +406,9 @@
         <button class="nav-item admin-only" onclick="showTab('insights')" title="Training Insight">
             <i class="fas fa-brain"></i><span class="nav-text">Training Insight</span>
         </button>
+        <button class="nav-item admin-only" onclick="showTab('insight-studio')" title="Insight">
+            <i class="fas fa-magnifying-glass-chart"></i><span class="nav-text">Insight</span>
+        </button>
 
         <button class="nav-item admin-only" onclick="showTab('manage')" title="Add Group">
             <i class="fas fa-user-plus"></i><span class="nav-text">Add Group</span>
@@ -520,6 +523,13 @@
             <div id="insightGrid" class="insight-grid">
                 <p style="color:var(--text-muted);">Select a group to view insights.</p>
             </div>
+        </section>
+
+        <section id="insight-studio" class="admin-only-section">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2>Insight</h2>
+            </div>
+            <div id="insight-studio-content"></div>
         </section>
 
         <section id="manage" class="admin-only-section">
@@ -883,6 +893,7 @@
         <div class="admin-sub-nav">
             <button class="sub-tab-btn active" id="btn-sub-users" onclick="showAdminSub('users', this)">Manage Users</button>
             <button class="sub-tab-btn" id="btn-sub-assessments" onclick="showAdminSub('assessments', this)">Training Topics</button>
+            <button class="sub-tab-btn" id="btn-sub-insight-rules" onclick="showAdminSub('insight-rules', this)">Insight Triggers</button>
             <button class="sub-tab-btn" id="btn-sub-data" onclick="showAdminSub('data', this)">Database</button>
             <button class="sub-tab-btn" id="btn-sub-access" onclick="showAdminSub('access', this)">Access Control</button>
             <button class="sub-tab-btn" id="btn-sub-status" onclick="showAdminSub('status', this)">System Status</button>
@@ -892,34 +903,59 @@
         </div>
         
         <div id="admin-view-users" class="admin-view active">
-            <div class="card grid-2">
-            <div id="admin-create-user-card">
-                <h3>Create User</h3>
-                <input type="text" id="newUserName" placeholder="Username" aria-label="New Username">
-                <select id="newUserRole" aria-label="Select Role"><option value="trainee">Trainee</option><option value="teamleader">Team Leader</option><option value="admin">Admin</option><option value="special_viewer">Special Viewer</option></select>
-                <div style="display:flex; gap:5px;"><input type="text" id="newUserPass" placeholder="Password" aria-label="New Password"><button class="btn-secondary" style="width:auto;" onclick="generatePassword()">Gen</button></div>
-                <button class="btn-primary" onclick="addUser()">Add User</button>
-            </div>
-            <div id="admin-user-list-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <h3 style="margin:0;">Manage Users</h3>
-                    <span style="font-size:0.75rem; color:var(--text-muted); border:1px solid var(--border-color); border-radius:999px; padding:3px 10px;">Server-Authoritative</span>
+            <div id="admin-user-list-card" class="card">
+                <div class="admin-users-header">
+                    <div>
+                        <h3 style="margin:0;">Manage Users</h3>
+                        <p style="margin:6px 0 0 0; font-size:0.84rem; color:var(--text-muted);">Unified user management with role buckets, group-aware trainee filtering, and server-authoritative sync.</p>
+                    </div>
+                    <span style="font-size:0.75rem; color:var(--text-muted); border:1px solid var(--border-color); border-radius:999px; padding:3px 10px; white-space:nowrap;">Server-Authoritative</span>
                 </div>
-                <p style="margin:0 0 10px 0; font-size:0.84rem; color:var(--text-muted);">Identity-safe view with deduped accounts and live activity snapshot.</p>
-                <div id="adminUsersLiveSummary" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;"></div>
-                <div id="admin-user-controls" style="margin-bottom:10px; display:flex; gap: 10px; align-items: center;">
-                    <button class="btn-primary" style="background:#005fa3; padding:5px 10px; font-size:0.8rem; white-space: nowrap;" onclick="scanAndGenerateUsers()"><i class="fas fa-sync"></i> Scan Missing</button>
-                    <select id="userRoleFilter" onchange="loadAdminUsers()" style="padding: 5px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-main);">
+
+                <div id="adminUsersLiveSummary" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;"></div>
+
+                <div id="admin-user-controls" class="admin-users-controls">
+                    <div id="admin-create-user-card">
+                        <button id="btnAddUserPopup" class="btn-primary" style="width:auto; white-space:nowrap;" onclick="openAddUserModal()"><i class="fas fa-user-plus"></i> Add User</button>
+                    </div>
+                    <select id="userRoleFilter" onchange="loadAdminUsers(true)" aria-label="Filter by role">
                         <option value="">All Roles</option>
                         <option value="trainee">Trainees</option>
                         <option value="teamleader">Team Leaders</option>
                         <option value="admin">Admins</option>
                         <option value="super_admin">Super Admins</option>
+                        <option value="special_viewer">Special Viewers</option>
                     </select>
-                    <input type="text" placeholder="Search Users..." id="userSearch" style="flex: 1; margin:0;" onkeyup="loadAdminUsers()" aria-label="Filter Users">
+                    <select id="userGroupFilter" onchange="loadAdminUsers(true)" aria-label="Filter trainees by group">
+                        <option value="">All Trainee Groups</option>
+                    </select>
+                    <input type="text" placeholder="Search users by name, role, email, or phone..." id="userSearch" class="admin-users-search" oninput="loadAdminUsers(true)" aria-label="Search users">
+                    <button id="btnMyProfileAdmin" class="btn-secondary" style="width:auto; white-space:nowrap;" onclick="openUnifiedProfileSettings()"><i class="fas fa-user-cog"></i> My Profile Settings</button>
                 </div>
-                <div style="max-height:60vh; overflow-y:auto; border: 1px solid var(--border-color); border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);"><table class="admin-table" style="margin: 0; width: 100%; border-collapse: collapse;"><thead style="position: sticky; top: 0; background: var(--bg-card); z-index: 5; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"><tr><th style="padding: 10px;">User</th><th style="padding: 10px;">Role</th><th style="padding: 10px;">Email</th><th style="padding: 10px;">Phone</th><th style="padding: 10px;">Pass</th><th style="padding: 10px;">Actions</th></tr></thead><tbody id="userList"></tbody></table></div>
-            </div>
+
+                <div id="adminUsersColumns" class="admin-users-columns">
+                    <section class="admin-user-role-column">
+                        <div class="admin-user-column-head">
+                            <h4>Admin / Super Admin</h4>
+                            <span id="adminUserCountAdmins" class="admin-user-count">0</span>
+                        </div>
+                        <div id="adminUserBucketAdmins" class="admin-user-bucket"></div>
+                    </section>
+                    <section class="admin-user-role-column">
+                        <div class="admin-user-column-head">
+                            <h4>Trainee</h4>
+                            <span id="adminUserCountTrainees" class="admin-user-count">0</span>
+                        </div>
+                        <div id="adminUserBucketTrainees" class="admin-user-bucket"></div>
+                    </section>
+                    <section class="admin-user-role-column">
+                        <div class="admin-user-column-head">
+                            <h4>Team Leader</h4>
+                            <span id="adminUserCountTeamleaders" class="admin-user-count">0</span>
+                        </div>
+                        <div id="adminUserBucketTeamleaders" class="admin-user-bucket"></div>
+                    </section>
+                </div>
             </div>
         </div>
 
@@ -955,6 +991,89 @@
                             <button class="btn-primary btn-sm" onclick="addVettingTopic()" style="width:auto;">Add</button>
                         </div>
                         <ul id="vettingList" class="vetting-list"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="admin-view-insight-rules" class="admin-view">
+            <div class="card">
+                <h3>Action Required Trigger Presets</h3>
+                <p style="color:var(--text-muted); margin-bottom:15px;">
+                    Configure each trigger as one full preset using Vetting/Assessment + Severity + Score Threshold.
+                </p>
+                <div class="grid-3" style="margin-bottom:16px;">
+                    <div>
+                        <label for="insightPresetAssessmentSelect">Vetting / Assessment</label>
+                        <select id="insightPresetAssessmentSelect" style="margin:0;"></select>
+                    </div>
+                    <div>
+                        <label for="insightPresetSeveritySelect">Severity</label>
+                        <select id="insightPresetSeveritySelect" style="margin:0;">
+                            <option value="critical">Critical</option>
+                            <option value="semi">Semi-Critical</option>
+                            <option value="improvement">Improvement</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="insightPresetThresholdInput">Score Threshold (%)</label>
+                        <input type="number" id="insightPresetThresholdInput" min="1" max="100" step="1" value="60" style="margin:0;">
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+                    <button class="btn-primary btn-sm" onclick="addInsightTriggerPreset()" style="width:auto;">Add Trigger Preset</button>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <h4 style="margin:0;">Assessment Severity Mapping (Configured Triggers)</h4>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-secondary btn-sm" onclick="resetInsightRuleConfig()">Reset Defaults</button>
+                        <button class="btn-primary btn-sm" onclick="saveInsightRuleConfig()">Save Presets</button>
+                    </div>
+                </div>
+                <div class="table-responsive" style="max-height:420px; overflow-y:auto;">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th style="width:60px;">#</th>
+                                <th>Assessment / Topic / Test</th>
+                                <th style="width:200px;">Severity</th>
+                                <th style="width:180px;">Score Threshold (%)</th>
+                                <th style="width:100px;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="insightRulesTableBody">
+                            <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Loading trigger catalog...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
+                    <h4 style="margin:0 0 10px 0;">Agent Progress Builder</h4>
+                    <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
+                        Build the Agent Progress checklist from configured topics/tests. `Onboard Report` and `Insight Review` are auto-included.
+                    </p>
+                    <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:10px;">
+                        <div style="min-width:300px; flex:1;">
+                            <label for="insightProgressItemSelect">Vetting / Assessment / Test</label>
+                            <select id="insightProgressItemSelect" style="margin:0;"></select>
+                        </div>
+                        <button class="btn-primary btn-sm" onclick="addInsightProgressItem()" style="width:auto;">Add to Progress</button>
+                    </div>
+                    <div class="table-responsive" style="max-height:300px; overflow-y:auto;">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:60px;">#</th>
+                                    <th>Checklist Item</th>
+                                    <th style="width:140px;">Type</th>
+                                    <th style="width:140px;">Source</th>
+                                    <th style="width:110px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="insightProgressTableBody">
+                                <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Loading progress requirements...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -1378,6 +1497,7 @@
 <script src="js/admin_updates.js"></script>
 
 <script src="js/admin_sys.js"></script>
+<script src="js/admin_insight_rules.js"></script>
 <script src="js/admin_users.js"></script>
 <script src="js/admin_builder.js"></script> 
 <script src="js/admin_grading.js"></script> <script src="js/schedule.js"></script>
@@ -1385,6 +1505,7 @@
 <script src="js/forms.js"></script> 
 <script src="js/insight.js"></script>
 <script src="js/assessment_core.js"></script>
+<script src="js/assessment_quiz_flow.js"></script>
 <script src="js/assessment_admin.js"></script>
 <script src="js/assessment_trainee.js"></script>
 <script src="js/live_execution.js"></script>
@@ -1392,6 +1513,7 @@
 <script src="js/tl_tasks.js"></script>
 <script src="js/opl_hub_loader.js"></script>
 <script src="js/content_studio_loader.js"></script>
+<script src="js/insight_studio_loader.js"></script>
 <script src="js/admin_history.js"></script>
 <script src="js/attendance.js"></script>
 <script src="js/study_monitor.js"></script>
@@ -1403,6 +1525,7 @@
 <script src="js/schedule_studio_loader.js"></script>
 <script src="js/superadmin_data_studio_loader.js"></script>
 <script src="js/ai_core.js"></script>
+<script src="js/easter_arcade.js"></script>
 
 <script src="js/main.js"></script>
 
