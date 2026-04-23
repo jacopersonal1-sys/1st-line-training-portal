@@ -13,8 +13,6 @@ function syncThemeFromHost() {
         const hostStyle = AppContext.host.getComputedStyle(hostRoot);
         const varsToMirror = [
             '--primary',
-            '--primary-hover',
-            '--primary-soft',
             '--bg-app',
             '--bg-card',
             '--bg-input',
@@ -26,7 +24,6 @@ function syncThemeFromHost() {
             '--border-radius',
             '--shadow-card',
             '--shadow-hover',
-            '--focus-ring',
             '--transition'
         ];
 
@@ -36,16 +33,8 @@ function syncThemeFromHost() {
                 localRoot.style.setProperty(name, value.trim());
             }
         });
-
-        const hostBody = AppContext.host.document.body;
-        const bodyStyle = hostBody ? AppContext.host.getComputedStyle(hostBody) : null;
-        const hostFont = bodyStyle ? bodyStyle.getPropertyValue('font-family') : '';
-        if (hostFont && hostFont.trim()) {
-            document.documentElement.style.setProperty('--host-font-family', hostFont.trim());
-            document.body.style.fontFamily = hostFont.trim();
-        }
     } catch (error) {
-        console.warn('[Schedule Studio] Theme sync failed:', error);
+        console.warn('[Trainee Portal] Theme sync failed:', error);
     }
 }
 
@@ -58,15 +47,7 @@ function syncThemeFromHost() {
             AppContext.host = window.parent;
         }
     } catch (error) {
-        console.warn('[Schedule Studio] Parent bridge unavailable:', error);
-    }
-
-    if (!AppContext.host) {
-        try {
-            if (window.opener && !window.opener.closed) {
-                AppContext.host = window.opener;
-            }
-        } catch (error) {}
+        console.warn('[Trainee Portal] Parent bridge unavailable:', error);
     }
 
     if (AppContext.host && AppContext.host.CURRENT_USER) {
@@ -74,23 +55,11 @@ function syncThemeFromHost() {
     } else {
         const userStr = params.get('user');
         if (userStr) {
-            AppContext.user = JSON.parse(decodeURIComponent(userStr));
+            try {
+                AppContext.user = JSON.parse(decodeURIComponent(userStr));
+            } catch (error) {}
         }
     }
 
     syncThemeFromHost();
-
-    if (AppContext.host && typeof AppContext.host.addEventListener === 'function') {
-        AppContext.host.addEventListener('buildzone:data-changed', (event) => {
-            if (event?.detail?.key === 'local_theme_config' || event?.detail?.key === 'system_config') {
-                syncThemeFromHost();
-            }
-        });
-    }
-
-    window.addEventListener('focus', syncThemeFromHost);
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) syncThemeFromHost();
-    });
-    setInterval(syncThemeFromHost, 5000);
 })();

@@ -957,8 +957,23 @@ window.onload = async function() {
         document.head.appendChild(style);
     }
 
-    // SHOW LOADER
     const loader = document.getElementById('global-loader');
+
+    const startupBootRole = getStartupBootRoleMode();
+    if (!startupBootRole) {
+        window.APP_BOOT_MODE = null;
+        applyBootRoleUi('');
+        if (loader) loader.classList.add('hidden');
+        if (typeof initLoginParticles === 'function') initLoginParticles();
+        return;
+    }
+
+    window.APP_BOOT_MODE = startupBootRole;
+    sessionStorage.setItem('boot_role_selection', startupBootRole);
+    applyBootRoleUi(startupBootRole);
+    const isTraineeBootMode = startupBootRole === 'trainee';
+
+    // SHOW LOADER
     if(loader) loader.classList.remove('hidden');
 
     // --- NATIVE DISK CACHE RECOVERY ---
@@ -1092,6 +1107,7 @@ window.onload = async function() {
         } catch(e) { console.error("Early render failed", e); }
     }
 
+    if (!isTraineeBootMode) {
     // --- SERVER MIGRATION PROTOCOL ---
     // Detects if we've switched servers and forces a full re-sync/push to ensure data consistency.
     const currentTarget = localStorage.getItem('active_server_target') || 'cloud';
@@ -1241,6 +1257,21 @@ window.onload = async function() {
     if(typeof populateYearSelect === 'function') populateYearSelect();
     if(typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
     if(typeof loadRostersList === 'function') loadRostersList();
+    } else {
+        // Trainee boot path: do not run full pre-login sync/migrations.
+        // Pull only auth-critical docs so trainee login can proceed safely.
+        if (typeof refreshAuthCriticalDataFromServer === 'function') {
+            try {
+                await refreshAuthCriticalDataFromServer();
+            } catch (error) {
+                console.warn("Trainee boot auth refresh failed, using local cache.", error);
+            }
+        }
+        if (loader) loader.classList.add('hidden');
+        if (typeof applySystemConfig === 'function') applySystemConfig();
+        if (typeof migrateData === 'function') migrateData();
+        if (typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
+    }
     
     // --- UPDATE RESTORATION LOGIC ---
     const restoreStateStr = localStorage.getItem('pending_update_restore');
@@ -1356,8 +1387,11 @@ window.onload = async function() {
             } catch(e) { console.error("Remember Me Failed", e); }
         }
         else {
-            // FIX: Initialize Login UI State (Admin Default) if nothing remembered
-            if (typeof toggleLoginMode === 'function') toggleLoginMode('admin');
+            // Initialize login inputs based on chosen runtime when nothing is remembered
+            if (typeof toggleLoginMode === 'function') {
+                if (window.APP_BOOT_MODE === 'trainee') toggleLoginMode('trainee');
+                else toggleLoginMode('admin');
+            }
         }
 
         // --- INIT LOGIN PARTICLES ---
@@ -2006,24 +2040,14 @@ function applyExperimentalTheme(themeName) {
 
 // --- SIDEBAR VISIBILITY LOGIC ---
 function updateSidebarVisibility() {
-    if (!CURRENT_USER) return;
+    if (!CURRENT_USER) {
+        document.body.classList.remove('trainee-runtime');
+        return;
+    }
 
     const role = CURRENT_USER.role;
-    const normalizeIdentity = (value) => {
-        let v = String(value || '').trim().toLowerCase();
-        if (!v) return '';
-        if (v.includes('@')) v = v.split('@')[0];
-        v = v.replace(/[._-]+/g, ' ');
-        v = v.replace(/\s+/g, ' ').trim();
-        return v;
-    };
-    const identitiesMatch = (a, b) => {
-        const na = normalizeIdentity(a);
-        const nb = normalizeIdentity(b);
-        if (!na || !nb) return false;
-        if (na === nb) return true;
-        return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
-    };
+    const isTraineeRuntimeSession = role === 'trainee';
+    document.body.classList.toggle('trainee-runtime', isTraineeRuntimeSession);
     
     // --- DYNAMIC LABEL UPDATE ---
     // Rename the hardcoded button based on role
@@ -2034,6 +2058,13 @@ function updateSidebarVisibility() {
             span.innerText = (role === 'trainee') ? 'Take Live Assessment' : 'Live Session Arena';
         }
         liveExecBtn.setAttribute('title', (role === 'trainee') ? 'Take Live Assessment' : 'Live Session Arena');
+    }
+
+    const homeBtn = document.querySelector('.nav-item[onclick="showTab(\'dashboard-view\')"]');
+    if (homeBtn) {
+        const span = homeBtn.querySelector('.nav-text');
+        if (span) span.innerText = (role === 'trainee') ? 'Trainee Portal' : 'Home';
+        homeBtn.setAttribute('title', (role === 'trainee') ? 'Trainee Portal' : 'Home / Overview');
     }
 
     // --- INJECT SUPER ADMIN BUTTON ---
@@ -2118,6 +2149,11 @@ function updateSidebarVisibility() {
         // Reset first
         btn.classList.remove('hidden');
         
+        if (isTraineeRuntimeSession) {
+            btn.classList.add('hidden');
+            return;
+        }
+
         // Safety check for onclick attribute
         const clickAttr = btn.getAttribute('onclick');
         if (!clickAttr) return;
@@ -2162,39 +2198,20 @@ function updateSidebarVisibility() {
         }
 
         // Rules
-        if (role === 'trainee') {
-            // Trainees hide Admin, Manage, Capture, Monthly, Insights
-            const hiddenForTrainee = ['admin-panel', 'manage', 'capture', 'insights', 'insight-studio', 'test-manage', 'test-records', 'live-assessment', 'vetting-rework', 'superadmin-studio'];
-            const visibleForTrainee = ['assessment-schedule', 'my-tests', 'dashboard-view', 'live-assessment', 'vetting-arena', 'live-execution', 'monthly'];
-            
-            // Special Check for Arena
-            if (targetTab === 'vetting-arena') {
-                const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
-                const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-                const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
-                const isTargeted = (s) => {
-                    if (!s || !s.active) return false;
-                    if (!s.targetGroup || s.targetGroup === 'all') return true;
-                    const members = rosters[s.targetGroup] || [];
-                    return members.some(m => identitiesMatch(m, CURRENT_USER.user));
-                };
-                const hasActiveTarget = (session && session.active && isTargeted(session))
-                    || (Array.isArray(activeSessions) && activeSessions.some(isTargeted));
-                if (!hasActiveTarget) btn.classList.add('hidden');
-                return;
-            }
-            
-            if (!visibleForTrainee.includes(targetTab)) btn.classList.add('hidden');
-        } 
-        else if (role === 'teamleader') {
+        if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'live-assessment', 'live-execution', 'insights', 'insight-studio', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'study-notes', 'live-assessment', 'live-execution', 'insights', 'insight-studio', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio', 'trainee-portal'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
             // Admins hide "My Tests" (Take Test) usually, but we keep it visible for testing purposes
             if (targetTab === 'my-tests') btn.classList.add('hidden');
+            if (targetTab === 'study-notes') btn.classList.add('hidden');
+            if (targetTab === 'trainee-portal') btn.classList.add('hidden');
+        } else {
+            if (targetTab === 'study-notes') btn.classList.add('hidden');
+            if (targetTab === 'trainee-portal') btn.classList.add('hidden');
         }
     });
 
@@ -2211,11 +2228,156 @@ function updateSidebarVisibility() {
     }
 }
 
+window.APP_BOOT_MODE = window.APP_BOOT_MODE || null;
+
+function normalizeBootRoleMode(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'trainee') return 'trainee';
+    if (raw === 'admin' || raw === 'teamleader' || raw === 'super_admin' || raw === 'special_viewer') return 'admin';
+    return '';
+}
+
+function deriveBootRoleFromUser(userObj) {
+    if (!userObj || typeof userObj !== 'object') return '';
+    const role = normalizeBootRoleMode(userObj.role || '');
+    if (role) return role;
+    const explicit = normalizeBootRoleMode(userObj.bootMode || '');
+    if (explicit) return explicit;
+    return '';
+}
+
+function deriveBootRoleFromRemembered() {
+    try {
+        const rememberedRaw = localStorage.getItem('rememberedUser');
+        if (!rememberedRaw) return '';
+        const remembered = JSON.parse(rememberedRaw);
+        if (!remembered || typeof remembered !== 'object') return '';
+
+        const rememberedMode = normalizeBootRoleMode(remembered.bootMode || remembered.role || '');
+        if (rememberedMode) return rememberedMode;
+
+        const rememberedUser = String(remembered.user || '').trim().toLowerCase();
+        if (!rememberedUser) return '';
+
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        if (!Array.isArray(users)) return '';
+        const hit = users.find(u => String(u && u.user || '').trim().toLowerCase() === rememberedUser);
+        return hit ? normalizeBootRoleMode(hit.role || '') : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function getStartupBootRoleMode() {
+    const sessionChoice = normalizeBootRoleMode(sessionStorage.getItem('boot_role_selection') || '');
+    if (sessionChoice) return sessionChoice;
+
+    const remembered = deriveBootRoleFromRemembered();
+    if (remembered) return remembered;
+
+    return '';
+}
+
+function applyBootRoleUi(mode) {
+    const gate = document.getElementById('boot-role-gate');
+    const authPane = document.getElementById('login-auth-pane');
+    const selectedHint = document.getElementById('boot-role-selected');
+    const selectedHintText = document.getElementById('boot-role-selected-text');
+    const switchBtn = document.getElementById('boot-role-switch-btn');
+    const loginError = document.getElementById('loginError');
+    const toggleWrap = document.querySelector('.login-toggle-wrapper');
+
+    if (loginError) loginError.innerText = '';
+
+    const normalized = normalizeBootRoleMode(mode);
+    if (!normalized) {
+        if (gate) gate.classList.remove('hidden');
+        if (authPane) authPane.classList.add('hidden');
+        if (selectedHint) selectedHint.classList.add('hidden');
+        if (selectedHintText) selectedHintText.innerText = '';
+        if (switchBtn) {
+            switchBtn.classList.remove('hidden');
+            switchBtn.disabled = false;
+            switchBtn.title = 'Switch startup runtime';
+        }
+        if (toggleWrap) toggleWrap.classList.remove('hidden');
+        return;
+    }
+
+    if (gate) gate.classList.add('hidden');
+    if (authPane) authPane.classList.remove('hidden');
+
+    if (selectedHint) {
+        const label = normalized === 'trainee' ? 'Trainee Runtime' : 'Admin / Teamleader Runtime';
+        if (selectedHintText) selectedHintText.innerText = `Runtime: ${label}`;
+        else selectedHint.innerText = `Runtime: ${label}`;
+        selectedHint.classList.remove('hidden');
+    }
+
+    let rememberedMode = '';
+    try {
+        const rememberedRaw = localStorage.getItem('rememberedUser');
+        const remembered = rememberedRaw ? JSON.parse(rememberedRaw) : null;
+        rememberedMode = normalizeBootRoleMode(remembered && (remembered.bootMode || remembered.role) || '');
+    } catch (error) {
+        rememberedMode = '';
+    }
+    const lockRuntimeSwitch = normalized === 'trainee' && rememberedMode === 'trainee';
+    if (switchBtn) {
+        switchBtn.classList.toggle('hidden', lockRuntimeSwitch);
+        switchBtn.disabled = lockRuntimeSwitch;
+        switchBtn.title = lockRuntimeSwitch
+            ? 'Disable Remember Me to switch startup runtime'
+            : 'Switch startup runtime';
+    }
+
+    if (normalized === 'trainee') {
+        if (toggleWrap) toggleWrap.classList.add('hidden');
+        if (typeof toggleLoginMode === 'function') toggleLoginMode('trainee');
+    } else {
+        if (toggleWrap) toggleWrap.classList.remove('hidden');
+        if (typeof toggleLoginMode === 'function') toggleLoginMode('admin');
+    }
+}
+
+window.selectBootRole = function selectBootRole(mode) {
+    const normalized = normalizeBootRoleMode(mode);
+    if (!normalized) return;
+
+    sessionStorage.setItem('boot_role_selection', normalized);
+    window.APP_BOOT_MODE = normalized;
+    applyBootRoleUi(normalized);
+    window.location.reload();
+};
+
+window.changeBootRoleSelection = function changeBootRoleSelection() {
+    try {
+        const rememberedRaw = localStorage.getItem('rememberedUser');
+        if (rememberedRaw) {
+            const remembered = JSON.parse(rememberedRaw);
+            const rememberedMode = normalizeBootRoleMode(remembered && (remembered.bootMode || remembered.role) || '');
+            if (rememberedMode === 'trainee') {
+                const msg = 'Trainee runtime is locked while Remember Me is enabled. Untick Remember Me and sign in again to unlock runtime switching.';
+                if (typeof showToast === 'function') showToast(msg, 'warning');
+                else alert(msg);
+                return;
+            }
+        }
+    } catch (error) {}
+
+    sessionStorage.removeItem('boot_role_selection');
+    window.APP_BOOT_MODE = null;
+    applyBootRoleUi('');
+    const loader = document.getElementById('global-loader');
+    if (loader) loader.classList.add('hidden');
+};
+
 let TAB_SWITCH_TIMEOUT = null;
 let VIEW_SYNC_IN_FLIGHT = false;
 const VIEW_SYNC_LAST_RUN = {};
 const HIGH_PRIORITY_SYNC_VIEWS = new Set([
     'assessment-schedule',
+    'trainee-portal',
     'insights',
     'insight-studio',
     'test-manage',
@@ -2224,6 +2386,139 @@ const HIGH_PRIORITY_SYNC_VIEWS = new Set([
     'live-assessment',
     'monthly'
 ]);
+
+const TRAINEE_ALLOWED_TABS = new Set([
+    'dashboard-view',
+    'trainee-portal',
+    'study-notes',
+    'my-tests',
+    'test-take-view',
+    'assessment-schedule',
+    'live-assessment',
+    'live-execution',
+    'vetting-arena'
+]);
+
+function normalizeVettingIdentity(value) {
+    let v = String(value || '').trim().toLowerCase();
+    if (!v) return '';
+    if (v.includes('@')) v = v.split('@')[0];
+    v = v.replace(/[._-]+/g, ' ');
+    return v.replace(/\s+/g, ' ').trim();
+}
+
+function getTraineeVettingNotesGate() {
+    if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') {
+        return { allowed: false, reason: 'Study Notes are available to trainee accounts only.', blocking: true };
+    }
+
+    let session = null;
+    try {
+        session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+    } catch (error) {
+        session = {};
+    }
+
+    if (!session || !session.active || !session.trainees || typeof session.trainees !== 'object') {
+        return { allowed: true, reason: '', blocking: false, relaxed: false, activeVetting: false };
+    }
+
+    const currentUser = String((CURRENT_USER && CURRENT_USER.user) || '').trim();
+    const wanted = normalizeVettingIdentity(currentUser);
+    if (!wanted) {
+        return { allowed: true, reason: '', blocking: false, relaxed: false, activeVetting: false };
+    }
+
+    const keys = Object.keys(session.trainees || {});
+    const matchKey = keys.find(k => normalizeVettingIdentity(k) === wanted);
+    if (!matchKey) {
+        return { allowed: true, reason: '', blocking: false, relaxed: false, activeVetting: false };
+    }
+
+    const traineeData = session.trainees[matchKey] || {};
+    const status = String(traineeData.status || '').trim().toLowerCase();
+    const terminal = new Set(['completed', 'cancelled', 'closed', 'ended', 'submitted']);
+    const activeVetting = !terminal.has(status);
+
+    let forceGlobalKiosk = false;
+    try {
+        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        forceGlobalKiosk = !!(cfg && cfg.security && cfg.security.force_kiosk_global);
+    } catch (error) {}
+
+    const relaxed = !!traineeData.relaxed && !forceGlobalKiosk;
+    const blocking = activeVetting && !relaxed;
+    const reason = blocking
+        ? 'Study Notes are locked during active Vetting unless security relax is enabled.'
+        : '';
+
+    return {
+        allowed: !blocking,
+        reason,
+        blocking,
+        relaxed,
+        activeVetting,
+        status
+    };
+}
+
+window.canOpenStudyNotesNow = function canOpenStudyNotesNow(options = {}) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const gate = getTraineeVettingNotesGate();
+
+    if (!gate.allowed && !opts.silent && typeof showToast === 'function') {
+        showToast(gate.reason || 'Study Notes are currently locked.', 'warning');
+    }
+    return gate;
+};
+
+window.enforceStudyNotesRestrictionNow = function enforceStudyNotesRestrictionNow(options = {}) {
+    const gate = window.canOpenStudyNotesNow({ silent: true });
+    if (gate.allowed) return gate;
+
+    if (window.StudyMonitor && typeof window.StudyMonitor.enforceStudyNotesPolicy === 'function') {
+        window.StudyMonitor.enforceStudyNotesPolicy({ silent: !!(options && options.silent) });
+    }
+
+    const active = document.querySelector('section.active');
+    if (active && active.id === 'study-notes' && typeof showTab === 'function') {
+        showTab('vetting-arena');
+    }
+    return gate;
+};
+
+window.openStudyNotesAssist = function openStudyNotesAssist(mode = 'tab') {
+    const gate = window.canOpenStudyNotesNow({ silent: false });
+    if (!gate.allowed) return false;
+
+    const preferredMode = String(mode || 'tab').toLowerCase();
+    if (preferredMode === 'popup') {
+        if (window.StudyMonitor && typeof window.StudyMonitor.openStudyNotesPopout === 'function') {
+            window.StudyMonitor.openStudyNotesPopout();
+            return true;
+        }
+    }
+    if (preferredMode === 'dock') {
+        if (window.StudyMonitor && typeof window.StudyMonitor.toggleStudyNotesDock === 'function') {
+            window.StudyMonitor.toggleStudyNotesDock(true);
+            return true;
+        }
+    }
+
+    if (typeof showTab === 'function') {
+        showTab('study-notes');
+        return true;
+    }
+    return false;
+};
+
+window.goWorkspaceHome = function goWorkspaceHome() {
+    if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
+        if (typeof showTab === 'function') showTab('trainee-portal');
+        return;
+    }
+    if (typeof showTab === 'function') showTab('dashboard-view');
+};
 
 function isHighPrioritySyncView(id) {
     return HIGH_PRIORITY_SYNC_VIEWS.has(String(id || ''));
@@ -2244,43 +2539,307 @@ function applyRealtimeFailoverProfile(id) {
     }
 }
 
-function rerenderActiveViewAfterFreshPull(id) {
-    const active = document.querySelector('section.active');
-    if (!active || active.id !== id) return;
+function renderAdminPanelSubViews() {
+    if (typeof loadAdminUsers === 'function') loadAdminUsers();
+    if (typeof loadAdminAssessments === 'function') loadAdminAssessments();
+    if (typeof loadAdminVetting === 'function') loadAdminVetting();
+    if (typeof loadAdminDatabase === 'function') loadAdminDatabase();
+    if (typeof loadAdminAccess === 'function') loadAdminAccess();
+    if (typeof loadAdminTheme === 'function') loadAdminTheme();
 
-    if (id === 'assessment-schedule' && typeof ScheduleStudioLoader !== 'undefined' && typeof ScheduleStudioLoader.refresh === 'function') {
-        ScheduleStudioLoader.refresh();
+    const statusView = document.getElementById('admin-view-status');
+    if (statusView && statusView.classList.contains('active') && typeof refreshSystemStatus === 'function') {
+        refreshSystemStatus();
+    }
+
+    const gradView = document.getElementById('admin-view-graduated');
+    if (gradView && gradView.classList.contains('active') && typeof loadGraduatedAgents === 'function') {
+        loadGraduatedAgents();
+    }
+
+    const insightRulesView = document.getElementById('admin-view-insight-rules');
+    if (insightRulesView && insightRulesView.classList.contains('active') && typeof loadAdminInsightRules === 'function') {
+        loadAdminInsightRules();
+    }
+}
+
+function renderVettingArenaByRole() {
+    const isAdminVettingUser = CURRENT_USER && (
+        CURRENT_USER.role === 'admin' ||
+        CURRENT_USER.role === 'super_admin' ||
+        CURRENT_USER.role === 'special_viewer'
+    );
+
+    if (isAdminVettingUser && typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
+        VettingReworkLoader.renderUI('vetting-arena-content', { mode: 'production', title: 'Vetting Arena 2.0 Active' });
         return;
     }
-    if (id === 'insights' && typeof renderInsightDashboard === 'function') {
-        renderInsightDashboard();
+
+    if (CURRENT_USER && CURRENT_USER.role === 'trainee' && window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.loadTraineeArena === 'function') {
+        window.VettingRuntimeV2.loadTraineeArena();
+    }
+}
+
+function renderViewById(id, options = {}) {
+    const source = String(options.source || 'switch');
+
+    if (!id) return;
+
+    if (source === 'freshPull') {
+        if (id === 'assessment-schedule' && typeof ScheduleStudioLoader !== 'undefined' && typeof ScheduleStudioLoader.refresh === 'function') {
+            ScheduleStudioLoader.refresh();
+            return;
+        }
+        if (id === 'trainee-portal' && typeof TraineePortalLoader !== 'undefined' && typeof TraineePortalLoader.refresh === 'function') {
+            TraineePortalLoader.refresh();
+            return;
+        }
+        if (id === 'study-notes' && typeof StudyNotesWorkspace !== 'undefined' && typeof StudyNotesWorkspace.refresh === 'function') {
+            StudyNotesWorkspace.refresh(false);
+            return;
+        }
+        if (id === 'insights' && typeof renderInsightDashboard === 'function') {
+            renderInsightDashboard();
+            return;
+        }
+        if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
+            InsightStudioLoader.refresh();
+            return;
+        }
+        if (id === 'test-manage') {
+            if (typeof loadManageTests === 'function') loadManageTests();
+            if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
+            if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
+            return;
+        }
+        if (id === 'test-records' && typeof loadTestRecords === 'function') {
+            loadTestRecords();
+            return;
+        }
+        if (id === 'admin-panel' && typeof loadAdminUsers === 'function') {
+            loadAdminUsers();
+            return;
+        }
+        if (id === 'live-assessment' && typeof renderLiveTable === 'function') {
+            renderLiveTable();
+            return;
+        }
+        if (id === 'monthly' && typeof loadAllDataViews === 'function') {
+            loadAllDataViews();
+        }
         return;
     }
-    if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
-        InsightStudioLoader.refresh();
+
+    if (source === 'hardRefresh') {
+        if (id === 'dashboard-view' && typeof renderDashboard === 'function') renderDashboard();
+        if (id === 'trainee-portal' && typeof TraineePortalLoader !== 'undefined' && typeof TraineePortalLoader.refresh === 'function') TraineePortalLoader.refresh();
+        if (id === 'study-notes' && typeof StudyNotesWorkspace !== 'undefined' && typeof StudyNotesWorkspace.refresh === 'function') StudyNotesWorkspace.refresh(false);
+        if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
+        if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
+        if (id === 'insights' && typeof renderInsightDashboard === 'function') renderInsightDashboard();
+        if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh();
+        if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
+        if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
+        if (id === 'admin-panel' && typeof loadAdminUsers === 'function') loadAdminUsers();
+        if (id === 'vetting-arena') {
+            const isAdminVettingUser = CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer');
+            if (CURRENT_USER && CURRENT_USER.role === 'trainee' && window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.renderTraineeArena === 'function') {
+                window.VettingRuntimeV2.renderTraineeArena();
+            }
+            if (isAdminVettingUser && typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
+                VettingReworkLoader.renderUI('vetting-arena-content', { mode: 'production', title: 'Vetting Arena 2.0 Active' });
+            }
+        }
         return;
     }
+
+    if (id === 'dashboard-view') {
+        if (typeof renderDashboard === 'function') setTimeout(renderDashboard, 0);
+        if (typeof CalendarModule !== 'undefined' && typeof CalendarModule.renderWidget === 'function') {
+            setTimeout(() => CalendarModule.renderWidget(), 200);
+        }
+        return;
+    }
+
+    if (id === 'insights') {
+        if (typeof renderInsightDashboard === 'function') {
+            try {
+                renderInsightDashboard();
+            } catch (e) {
+                console.error('Dashboard Render Failed:', e);
+            }
+        }
+        if (typeof populateInsightGroupFilter === 'function') {
+            try {
+                populateInsightGroupFilter();
+            } catch (e) {
+                console.error('populateInsightGroupFilter failed:', e);
+            }
+        }
+        return;
+    }
+
+    if (id === 'manage') {
+        if (typeof loadRostersList === 'function') loadRostersList();
+        if (typeof populateYearSelect === 'function') populateYearSelect();
+        return;
+    }
+
+    if (id === 'capture') {
+        if (typeof loadRostersToSelect === 'function') loadRostersToSelect('selectedGroup');
+        if (typeof updateAssessmentDropdown === 'function') updateAssessmentDropdown();
+        const dateInput = document.getElementById('captureDate');
+        if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
+        return;
+    }
+
+    if (id === 'monthly' && typeof loadAllDataViews === 'function') {
+        loadAllDataViews();
+        return;
+    }
+
+    if (id === 'report-card') {
+        if (typeof loadReportTab === 'function') loadReportTab();
+        if (CURRENT_USER && CURRENT_USER.role === 'teamleader') {
+            setTimeout(() => {
+                const btnCreate = document.getElementById('btn-rep-new');
+                if (btnCreate) btnCreate.style.display = 'none';
+                const btnSaved = document.getElementById('btn-rep-saved');
+                if (btnSaved) btnSaved.click();
+            }, 50);
+        }
+        return;
+    }
+
+    if (id === 'agent-search' && typeof loadAgentSearch === 'function') {
+        loadAgentSearch();
+        return;
+    }
+
+    if (id === 'tl-hub') {
+        if (typeof TLTasks !== 'undefined' && typeof TLTasks.renderUI === 'function') {
+            TLTasks.renderUI();
+        } else {
+            console.error('TLTasks module not loaded. Check js/tl_tasks.js');
+        }
+        return;
+    }
+
+    if (id === 'opl-hub') {
+        if (typeof OPLHubLoader !== 'undefined' && typeof OPLHubLoader.renderUI === 'function') {
+            OPLHubLoader.renderUI();
+        } else {
+            console.error('OPLHubLoader module not loaded. Check js/opl_hub_loader.js');
+        }
+        return;
+    }
+
+    if (id === 'content-studio') {
+        if (typeof ContentStudioLoader !== 'undefined' && typeof ContentStudioLoader.renderUI === 'function') {
+            ContentStudioLoader.renderUI();
+        } else {
+            console.error('ContentStudioLoader module not loaded. Check js/content_studio_loader.js');
+        }
+        return;
+    }
+
+    if (id === 'trainee-portal') {
+        if (typeof TraineePortalLoader !== 'undefined' && typeof TraineePortalLoader.renderUI === 'function') {
+            TraineePortalLoader.renderUI();
+        }
+        return;
+    }
+
+    if (id === 'insight-studio') {
+        if (typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.renderUI === 'function') {
+            InsightStudioLoader.renderUI();
+        } else {
+            console.error('InsightStudioLoader module not loaded. Check js/insight_studio_loader.js');
+        }
+        return;
+    }
+
+    if (id === 'live-assessment' && typeof renderLiveTable === 'function') {
+        renderLiveTable();
+        return;
+    }
+
+    if (id === 'assessment-schedule' && typeof renderSchedule === 'function') {
+        renderSchedule();
+        return;
+    }
+
+    if (id === 'live-execution') {
+        if (typeof loadLiveExecution === 'function') {
+            loadLiveExecution();
+        } else {
+            setTimeout(() => {
+                if (typeof loadLiveExecution === 'function') loadLiveExecution();
+                else alert('Error: Live Execution script not loaded. Please refresh.');
+            }, 500);
+        }
+        return;
+    }
+
+    if (id === 'admin-panel') {
+        renderAdminPanelSubViews();
+        return;
+    }
+
     if (id === 'test-manage') {
         if (typeof loadManageTests === 'function') loadManageTests();
         if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
         if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
         return;
     }
+
+    if (id === 'my-tests' && typeof loadTraineeTests === 'function') {
+        loadTraineeTests();
+        return;
+    }
+
+    if (id === 'study-notes') {
+        if (window.StudyNotesWorkspace && typeof window.StudyNotesWorkspace.renderUI === 'function') {
+            window.StudyNotesWorkspace.renderUI();
+        }
+        return;
+    }
+
     if (id === 'test-records' && typeof loadTestRecords === 'function') {
         loadTestRecords();
         return;
     }
-    if (id === 'admin-panel' && typeof loadAdminUsers === 'function') {
-        loadAdminUsers();
+
+    if (id === 'vetting-arena') {
+        renderVettingArenaByRole();
         return;
     }
-    if (id === 'live-assessment' && typeof renderLiveTable === 'function') {
-        renderLiveTable();
+
+    if (id === 'vetting-rework') {
+        console.log('[Router] Vetting Rework tab clicked.');
+        if (typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
+            console.log('[Router] Executing Loader...');
+            VettingReworkLoader.renderUI();
+        } else {
+            console.error('VettingReworkLoader module not loaded.');
+        }
         return;
     }
-    if (id === 'monthly' && typeof loadAllDataViews === 'function') {
-        loadAllDataViews();
+
+    if (id === 'superadmin-studio') {
+        console.log('[Router] Super Admin Data Studio tab clicked.');
+        if (typeof SuperAdminDataStudioLoader !== 'undefined' && typeof SuperAdminDataStudioLoader.renderUI === 'function') {
+            SuperAdminDataStudioLoader.renderUI();
+        } else {
+            console.error('SuperAdminDataStudioLoader module not loaded.');
+        }
     }
+}
+
+function rerenderActiveViewAfterFreshPull(id) {
+    const active = document.querySelector('section.active');
+    if (!active || active.id !== id) return;
+    renderViewById(id, { source: 'freshPull' });
 }
 
 async function syncFreshDataForView(id) {
@@ -2325,10 +2884,42 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'live-assessment', 'insights', 'insight-studio', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
+      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insights', 'insight-studio', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id === 'dashboard-view') {
+      id = 'trainee-portal';
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && !TRAINEE_ALLOWED_TABS.has(id)) {
+      if (typeof showToast === 'function') {
+          showToast("This area is not available in Trainee runtime.", "warning");
+      }
+      id = 'trainee-portal';
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role !== 'trainee' && id === 'trainee-portal') {
+      if (typeof showToast === 'function') {
+          showToast("Trainee Portal is available to trainee sessions.", "warning");
+      }
+      return;
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role !== 'trainee' && id === 'study-notes') {
+      if (typeof showToast === 'function') {
+          showToast("Study Notes workspace is available to trainees.", "warning");
+      }
+      return;
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id === 'study-notes') {
+      const gate = (typeof window.canOpenStudyNotesNow === 'function')
+          ? window.canOpenStudyNotesNow({ silent: false })
+          : { allowed: true };
+      if (!gate.allowed) return;
   }
 
   if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'opl-hub') {
@@ -2353,17 +2944,32 @@ function showTab(id, btn) {
       return;
   }
 
-  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id === 'test-records') {
-      if (typeof showToast === 'function') {
-          showToast("Marked scripts are not available to trainees after review.", "warning");
+  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id !== 'live-execution') {
+      const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+      const currentUser = String(CURRENT_USER.user || '').trim().toLowerCase();
+      const hasActiveLiveSession = Array.isArray(liveSessions) && liveSessions.some(s =>
+          s &&
+          s.active === true &&
+          String(s.trainee || '').trim().toLowerCase() === currentUser
+      );
+      if (hasActiveLiveSession) {
+          if (typeof showToast === 'function') {
+              showToast("Live assessment is active. Complete it before leaving the arena.", "warning");
+          }
+          id = 'live-execution';
       }
-      id = 'monthly';
   }
   
   // --- ROGUE TIMER PREVENTION ---
   // If we are leaving the test view, kill the active timer to prevent background auto-submits
   if (id !== 'test-take-view' && id !== 'vetting-arena' && window.TEST_TIMER) {
       clearInterval(window.TEST_TIMER);
+  }
+
+  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id === 'vetting-arena') {
+      if (typeof window.enforceStudyNotesRestrictionNow === 'function') {
+          window.enforceStudyNotesRestrictionNow({ silent: true });
+      }
   }
 
   if (id !== 'vetting-arena' && typeof cleanupVettingArenaWatchers === 'function') {
@@ -2377,6 +2983,12 @@ function showTab(id, btn) {
   if (id !== 'live-execution' && window.LIVE_HARD_SYNC_LOOP) {
       clearInterval(window.LIVE_HARD_SYNC_LOOP);
       window.LIVE_HARD_SYNC_LOOP = null;
+  }
+  if (id !== 'trainee-portal' && typeof TraineePortalLoader !== 'undefined' && typeof TraineePortalLoader.stopAutoRefresh === 'function') {
+      TraineePortalLoader.stopAutoRefresh();
+  }
+  if (id !== 'study-notes' && typeof StudyNotesWorkspace !== 'undefined' && typeof StudyNotesWorkspace.stopAutoRefresh === 'function') {
+      StudyNotesWorkspace.stopAutoRefresh();
   }
 
   if (TAB_SWITCH_TIMEOUT) clearTimeout(TAB_SWITCH_TIMEOUT);
@@ -2407,10 +3019,12 @@ function showTab(id, btn) {
       
       // Update Sidebar
       document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-      
-      // Find button by onclick attribute (reliable for sidebar navigation)
-      const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${id}')"]`);
-      if(sidebarBtn) sidebarBtn.classList.add('active');
+      if (!(CURRENT_USER && CURRENT_USER.role === 'trainee')) {
+          // Find button by onclick attribute (reliable for sidebar navigation)
+          const navTargetId = id;
+          const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${navTargetId}')"]`);
+          if(sidebarBtn) sidebarBtn.classList.add('active');
+      }
 
       // --- ACTIVITY TRACKING ---
       if (typeof StudyMonitor !== 'undefined') {
@@ -2424,201 +3038,7 @@ function showTab(id, btn) {
       }, 50);
         
       // --- DYNAMIC DATA REFRESH ---
-      // Whenever a tab is shown, refresh its specific data/dropdowns
-
-      // NEW: Render Dashboard if Home Tab is clicked
-      if(id === 'dashboard-view') {
-          if(typeof renderDashboard === 'function') setTimeout(renderDashboard, 0); // Async render to ensure container is ready
-          
-          // FIX: Force Calendar Widget render (Today's Tasks)
-          if(typeof CalendarModule !== 'undefined' && typeof CalendarModule.renderWidget === 'function') {
-              setTimeout(() => CalendarModule.renderWidget(), 200);
-          }
-      }
-
-      // === CORRECTED: Training Insight Tab ===
-      if(id === 'insights') {
-          // 1. Try to render the full dashboard
-          if(typeof renderInsightDashboard === 'function') {
-              try {
-                renderInsightDashboard();
-              } catch (e) {
-                console.error("Dashboard Render Failed:", e);
-              }
-          }
-          
-          // 2. SAFETY: Explicitly populate the dropdown using the CORRECT function name
-          if(typeof populateInsightGroupFilter === 'function') {
-              try {
-                populateInsightGroupFilter();
-              } catch(e) {
-                console.error("populateInsightGroupFilter failed:", e);
-              }
-          }
-      }
-      
-      if(id === 'manage') {
-          if(typeof loadRostersList === 'function') loadRostersList();
-          if(typeof populateYearSelect === 'function') populateYearSelect(); 
-      }
-      
-      if(id === 'capture') {
-          if(typeof loadRostersToSelect === 'function') loadRostersToSelect('selectedGroup');
-          if(typeof updateAssessmentDropdown === 'function') updateAssessmentDropdown();
-          // Set default date to today
-          const dateInput = document.getElementById('captureDate');
-          if(dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
-      }
-      
-      if(id === 'monthly') {
-          if(typeof loadAllDataViews === 'function') loadAllDataViews(); 
-      }
-      
-      if(id === 'report-card') {
-          if(typeof loadReportTab === 'function') loadReportTab(); 
-          
-          // TEAM LEADER: Force View to Saved Reports Only
-          if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
-              setTimeout(() => {
-                  // Hide "Create New" button
-                  const btnCreate = document.getElementById('btn-rep-new');
-                  if(btnCreate) btnCreate.style.display = 'none';
-
-                  // Automatically click "Saved Reports"
-                  const btnSaved = document.getElementById('btn-rep-saved');
-                  if(btnSaved) btnSaved.click();
-              }, 50);
-          }
-      }
-
-      if(id === 'agent-search') {
-          if(typeof loadAgentSearch === 'function') loadAgentSearch();
-      }
-
-      if(id === 'tl-hub') {
-          if(typeof TLTasks !== 'undefined' && typeof TLTasks.renderUI === 'function') {
-              TLTasks.renderUI();
-          } else {
-              console.error("TLTasks module not loaded. Check js/tl_tasks.js");
-          }
-      }
-
-      if(id === 'opl-hub') {
-          if(typeof OPLHubLoader !== 'undefined' && typeof OPLHubLoader.renderUI === 'function') {
-              OPLHubLoader.renderUI();
-          } else {
-              console.error("OPLHubLoader module not loaded. Check js/opl_hub_loader.js");
-          }
-      }
-
-      if(id === 'content-studio') {
-          if(typeof ContentStudioLoader !== 'undefined' && typeof ContentStudioLoader.renderUI === 'function') {
-              ContentStudioLoader.renderUI();
-          } else {
-              console.error("ContentStudioLoader module not loaded. Check js/content_studio_loader.js");
-          }
-      }
-
-      if(id === 'insight-studio') {
-          if(typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.renderUI === 'function') {
-              InsightStudioLoader.renderUI();
-          } else {
-              console.error("InsightStudioLoader module not loaded. Check js/insight_studio_loader.js");
-          }
-      }
-
-      if(id === 'live-assessment') {
-          if(typeof renderLiveTable === 'function') renderLiveTable();
-      }
-      
-      if(id === 'assessment-schedule') {
-          if(typeof renderSchedule === 'function') renderSchedule(); 
-      }
-
-      if(id === 'live-execution') {
-          if(typeof loadLiveExecution === 'function') {
-              loadLiveExecution();
-          } else {
-              // Fallback if script is still loading
-              setTimeout(() => {
-                  if(typeof loadLiveExecution === 'function') loadLiveExecution();
-                  else alert("Error: Live Execution script not loaded. Please refresh.");
-              }, 500);
-          }
-      }
-      
-      if(id === 'admin-panel') { 
-          if(typeof loadAdminUsers === 'function') loadAdminUsers(); 
-          if(typeof loadAdminAssessments === 'function') loadAdminAssessments(); 
-          if(typeof loadAdminVetting === 'function') loadAdminVetting();
-          if(typeof loadAdminDatabase === 'function') loadAdminDatabase(); 
-          if(typeof loadAdminAccess === 'function') loadAdminAccess(); 
-          if(typeof loadAdminTheme === 'function') loadAdminTheme(); 
-
-          // TRAINEE FILTER: Only show their own user in the list
-          if (CURRENT_USER && CURRENT_USER.role === 'trainee' && typeof filterUserListForTrainee === 'function') {
-              setTimeout(filterUserListForTrainee, 50); // Small delay to ensure table is populated
-          }
-          
-          // NEW: Refresh System Status if that specific view is open
-          const statusView = document.getElementById('admin-view-status');
-          if(statusView && statusView.classList.contains('active')) {
-              if(typeof refreshSystemStatus === 'function') refreshSystemStatus();
-          }
-          
-          // NEW: Refresh Graduated Agents if that specific view is open
-          const gradView = document.getElementById('admin-view-graduated');
-          if(gradView && gradView.classList.contains('active')) {
-              if(typeof loadGraduatedAgents === 'function') loadGraduatedAgents();
-          }
-
-          const insightRulesView = document.getElementById('admin-view-insight-rules');
-          if(insightRulesView && insightRulesView.classList.contains('active')) {
-              if(typeof loadAdminInsightRules === 'function') loadAdminInsightRules();
-          }
-      }
-      
-      if(id === 'test-manage') {
-          if(typeof loadManageTests === 'function') loadManageTests();
-          if(typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
-          if(typeof loadMarkingQueue === 'function') loadMarkingQueue();
-      }
-      
-      if(id === 'my-tests') {
-          if(typeof loadTraineeTests === 'function') loadTraineeTests();
-      }
-      
-      if(id === 'test-records') {
-          if(typeof loadTestRecords === 'function') loadTestRecords();
-      }
-      
-      if(id === 'vetting-arena') {
-          const isAdminVettingUser = CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer');
-          if (isAdminVettingUser && typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
-              VettingReworkLoader.renderUI('vetting-arena-content', { mode: 'production', title: 'Vetting Arena 2.0 Active' });
-          } else if (CURRENT_USER && CURRENT_USER.role === 'trainee' && window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.loadTraineeArena === 'function') {
-              window.VettingRuntimeV2.loadTraineeArena();
-          }
-      }
-
-      if(id === 'vetting-rework') {
-          console.log("[Router] Vetting Rework tab clicked.");
-          if(typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
-              console.log("[Router] Executing Loader...");
-              VettingReworkLoader.renderUI();
-          } else {
-              console.error("VettingReworkLoader module not loaded.");
-          }
-      }
-
-      if(id === 'superadmin-studio') {
-          console.log("[Router] Super Admin Data Studio tab clicked.");
-          if(typeof SuperAdminDataStudioLoader !== 'undefined' && typeof SuperAdminDataStudioLoader.renderUI === 'function') {
-              SuperAdminDataStudioLoader.renderUI();
-          } else {
-              console.error("SuperAdminDataStudioLoader module not loaded.");
-          }
-      }
+      renderViewById(id, { source: 'switch' });
 
       syncFreshDataForView(id);
   };
@@ -2738,25 +3158,7 @@ async function refreshApp() {
         if (typeof updateNotifications === 'function') updateNotifications();
 
         const active = document.querySelector('section.active');
-        if (active) {
-            const id = active.id;
-            if (id === 'dashboard-view' && typeof renderDashboard === 'function') renderDashboard();
-            if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
-            if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
-            if (id === 'insights' && typeof renderInsightDashboard === 'function') renderInsightDashboard();
-            if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh();
-            if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
-            if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
-            if (id === 'admin-panel' && typeof loadAdminUsers === 'function') loadAdminUsers();
-            if (id === 'vetting-arena') {
-                if (CURRENT_USER && CURRENT_USER.role === 'trainee' && window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.renderTraineeArena === 'function') {
-                    window.VettingRuntimeV2.renderTraineeArena();
-                }
-                if (CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') && typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
-                    VettingReworkLoader.renderUI('vetting-arena-content', { mode: 'production', title: 'Vetting Arena 2.0 Active' });
-                }
-            }
-        }
+        if (active) renderViewById(active.id, { source: 'hardRefresh' });
 
         if (typeof showToast === 'function') showToast('Full refresh completed. Latest cloud data loaded.', 'success');
     } catch (e) {
@@ -3133,6 +3535,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.28": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Startup runtime selection now routes trainee sessions directly into the isolated Trainee Portal path.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Trainee Portal and Study Notes refresh flow now uses leaner bridge/event-driven updates to reduce duplicate background polling.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Tab rendering paths were consolidated to reduce duplicate logic and keep view refresh behavior consistent.</li>
+            </ul>`,
         "2.6.27": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Released the new Insight workspace with Agent Triggers and Agent Progress flows for admin operations.</li>

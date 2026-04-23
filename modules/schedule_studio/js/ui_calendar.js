@@ -51,9 +51,9 @@ const CalendarUI = {
     },
 
     getColor(item) {
-        if (item.isVetting) return '#e74c3c';
-        if (item.isLive) return '#2ecc71';
-        if (item.linkedTestId) return '#f39c12';
+        if (item.isVetting) return 'var(--studio-danger)';
+        if (item.isLive) return 'var(--studio-success)';
+        if (item.linkedTestId) return 'var(--studio-test)';
         return 'var(--primary)';
     },
 

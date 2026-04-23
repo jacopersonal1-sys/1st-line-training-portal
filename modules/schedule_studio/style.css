@@ -1,5 +1,7 @@
 :root {
     --primary: #f37021;
+    --primary-hover: #d95e16;
+    --primary-soft: rgba(243, 112, 33, 0.2);
     --bg-app: #121212;
     --bg-card: #1e1e1e;
     --bg-input: #252525;
@@ -12,10 +14,12 @@
     --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.2);
     --shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.35);
     --transition: all 0.25s ease;
+    --host-font-family: "Montserrat", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    font-family: var(--host-font-family);
     --studio-success: #2ecc71;
     --studio-danger: #ff6b6b;
     --studio-warning: #f1c40f;
-    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    --studio-test: #f39c12;
 }
 
 * {
@@ -26,6 +30,7 @@ body {
     margin: 0;
     background: var(--bg-app);
     color: var(--text-main);
+    font-family: var(--host-font-family);
 }
 
 button,
@@ -127,6 +132,11 @@ select {
     background: var(--primary);
     border-color: var(--primary);
     color: #fff;
+}
+
+.studio-btn.primary:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
 }
 
 .studio-btn.secondary {

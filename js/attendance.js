@@ -5,6 +5,10 @@
 
 let attendanceMonitorInterval = null;
 
+function getAttendancePromptKey(user, dateIso) {
+    return `attendance_prompt_shown_${String(user || '').trim().toLowerCase()}_${String(dateIso || '').trim()}`;
+}
+
 function checkAttendanceStatus() {
     if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
 
@@ -32,9 +36,12 @@ function checkAttendanceStatus() {
     
     // Check if already clocked in today
     const myRecord = records.find(r => r.user === CURRENT_USER.user && r.date === today);
+    const promptKey = getAttendancePromptKey(CURRENT_USER.user, today);
     
     if (!myRecord) {
-        // Not clocked in yet -> Force Modal
+        // Not clocked in yet -> show once per day for this user.
+        if (localStorage.getItem(promptKey) === '1') return;
+        localStorage.setItem(promptKey, '1');
         openClockInModal();
     } else if (!myRecord.clockOut) {
         // Clocked in, but not out. Show "Clock Out" button in dashboard/header if needed.
@@ -100,6 +107,12 @@ function checkClockOutReminder() {
 function openClockInModal() {
     const modal = document.getElementById('attendanceModal');
     if (!modal) return;
+
+    if (CURRENT_USER && CURRENT_USER.user) {
+        const today = new Date().toISOString().split('T')[0];
+        const promptKey = getAttendancePromptKey(CURRENT_USER.user, today);
+        localStorage.setItem(promptKey, '1');
+    }
 
     // Reset Fields
     document.getElementById('lateReasonSection').classList.add('hidden');

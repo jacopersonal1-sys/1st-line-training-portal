@@ -882,7 +882,16 @@ async function renderLiveTable() {
         const mySchedId = getTraineeLiveScheduleId(CURRENT_USER.user, liveSchedules);
         if (!mySchedId) {
              const container = document.getElementById('live-assessment');
-             if(container) container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-calendar-times" style="font-size:3rem; margin-bottom:15px;"></i><br>No live assessment schedule assigned to your group.</div>`;
+             if(container) container.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+                    <h2 style="margin:0;">Live Assessment Booking</h2>
+                    <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                </div>
+                <div style="text-align:center; padding:40px; color:var(--text-muted);">
+                    <i class="fas fa-calendar-times" style="font-size:3rem; margin-bottom:15px;"></i><br>
+                    No live assessment schedule assigned to your group.
+                </div>
+             `;
              return;
         }
         ACTIVE_LIVE_SCHED_ID = mySchedId;

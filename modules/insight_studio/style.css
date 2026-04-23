@@ -16,6 +16,22 @@ body {
     gap: 14px;
 }
 
+.ins-dept-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.ins-dept-kpi-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.ins-table-compact th,
+.ins-table-compact td {
+    padding: 8px;
+    font-size: 0.8rem;
+}
+
 .ins-toolbar {
     display: flex;
     align-items: center;
@@ -295,6 +311,14 @@ body {
 }
 
 @media (max-width: 980px) {
+    .ins-dept-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ins-dept-kpi-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
     .ins-drawer-body {
         grid-template-columns: 1fr;
     }

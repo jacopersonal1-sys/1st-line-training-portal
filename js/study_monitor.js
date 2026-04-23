@@ -26,6 +26,8 @@ const StudyMonitor = {
     maxLocalPageCacheEntries: 60,
     tabCounter: 0,
     lastSpawnedLink: null,
+    studyNotesDockOpen: false,
+    studyNotesPopup: null,
 
     buildTabId: function() {
         this.tabCounter += 1;
@@ -332,6 +334,137 @@ const StudyMonitor = {
         if (forwardBtn) forwardBtn.disabled = !navState.ready || !navState.canGoForward;
         if (reloadBtn) reloadBtn.disabled = !hasWebview;
         if (homeBtn) homeBtn.disabled = !hasWebview || !this.browserState.homeUrl;
+    },
+
+    getStudyNotesModuleUrl: function(embedded = true) {
+        const basePath = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
+        const params = new URLSearchParams();
+        params.set('embedded', embedded ? '1' : '0');
+        if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) {
+            try {
+                params.set('user', JSON.stringify({ user: CURRENT_USER.user, role: CURRENT_USER.role || 'trainee' }));
+            } catch (error) {}
+        }
+        return `${basePath}/modules/study_notes/index.html?${params.toString()}`;
+    },
+
+    canOpenStudyNotes: function(silent = false) {
+        if (typeof window.canOpenStudyNotesNow === 'function') {
+            return window.canOpenStudyNotesNow({ silent: !!silent });
+        }
+        return { allowed: true };
+    },
+
+    ensureStudyNotesDockFrame: function() {
+        const frame = document.getElementById('study-notes-dock-frame');
+        if (!frame) return null;
+        const targetUrl = this.getStudyNotesModuleUrl(true);
+        if (!frame.src || frame.src.indexOf('/modules/study_notes/index.html') === -1) {
+            frame.src = targetUrl;
+        }
+        return frame;
+    },
+
+    refreshStudyNotesDock: function() {
+        const frame = document.getElementById('study-notes-dock-frame');
+        if (!frame) return;
+        try {
+            if (
+                frame.contentWindow &&
+                frame.contentWindow.StudyNotesWorkspace &&
+                typeof frame.contentWindow.StudyNotesWorkspace.refresh === 'function'
+            ) {
+                frame.contentWindow.StudyNotesWorkspace.refresh();
+            }
+        } catch (error) {}
+    },
+
+    toggleStudyNotesDock: function(forceOpen = null) {
+        const gate = this.canOpenStudyNotes(false);
+        if (!gate.allowed) {
+            this.closeStudyNotesDock();
+            return false;
+        }
+
+        const shell = document.getElementById('study-browser-shell');
+        const dock = document.getElementById('study-notes-dock');
+        const toggleBtn = document.getElementById('study-notes-toggle-btn');
+        if (!shell || !dock) return false;
+
+        const currentlyOpen = !dock.classList.contains('hidden');
+        const open = (forceOpen === null || forceOpen === undefined) ? !currentlyOpen : !!forceOpen;
+
+        if (open) {
+            this.ensureStudyNotesDockFrame();
+            dock.classList.remove('hidden');
+            shell.classList.add('study-notes-open');
+            this.studyNotesDockOpen = true;
+            if (toggleBtn) {
+                toggleBtn.classList.add('active');
+                toggleBtn.innerHTML = '<i class="fas fa-note-sticky"></i> Hide Notes';
+            }
+            this.refreshStudyNotesDock();
+            this.track('Navigating: Study Notes (Docked)');
+            return true;
+        }
+
+        this.closeStudyNotesDock();
+        return true;
+    },
+
+    closeStudyNotesDock: function() {
+        const shell = document.getElementById('study-browser-shell');
+        const dock = document.getElementById('study-notes-dock');
+        const toggleBtn = document.getElementById('study-notes-toggle-btn');
+        if (dock) dock.classList.add('hidden');
+        if (shell) shell.classList.remove('study-notes-open');
+        this.studyNotesDockOpen = false;
+        if (toggleBtn) {
+            toggleBtn.classList.remove('active');
+            toggleBtn.innerHTML = '<i class="fas fa-note-sticky"></i> Study Notes';
+        }
+    },
+
+    openStudyNotesPopout: function() {
+        const gate = this.canOpenStudyNotes(false);
+        if (!gate.allowed) return false;
+
+        const popUrl = this.getStudyNotesModuleUrl(false);
+        if (this.studyNotesPopup && !this.studyNotesPopup.closed) {
+            try {
+                this.studyNotesPopup.focus();
+                return true;
+            } catch (error) {}
+        }
+
+        const features = 'popup=yes,width=1240,height=860,left=80,top=60,resizable=yes,scrollbars=yes';
+        const child = window.open(popUrl, 'study_notes_workspace', features);
+        if (!child) {
+            if (typeof showToast === 'function') showToast('Popup blocked. Allow popups for Study Notes.', 'warning');
+            return false;
+        }
+
+        this.studyNotesPopup = child;
+        this.track('Navigating: Study Notes (Second Screen)');
+        return true;
+    },
+
+    enforceStudyNotesPolicy: function(options = {}) {
+        const gate = this.canOpenStudyNotes(true);
+        if (gate.allowed) return true;
+
+        this.closeStudyNotesDock();
+        if (this.studyNotesPopup && !this.studyNotesPopup.closed) {
+            try { this.studyNotesPopup.close(); } catch (error) {}
+        }
+        this.studyNotesPopup = null;
+
+        if (!options || !options.silent) {
+            if (typeof showToast === 'function') {
+                showToast(gate.reason || 'Study Notes are locked during active Vetting.', 'warning');
+            }
+        }
+        return false;
     },
 
     getActiveTab: function() {
@@ -1013,6 +1146,7 @@ const StudyMonitor = {
             this.openExternalUrl(url);
             return;
         }
+        this.enforceStudyNotesPolicy({ silent: true });
 
         // Remove restore button if it was floating
         const restoreBtn = document.getElementById('study-restore-btn');
@@ -1045,6 +1179,7 @@ const StudyMonitor = {
         overlay.classList.remove('hidden');
         this.setStudyOverlayInteractionState(true);
         this.updateBrowserChrome();
+        if (this.studyNotesDockOpen) this.refreshStudyNotesDock();
     },
 
     minimizeStudyWindow: function() {
@@ -1071,6 +1206,7 @@ const StudyMonitor = {
         if (overlay) overlay.classList.remove('hidden');
         this.setStudyOverlayInteractionState(true);
         this.isStudyOpen = true;
+        this.enforceStudyNotesPolicy({ silent: true });
         
         const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId);
         if (activeTab) {
@@ -1087,6 +1223,7 @@ const StudyMonitor = {
         const overlay = document.getElementById('study-overlay');
         if (overlay) overlay.classList.add('hidden');
         this.setStudyOverlayInteractionState(false);
+        this.closeStudyNotesDock();
         
         // Cleanup
         this.isStudyOpen = false;
@@ -1133,6 +1270,12 @@ const StudyMonitor = {
                         <button type="button" id="study-nav-home" class="study-control-btn" title="Return to the first study page"><i class="fas fa-house"></i><span>Home</span></button>
                     </div>
                     <div class="study-header-actions">
+                        <button type="button" id="study-notes-toggle-btn" class="study-action-btn study-action-secondary" title="Open Study Notes next to your training material">
+                            <i class="fas fa-note-sticky"></i> Study Notes
+                        </button>
+                        <button type="button" id="study-notes-popout-btn" class="study-action-btn study-action-secondary" title="Open Study Notes in a separate window for a second screen">
+                            <i class="fas fa-up-right-from-square"></i> Pop Out Notes
+                        </button>
                         <button type="button" id="study-bookmark-btn" class="study-action-btn study-action-secondary" title="Mark a specific spot to ask for clarity later">
                             <i class="fas fa-crop-alt"></i> Mark for Clarity
                         </button>
@@ -1154,7 +1297,24 @@ const StudyMonitor = {
                         </button>
                     </div>
                 </div>
-                <div id="study-webview-container" class="study-webview-stack"></div>
+                <div class="study-workspace-layout">
+                    <div id="study-webview-container" class="study-webview-stack"></div>
+                    <aside id="study-notes-dock" class="study-notes-dock hidden">
+                        <div class="study-notes-dock-head">
+                            <div class="study-notes-dock-title"><i class="fas fa-note-sticky"></i> Study Notes</div>
+                            <div class="study-notes-dock-actions">
+                                <button type="button" id="study-notes-dock-popout-btn" class="btn-secondary btn-sm" title="Move notes to a second screen"><i class="fas fa-up-right-from-square"></i></button>
+                                <button type="button" id="study-notes-dock-close-btn" class="btn-secondary btn-sm" title="Hide notes panel"><i class="fas fa-times"></i></button>
+                            </div>
+                        </div>
+                        <iframe
+                            id="study-notes-dock-frame"
+                            src=""
+                            title="Study Notes Dock"
+                            style="width:100%; height:100%; border:none; background:var(--bg-card);"
+                        ></iframe>
+                    </aside>
+                </div>
             </div>
         `;
     },
@@ -1164,11 +1324,16 @@ const StudyMonitor = {
         document.getElementById('study-nav-forward').onclick = () => this.goForwardActiveTab();
         document.getElementById('study-nav-reload').onclick = () => this.reloadActiveTab();
         document.getElementById('study-nav-home').onclick = () => this.goHomeActiveTab();
+        document.getElementById('study-notes-toggle-btn').onclick = () => this.toggleStudyNotesDock();
+        document.getElementById('study-notes-popout-btn').onclick = () => this.openStudyNotesPopout();
+        document.getElementById('study-notes-dock-popout-btn').onclick = () => this.openStudyNotesPopout();
+        document.getElementById('study-notes-dock-close-btn').onclick = () => this.closeStudyNotesDock();
         document.getElementById('study-bookmark-btn').onclick = () => this.startMarkForClarity();
         document.getElementById('study-clear-cache-btn').onclick = () => this.clearStudyBrowserCache();
         document.getElementById('study-min-btn').onclick = () => this.minimizeStudyWindow();
         document.getElementById('study-close-btn').onclick = () => this.closeStudyWindow();
         document.getElementById('study-quick-links').onchange = (event) => this.navigateQuickLink(event.target.value);
+        this.closeStudyNotesDock();
         this.updateBrowserChrome();
     },
 

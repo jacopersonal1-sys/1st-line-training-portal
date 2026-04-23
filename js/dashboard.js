@@ -1640,7 +1640,7 @@ function buildTraineeWidgets(container) {
     }
 
     // 3. Recent Results (Expanded)
-    const recent = myRecords.slice(-5).reverse(); // Last 5
+    const recent = myRecords.slice().reverse(); // Show full history (newest first)
     let resultsHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-trophy"></i></div><h3 style="margin:0;">Recent Results</h3></div>`;
     
     if (recent.length === 0) {
@@ -1720,6 +1720,9 @@ function buildTraineeWidgets(container) {
             </div>
             <textarea class="notepad-area" style="flex:1; min-height:80px;" placeholder="Type your notes here..." oninput="updateTraineeNote(this.value)">${safeNote}</textarea>
             ${bookmarksHtml}
+            <div style="margin-top:8px; text-align:right;">
+                <button class="btn-secondary btn-sm" onclick="showTab('study-notes')"><i class="fas fa-book-open"></i> Open Study Notes</button>
+            </div>
         </div>`;
 
     // 6. Daily Tip

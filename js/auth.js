@@ -26,6 +26,8 @@ function clearPersistentAppSession() {
 
 function getPersistentAppSession() {
     try {
+        const rememberedRaw = localStorage.getItem('rememberedUser');
+        if (!rememberedRaw) return null;
         const raw = localStorage.getItem(window.PERSISTENT_SESSION_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
@@ -593,6 +595,15 @@ async function attemptLogin() {
     // ----------------------------------------------------
 
     const userRole = validUser.role ? validUser.role.toLowerCase().trim() : '';
+    const activeBootMode = String(window.APP_BOOT_MODE || '').toLowerCase().trim();
+    if (activeBootMode === 'trainee' && userRole !== 'trainee') {
+      document.getElementById('loginError').innerText = "This startup is locked to Trainee runtime. Restart and choose Admin / Teamleader.";
+      return;
+    }
+    if (activeBootMode === 'admin' && userRole === 'trainee') {
+      document.getElementById('loginError').innerText = "This startup is locked to Admin / Teamleader runtime. Restart and choose Trainee.";
+      return;
+    }
     if(window.LOGIN_MODE === 'admin' && (userRole === 'trainee' && userRole !== 'super_admin')) {
       document.getElementById('loginError').innerText = "Trainees must use Trainee tab."; return;
     }
@@ -612,6 +623,9 @@ async function attemptLogin() {
     window.CURRENT_USER = CURRENT_USER;
     // Normalize role for session consistency
     if (CURRENT_USER.role) CURRENT_USER.role = CURRENT_USER.role.toLowerCase().trim();
+    const sessionBootMode = CURRENT_USER.role === 'trainee' ? 'trainee' : 'admin';
+    window.APP_BOOT_MODE = sessionBootMode;
+    sessionStorage.setItem('boot_role_selection', sessionBootMode);
     
     sessionStorage.setItem('currentUser', JSON.stringify(validUser));
     persistAppSession(validUser);
@@ -619,7 +633,12 @@ async function attemptLogin() {
     // --- REMEMBER ME LOGIC ---
     const remember = document.getElementById('rememberMe').checked;
     if (remember) {
-        localStorage.setItem('rememberedUser', JSON.stringify({ user: validUser.user, pass: validUser.pass }));
+        localStorage.setItem('rememberedUser', JSON.stringify({
+            user: validUser.user,
+            pass: validUser.pass,
+            role: CURRENT_USER.role,
+            bootMode: sessionBootMode
+        }));
     } else {
         localStorage.removeItem('rememberedUser');
     }
@@ -749,6 +768,14 @@ async function autoLogin() {
   // --- START VETTING ENFORCER ---
   if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
 
+  if (window.APP_BOOT_MODE === 'trainee' && CURRENT_USER.role === 'trainee' && typeof loadFromServer === 'function') {
+      try {
+          await loadFromServer(true);
+      } catch (error) {
+          console.warn("Trainee post-login sync failed:", error);
+      }
+  }
+
   // Redirect based on role
   if (window.RESTORE_TAB) {
       showTab(window.RESTORE_TAB);
@@ -759,7 +786,7 @@ async function autoLogin() {
           if (typeof restoreBuilderDraft === 'function') restoreBuilderDraft();
       }
   } else if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') showTab('dashboard-view'); 
-  else if(CURRENT_USER.role === 'trainee') showTab('dashboard-view');
+  else if(CURRENT_USER.role === 'trainee') showTab('trainee-portal');
   else showTab('monthly'); // Team Leader
 }
 
@@ -770,6 +797,24 @@ function checkFirstTimeLogin() {
 }
 
 function applyRolePermissions() {
+  const applyHeaderIconButtonStyle = (button, opts = {}) => {
+      if (!button) return;
+      const marginLeft = (opts && typeof opts.marginLeft === 'string') ? opts.marginLeft : '5px';
+      button.style.padding = '0';
+      button.style.width = '40px';
+      button.style.height = '40px';
+      button.style.display = 'flex';
+      button.style.alignItems = 'center';
+      button.style.justifyContent = 'center';
+      button.style.borderRadius = '50%';
+      button.style.overflow = 'visible';
+      button.style.marginLeft = marginLeft;
+      button.style.border = 'none';
+      button.style.background = 'transparent';
+      button.style.cursor = 'pointer';
+      button.style.zIndex = '100';
+  };
+
   const normalizeIdentity = (value) => {
       let v = String(value || '').trim().toLowerCase();
       if (!v) return '';
@@ -824,13 +869,16 @@ function applyRolePermissions() {
       }
   }
 
-  // --- 2. PROFILE SETTINGS BUTTON (Universal - Logo) ---
+  // --- 2. PROFILE SETTINGS BUTTON ---
   let controlContainer = document.querySelector('.control-bubble .bubble-content');
   if (!controlContainer && adminPanelBtn && adminPanelBtn.parentElement) {
       controlContainer = adminPanelBtn.parentElement;
   }
   
   if (controlContainer) {
+      let traineeHomeBtn = document.getElementById('btn-trainee-home');
+      if (traineeHomeBtn) traineeHomeBtn.remove();
+
       // Remove any existing profile buttons to prevent duplicates/stale state
       let profileBtn = document.getElementById('btn-profile-settings');
       if (profileBtn) profileBtn.remove();
@@ -844,16 +892,7 @@ function applyRolePermissions() {
       controlContainer.prepend(profileBtn);
 
       profileBtn.title = "Profile & Settings";
-      
-      // Apply Ring to Logo if enabled
-      const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
-      let imgStyle = "width:32px; height:32px; vertical-align:middle; object-fit:contain; border-radius:50%;";
-      if (localTheme && localTheme.showRing && localTheme.profileRingColor) {
-          imgStyle += ` box-shadow: 0 0 0 3px ${localTheme.profileRingColor};`;
-      }
-
-      // Use the Logo (ico.ico) as requested
-      profileBtn.innerHTML = `<img src="ico.ico" style="${imgStyle}" alt="Profile" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'#fff\\' stroke-width=\\'2\\' stroke-linecap=\\'round\\' stroke-linejoin=\\'round\\'><circle cx=\\'12\\' cy=\\'12\\' r=\\'10\\'/><path d=\\'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2\\' /><circle cx=\\'12\\' cy=\\'7\\' r=\\'4\\' /></svg>'">`;
+      profileBtn.innerHTML = '<i class="fas fa-user-gear"></i>';
       
       profileBtn.onclick = function(e) { 
           e.preventDefault();
@@ -863,26 +902,23 @@ function applyRolePermissions() {
       
       // Ensure visibility for all roles
       profileBtn.classList.remove('hidden', 'admin-only');
-      
-      // Styling
-      profileBtn.style.padding = '0';
-      profileBtn.style.width = '40px';
-      profileBtn.style.height = '40px';
-      profileBtn.style.display = 'flex';
-      profileBtn.style.alignItems = 'center';
-      profileBtn.style.justifyContent = 'center';
-      profileBtn.style.borderRadius = '50%';
-      profileBtn.style.overflow = 'visible';
-      profileBtn.style.marginLeft = '5px';
-      profileBtn.style.border = 'none';
-      profileBtn.style.background = 'transparent';
-      profileBtn.style.cursor = 'pointer';
-      profileBtn.style.zIndex = '100'; // Ensure it's on top
+      applyHeaderIconButtonStyle(profileBtn, { marginLeft: '5px' });
 
-      // Fix Avatar Margin (Remove right margin meant for text labels)
-      const innerAvatar = profileBtn.querySelector('div');
-      if(innerAvatar) {
-          innerAvatar.style.marginRight = '0';
+      if (CURRENT_USER.role === 'trainee') {
+          traineeHomeBtn = document.createElement('button');
+          traineeHomeBtn.id = 'btn-trainee-home';
+          traineeHomeBtn.className = 'icon-btn';
+          traineeHomeBtn.title = 'Portal Home';
+          traineeHomeBtn.innerHTML = '<i class="fas fa-house"></i>';
+          traineeHomeBtn.classList.remove('hidden', 'admin-only');
+          traineeHomeBtn.onclick = function(e) {
+              e.preventDefault();
+              if (typeof showTab === 'function') showTab('trainee-portal');
+          };
+          applyHeaderIconButtonStyle(traineeHomeBtn, { marginLeft: '0' });
+
+          if (profileBtn.nextSibling) controlContainer.insertBefore(traineeHomeBtn, profileBtn.nextSibling);
+          else controlContainer.appendChild(traineeHomeBtn);
       }
   } else {
       console.warn("Profile Button: Control container not found.");
@@ -1175,20 +1211,6 @@ function hasPermission(permission) {
         return allowedPermissions.includes(permission);
     }
     return false;
-}
-
-// --- TRAINEE VIEW FILTER ---
-function filterUserListForTrainee() {
-    const tbody = document.getElementById('userList');
-    if (!tbody || !CURRENT_USER) return;
-    
-    const rows = tbody.querySelectorAll('tr');
-    rows.forEach(row => {
-        // Hide row if it doesn't contain the current user's name
-        if (!row.innerText.includes(CURRENT_USER.user)) {
-            row.style.display = 'none';
-        }
-    });
 }
 
 /* ================= VISUAL EFFECTS ================= */

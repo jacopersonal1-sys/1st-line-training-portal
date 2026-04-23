@@ -89,9 +89,11 @@ Maps local `localStorage` keys to Supabase tables.
 - **Responsibility:** App initialization, version checks, failover recovery, global event listeners, and Native OS bridging (`preload.js`).
 - **Key Functions:**
     - `window.onload`: Main entry point. Checks `last_connected_server` for server migration logic. Calls `loadFromServer`.
+    - `selectBootRole(mode)` / `applyBootRoleUi(mode)` / `getStartupBootRoleMode()`: Startup runtime gate that routes login into Admin/Teamleader runtime or isolated Trainee runtime before normal navigation.
     - `performSilentServerSwitch(newTarget)`: Hot failover helper. **Awaits the full local-to-target migration before pulling**, and rolls back to the previous target if the migration fails.
     - `loadFromServer()`: **CRITICAL**. Orchestrates the sync process. Returns `true` on partial/full success.
     - `startRealtimeSync()`: Starts the background polling loops for Data Sync and Heartbeat.
+    - `renderViewById(id, { source })`: Shared tab-render router used by tab switches, high-priority fresh-pull rerenders, and hard refresh flows to prevent duplicate view logic drift.
     - `applySystemConfig()`: Applies hot-reload settings (Announcements, Sync Rates).
     - `checkReleaseNotes(ver)`: Shows changelog popup on update.
     - `performUpdateRestart()`: Saves user state (drafts, active tab) and restarts the app after an update is downloaded.
@@ -354,6 +356,25 @@ Maps local `localStorage` keys to Supabase tables.
         - **Media Controls:** Includes yes/no media toggles, source switchers (`HTTP Link` vs `Upload`), video upload, and PDF-only document upload.
     - `js/ui_engagement.js`: Admin/Super Admin engagement workspace for per-user and per-subject breakdown (watch time, plays, skips, notes/questions, last activity).
 
+#### `js/trainee_portal_loader.js` + `modules/trainee_portal/` (Trainee Portal Runtime - Isolated Module)
+- **Architecture:** Program-within-a-program trainee workspace mounted in `#trainee-portal` and isolated from admin-heavy views.
+- **Entry Point:** `modules/trainee_portal/index.html?embedded=1` mounted by `js/trainee_portal_loader.js`.
+- **Key Behaviors:**
+    - Visual widget dashboard with drag/reorder/resize layout persistence per trainee (`trainee_portal_layout_v2_<user>`).
+    - Widget actions route to existing host tabs (`assessment-schedule`, `my-tests`, `live-assessment`, `live-execution`, `study-notes`) while keeping trainee runtime isolation boundaries.
+    - Attendance + badges + results + notes/clarity metrics are aggregated from trainee-scoped local cache (`records`, `submissions`, `liveBookings`, `attendance_records`, `trainee_bookmarks`).
+    - Loader bridges module auto-refresh lifecycle directly (start/stop), avoiding duplicate host interval polling.
+
+#### `js/study_notes.js` + `modules/study_notes/` (Study Notes Runtime - Isolated Module)
+- **Architecture:** Isolated notes workspace mounted in `#study-notes` and designed for section -> page -> note authoring flow.
+- **Entry Point:** `modules/study_notes/index.html?embedded=1` mounted by `js/study_notes.js`.
+- **Data Key:** `study_notes_v2` (per-user workspace object), with clarity integration from `trainee_bookmarks`.
+- **Key Behaviors:**
+    - Section/page CRUD (`add`, `rename`, `delete`, `select`) with active selection state (`activeSectionId`, `activePageId`).
+    - Debounced save and host sync bridge (`saveToServer(['study_notes_v2'])`).
+    - Bookmark insertion pipeline that converts clarity marks into structured note blocks.
+    - Event-driven rerender (`buildzone:data-changed`) for `study_notes_v2` and `trainee_bookmarks`; no loader-level polling loop.
+
 ---
 
 ## 4. Critical Workflows
@@ -364,12 +385,13 @@ Maps local `localStorage` keys to Supabase tables.
 
 ### A. The Boot Sequence (`main.js`)
 1.  **Init:** Load `config.js` to set `supabaseClient`.
-2.  **Migration Check:** Compare `last_connected_server` vs `active_server_target`. If different, trigger `saveToServer` (Push).
-3.  **Load:** Call `loadFromServer()`.
+2.  **Runtime Gate:** `selectBootRole` / `getStartupBootRoleMode` determines whether login proceeds through Admin/Teamleader runtime or isolated Trainee runtime.
+3.  **Migration Check:** Compare `last_connected_server` vs `active_server_target`. If different, trigger `saveToServer` (Push).
+4.  **Load:** Call `loadFromServer()`.
     *   If successful: Render UI.
     *   If failed (Timeout/Error): Check `active_server_target`.
         *   If Local: Trigger **Auto-Recovery** (Switch to Cloud, set `recovery_mode` flag, reload).
-4.  **Start Engine:** Call `startRealtimeSync()` to begin polling/heartbeat and **subscribe to Realtime channels**.
+5.  **Start Engine:** Call `startRealtimeSync()` to begin polling/heartbeat and **subscribe to Realtime channels**.
 
 ### B. Data Synchronization (`data.js`)
 1.  **Pull (Load):**
@@ -430,6 +452,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.28 (Trainee Runtime Isolation + Router Cleanup, 2026-04-23):** Finalized startup runtime selection flow so trainee sessions boot directly into the isolated Trainee Portal path, documented isolated Study Notes runtime contracts, removed duplicate loader polling intervals, and consolidated duplicated tab-render routing in `js/main.js` to a shared `renderViewById(...)` path to reduce drift and maintenance risk.
+
 - **v2.6.22 (User Control Explorer + Study Browser Hit-Test Hardening, 2026-04-16):** Expanded Super Admin Data Studio User Control with a folder-style Agent Data Explorer and specific row-level moves both directions (live↔archive) across lifecycle buckets, backed by backup snapshots (`user_control_move_backups`) and rollback-aware move handling. Also hardened Study Browser overlay layering and hidden-tab hit-testing to reduce inconsistent unclickable hotspots in embedded apps (e.g., Q-Contact).
 - **v2.6.21 (Content Creator Media + Engagement Expansion, 2026-04-16):** Extended Content Creator with optional per-subject media toggles, dual media source modes (`HTTP Link` or Supabase upload), dedicated Engagement submenu (admin-only per-user + per-subject analytics), and in-player timestamped note/question capture tied to each watcher.
 - **v2.6.20 (Content Creator + User Control Release, 2026-04-15):** Finalized isolated `content-studio` runtime and reworked it into Content Creator (View + Builder + engagement telemetry), removed schedule timeline selector dependency, kept Header + Subject Builder flows with optional inputs, and aligned module theming with the main app while preserving Super Admin Data Studio `User Control` and sync hardening updates.
@@ -477,6 +501,13 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Improvement: Linked content launch paths in Schedule/Content Creator are more reliable for module discovery and media/quiz opens.
 - Bug Fix: Realtime fallback handling and diagnostics UI guards were hardened to reduce timeout reconnect storms and null-element runtime crashes.
 - Release: Version bump to `2.6.27` for stable main channel rollout.
+
+## v2.6.28 - 2026-04-23
+
+- Feature Added: Startup runtime selection now routes trainee sessions directly into the isolated Trainee Portal runtime path.
+- Improvement: Trainee Portal and Study Notes loaders now use leaner event/bridge refresh behavior to reduce duplicate background polling.
+- Bug Fix: Shared tab rendering logic was consolidated to reduce duplicate router branches and prevent view-refresh drift across navigation paths.
+- Release: Version bump to `2.6.28` for beta rollout.
 
 ## v2.6.25 - 2026-04-20
 

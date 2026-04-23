@@ -20,7 +20,10 @@
                             <strong style="color:var(--primary);"><i class="fas fa-layer-group"></i> Schedule Studio</strong>
                             <div style="font-size:0.85rem; color:var(--text-muted); margin-top:4px;">The schedule timeline now runs inside its own isolated module.</div>
                         </div>
-                        <button class="btn-secondary btn-sm" onclick="ScheduleStudioLoader.refresh()"><i class="fas fa-rotate-right"></i> Refresh</button>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                            <button class="btn-secondary btn-sm" onclick="ScheduleStudioLoader.refresh()"><i class="fas fa-rotate-right"></i> Refresh</button>
+                        </div>
                     </div>
                     <iframe
                         id="schedule-studio-frame"

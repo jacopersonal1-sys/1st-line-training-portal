@@ -1022,6 +1022,33 @@
         }
     }
 
+    async function pollVettingSession() {
+        if (!isTrainee()) return;
+        try {
+            await checkAndEnforceVetting();
+
+            try {
+                const local = getLocalSession();
+                const username = getUsername();
+                const myData = getTraineeData(local, username);
+                const status = String((myData && myData.status) || '').toLowerCase();
+                const terminal = new Set(['completed', 'cancelled', 'closed', 'ended', 'submitted']);
+                const sessionActive = !!(local && local.active && myData && !terminal.has(status));
+                const relaxed = !!(myData && myData.relaxed);
+                if (sessionActive && !relaxed && typeof window.enforceStudyNotesRestrictionNow === 'function') {
+                    window.enforceStudyNotesRestrictionNow({ silent: true });
+                }
+            } catch (policyErr) {}
+
+            const activeTab = document.querySelector('section.active');
+            if (activeTab && activeTab.id === 'vetting-arena' && !document.getElementById('arenaTestContainer')) {
+                renderTraineeArena();
+            }
+        } catch (e) {
+            console.warn('Vetting session poll failed:', e);
+        }
+    }
+
     function ensureBackgroundLoops() {
         if (!VETTING_PATCH_FLUSH_INTERVAL) {
             VETTING_PATCH_FLUSH_INTERVAL = setInterval(() => {

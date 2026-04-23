@@ -141,6 +141,35 @@ window.rejoinLiveSession = function(sessionId) {
     showTab('live-execution');
 };
 
+function enforceTraineeLiveArenaFocus(session) {
+    if (!CURRENT_USER || CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
+        window.__TRAINEE_ACTIVE_LIVE_SESSION_ID = null;
+        return;
+    }
+
+    const activeSessionId = (session && session.active && session.sessionId) ? session.sessionId : null;
+    window.__TRAINEE_ACTIVE_LIVE_SESSION_ID = activeSessionId;
+
+    if (!activeSessionId) {
+        window.__TRAINEE_LIVE_LOCK_NOTICE_FOR = null;
+        return;
+    }
+
+    const activeTabId = document.querySelector('section.active')?.id || '';
+    if (activeTabId === 'live-execution') return;
+
+    if (window.__TRAINEE_LIVE_LOCK_NOTICE_FOR !== activeSessionId && typeof showToast === 'function') {
+        showToast("Live assessment started. You are being moved to the Live Assessment Arena.", "info");
+        window.__TRAINEE_LIVE_LOCK_NOTICE_FOR = activeSessionId;
+    }
+
+    const lastJumpTs = Number(window.__TRAINEE_LIVE_AUTO_JUMP_TS || 0);
+    if ((Date.now() - lastJumpTs) < 1000) return;
+
+    window.__TRAINEE_LIVE_AUTO_JUMP_TS = Date.now();
+    if (typeof showTab === 'function') showTab('live-execution');
+}
+
 async function syncLiveSessionState() {
     // READ FROM REALTIME CACHE INSTEAD OF HAMMERING DATABASE
     // The data.js WebSocket listener automatically keeps this array perfectly up to date with 0 latency.
@@ -215,6 +244,8 @@ function processLiveSessionState(allSessions) {
         // Work with a detached copy so local merge logic never mutates cached session arrays.
         myServerSession = JSON.parse(JSON.stringify(myServerSession));
     }
+
+    enforceTraineeLiveArenaFocus(myServerSession);
 
     // PRESERVE LOCAL ANSWERS (Trainee Only)
     if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
@@ -1196,8 +1227,13 @@ function renderTraineeLivePanel(container) {
                 <div style="margin-bottom:10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <h2 style="margin:0;">Live Assessment</h2>
-                        <div id="socket-status-trainee" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
-                            <i class="fas fa-bolt"></i> ...
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                            <button class="btn-secondary btn-sm" style="width:auto;" onclick="openStudyNotesAssist('popup')" title="Open Study Notes without leaving this live session">
+                                <i class="fas fa-note-sticky"></i> Study Notes
+                            </button>
+                            <div id="socket-status-trainee" style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:var(--bg-input); border:1px solid var(--border-color);">
+                                <i class="fas fa-bolt"></i> ...
+                            </div>
                         </div>
                     </div>
                     <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">

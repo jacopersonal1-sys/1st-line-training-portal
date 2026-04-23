@@ -74,6 +74,25 @@ function insNormalizeSubjectName(label) {
     return raw;
 }
 
+const INS_SHARED_RECORD_BUCKETS = new Set([
+    insNormalize('live-session'),
+    insNormalize('digital-assessment'),
+    insNormalize('manual-upload'),
+    insNormalize('unknown')
+]);
+
+function insIsSharedRecordGroup(value) {
+    return INS_SHARED_RECORD_BUCKETS.has(insNormalize(value));
+}
+
+function insRecordMatchesGroup(record, groupID) {
+    const targetGroup = insNormalize(groupID);
+    if (!targetGroup || targetGroup === 'all') return true;
+    const recordGroup = insNormalize(record && record.groupID);
+    if (!recordGroup) return true;
+    return recordGroup === targetGroup || insIsSharedRecordGroup(recordGroup);
+}
+
 function insInferProgressType(name, explicitType) {
     const normalizedType = insNormalize(explicitType);
     if (['assessment', 'vetting', 'test', 'report', 'review'].includes(normalizedType)) {
@@ -810,8 +829,12 @@ const InsightDataService = {
         return this.state.records.filter(row => insMatch(row.trainee, agentName));
     },
 
-    getAgentStatus: function(agentName) {
-        const records = this.getAgentRecords(agentName);
+    getAgentRecordsForGroup: function(agentName, groupID) {
+        return this.getAgentRecords(agentName).filter(row => insRecordMatchesGroup(row, groupID));
+    },
+
+    buildStatusFromRecords: function(recordsInput) {
+        const records = Array.isArray(recordsInput) ? recordsInput : [];
         const defaultThreshold = this.getRuleConfig().defaultScoreThreshold;
         if (!records.length) {
             return {
@@ -857,6 +880,14 @@ const InsightDataService = {
         if (failedSemi.length) return { status: 'Semi-Critical', failedItems: [...failedSemi, ...failedImprove], scoreThreshold: defaultThreshold, thresholdLabel };
         if (failedImprove.length) return { status: 'Improvement', failedItems: failedImprove, scoreThreshold: defaultThreshold, thresholdLabel };
         return { status: 'Pass', failedItems: [], scoreThreshold: defaultThreshold, thresholdLabel: `${defaultThreshold}%` };
+    },
+
+    getAgentStatus: function(agentName) {
+        return this.buildStatusFromRecords(this.getAgentRecords(agentName));
+    },
+
+    getAgentStatusForGroup: function(agentName, groupID) {
+        return this.buildStatusFromRecords(this.getAgentRecordsForGroup(agentName, groupID));
     },
 
     getAgentAttendance: function(agentName) {
@@ -1099,6 +1130,302 @@ const InsightDataService = {
             engagement: this.getAgentContentEngagement(agentName),
             timeline: this.getAgentTimeline(agentName),
             subjectReviewMap: this.getAgentSubjectReviewMap(agentName)
+        };
+    },
+
+    getDepartmentOverview: function(groupFilter, searchText) {
+        const normalizedSearch = String(searchText || '').trim().toLowerCase();
+        const selectedGroup = String(groupFilter || 'all').trim();
+        const inGroup = (agent) => selectedGroup === 'all' || String(agent.group || '') === selectedGroup;
+
+        const agents = this.getAllAgents().filter((agent) => {
+            if (String(agent.role || '').toLowerCase() !== 'trainee') return false;
+            if (!inGroup(agent)) return false;
+            if (normalizedSearch && !String(agent.name || '').toLowerCase().includes(normalizedSearch)) return false;
+            return true;
+        });
+
+        const statusCounts = { Critical: 0, 'Semi-Critical': 0, Improvement: 0, Pass: 0, Pending: 0 };
+        const focusPool = [];
+        const scorePool = [];
+        const timelineRows = [];
+        const effortRows = [];
+        const lateRows = [];
+        const activityRows = [];
+        const engagementRows = [];
+        const feedbackRows = [];
+        const feedbackMediumMap = {};
+        const subjectStatsMap = {};
+        const assessmentStatsMap = {};
+
+        let totalLateCount = 0;
+        let totalConfirmedLateCount = 0;
+        let totalViolationCount = 0;
+        let totalIdleMinutes = 0;
+        let totalExternalMinutes = 0;
+        let totalWatchSeconds = 0;
+        let totalQuizAttempts = 0;
+        let totalFailedQuestions = 0;
+        let totalFeedback = 0;
+        let totalFailedSubjects = 0;
+        let reviewedFailedSubjects = 0;
+
+        agents.forEach((agent) => {
+            const scopedRecords = this.getAgentRecordsForGroup(agent.name, selectedGroup);
+            const status = this.buildStatusFromRecords(scopedRecords);
+            statusCounts[status.status] = (statusCounts[status.status] || 0) + 1;
+
+            let avgScore = 0;
+            if (scopedRecords.length) {
+                const sum = scopedRecords.reduce((acc, row) => acc + insToNumber(row.score, 0), 0);
+                avgScore = Math.round(sum / scopedRecords.length);
+                scorePool.push(...scopedRecords.map(row => insToNumber(row.score, 0)));
+            }
+
+            scopedRecords.forEach((row) => {
+                const key = insNormalize(row.assessment);
+                if (!key) return;
+                if (!assessmentStatsMap[key]) {
+                    assessmentStatsMap[key] = { assessment: row.assessment, totalScore: 0, attempts: 0, belowThreshold: 0 };
+                }
+                assessmentStatsMap[key].totalScore += insToNumber(row.score, 0);
+                assessmentStatsMap[key].attempts += 1;
+                const threshold = this.getThresholdForAssessment(row.assessment);
+                if (insToNumber(row.score, 0) < threshold) assessmentStatsMap[key].belowThreshold += 1;
+            });
+
+            const attendance = this.getAgentAttendance(agent.name);
+            const lateEntries = attendance.filter(item => item.isLate);
+            const confirmedLate = lateEntries.filter(item => item.lateConfirmed);
+            totalLateCount += lateEntries.length;
+            totalConfirmedLateCount += confirmedLate.length;
+            if (lateEntries.length) {
+                lateRows.push({
+                    agent: agent.name,
+                    lateCount: lateEntries.length,
+                    confirmedCount: confirmedLate.length,
+                    lastLateDate: lateEntries[0] ? lateEntries[0].date : ''
+                });
+            }
+
+            const activity = this.getAgentActivityBreakdown(agent.name);
+            totalViolationCount += insToNumber(activity.violationCount, 0);
+            totalIdleMinutes += insToNumber(activity.idleMinutes, 0);
+            totalExternalMinutes += insToNumber(activity.externalMinutes, 0);
+            if (activity.daysTracked > 0) focusPool.push(insToNumber(activity.focusScore, 0));
+            activityRows.push({
+                agent: agent.name,
+                violationCount: insToNumber(activity.violationCount, 0),
+                idleMinutes: insToNumber(activity.idleMinutes, 0),
+                externalMinutes: insToNumber(activity.externalMinutes, 0),
+                focusScore: insToNumber(activity.focusScore, 0)
+            });
+
+            const engagement = this.getAgentContentEngagement(agent.name);
+            totalWatchSeconds += insToNumber(engagement.totals.totalWatchSeconds, 0);
+            totalQuizAttempts += insToNumber(engagement.totals.totalQuizAttempts, 0);
+            totalFailedQuestions += insToNumber(engagement.totals.failedQuestions, 0);
+            const bestScore = (engagement.subjects || []).reduce((best, item) => {
+                const score = item.quizBestScore === null ? null : insToNumber(item.quizBestScore, 0);
+                if (score === null) return best;
+                if (best === null || score > best) return score;
+                return best;
+            }, null);
+            engagementRows.push({
+                agent: agent.name,
+                subjectCount: insToNumber(engagement.totals.subjectCount, 0),
+                watchSeconds: insToNumber(engagement.totals.totalWatchSeconds, 0),
+                quizAttempts: insToNumber(engagement.totals.totalQuizAttempts, 0),
+                failedQuestions: insToNumber(engagement.totals.failedQuestions, 0),
+                bestScore
+            });
+
+            const subjectReviewMap = this.getAgentSubjectReviewMap(agent.name);
+            (status.failedItems || []).forEach((failedItem) => {
+                const subjectCore = insNormalizeSubjectName(failedItem);
+                const key = insNormalize(subjectCore);
+                if (!key) return;
+                if (!subjectStatsMap[key]) {
+                    subjectStatsMap[key] = {
+                        subject: subjectCore,
+                        failCount: 0,
+                        reviewedCount: 0,
+                        improveCount: 0,
+                        passCount: 0,
+                        completeFailCount: 0
+                    };
+                }
+                totalFailedSubjects += 1;
+                subjectStatsMap[key].failCount += 1;
+
+                const review = subjectReviewMap[key];
+                if (review && review.decision) {
+                    reviewedFailedSubjects += 1;
+                    subjectStatsMap[key].reviewedCount += 1;
+                    const decision = insNormalize(review.decision);
+                    if (decision === 'pass') subjectStatsMap[key].passCount += 1;
+                    else if (decision === 'complete fail') subjectStatsMap[key].completeFailCount += 1;
+                    else subjectStatsMap[key].improveCount += 1;
+                }
+            });
+
+            const feedback = this.getAgentFeedback(agent.name);
+            totalFeedback += feedback.length;
+            feedback.forEach((item) => {
+                const medium = String(item.selectedMedium || 'Unspecified').trim() || 'Unspecified';
+                const mediumKey = medium.toLowerCase();
+                feedbackMediumMap[mediumKey] = feedbackMediumMap[mediumKey] || { medium, count: 0 };
+                feedbackMediumMap[mediumKey].count += 1;
+                feedbackRows.push({
+                    agent: agent.name,
+                    tl: item.tl || '',
+                    date: item.date || item.createdAt || '',
+                    selectedMedium: medium,
+                    problemStatement: item.problemStatement || '',
+                    ticketNumber: item.ticketNumber || ''
+                });
+            });
+
+            const timeline = this.getAgentTimeline(agent.name).slice(0, 25);
+            timeline.forEach((event) => {
+                timelineRows.push({
+                    agent: agent.name,
+                    ts: insToTs(event.date || event.ts),
+                    date: event.date || '',
+                    type: event.type || 'Event',
+                    detail: event.detail || ''
+                });
+            });
+
+            let effortStatus = 'On Track';
+            let effortTone = 'pass';
+            const focusScore = insToNumber(activity.focusScore, 0);
+            if (!scopedRecords.length) {
+                effortStatus = 'No Score Yet';
+                effortTone = 'pending';
+            } else if (avgScore < 80 && focusScore >= 70) {
+                effortStatus = 'Struggling (High Effort)';
+                effortTone = 'semi';
+            } else if (avgScore < 80) {
+                effortStatus = 'At Risk (Low Effort)';
+                effortTone = 'critical';
+            }
+
+            effortRows.push({
+                agent: agent.name,
+                avgScore,
+                focusScore,
+                status: effortStatus,
+                tone: effortTone
+            });
+        });
+
+        const avgScore = scorePool.length
+            ? Math.round(scorePool.reduce((acc, value) => acc + insToNumber(value, 0), 0) / scorePool.length)
+            : 0;
+        const avgFocus = focusPool.length
+            ? Math.round(focusPool.reduce((acc, value) => acc + insToNumber(value, 0), 0) / focusPool.length)
+            : 0;
+
+        const failedSubjectRows = Object.values(subjectStatsMap)
+            .sort((a, b) => {
+                const failDiff = insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0);
+                if (failDiff !== 0) return failDiff;
+                return String(a.subject || '').localeCompare(String(b.subject || ''), undefined, { sensitivity: 'base', numeric: true });
+            })
+            .slice(0, 12);
+
+        const struggleAreas = Object.values(assessmentStatsMap)
+            .map((item) => ({
+                assessment: item.assessment,
+                avgScore: item.attempts ? Math.round(item.totalScore / item.attempts) : 0,
+                attempts: item.attempts,
+                belowThreshold: item.belowThreshold
+            }))
+            .sort((a, b) => {
+                const avgDiff = insToNumber(a.avgScore, 0) - insToNumber(b.avgScore, 0);
+                if (avgDiff !== 0) return avgDiff;
+                return insToNumber(b.attempts, 0) - insToNumber(a.attempts, 0);
+            })
+            .slice(0, 12);
+
+        lateRows.sort((a, b) => {
+            const diff = insToNumber(b.lateCount, 0) - insToNumber(a.lateCount, 0);
+            if (diff !== 0) return diff;
+            return String(a.agent || '').localeCompare(String(b.agent || ''), undefined, { sensitivity: 'base' });
+        });
+
+        activityRows.sort((a, b) => {
+            const violationDiff = insToNumber(b.violationCount, 0) - insToNumber(a.violationCount, 0);
+            if (violationDiff !== 0) return violationDiff;
+            const idleDiff = insToNumber(b.idleMinutes, 0) - insToNumber(a.idleMinutes, 0);
+            if (idleDiff !== 0) return idleDiff;
+            return String(a.agent || '').localeCompare(String(b.agent || ''), undefined, { sensitivity: 'base' });
+        });
+
+        engagementRows.sort((a, b) => {
+            const failDiff = insToNumber(b.failedQuestions, 0) - insToNumber(a.failedQuestions, 0);
+            if (failDiff !== 0) return failDiff;
+            const quizDiff = insToNumber(b.quizAttempts, 0) - insToNumber(a.quizAttempts, 0);
+            if (quizDiff !== 0) return quizDiff;
+            return insToNumber(b.watchSeconds, 0) - insToNumber(a.watchSeconds, 0);
+        });
+
+        feedbackRows.sort((a, b) => insToTs(b.date) - insToTs(a.date));
+        const feedbackMediumRows = Object.values(feedbackMediumMap)
+            .sort((a, b) => insToNumber(b.count, 0) - insToNumber(a.count, 0));
+
+        timelineRows.sort((a, b) => insToNumber(b.ts, 0) - insToNumber(a.ts, 0));
+        const limitedTimeline = timelineRows.slice(0, 120);
+
+        effortRows.sort((a, b) => {
+            const scoreDiff = insToNumber(a.avgScore, 0) - insToNumber(b.avgScore, 0);
+            if (scoreDiff !== 0) return scoreDiff;
+            return insToNumber(a.focusScore, 0) - insToNumber(b.focusScore, 0);
+        });
+
+        const reviewCoverage = totalFailedSubjects > 0
+            ? Math.round((reviewedFailedSubjects / totalFailedSubjects) * 100)
+            : 100;
+
+        return {
+            scope: {
+                groupFilter: selectedGroup,
+                searchText: normalizedSearch,
+                agentCount: agents.length
+            },
+            kpis: {
+                criticalCount: statusCounts.Critical || 0,
+                semiCount: statusCounts['Semi-Critical'] || 0,
+                improvementCount: statusCounts.Improvement || 0,
+                passCount: statusCounts.Pass || 0,
+                pendingCount: statusCounts.Pending || 0,
+                actionRequiredCount: (statusCounts.Critical || 0) + (statusCounts.Improvement || 0),
+                avgScore,
+                avgFocus,
+                totalLateCount,
+                totalConfirmedLateCount,
+                totalViolationCount,
+                totalIdleMinutes,
+                totalExternalMinutes,
+                totalWatchSeconds,
+                totalQuizAttempts,
+                totalFailedQuestions,
+                totalFeedback,
+                totalFailedSubjects,
+                reviewedFailedSubjects,
+                reviewCoverage,
+                timelineEventCount: limitedTimeline.length
+            },
+            effortRows: effortRows.slice(0, 20),
+            struggleAreas,
+            lateRows: lateRows.slice(0, 12),
+            activityRows: activityRows.slice(0, 12),
+            engagementRows: engagementRows.slice(0, 12),
+            failedSubjectRows,
+            feedbackMediumRows: feedbackMediumRows.slice(0, 8),
+            feedbackRecent: feedbackRows.slice(0, 20),
+            timelineRows: limitedTimeline
         };
     },
 

@@ -89,6 +89,75 @@ const STRICT_SERVER_KEYS = new Set([
     ...Array.from(STRICT_SERVER_ROW_KEYS)
 ]);
 
+// --- TRAINEE RUNTIME OPTIMIZATION ---
+// Keep trainee document pulls/saves scoped to only what the trainee surface needs.
+const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
+    'system_config',
+    'rosters',
+    'schedules',
+    'liveSchedules',
+    'tests',
+    'assessments',
+    'dailyTips',
+    'nps_surveys',
+    'notices',
+    'vettingSession',
+    'adminVettingSessions',
+    'vettingTopics',
+    'trainee_notes',
+    'trainee_bookmarks',
+    'study_notes_v2',
+    'monitor_whitelist',
+    'monitor_reviewed',
+    'liveScheduleSettings',
+    'cancellationCounts'
+]);
+
+const TRAINEE_DEFAULT_SAVE_KEYS = new Set([
+    'monitor_data',
+    'monitor_history',
+    'trainee_notes',
+    'trainee_bookmarks',
+    'study_notes_v2',
+    'nps_responses'
+]);
+
+const TRAINEE_SKIP_ROW_TABLES = new Set([
+    'users',
+    'audit_logs',
+    'access_logs',
+    'error_reports',
+    'archived_users',
+    'network_diagnostics',
+    'saved_reports',
+    'insight_reviews',
+    'tl_task_submissions'
+]);
+
+function isTraineeRuntime() {
+    return (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+}
+
+function normalizeTraineeIdentity(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function isRowOwnedByCurrentTrainee(localKey, rowData) {
+    if (!isTraineeRuntime()) return true;
+    if (!rowData || typeof rowData !== 'object') return false;
+
+    const currentUser = normalizeTraineeIdentity(CURRENT_USER.user);
+    const traineeVal = normalizeTraineeIdentity(rowData.trainee || rowData.user || rowData.user_id);
+
+    if (['records', 'submissions', 'exemptions', 'linkRequests', 'liveBookings', 'attendance_records', 'monitor_history', 'nps_responses'].includes(localKey)) {
+        return traineeVal === currentUser;
+    }
+    if (localKey === 'liveSessions') {
+        return normalizeTraineeIdentity(rowData.trainee) === currentUser;
+    }
+    return true;
+}
+
 // --- NEW: DEBOUNCED SAVE QUEUE (PERFORMANCE) ---
 // This prevents the UI from freezing on large data saves by queueing the save
 // and processing it a few seconds later in the background.
@@ -308,8 +377,9 @@ async function loadFromServer(silent = false) {
         // --- IDENTIFY TRAINEE EARLY ---
         const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
         if (isTrainee) {
-            localStorage.removeItem('agentNotes'); // Security & Memory Purge
-            localStorage.removeItem('tl_personal_lists');
+            // Security & memory hygiene for trainee-only runtime
+            ['agentNotes', 'tl_personal_lists', 'auditLogs', 'accessLogs', 'error_reports', 'network_diagnostics', 'savedReports', 'insightReviews']
+                .forEach(k => localStorage.removeItem(k));
         }
         
         // --- PHASE A: BLOB SYNC (Settings, Rosters, Users) ---
@@ -339,6 +409,7 @@ async function loadFromServer(silent = false) {
         const keysToFetch = [];
         meta.forEach(row => {
             const localKey = IS_DEMO_MODE ? row.key.replace('demo_', '') : row.key;
+            if (isTrainee && !TRAINEE_ALLOWED_BLOB_KEYS.has(localKey)) return;
             // SECURITY & MINIMIZATION: Skip admin-only blobs for trainees
             if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(localKey)) return;
             // Legacy compatibility guard:
@@ -464,7 +535,7 @@ async function loadFromServer(silent = false) {
         Object.entries(ROW_MAP).forEach(([localKey, tableName]) => {
             
             // TRAINEE DATA MINIMIZATION: Completely skip Admin-only tables to save bandwidth
-            if (isTrainee && ['audit_logs', 'access_logs', 'error_reports', 'nps_responses', 'archived_users', 'network_diagnostics', 'saved_reports', 'insight_reviews', 'tl_task_submissions'].includes(tableName)) {
+            if (isTrainee && TRAINEE_SKIP_ROW_TABLES.has(tableName)) {
                 return;
             }
 
@@ -518,13 +589,19 @@ async function loadFromServer(silent = false) {
             if (isTrainee) {
                 if (['records', 'submissions', 'exemptions', 'link_requests'].includes(tableName)) {
                     query = query.ilike('trainee', CURRENT_USER.user);
-                } else if (['attendance', 'monitor_history'].includes(tableName)) {
+                } else if (['attendance', 'monitor_history', 'nps_responses'].includes(tableName)) {
                     query = query.ilike('user_id', CURRENT_USER.user);
+                } else if (tableName === 'live_bookings') {
+                    query = query.ilike('trainee', CURRENT_USER.user);
                 }
             }
             
                 // ARCHITECTURAL FIX: Throttle row limits for heavy JSON tables to prevent OOM crashes
-                const fetchLimit = tableName === 'monitor_history' ? 100 : (heavyTables.includes(tableName) ? 500 : 2000);
+                const fetchLimit = tableName === 'monitor_history'
+                    ? 100
+                    : (isTrainee && tableName === 'live_sessions')
+                        ? 200
+                        : (heavyTables.includes(tableName) ? 500 : 2000);
                 const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
                 const rowBytes = estimateSyncPayloadSize((newRows || []).map(r => r && r.data ? r.data : null));
                 if (rowBytes > 0) {
@@ -552,7 +629,7 @@ async function loadFromServer(silent = false) {
                 
                 if (isFullAuthoritativePull) {
                     // AUTHORITATIVE SYNC: Server is Truth. Overwrite local.
-                    const serverItems = newRows
+                    let serverItems = newRows
                         .filter(r => r && r.data)
                         .map(r => {
                             const item = (r.data && typeof r.data === 'object') ? { ...r.data } : r.data;
@@ -561,13 +638,16 @@ async function loadFromServer(silent = false) {
                             }
                             return item;
                         });
+                    if (isTrainee) {
+                        serverItems = serverItems.filter(item => isRowOwnedByCurrentTrainee(localKey, item));
+                    }
                     localStorage.setItem(localKey, JSON.stringify(serverItems));
                     // Update timestamp to now (though unused for full sync, good for debug)
                     localStorage.setItem(`row_sync_ts_${localKey}`, new Date().toISOString());
                 } else {
                 // Extract data objects
                 // GHOST DATA FIX: Filter out items that are pending deletion locally
-                const serverItems = newRows.filter(r => {
+                let serverItems = newRows.filter(r => {
                     if (!r || !r.data) return false;
                     const rowData = r.data;
                     const id = rowData.id || r.id;
@@ -595,6 +675,9 @@ async function loadFromServer(silent = false) {
                     }
                     return item;
                 });
+                if (isTrainee) {
+                    serverItems = serverItems.filter(item => isRowOwnedByCurrentTrainee(localKey, item));
+                }
 
                 let localItems = safeLocalParse(localKey, []);
                 
@@ -602,8 +685,12 @@ async function loadFromServer(silent = false) {
                 if (isTrainee) {
                     if (['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
                         localItems = localItems.filter(i => (i.trainee || '').toLowerCase() === CURRENT_USER.user.toLowerCase() || (i.user || '').toLowerCase() === CURRENT_USER.user.toLowerCase());
-                    } else if (['attendance_records', 'monitor_history'].includes(localKey)) {
+                    } else if (['attendance_records', 'monitor_history', 'nps_responses'].includes(localKey)) {
                         localItems = localItems.filter(i => (i.user || '').toLowerCase() === CURRENT_USER.user.toLowerCase() || (i.user_id || '').toLowerCase() === CURRENT_USER.user.toLowerCase());
+                    } else if (localKey === 'liveBookings') {
+                        localItems = localItems.filter(i => (i.trainee || '').toLowerCase() === CURRENT_USER.user.toLowerCase());
+                    } else if (localKey === 'liveSessions') {
+                        localItems = localItems.filter(i => (i.trainee || '').toLowerCase() === CURRENT_USER.user.toLowerCase());
                     }
                 }
                 
@@ -1643,7 +1730,11 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
         targetKeys = null; // Save all
     }
 
-    const keysToQueue = targetKeys || Object.keys(DB_SCHEMA);
+    let keysToQueue = targetKeys || Object.keys(DB_SCHEMA);
+    if (!targetKeys && isTraineeRuntime()) {
+        keysToQueue = keysToQueue.filter(k => TRAINEE_DEFAULT_SAVE_KEYS.has(k));
+    }
+    if (!Array.isArray(keysToQueue) || keysToQueue.length === 0) return true;
     const hasStrictExplicitTargets = Array.isArray(targetKeys) && targetKeys.some(k => STRICT_SERVER_KEYS.has(k));
     if (Array.isArray(targetKeys)) {
         targetKeys.forEach(k => EXPLICIT_SAVE_KEYS.add(k));
@@ -3036,9 +3127,7 @@ function setupRealtimeListeners() {
         window.supabaseClient.removeChannel(window.GLOBAL_CHANGES_CHANNEL).catch(()=>{});
     }
 
-    // Subscribe to the ENTIRE public schema for 0-latency updates
-    window.GLOBAL_CHANGES_CHANNEL = window.supabaseClient.channel('global_app_changes')
-        .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+    const routeRealtimePayload = (payload) => {
             const table = payload.table;
             
             // ISOLATION: Demo mode ONLY listens to app_documents
@@ -3058,7 +3147,49 @@ function setupRealtimeListeners() {
                     handleRowRealtime(payload);
                 }
             }
-        })
+        };
+
+    const makeRealtimeEqFilter = (column, value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return null;
+        // If identity contains spaces/special delimiters, fall back to table-only subscription.
+        if (/[\s,]/.test(raw)) return null;
+        return `${column}=eq.${raw.replace(/"/g, '')}`;
+    };
+    const channel = window.supabaseClient.channel('global_app_changes');
+    const traineeScopedRealtime = isTraineeRuntime() && !IS_DEMO_MODE;
+
+    if (traineeScopedRealtime) {
+        const currentUser = (CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : '';
+        const addScopedBinding = (table, filterColumn = null) => {
+            const binding = { event: '*', schema: 'public', table };
+            if (filterColumn) {
+                const filter = makeRealtimeEqFilter(filterColumn, currentUser);
+                if (filter) binding.filter = filter;
+            }
+            channel.on('postgres_changes', binding, routeRealtimePayload);
+        };
+
+        addScopedBinding('app_documents');
+        addScopedBinding('monitor_state', 'user_id');
+        addScopedBinding('attendance', 'user_id');
+        addScopedBinding('sessions', 'username');
+        addScopedBinding('records', 'trainee');
+        addScopedBinding('submissions', 'trainee');
+        addScopedBinding('live_bookings', 'trainee');
+        addScopedBinding('link_requests', 'trainee');
+        addScopedBinding('exemptions', 'trainee');
+        addScopedBinding('monitor_history', 'user_id');
+        addScopedBinding('nps_responses', 'user_id');
+        addScopedBinding('live_sessions');
+        addScopedBinding('vetting_sessions');
+        addScopedBinding('vetting_sessions_v2');
+    } else {
+        // Admin / team leader / demo still use broad subscription.
+        channel.on('postgres_changes', { event: '*', schema: 'public' }, routeRealtimePayload);
+    }
+
+    window.GLOBAL_CHANGES_CHANNEL = channel
         .subscribe((status, err) => {
             if (status !== window.REALTIME_LAST_STATUS || err) {
                 console.log(`[Realtime Tunnel] Data Channel Status: ${status}`, err || '');
@@ -3298,7 +3429,7 @@ function processIncomingDataQueue() {
                     item.user = newRow.user_id;
                     
                     // Trainee Minimization
-                    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee' && item.user !== CURRENT_USER.user) return;
+                    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee' && !isRowOwnedByCurrentTrainee('attendance_records', item)) return;
 
                     const idx = records.findIndex(r => r.id === item.id);
                     if (idx > -1) records[idx] = item;
@@ -3322,6 +3453,7 @@ function processIncomingDataQueue() {
                     const item = (newRow.data && typeof newRow.data === 'object') ? { ...newRow.data } : newRow.data;
                     if (!item || typeof item !== 'object') return;
                     item.id = (item.id !== undefined && item.id !== null) ? item.id : newRow.id;
+                    if (isTraineeRuntime() && !isRowOwnedByCurrentTrainee('liveBookings', item)) return;
                     const idx = bookings.findIndex(b => String(b.id) === String(item.id));
                     if (idx > -1) bookings[idx] = item;
                     else bookings.push(item);
@@ -3349,6 +3481,7 @@ function processIncomingDataQueue() {
                     
                     // Trainee Data Minimization (Security)
                     const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+                    if (isTrainee && !TRAINEE_ALLOWED_BLOB_KEYS.has(key)) return;
                     if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(key)) return;
 
                     const localVal = safeLocalParse(key, null);
@@ -3397,11 +3530,8 @@ function processIncomingDataQueue() {
                         const newItem = p.new.data;
                         if (!newItem.id) newItem.id = p.new.id;
                         
-                        if (isTrainee && ['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
-                            const nTrainee = (newItem.trainee || '').toLowerCase();
-                            const nUser = (newItem.user || '').toLowerCase();
-                            const cUser = CURRENT_USER.user.toLowerCase();
-                            if (nTrainee !== cUser && nUser !== cUser) return;
+                        if (isTrainee && !isRowOwnedByCurrentTrainee(localKey, newItem)) {
+                            return;
                         }
 
                         const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
@@ -3448,16 +3578,28 @@ function processIncomingDataQueue() {
 
 // --- UPDATED HANDLERS: PUSH TO QUEUE INSTEAD OF PROCESS ---
 function handleMonitorRealtime(payload) {
+    if (isTraineeRuntime()) {
+        const userId = String(payload?.new?.user_id || payload?.old?.user_id || '').trim();
+        if (userId && normalizeTraineeIdentity(userId) !== normalizeTraineeIdentity(CURRENT_USER.user)) return;
+    }
     INCOMING_DATA_QUEUE.push({ type: 'monitor', payload });
     updateQueueIndicator();
 }
 
 function handleAttendanceRealtime(payload) {
+    if (isTraineeRuntime()) {
+        const userId = String(payload?.new?.user_id || payload?.old?.user_id || '').trim();
+        if (userId && normalizeTraineeIdentity(userId) !== normalizeTraineeIdentity(CURRENT_USER.user)) return;
+    }
     INCOMING_DATA_QUEUE.push({ type: 'attendance', payload });
     updateQueueIndicator();
 }
 
 function handleLiveBookingRealtime(payload) {
+    if (isTraineeRuntime()) {
+        const rowData = payload?.new?.data || payload?.new || payload?.old?.data || payload?.old || null;
+        if (rowData && !isRowOwnedByCurrentTrainee('liveBookings', rowData)) return;
+    }
     INCOMING_DATA_QUEUE.push({ type: 'bookings', payload });
     updateQueueIndicator();
 }
@@ -3475,6 +3617,7 @@ async function forceRefreshLiveSessionById(sessionId) {
 
         const refreshed = { ...row.data };
         if (!refreshed.sessionId) refreshed.sessionId = row.id;
+        if (isTraineeRuntime() && !isRowOwnedByCurrentTrainee('liveSessions', refreshed)) return false;
 
         let sessions = safeLocalParse('liveSessions', []) || [];
         sessions = sessions.filter(s => s.sessionId !== refreshed.sessionId);
@@ -3762,6 +3905,13 @@ function handleSessionRealtime(payload) {
 }
 
 function handleAppDocumentRealtime(payload) {
+    if (isTraineeRuntime()) {
+        const rawKey = String(payload?.new?.key || payload?.old?.key || '').trim();
+        if (rawKey) {
+            const localKey = IS_DEMO_MODE ? rawKey.replace(/^demo_/, '') : rawKey;
+            if (!TRAINEE_ALLOWED_BLOB_KEYS.has(localKey)) return;
+        }
+    }
     INCOMING_DATA_QUEUE.push({ type: 'app_documents', payload });
     updateQueueIndicator();
 }
@@ -3780,11 +3930,8 @@ function applyGenericRowRealtimePayload(payload) {
         const newItem = payload.new.data;
         if (!newItem.id) newItem.id = payload.new.id;
 
-        if (isTrainee && ['records', 'submissions', 'exemptions', 'linkRequests'].includes(localKey)) {
-            const nTrainee = (newItem.trainee || '').toLowerCase();
-            const nUser = (newItem.user || '').toLowerCase();
-            const cUser = CURRENT_USER.user.toLowerCase();
-            if (nTrainee !== cUser && nUser !== cUser) return false;
+        if (isTrainee && !isRowOwnedByCurrentTrainee(localKey, newItem)) {
+            return false;
         }
 
         const idx = items.findIndex(i => (i.id && i.id.toString()) === newItem.id.toString());
@@ -3829,6 +3976,10 @@ function refreshSubmissionDrivenUI() {
 }
 
 function handleRowRealtime(payload) {
+    if (isTraineeRuntime()) {
+        const traineeTables = new Set(['records', 'submissions', 'live_bookings', 'live_sessions', 'attendance', 'monitor_history', 'link_requests', 'exemptions', 'nps_responses']);
+        if (!traineeTables.has(String(payload?.table || ''))) return;
+    }
     if (payload.table === 'submissions' && applyGenericRowRealtimePayload(payload)) {
         refreshSubmissionDrivenUI();
         updateQueueIndicator();
@@ -3862,6 +4013,9 @@ async function recoverLiveSessionRow(rowId) {
 
         const recovered = { ...row.data };
         if (!recovered.sessionId) recovered.sessionId = row.id;
+        if (isTraineeRuntime() && !isRowOwnedByCurrentTrainee('liveSessions', recovered)) {
+            return false;
+        }
 
         let allSessions = safeLocalParse('liveSessions', []) || [];
         allSessions = allSessions.filter(s => s.sessionId !== recovered.sessionId);
@@ -3894,8 +4048,12 @@ function handleLiveSessionRealtime(payload) {
 
         const newData = { ...incoming.data };
         if (!newData.sessionId) newData.sessionId = incoming.id;
+        if (isTraineeRuntime() && !isRowOwnedByCurrentTrainee('liveSessions', newData)) return;
         allSessions = allSessions.filter(s => s.sessionId !== newData.sessionId);
         allSessions.push(newData);
+    }
+    if (isTraineeRuntime()) {
+        allSessions = allSessions.filter(s => isRowOwnedByCurrentTrainee('liveSessions', s));
     }
     localStorage.setItem('liveSessions', JSON.stringify(allSessions));
     window.LIVE_LAST_CACHE_EVENT_AT = Date.now();

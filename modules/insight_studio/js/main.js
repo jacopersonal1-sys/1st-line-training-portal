@@ -91,6 +91,14 @@ const InsightApp = {
         return `${mins}m ${secs.toString().padStart(2, '0')}s`;
     },
 
+    formatDurationCompact: function(seconds) {
+        const total = Math.max(0, Math.round(Number(seconds || 0)));
+        const hrs = Math.floor(total / 3600);
+        const mins = Math.floor((total % 3600) / 60);
+        if (hrs > 0) return `${hrs}h ${mins}m`;
+        return `${mins}m`;
+    },
+
     hashColor: function(name) {
         const seed = String(name || 'insight');
         let hash = 0;
@@ -113,7 +121,9 @@ const InsightApp = {
 
     setViewMode: function(mode) {
         const normalized = String(mode || '').trim().toLowerCase();
-        this.state.viewMode = normalized === 'progress' ? 'progress' : 'triggers';
+        if (normalized === 'progress') this.state.viewMode = 'progress';
+        else if (normalized === 'department' || normalized === 'dept') this.state.viewMode = 'department';
+        else this.state.viewMode = 'triggers';
         this.state.drawerOpen = false;
         this.state.selectedAgent = '';
         this.state.detail = null;
@@ -632,6 +642,251 @@ const InsightApp = {
         `;
     },
 
+    renderDepartmentOverview: function() {
+        const esc = this.escapeHtml;
+        const summary = InsightDataService.getDepartmentOverview(this.state.groupFilter, this.state.search);
+        const kpis = summary.kpis || {};
+        const effortRows = Array.isArray(summary.effortRows) ? summary.effortRows : [];
+        const struggleAreas = Array.isArray(summary.struggleAreas) ? summary.struggleAreas : [];
+        const lateRows = Array.isArray(summary.lateRows) ? summary.lateRows : [];
+        const activityRows = Array.isArray(summary.activityRows) ? summary.activityRows : [];
+        const engagementRows = Array.isArray(summary.engagementRows) ? summary.engagementRows : [];
+        const failedSubjectRows = Array.isArray(summary.failedSubjectRows) ? summary.failedSubjectRows : [];
+        const feedbackMediumRows = Array.isArray(summary.feedbackMediumRows) ? summary.feedbackMediumRows : [];
+        const feedbackRecent = Array.isArray(summary.feedbackRecent) ? summary.feedbackRecent : [];
+        const timelineRows = Array.isArray(summary.timelineRows) ? summary.timelineRows : [];
+
+        return `
+            <div class="ins-dept-grid">
+                <div class="ins-card full">
+                    <h3>Department Health Snapshot</h3>
+                    <div class="ins-mini-grid ins-dept-kpi-grid" style="margin-top:8px;">
+                        <div class="ins-mini"><strong>${kpis.criticalCount || 0}</strong><span class="ins-subtle">Critical</span></div>
+                        <div class="ins-mini"><strong>${kpis.improvementCount || 0}</strong><span class="ins-subtle">Improvement</span></div>
+                        <div class="ins-mini"><strong>${kpis.semiCount || 0}</strong><span class="ins-subtle">Semi-Critical</span></div>
+                        <div class="ins-mini"><strong>${kpis.passCount || 0}</strong><span class="ins-subtle">Pass</span></div>
+                        <div class="ins-mini"><strong>${kpis.pendingCount || 0}</strong><span class="ins-subtle">Pending</span></div>
+                        <div class="ins-mini"><strong>${kpis.actionRequiredCount || 0}</strong><span class="ins-subtle">Action Required</span></div>
+                        <div class="ins-mini"><strong>${kpis.avgScore || 0}%</strong><span class="ins-subtle">Avg Score</span></div>
+                        <div class="ins-mini"><strong>${kpis.avgFocus || 0}%</strong><span class="ins-subtle">Avg Focus</span></div>
+                    </div>
+                </div>
+
+                <div class="ins-card full">
+                    <h3>Operational Metrics</h3>
+                    <div class="ins-mini-grid ins-dept-kpi-grid" style="margin-top:8px;">
+                        <div class="ins-mini"><strong>${kpis.totalLateCount || 0}</strong><span class="ins-subtle">Late Comings</span></div>
+                        <div class="ins-mini"><strong>${kpis.totalConfirmedLateCount || 0}</strong><span class="ins-subtle">Late Confirmed</span></div>
+                        <div class="ins-mini"><strong>${kpis.totalViolationCount || 0}</strong><span class="ins-subtle">Violations</span></div>
+                        <div class="ins-mini"><strong>${kpis.totalIdleMinutes || 0}m</strong><span class="ins-subtle">Idle Time</span></div>
+                        <div class="ins-mini"><strong>${this.formatDurationCompact(kpis.totalWatchSeconds || 0)}</strong><span class="ins-subtle">Watch Time</span></div>
+                        <div class="ins-mini"><strong>${kpis.totalQuizAttempts || 0}</strong><span class="ins-subtle">Quiz Attempts</span></div>
+                        <div class="ins-mini"><strong>${kpis.totalFailedQuestions || 0}</strong><span class="ins-subtle">Failed Questions</span></div>
+                        <div class="ins-mini"><strong>${kpis.totalFeedback || 0}</strong><span class="ins-subtle">TL Feedback</span></div>
+                        <div class="ins-mini"><strong>${kpis.reviewedFailedSubjects || 0}/${kpis.totalFailedSubjects || 0}</strong><span class="ins-subtle">Failed Subject Reviews</span></div>
+                        <div class="ins-mini"><strong>${kpis.reviewCoverage || 0}%</strong><span class="ins-subtle">Review Coverage</span></div>
+                        <div class="ins-mini"><strong>${summary.scope && summary.scope.agentCount ? summary.scope.agentCount : 0}</strong><span class="ins-subtle">Agents In Scope</span></div>
+                        <div class="ins-mini"><strong>${kpis.timelineEventCount || 0}</strong><span class="ins-subtle">Timeline Events</span></div>
+                    </div>
+                </div>
+
+                <div class="ins-card">
+                    <h3>Effort vs Performance</h3>
+                    <div class="table-responsive" style="max-height:270px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Agent</th><th>Focus</th><th>Avg Score</th><th>Status</th></tr></thead>
+                            <tbody>
+                                ${effortRows.length
+                                    ? effortRows.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.agent)}</td>
+                                            <td class="ins-metric">${row.focusScore}%</td>
+                                            <td class="ins-metric">${row.avgScore}%</td>
+                                            <td><span class="ins-status ${esc(row.tone || 'pending')}">${esc(row.status || 'Pending')}</span></td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No trainee performance data found for this filter.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card">
+                    <h3>Group Struggle Areas</h3>
+                    <div class="table-responsive" style="max-height:270px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Assessment</th><th>Avg Score</th><th>Below Threshold</th><th>Attempts</th></tr></thead>
+                            <tbody>
+                                ${struggleAreas.length
+                                    ? struggleAreas.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.assessment)}</td>
+                                            <td class="ins-metric">${row.avgScore}%</td>
+                                            <td class="ins-metric">${row.belowThreshold}</td>
+                                            <td class="ins-metric">${row.attempts}</td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No group struggle areas detected.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card">
+                    <h3>Attendance (Late Comings)</h3>
+                    <div class="table-responsive" style="max-height:270px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Agent</th><th>Late</th><th>Confirmed</th><th>Last Late</th></tr></thead>
+                            <tbody>
+                                ${lateRows.length
+                                    ? lateRows.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.agent)}</td>
+                                            <td class="ins-metric">${row.lateCount}</td>
+                                            <td class="ins-metric">${row.confirmedCount}</td>
+                                            <td class="ins-metric">${esc(row.lastLateDate || '-')}</td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No late comings in this scope.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card">
+                    <h3>Activity Breakdown</h3>
+                    <div class="table-responsive" style="max-height:270px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Agent</th><th>Violations</th><th>Idle</th><th>External</th><th>Focus</th></tr></thead>
+                            <tbody>
+                                ${activityRows.length
+                                    ? activityRows.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.agent)}</td>
+                                            <td class="ins-metric">${row.violationCount}</td>
+                                            <td class="ins-metric">${row.idleMinutes}m</td>
+                                            <td class="ins-metric">${row.externalMinutes}m</td>
+                                            <td class="ins-metric">${row.focusScore}%</td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No activity monitor data found.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card full">
+                    <h3>Content Creator Engagement</h3>
+                    <div class="table-responsive" style="max-height:270px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Agent</th><th>Subjects</th><th>Watch</th><th>Quiz Attempts</th><th>Best</th><th>Failed Q</th></tr></thead>
+                            <tbody>
+                                ${engagementRows.length
+                                    ? engagementRows.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.agent)}</td>
+                                            <td class="ins-metric">${row.subjectCount}</td>
+                                            <td class="ins-metric">${this.formatDurationCompact(row.watchSeconds)}</td>
+                                            <td class="ins-metric">${row.quizAttempts}</td>
+                                            <td class="ins-metric">${row.bestScore === null ? '-' : `${Math.round(row.bestScore)}%`}</td>
+                                            <td class="ins-metric">${row.failedQuestions}</td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No content engagement captured yet.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card full">
+                    <h3>Action Required Subjects</h3>
+                    <p class="ins-subtle" style="margin-bottom:8px;">Failure frequency and subject-review outcomes (Improve / Pass / Complete Fail).</p>
+                    <div class="table-responsive" style="max-height:280px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Subject</th><th>Fails</th><th>Reviewed</th><th>Improve</th><th>Pass</th><th>Complete Fail</th></tr></thead>
+                            <tbody>
+                                ${failedSubjectRows.length
+                                    ? failedSubjectRows.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.subject)}</td>
+                                            <td class="ins-metric">${row.failCount}</td>
+                                            <td class="ins-metric">${row.reviewedCount}</td>
+                                            <td class="ins-metric">${row.improveCount}</td>
+                                            <td class="ins-metric">${row.passCount}</td>
+                                            <td class="ins-metric">${row.completeFailCount}</td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No failed subjects in current scope.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card">
+                    <h3>Teamleader Production Feedback Mix</h3>
+                    <div class="table-responsive" style="max-height:240px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Medium</th><th>Count</th></tr></thead>
+                            <tbody>
+                                ${feedbackMediumRows.length
+                                    ? feedbackMediumRows.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.medium)}</td>
+                                            <td class="ins-metric">${row.count}</td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="2" style="text-align:center; color:var(--text-muted);">No feedback mediums captured.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card">
+                    <h3>Recent TL Feedback</h3>
+                    <div class="table-responsive" style="max-height:240px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Agent</th><th>Medium</th><th>Issue</th><th>Ticket</th><th>Date</th></tr></thead>
+                            <tbody>
+                                ${feedbackRecent.length
+                                    ? feedbackRecent.map((row) => `
+                                        <tr>
+                                            <td>${esc(row.agent)}</td>
+                                            <td>${esc(row.selectedMedium || '-')}</td>
+                                            <td>${esc(row.problemStatement || '-')}</td>
+                                            <td>${esc(row.ticketNumber || '-')}</td>
+                                            <td>${esc(row.date || '-')}</td>
+                                        </tr>
+                                    `).join('')
+                                    : '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No Teamleader production feedback found.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="ins-card full">
+                    <h3>Activity Timeline</h3>
+                    <p class="ins-subtle" style="margin-bottom:8px;">Unified cross-agent timeline (attendance, assessments, quizzes, feedback, and activity summaries).</p>
+                    <div class="ins-timeline" style="max-height:360px;">
+                        ${timelineRows.length
+                            ? timelineRows.map((event) => `
+                                <div class="ins-timeline-item">
+                                    <div class="ins-timeline-dot"></div>
+                                    <div class="ins-timeline-content">
+                                        <div class="ins-item-top">
+                                            <strong>${esc(event.agent)} | ${esc(event.type)}</strong>
+                                            <span class="ins-subtle">${esc(event.date || '-')}</span>
+                                        </div>
+                                        <div class="ins-subtle" style="margin-top:6px;">${esc(event.detail || '-')}</div>
+                                    </div>
+                                </div>
+                            `).join('')
+                            : '<div class="ins-item">No timeline activity found in this scope.</div>'}
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
     render: function() {
         const root = document.getElementById('insight-app');
         if (!root) return;
@@ -659,6 +914,7 @@ const InsightApp = {
         const esc = this.escapeHtml;
         const groups = InsightDataService.getGroups();
         const isProgressView = this.state.viewMode === 'progress';
+        const isDepartmentView = this.state.viewMode === 'department';
 
         const rowsHtml = isProgressView
             ? this.getProgressAgents().map((row, idx) => {
@@ -732,11 +988,16 @@ const InsightApp = {
             <div class="ins-shell">
                 <div class="ins-toolbar">
                     <div class="ins-toolbar-left">
-                        <strong>${isProgressView ? 'Agent Progress' : 'Agent Triggers'}</strong>
-                        <span class="ins-subtle">${isProgressView ? 'Checklist progress with configurable requirements, N/A control, and graduation readiness.' : 'Program-level trainee insight with adjustable action triggers.'}</span>
+                        <strong>${isDepartmentView ? 'Department Overview' : (isProgressView ? 'Agent Progress' : 'Agent Triggers')}</strong>
+                        <span class="ins-subtle">${isDepartmentView
+                            ? 'High-level operational overview powered by trigger, engagement, feedback, and timeline signals.'
+                            : (isProgressView
+                                ? 'Checklist progress with configurable requirements, N/A control, and graduation readiness.'
+                                : 'Program-level trainee insight with adjustable action triggers.')}</span>
                         <div style="display:flex; gap:8px; margin-left:6px;">
                             <button class="sub-tab-btn ${this.state.viewMode === 'triggers' ? 'active' : ''}" onclick="InsightApp.setViewMode('triggers')">Agent Triggers</button>
                             <button class="sub-tab-btn ${this.state.viewMode === 'progress' ? 'active' : ''}" onclick="InsightApp.setViewMode('progress')">Agent Progress</button>
+                            <button class="sub-tab-btn ${this.state.viewMode === 'department' ? 'active' : ''}" onclick="InsightApp.setViewMode('department')">Department Overview</button>
                         </div>
                     </div>
                     <div class="ins-toolbar-right">
@@ -749,37 +1010,39 @@ const InsightApp = {
                     </div>
                 </div>
 
-                <div class="ins-table-wrap">
-                    <table class="ins-table">
-                        <thead>
-                            ${isProgressView
-                                ? `<tr>
-                                    <th style="width:50px;">#</th>
-                                    <th>Agent</th>
-                                    <th>Completed</th>
-                                    <th>Progress</th>
-                                    <th>Access</th>
-                                    <th style="width:120px;">Details</th>
-                                </tr>`
-                                : `<tr>
-                                    <th style="width:50px;">#</th>
-                                    <th>Agent</th>
-                                    <th>Status</th>
-                                    <th>Avg Score</th>
-                                    <th>Late</th>
-                                    <th>Violations</th>
-                                    <th>Quiz Attempts</th>
-                                    <th>Badges</th>
-                                    <th style="width:120px;">Review</th>
-                                </tr>`}
-                        </thead>
-                        <tbody>
-                            ${rowsHtml || `<tr><td colspan="${isProgressView ? '6' : '9'}" style="text-align:center; color:var(--text-muted);">${isProgressView ? 'No trainee agents found for this filter.' : 'No trainee agents currently in Improvement or Critical status for this filter.'}</td></tr>`}
-                        </tbody>
-                    </table>
-                </div>
+                ${isDepartmentView
+                    ? this.renderDepartmentOverview()
+                    : `<div class="ins-table-wrap">
+                        <table class="ins-table">
+                            <thead>
+                                ${isProgressView
+                                    ? `<tr>
+                                        <th style="width:50px;">#</th>
+                                        <th>Agent</th>
+                                        <th>Completed</th>
+                                        <th>Progress</th>
+                                        <th>Access</th>
+                                        <th style="width:120px;">Details</th>
+                                    </tr>`
+                                    : `<tr>
+                                        <th style="width:50px;">#</th>
+                                        <th>Agent</th>
+                                        <th>Status</th>
+                                        <th>Avg Score</th>
+                                        <th>Late</th>
+                                        <th>Violations</th>
+                                        <th>Quiz Attempts</th>
+                                        <th>Badges</th>
+                                        <th style="width:120px;">Review</th>
+                                    </tr>`}
+                            </thead>
+                            <tbody>
+                                ${rowsHtml || `<tr><td colspan="${isProgressView ? '6' : '9'}" style="text-align:center; color:var(--text-muted);">${isProgressView ? 'No trainee agents found for this filter.' : 'No trainee agents currently in Improvement or Critical status for this filter.'}</td></tr>`}
+                            </tbody>
+                        </table>
+                    </div>`}
             </div>
-            ${this.renderDetailDrawer()}
+            ${isDepartmentView ? '' : this.renderDetailDrawer()}
         `;
     }
 };
