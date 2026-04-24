@@ -452,6 +452,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.29 (Global Cleanup + Release Scope Hygiene, 2026-04-24):** Removed cross-module helper collisions that could override shared global UI helpers (`getAvatarHTML`, `refreshApp`, `toggleTheme`), tightened refresh-button targeting for current runtime headers, and added ignore rules for local recovery/cache backup artifacts so release commits stay scoped to product code.
+
 - **v2.6.28 (Trainee Runtime Isolation + Router Cleanup, 2026-04-23):** Finalized startup runtime selection flow so trainee sessions boot directly into the isolated Trainee Portal path, documented isolated Study Notes runtime contracts, removed duplicate loader polling intervals, and consolidated duplicated tab-render routing in `js/main.js` to a shared `renderViewById(...)` path to reduce drift and maintenance risk.
 
 - **v2.6.22 (User Control Explorer + Study Browser Hit-Test Hardening, 2026-04-16):** Expanded Super Admin Data Studio User Control with a folder-style Agent Data Explorer and specific row-level moves both directions (live↔archive) across lifecycle buckets, backed by backup snapshots (`user_control_move_backups`) and rollback-aware move handling. Also hardened Study Browser overlay layering and hidden-tab hit-testing to reduce inconsistent unclickable hotspots in embedded apps (e.g., Q-Contact).
@@ -508,6 +510,13 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Improvement: Trainee Portal and Study Notes loaders now use leaner event/bridge refresh behavior to reduce duplicate background polling.
 - Bug Fix: Shared tab rendering logic was consolidated to reduce duplicate router branches and prevent view-refresh drift across navigation paths.
 - Release: Version bump to `2.6.28` for beta rollout.
+
+## v2.6.29 - 2026-04-24
+
+- Improvement: Global helper collisions were removed so shared UI helpers remain consistent across modules and tabs.
+- Bug Fix: Refresh icon detection now matches current runtime header patterns more safely.
+- Improvement: Local recovery/cache backup artifacts are now ignored from source control for cleaner release scope.
+- Release: Version bump to `2.6.29` for beta rollout.
 
 ## v2.6.25 - 2026-04-20
 

@@ -169,9 +169,11 @@ function getGroupLabel(groupId, count) {
     return `${groupId}${namesDisplay}`;
 }
 
-function toggleTheme() {
-    const isDark = document.body.classList.toggle('light-mode'); 
-    localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
+if (typeof window.toggleTheme !== 'function') {
+    window.toggleTheme = function() {
+        document.body.classList.toggle('light-mode');
+        localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
+    };
 }
 
 function loadAdminTheme() {
@@ -183,8 +185,10 @@ function loadAdminTheme() {
     }
 }
 
-function refreshApp() {
-    location.reload();
+if (typeof window.refreshApp !== 'function') {
+    window.refreshApp = function() {
+        location.reload();
+    };
 }
 
 /* ================= MIGRATION TOOLS ================= */

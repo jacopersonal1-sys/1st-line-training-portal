@@ -10,7 +10,8 @@ let INSIGHT_VIEW_MODE = 'action'; // 'action', 'all', 'progress', 'dept'
 let CURRENT_REVIEW_TARGET = null;
 
 // --- HELPER: AVATAR GENERATOR ---
-function getAvatarHTML(name) {
+// Keep this local to Insight so we don't override the global avatar helper in utils.js.
+function getInsightAvatarHTML(name) {
     if(!name) return '';
     const initials = name.substring(0, 2).toUpperCase();
     let hash = 0;
@@ -446,7 +447,7 @@ function renderProgressView(members, filter, grid, navHTML) {
             revokeBtnHTML = `<div style="margin-top:10px; font-size:0.8rem; color:#27ae60; text-align:center;"><i class="fas fa-check"></i> Access Revoked (Graduated)</div>`;
         }
 
-        const avatar = getAvatarHTML(trainee);
+        const avatar = getInsightAvatarHTML(trainee);
 
         html += `
         <div class="completeness-card" data-search="${trainee.toLowerCase()}" style="margin-bottom:0; transition: transform 0.2s;">
@@ -650,7 +651,7 @@ function buildInsightCard(name, group, data, cycle) {
         ? `<div class="insight-actions" style="margin-top:10px;"><button class="btn-primary btn-sm" onclick="openInsightReview('${name}')" aria-label="${btnText} for ${name}">${btnText}</button></div>`
         : ``;
 
-    const avatar = getAvatarHTML(name);
+    const avatar = getInsightAvatarHTML(name);
 
     return `
     <div class="insight-card ${borderClass}" data-search="${name.toLowerCase()}" style="transition: transform 0.2s, box-shadow 0.2s;">

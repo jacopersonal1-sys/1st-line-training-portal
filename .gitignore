@@ -8,3 +8,9 @@ build/
 *.log
 .DS_Store
 .env
+
+# Local recovery/backup artifacts
+recovery_cache/
+*_Backup_*.json
+recovered_*.json
+rework_comparison_report.json

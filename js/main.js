@@ -3129,7 +3129,12 @@ async function refreshApp() {
     if (_isHardRefreshRunning) return;
     _isHardRefreshRunning = true;
 
-    const icon = document.querySelector('button.icon-btn[onclick="refreshApp()"] i') || document.querySelector('.icon-btn[title="Refresh"] i');
+    const refreshBtn =
+        document.getElementById('btn-runtime-refresh') ||
+        document.querySelector('[data-action="refresh-app"]') ||
+        document.querySelector('button.icon-btn[onclick="refreshApp()"]') ||
+        document.querySelector('.icon-btn[title="Refresh"]');
+    const icon = refreshBtn ? refreshBtn.querySelector('i') : null;
     if (icon) icon.classList.add('fa-spin');
 
     try {
@@ -3535,6 +3540,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.29": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Shared helper collisions were cleaned up so global UI helpers stay consistent across modules.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Refresh icon targeting now supports the current header runtime controls more safely.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Recovery/cache backup artifacts are now ignored from source control to keep release scope cleaner.</li>
+            </ul>`,
         "2.6.28": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Startup runtime selection now routes trainee sessions directly into the isolated Trainee Portal path.</li>
