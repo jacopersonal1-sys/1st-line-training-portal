@@ -452,6 +452,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.30 (Live Session Completion + Stale Recovery Rollout, 2026-04-24):** Hardened Live Assessment completion so `Confirm & Submit` now executes authoritative session close semantics (inactive marker + server row cleanup + local pointer cleanup), preventing completed sessions from resurfacing as active. Expanded Live Booking Integrity with stale-session detection and one-click recovery that archives stale session payloads (`liveSessionRecoveryArchive`), rebuilds missing submission/record artifacts for completed stale sessions, then safely closes stale active rows.
+
 - **v2.6.29 (Global Cleanup + Release Scope Hygiene, 2026-04-24):** Removed cross-module helper collisions that could override shared global UI helpers (`getAvatarHTML`, `refreshApp`, `toggleTheme`), tightened refresh-button targeting for current runtime headers, and added ignore rules for local recovery/cache backup artifacts so release commits stay scoped to product code.
 
 - **v2.6.28 (Trainee Runtime Isolation + Router Cleanup, 2026-04-23):** Finalized startup runtime selection flow so trainee sessions boot directly into the isolated Trainee Portal path, documented isolated Study Notes runtime contracts, removed duplicate loader polling intervals, and consolidated duplicated tab-render routing in `js/main.js` to a shared `renderViewById(...)` path to reduce drift and maintenance risk.
@@ -517,6 +519,13 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Bug Fix: Refresh icon detection now matches current runtime header patterns more safely.
 - Improvement: Local recovery/cache backup artifacts are now ignored from source control for cleaner release scope.
 - Release: Version bump to `2.6.29` for beta rollout.
+
+## v2.6.30 - 2026-04-24
+
+- Bug Fix: Live Assessment Confirm & Submit now closes sessions authoritatively so completed sessions no longer re-open as active.
+- Feature Added: Live Booking Integrity now includes Recover Stale Sessions, which archives stale session payloads and rebuilds missing submission/record artifacts where recoverable.
+- Improvement: Stale live-session filtering now blocks stale rejoin paths tied to completed/cancelled booking states.
+- Release: Version bump to `2.6.30` for stable main channel rollout.
 
 ## v2.6.25 - 2026-04-20
 

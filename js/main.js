@@ -3540,6 +3540,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.30": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live Assessment Confirm &amp; Submit now closes sessions authoritatively so completed sessions do not re-open as active.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Live Booking Integrity now includes Recover Stale Sessions to archive stale session payloads and recover missing submission/record data.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Live session stale-guard filtering now suppresses stale rejoin paths for completed/cancelled booking states.</li>
+            </ul>`,
         "2.6.29": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Shared helper collisions were cleaned up so global UI helpers stay consistent across modules.</li>

@@ -1040,7 +1040,9 @@ async function renderLiveTable() {
                     let actions = '';
                     if (canManageLive) {
                         // Admin: Cancel OR Mark Complete
-                        const existingSession = allLiveSessions.find(s => s.bookingId === booking.id && s.active);
+                        const existingSession = (booking.status === 'Completed' || booking.status === 'Cancelled')
+                            ? null
+                            : allLiveSessions.find(s => String((s && s.bookingId) || '') === String(booking.id) && !!(s && s.active));
 
                         if(!isCompleted) {
                             if (existingSession) {
@@ -1555,6 +1557,100 @@ function buildLiveBookingIntegrityReport(bookings) {
     return report;
 }
 
+const LIVE_SESSION_RECOVERY_ARCHIVE_KEY = 'liveSessionRecoveryArchive';
+const LIVE_SESSION_STALE_MS = 12 * 60 * 60 * 1000;
+
+function buildLiveSessionStaleReport() {
+    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const bookingById = new Map(
+        (Array.isArray(bookings) ? bookings : [])
+            .filter(b => b && b.id)
+            .map(b => [String(b.id), b])
+    );
+
+    const now = Date.now();
+    const items = [];
+
+    (Array.isArray(sessions) ? sessions : []).forEach(session => {
+        if (!session || !session.active) return;
+
+        const sessionId = String(session.sessionId || '');
+        const bookingId = String(session.bookingId || '');
+        const booking = bookingId ? bookingById.get(bookingId) : null;
+        const bookingStatus = String((booking && booking.status) || '').trim().toLowerCase();
+        const startTs = Number(session.startTime || 0) || 0;
+        const ageMs = startTs > 0 ? Math.max(0, now - startTs) : 0;
+        const ageMinutes = Math.round(ageMs / 60000);
+
+        let reason = '';
+        if (bookingStatus === 'completed') reason = 'booking_completed';
+        else if (bookingStatus === 'cancelled') reason = 'booking_cancelled';
+        else if (bookingId && !booking) reason = 'booking_missing';
+        else if (startTs > 0 && ageMs > LIVE_SESSION_STALE_MS) reason = 'stale_age';
+
+        if (!reason) return;
+        items.push({
+            sessionId,
+            trainee: session.trainee || 'Unknown',
+            trainer: session.trainer || 'Unknown',
+            bookingId: bookingId || '(none)',
+            bookingStatus: bookingStatus || 'unknown',
+            reason,
+            ageMinutes,
+            recoverable: reason === 'booking_completed' || reason === 'booking_cancelled'
+        });
+    });
+
+    const countByReason = items.reduce((acc, item) => {
+        acc[item.reason] = (acc[item.reason] || 0) + 1;
+        return acc;
+    }, {});
+
+    const recoverable = items.filter(i => i.recoverable).length;
+    return {
+        total: items.length,
+        recoverable,
+        counts: countByReason,
+        items
+    };
+}
+
+function renderLiveSessionStaleRows(report) {
+    const rows = (report.items || []).slice(0, 8).map(item => {
+        const reasonLabel = item.reason.replace(/_/g, ' ');
+        return `<div style="display:flex; justify-content:space-between; gap:10px; margin-bottom:6px;">
+            <span>${escapeHtml(item.trainee)} (${escapeHtml(item.sessionId)})</span>
+            <span style="color:var(--text-muted);">${escapeHtml(reasonLabel)}</span>
+        </div>`;
+    }).join('');
+
+    const moreCount = Math.max(0, (report.items || []).length - 8);
+    const moreHtml = moreCount > 0
+        ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">+${moreCount} more stale sessions</div>`
+        : '';
+
+    return `
+        <div style="padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <strong>Stale Live Sessions</strong>
+                <span class="status-badge" style="${report.total > 0 ? 'background:#7f1d1d; color:#fecaca;' : 'background:#14532d; color:#bbf7d0;'}">${report.total}</span>
+            </div>
+            ${rows ? `<div style="margin-top:8px; font-size:0.82rem;">${rows}${moreHtml}</div>` : '<div style="margin-top:8px; font-size:0.82rem; color:var(--text-muted);">No stale live sessions detected.</div>'}
+        </div>
+    `;
+}
+
+function getLiveSessionRecoveryArchive() {
+    const data = JSON.parse(localStorage.getItem(LIVE_SESSION_RECOVERY_ARCHIVE_KEY) || '[]');
+    return Array.isArray(data) ? data : [];
+}
+
+function saveLiveSessionRecoveryArchive(entries) {
+    const safeEntries = Array.isArray(entries) ? entries.slice(0, 500) : [];
+    localStorage.setItem(LIVE_SESSION_RECOVERY_ARCHIVE_KEY, JSON.stringify(safeEntries));
+}
+
 function renderLiveBookingIntegrityRows(report) {
     const sections = [];
     const pushSection = (title, count, detailsHtml) => {
@@ -1624,6 +1720,7 @@ window.openLiveBookingIntegrityModal = function() {
     if (!isLiveBookingManager()) return;
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
     const report = buildLiveBookingIntegrityReport(bookings);
+    const staleReport = buildLiveSessionStaleReport();
 
     closeLiveBookingIntegrityModal();
     const modalHtml = `
@@ -1633,7 +1730,7 @@ window.openLiveBookingIntegrityModal = function() {
                     <h3 style="margin:0;"><i class="fas fa-shield-alt" style="color:var(--primary);"></i> Live Booking Integrity Check</h3>
                     <button class="btn-secondary" onclick="closeLiveBookingIntegrityModal()">&times;</button>
                 </div>
-                <div style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin-bottom:12px;">
+                <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin-bottom:12px;">
                     <div style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
                         <div style="font-size:0.75rem; color:var(--text-muted);">Total Bookings</div>
                         <div style="font-size:1.15rem; font-weight:700;">${report.total}</div>
@@ -1646,13 +1743,19 @@ window.openLiveBookingIntegrityModal = function() {
                         <div style="font-size:0.75rem; color:var(--text-muted);">Integrity Issues</div>
                         <div style="font-size:1.15rem; font-weight:700;">${report.totalIssues}</div>
                     </div>
+                    <div style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:${staleReport.total > 0 ? 'rgba(127,29,29,0.18)' : 'rgba(20,83,45,0.18)'}; border-color:${staleReport.total > 0 ? '#7f1d1d' : '#14532d'};">
+                        <div style="font-size:0.75rem; color:var(--text-muted);">Stale Sessions</div>
+                        <div style="font-size:1.15rem; font-weight:700;">${staleReport.total}</div>
+                    </div>
                 </div>
                 <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; max-height:52vh; overflow:auto; padding-right:3px;">
                     ${renderLiveBookingIntegrityRows(report)}
+                    ${renderLiveSessionStaleRows(staleReport)}
                 </div>
                 <div style="display:flex; justify-content:space-between; gap:10px; margin-top:14px;">
                     <button class="btn-secondary" onclick="openLiveBookingIntegrityModal()"><i class="fas fa-sync"></i> Refresh Scan</button>
                     <div style="display:flex; gap:10px;">
+                        <button class="btn-warning" onclick="runLiveSessionStaleRecovery()"><i class="fas fa-life-ring"></i> Recover Stale Sessions</button>
                         <button class="btn-danger" onclick="runLiveBookingAutoRepair()"><i class="fas fa-wrench"></i> Auto-Repair Issues</button>
                         <button class="btn-primary" onclick="closeLiveBookingIntegrityModal()">Close</button>
                     </div>
@@ -1661,6 +1764,188 @@ window.openLiveBookingIntegrityModal = function() {
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.runLiveSessionStaleRecovery = async function() {
+    if (!isLiveBookingManager()) return;
+
+    const staleReport = buildLiveSessionStaleReport();
+    if (staleReport.total === 0) {
+        if (typeof showToast === 'function') showToast('No stale live sessions found.', 'success');
+        return;
+    }
+
+    const recoverableItems = (staleReport.items || []).filter(i => i.recoverable);
+    if (recoverableItems.length === 0) {
+        if (typeof showToast === 'function') showToast('Stale sessions found, but none are safe for auto-recovery.', 'warning');
+        return;
+    }
+
+    if (!confirm(`Recover ${recoverableItems.length} stale live session(s)?\n\nThis will archive session payloads first, recover missing submissions/records where needed, then close stale sessions.`)) return;
+
+    let sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    sessions = Array.isArray(sessions) ? sessions : [];
+    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    bookings = Array.isArray(bookings) ? bookings : [];
+    let submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    submissions = Array.isArray(submissions) ? submissions : [];
+    let records = JSON.parse(localStorage.getItem('records') || '[]');
+    records = Array.isArray(records) ? records : [];
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const nowIso = new Date().toISOString();
+
+    const bookingById = new Map(bookings.filter(b => b && b.id).map(b => [String(b.id), b]));
+    const testById = new Map((Array.isArray(tests) ? tests : []).filter(t => t && t.id).map(t => [String(t.id), t]));
+    const archive = getLiveSessionRecoveryArchive();
+
+    let archivedCount = 0;
+    let closedCount = 0;
+    let recoveredSubmissionCount = 0;
+    let recoveredRecordCount = 0;
+
+    const findGroupForTrainee = (traineeName) => {
+        const normalized = normalizeScheduleText(traineeName);
+        for (const [groupId, members] of Object.entries(rosters || {})) {
+            if (!Array.isArray(members)) continue;
+            if (members.some(m => normalizeScheduleText(m) === normalized)) return groupId;
+        }
+        return 'Live-Session';
+    };
+
+    for (const item of recoverableItems) {
+        const session = sessions.find(s => String((s && s.sessionId) || '') === String(item.sessionId));
+        if (!session) continue;
+
+        const booking = session.bookingId ? bookingById.get(String(session.bookingId)) : null;
+        const test = testById.get(String(session.testId || ''));
+
+        archive.unshift({
+            id: `live_recovery_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            recoveredAt: nowIso,
+            recoveredBy: CURRENT_USER?.user || 'system',
+            reason: item.reason,
+            sessionSnapshot: session,
+            bookingSnapshot: booking || null
+        });
+        archivedCount++;
+
+        const canRebuildArtifacts = item.reason === 'booking_completed';
+        if (canRebuildArtifacts) {
+            let score = Number(booking && booking.score);
+            if (!Number.isFinite(score)) {
+                const questions = Array.isArray(test && test.questions) ? test.questions : [];
+                const maxScore = questions.reduce((sum, q) => sum + (parseFloat(q?.points || 1) || 0), 0);
+                const totalScore = questions.reduce((sum, q, idx) => sum + (parseFloat((session.scores && session.scores[idx]) || 0) || 0), 0);
+                score = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+            }
+            if (!Number.isFinite(score)) score = 0;
+
+            const existingSubIdx = submissions.findIndex(s =>
+                (session.bookingId && String(s.bookingId || '') === String(session.bookingId)) ||
+                String(s.liveSessionId || '') === String(session.sessionId)
+            );
+
+            const subId = existingSubIdx > -1 ? submissions[existingSubIdx].id : Date.now().toString() + '_' + Math.random().toString(36).slice(2, 6);
+            const testTitle = (test && test.title) || (booking && booking.assessment) || 'Live Assessment';
+            const submissionPayload = {
+                id: subId,
+                bookingId: session.bookingId || null,
+                liveSessionId: session.sessionId,
+                testId: session.testId || (booking && booking.assessmentId) || null,
+                assessmentId: session.testId || (booking && booking.assessmentId) || null,
+                testTitle,
+                testSnapshot: test || null,
+                trainee: session.trainee || (booking && booking.trainee) || '',
+                date: nowIso.split('T')[0],
+                answers: session.answers || {},
+                status: 'completed',
+                score,
+                type: 'live',
+                marker: session.trainer || CURRENT_USER?.user || 'system',
+                comments: session.comments || {},
+                scores: session.scores || {},
+                lastModified: nowIso,
+                modifiedBy: CURRENT_USER?.user || 'system',
+                recoveryTag: 'stale_live_session_recovery'
+            };
+
+            if (existingSubIdx > -1) {
+                submissions[existingSubIdx] = { ...submissions[existingSubIdx], ...submissionPayload };
+            } else {
+                submissions.push(submissionPayload);
+                recoveredSubmissionCount++;
+            }
+
+            const groupId = findGroupForTrainee(submissionPayload.trainee);
+            const existingRecordIdx = records.findIndex(r =>
+                String(r.submissionId || '') === String(subId) ||
+                (
+                    normalizeScheduleText(r.trainee) === normalizeScheduleText(submissionPayload.trainee) &&
+                    (
+                        (submissionPayload.assessmentId && String(r.assessmentId || '') === String(submissionPayload.assessmentId)) ||
+                        normalizeScheduleText(r.assessment) === normalizeScheduleText(submissionPayload.testTitle)
+                    )
+                )
+            );
+
+            const recordPayload = {
+                id: existingRecordIdx > -1 ? records[existingRecordIdx].id : Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+                groupID: groupId,
+                trainee: submissionPayload.trainee,
+                assessment: submissionPayload.testTitle,
+                score,
+                date: submissionPayload.date,
+                phase: submissionPayload.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment',
+                cycle: 'Live',
+                link: 'Live-Session',
+                docSaved: true,
+                submissionId: subId,
+                assessmentId: submissionPayload.assessmentId
+            };
+
+            if (existingRecordIdx > -1) {
+                records[existingRecordIdx] = { ...records[existingRecordIdx], ...recordPayload };
+            } else {
+                records.push(recordPayload);
+                recoveredRecordCount++;
+            }
+        }
+
+        sessions = sessions.filter(s => String((s && s.sessionId) || '') !== String(session.sessionId));
+        if (String(localStorage.getItem('currentLiveSessionId') || '') === String(session.sessionId)) {
+            localStorage.removeItem('currentLiveSessionId');
+        }
+        const currentLocalSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        if (String(currentLocalSession.sessionId || '') === String(session.sessionId)) {
+            localStorage.setItem('liveSession', JSON.stringify({ active: false, sessionId: session.sessionId, endedAt: Date.now() }));
+        }
+
+        if (window.supabaseClient) {
+            try {
+                await window.supabaseClient.from('live_sessions').delete().eq('id', session.sessionId);
+            } catch (e) {
+                console.warn('Failed to delete stale live session row:', session.sessionId, e);
+            }
+        }
+        closedCount++;
+    }
+
+    saveLiveSessionRecoveryArchive(archive);
+    localStorage.setItem('liveSessions', JSON.stringify(sessions));
+    localStorage.setItem('submissions', JSON.stringify(submissions));
+    localStorage.setItem('records', JSON.stringify(records));
+    if (typeof emitDataChange === 'function') emitDataChange('liveSessions', 'stale_recovery_cleanup');
+
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['liveSessions', 'submissions', 'records'], true);
+    }
+
+    if (typeof renderLiveTable === 'function') renderLiveTable();
+    if (typeof showToast === 'function') {
+        showToast(`Recovered ${closedCount} stale session(s). Archived ${archivedCount}, rebuilt ${recoveredSubmissionCount} submission(s), ${recoveredRecordCount} record(s).`, 'success');
+    }
+    openLiveBookingIntegrityModal();
 };
 
 window.runLiveBookingAutoRepair = async function() {

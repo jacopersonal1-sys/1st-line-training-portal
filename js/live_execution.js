@@ -19,6 +19,59 @@ function getLiveBookingById(bookingId) {
     return bookings.find(b => String(b.id) === String(bookingId)) || null;
 }
 
+function isLiveSessionBookingOpen(session) {
+    if (!session || !session.bookingId) return true;
+    const booking = getLiveBookingById(session.bookingId);
+    if (!booking) return true;
+    const status = String(booking.status || '').trim().toLowerCase();
+    return status !== 'completed' && status !== 'cancelled';
+}
+
+function cleanupLocalLiveSessionState(sessionId) {
+    if (!sessionId) return;
+
+    const currentSessionId = String(localStorage.getItem('currentLiveSessionId') || '');
+    if (currentSessionId === String(sessionId)) {
+        localStorage.removeItem('currentLiveSessionId');
+    }
+
+    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    allSessions = Array.isArray(allSessions) ? allSessions : [];
+    const nextSessions = allSessions.filter(s => String((s && s.sessionId) || '') !== String(sessionId));
+    localStorage.setItem('liveSessions', JSON.stringify(nextSessions));
+    if (typeof emitDataChange === 'function') emitDataChange('liveSessions', 'local_close_cleanup');
+
+    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    if (localSession && String(localSession.sessionId || '') === String(sessionId)) {
+        localStorage.setItem('liveSession', JSON.stringify({ active: false, sessionId }));
+    }
+}
+
+async function closeLiveSessionAuthoritatively(session) {
+    if (!session || !session.sessionId) return;
+
+    // Mark inactive in local proxy immediately.
+    const closedSession = { ...session, active: false, endedAt: Date.now() };
+    localStorage.setItem('liveSession', JSON.stringify(closedSession));
+
+    // First write inactive state (for realtime listeners), then hard-delete row.
+    await updateGlobalSessionArray(closedSession, true);
+    if (window.supabaseClient) {
+        try {
+            const { error } = await window.supabaseClient
+                .from('live_sessions')
+                .delete()
+                .eq('id', closedSession.sessionId);
+            if (error) throw error;
+        } catch (e) {
+            console.warn('Live session delete failed after close marker:', e);
+        }
+    }
+
+    // Remove ghost references locally regardless of network result.
+    cleanupLocalLiveSessionState(closedSession.sessionId);
+}
+
 function resolveLiveTestDefinition(tests, assessmentName, assessmentId) {
     if (!Array.isArray(tests)) return null;
     if (assessmentId) {
@@ -182,6 +235,15 @@ async function syncLiveSessionState() {
 function processLiveSessionState(allSessions) {
     // SAFETY GUARD: Prevent execution if not logged in (e.g., during initial boot sync on login screen)
     if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER) return;
+
+    // Guard against stale ghost sessions linked to already completed/cancelled bookings.
+    allSessions = Array.isArray(allSessions) ? allSessions : [];
+    const sanitizedSessions = allSessions.filter(s => isLiveSessionBookingOpen(s));
+    if (sanitizedSessions.length !== allSessions.length) {
+        localStorage.setItem('liveSessions', JSON.stringify(sanitizedSessions));
+        if (typeof emitDataChange === 'function') emitDataChange('liveSessions', 'stale_booking_guard');
+    }
+    allSessions = sanitizedSessions;
 
     // FIND MY RELEVANT SESSION
     let myServerSession = null;
@@ -1817,20 +1879,9 @@ async function confirmAndSaveLiveSession() {
     }
     localStorage.setItem('records', JSON.stringify(records));
 
-    // 4. Clear Session
-    session.active = false;
-    localStorage.setItem('liveSession', JSON.stringify(session));
-
-    // 5. Sync All
-    await updateGlobalSessionArray(session, false); // Sync session state first
+    // 4/5. Close session authoritatively + sync assessment artifacts
+    await closeLiveSessionAuthoritatively(session);
     if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], true);
-    
-    // HARD DELETE: Remove completed session from real-time table to prevent bloat
-    if (window.supabaseClient && session.sessionId) {
-        // Use 'safe' delete (fire and forget) to prevent UI hang on network error
-        // We don't await this because the local state is already cleared.
-        window.supabaseClient.from('live_sessions').delete().eq('id', session.sessionId).then(() => {});
-    }
 
     if(typeof showToast === 'function') showToast(`Session Completed. Score: ${percentage}%`, "success");
     showTab('live-assessment');
@@ -1839,15 +1890,7 @@ async function confirmAndSaveLiveSession() {
 async function endLiveSession() {
     if(!confirm("Abort session? Data will be lost.")) return;
     const session = JSON.parse(localStorage.getItem('liveSession'));
-    session.active = false;
-    localStorage.setItem('liveSession', JSON.stringify(session));
-    
-    // HARD DELETE: Remove active session row from server to prevent stale data
-    if (window.supabaseClient && session.sessionId) {
-        await window.supabaseClient.from('live_sessions').delete().eq('id', session.sessionId);
-    }
-
-    await updateGlobalSessionArray(session, false);
+    await closeLiveSessionAuthoritatively(session);
     showTab('live-assessment');
 }
 
