@@ -3207,6 +3207,25 @@ function toggleNotifications() {
     if(!drop.classList.contains('hidden')) updateNotifications();
 }
 
+function getLocalProblemReportCount() {
+    let rawReports = [];
+    try {
+        rawReports = (typeof safeLocalParse === 'function')
+            ? safeLocalParse('error_reports', [])
+            : JSON.parse(localStorage.getItem('error_reports') || '[]');
+    } catch (err) {
+        rawReports = [];
+    }
+
+    return (Array.isArray(rawReports) ? rawReports : []).filter(entry => {
+        const report = entry && entry.data && typeof entry.data === 'object' ? entry.data : entry;
+        if (!report || typeof report !== 'object') return false;
+        const type = String(report.type || report.reportType || '').toLowerCase();
+        const source = String(report.source || report.origin || '').toLowerCase();
+        return type === 'user_report' || source === 'report_problem' || !!report.issueDetail;
+    }).length;
+}
+
 function updateNotifications() {
     const notifList = document.getElementById('notifList');
     const badge = document.getElementById('notifBadge');
@@ -3275,7 +3294,24 @@ function updateNotifications() {
         }
     }
 
-    // 3. EMPTY STATE
+    // 3. SUPER ADMIN PROBLEM REPORT NOTIFICATIONS
+    if (CURRENT_USER && CURRENT_USER.role === 'super_admin') {
+        const problemReportCount = getLocalProblemReportCount();
+        const seenProblemReports = parseInt(localStorage.getItem('last_seen_problem_report_count') || '0', 10) || 0;
+        const newProblemReports = Math.max(0, problemReportCount - seenProblemReports);
+
+        if (newProblemReports > 0) {
+            count += newProblemReports;
+            notifList.innerHTML += `
+            <div class="notif-item" onclick="viewProblemReports()" style="border-left:3px solid #ff6b6b;" aria-label="${newProblemReports} new problem reports">
+                <i class="fas fa-question-circle" style="color:#ff6b6b;"></i>
+                <strong>${newProblemReports} New Problem Report${newProblemReports === 1 ? '' : 's'}</strong>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">Open Problem Reports to review.</div>
+            </div>`;
+        }
+    }
+
+    // 4. EMPTY STATE
     if (notifList.innerHTML === '') {
         notifList.innerHTML = '<div style="padding:15px; text-align:center; color:#888;">No new notifications</div>';
     }
@@ -3558,6 +3594,7 @@ function getChangelog(version) {
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Row uploads now collapse duplicate IDs before batch upsert so records cannot fail with duplicate ON CONFLICT updates.</li>
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Trainees are now released from the Live Assessment Arena when a trainer ends the session, even if the realtime delete event is missed.</li>
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Network Diagnostics now sends lightweight background reports every 10 minutes, includes scheduled group online counts, and captures broader console/runtime issues.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Problem Reports now refresh from the server directly, trainee-submitted reports sync correctly, and Super Admins get notification-bell alerts for new reports.</li>
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Study Notes are now local-only for trainees with a section rail and page-tab workspace that avoids refreshes while typing.</li>
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Activity Monitor summaries now let admins open a per-trainee violation view.</li>
             </ul>`,

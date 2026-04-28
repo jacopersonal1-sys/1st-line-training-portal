@@ -2383,6 +2383,44 @@ function getErrorReportCollections() {
     return { allReports, systemReports, problemReports };
 }
 
+async function refreshErrorReportsFromServer() {
+    if (!window.supabaseClient) return getErrorReportCollections();
+
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('error_reports')
+            .select('id, data, updated_at')
+            .order('updated_at', { ascending: false })
+            .limit(500);
+
+        if (error) throw error;
+
+        const remoteReports = (Array.isArray(data) ? data : []).map(row => {
+            const report = row && row.data && typeof row.data === 'object' ? { ...row.data } : {};
+            if (!report.id && row.id) report.id = row.id;
+            if (!report.timestamp && row.updated_at) report.timestamp = row.updated_at;
+            return report;
+        }).filter(report => report && report.id);
+
+        const localReports = getErrorReportCollections().allReports;
+        const merged = new Map();
+        localReports.concat(remoteReports).forEach(report => {
+            if (!report || !report.id) return;
+            merged.set(String(report.id), report);
+        });
+
+        const ordered = Array.from(merged.values())
+            .sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
+            .slice(-500);
+
+        localStorage.setItem('error_reports', JSON.stringify(ordered));
+    } catch (err) {
+        console.warn("Problem report refresh failed:", err);
+    }
+
+    return getErrorReportCollections();
+}
+
 function escapeReportHtml(value) {
     const str = String(value || '');
     if (typeof escapeHTML === 'function') return escapeHTML(str);
@@ -2395,10 +2433,7 @@ function escapeReportHtml(value) {
 }
 
 async function viewSystemErrors() {
-    // Force pull latest errors to ensure list is populated
-    if(typeof loadFromServer === 'function') await loadFromServer(true);
-
-    const { systemReports: reports } = getErrorReportCollections();
+    const { systemReports: reports } = await refreshErrorReportsFromServer();
     
     // Update "Last Seen" count to stop notifications
     localStorage.setItem('last_seen_error_count', reports.length.toString());
@@ -2472,9 +2507,11 @@ async function clearSystemErrors() {
 }
 
 async function viewProblemReports() {
-    if(typeof loadFromServer === 'function') await loadFromServer(true);
-    const { problemReports: reports } = getErrorReportCollections();
+    const { problemReports: reports } = await refreshErrorReportsFromServer();
     const uniqueUsers = new Set(reports.map(r => r.user)).size;
+
+    localStorage.setItem('last_seen_problem_report_count', reports.length.toString());
+    if (typeof updateNotifications === 'function') updateNotifications();
 
     let html = `<div class="modal-overlay" id="problemReportModal" style="z-index:10002;">
         <div class="modal-box" style="width:980px; max-height:90vh; display:flex; flex-direction:column;">
@@ -2584,6 +2621,9 @@ async function clearProblemReports() {
     if (typeof saveToServer === 'function') {
         await saveToServer(['error_reports'], true, true);
     }
+
+    localStorage.setItem('last_seen_problem_report_count', '0');
+    if (typeof updateNotifications === 'function') updateNotifications();
 
     const modal = document.getElementById('problemReportModal');
     if (modal) modal.remove();

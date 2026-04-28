@@ -74,8 +74,8 @@ window.NetworkDiag = {
                 .net-filter-group input { margin:0; }
                 .net-console-view { margin-top:10px; border-top:1px dashed var(--border-color); padding-top:10px; }
                 .net-console-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
-                .net-console-list { max-height:160px; overflow:auto; background:rgba(0,0,0,0.16); border:1px solid var(--border-color); border-radius:6px; }
-                .net-console-row { display:grid; grid-template-columns:72px 70px 1fr; gap:8px; padding:6px 8px; border-bottom:1px solid var(--border-color); font-size:0.78rem; align-items:start; }
+                .net-console-list { max-height:280px; overflow:auto; background:transparent; border:none; border-radius:0; padding-right:4px; }
+                .net-console-row { display:grid; grid-template-columns:72px 70px 1fr; gap:8px; padding:8px 0; border-bottom:1px solid var(--border-color); font-size:0.78rem; align-items:start; }
                 .net-console-row:last-child { border-bottom:none; }
                 .net-console-level-error { color:#ff5252; font-weight:bold; }
                 .net-console-level-warn { color:#f1c40f; font-weight:bold; }
@@ -955,6 +955,8 @@ window.NetworkDiag = {
         window.__NETWORK_DIAG_CONSOLE_CAPTURED = true;
         window.NETWORK_DIAG_CONSOLE_EVENTS = window.NETWORK_DIAG_CONSOLE_EVENTS || [];
 
+        if (Array.isArray(window.CONSOLE_HISTORY)) return;
+
         const pushEvent = (level, args, source = 'console') => {
             try {
                 const events = window.NETWORK_DIAG_CONSOLE_EVENTS || [];
@@ -1017,11 +1019,28 @@ window.NetworkDiag = {
     },
 
     getConsoleEvents: function() {
-        return (window.NETWORK_DIAG_CONSOLE_EVENTS || []).slice(-12).reverse();
+        const globalEvents = Array.isArray(window.CONSOLE_HISTORY)
+            ? window.CONSOLE_HISTORY.map(item => ({
+                time: item.time,
+                level: item.type || 'log',
+                source: 'global',
+                message: item.msg || ''
+            }))
+            : [];
+        const localEvents = Array.isArray(window.NETWORK_DIAG_CONSOLE_EVENTS)
+            ? window.NETWORK_DIAG_CONSOLE_EVENTS
+            : [];
+
+        return globalEvents.concat(localEvents)
+            .filter(item => item && item.message)
+            .sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0))
+            .slice(-30)
+            .reverse();
     },
 
     clearConsoleCapture: function() {
         window.NETWORK_DIAG_CONSOLE_EVENTS = [];
+        if (Array.isArray(window.CONSOLE_HISTORY)) window.CONSOLE_HISTORY = [];
         this.renderConsoleView();
         this.refreshPopout();
     },
@@ -1202,8 +1221,8 @@ window.NetworkDiag = {
                 .ok { color:#2ecc71; } .warn { color:#f1c40f; } .bad { color:#ff5252; }
                 .summary { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; }
                 .summary .value { font-size:18px; }
-                .console-list { max-height:160px; overflow:auto; margin-top:8px; border-top:1px solid #2a3343; padding-top:6px; }
-                .console-row { display:grid; grid-template-columns:68px 60px 1fr; gap:6px; padding:5px 0; border-bottom:1px solid #2a3343; font-size:12px; }
+                .console-list { max-height:280px; overflow:auto; margin-top:8px; padding-right:4px; }
+                .console-row { display:grid; grid-template-columns:68px 60px 1fr; gap:6px; padding:7px 0; border-bottom:1px solid #2a3343; font-size:12px; }
                 .console-msg { white-space:pre-wrap; overflow-wrap:anywhere; }
                 @media (max-width: 760px), (max-height: 560px) {
                     body { overflow:auto; }

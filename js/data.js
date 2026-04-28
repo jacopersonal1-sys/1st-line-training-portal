@@ -156,6 +156,14 @@ function isRowOwnedByCurrentTrainee(localKey, rowData) {
     return true;
 }
 
+function isUserProblemReport(item) {
+    if (!item || typeof item !== 'object') return false;
+    const data = item.data && typeof item.data === 'object' ? item.data : item;
+    const type = String(data.type || data.reportType || '').toLowerCase();
+    const source = String(data.source || data.origin || '').toLowerCase();
+    return type === 'user_report' || source === 'report_problem' || !!data.issueDetail;
+}
+
 // --- NEW: DEBOUNCED SAVE QUEUE (PERFORMANCE) ---
 // This prevents the UI from freezing on large data saves by queueing the save
 // and processing it a few seconds later in the background.
@@ -1904,6 +1912,9 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 // 1. Identify Changed Items (Delta)
                     if (Array.isArray(localContent)) {
                     localContent.forEach(item => {
+                        if (isTraineeRuntime() && key === 'error_reports' && !isUserProblemReport(item)) {
+                            return;
+                        }
                         // Ensure ID exists
                         if (!item.id) {
                             // Use deterministic IDs for 'users' to avoid duplicate rows across clients
@@ -3719,6 +3730,9 @@ function processIncomingDataQueue() {
                 items = dedupeArrayByIdentity(localKey, items, 'server_wins');
                 localStorage.setItem(localKey, JSON.stringify(items));
                 emitDataChange(localKey, 'realtime');
+                if (localKey === 'error_reports' && typeof updateNotifications === 'function') {
+                    updateNotifications();
+                }
             });
             
             // Soft UI Refreshes based on active view
