@@ -5,10 +5,13 @@ window.NetworkDiag = {
     isRunning: false,
     interval: null,
     reportInterval: null,
+    backgroundReportInterval: null,
+    backgroundReportInFlight: null,
     dashboardInterval: null,
     popoutInterval: null,
     popoutWindow: null,
     oneHourMs: 60 * 60 * 1000,
+    reportEveryMs: 10 * 60 * 1000,
     consoleLimit: 80,
     history: { gateway: [], internet: [], server: [], dbQuery: [] },
     lastResults: {
@@ -96,6 +99,7 @@ window.NetworkDiag = {
 
         const btn = document.getElementById('btn-sidebar-net-test');
         if (btn) btn.onclick = () => this.openModal();
+        this.startBackgroundReporting();
     },
 
     openModal: function() {
@@ -243,7 +247,6 @@ window.NetworkDiag = {
 
         this.runLoop();
         this.interval = setInterval(() => this.runLoop(), 2000);
-        this.reportInterval = setInterval(() => this.reportToCloud(), 600000);
     },
 
     stopTests: function() {
@@ -268,6 +271,33 @@ window.NetworkDiag = {
         this.dashboardInterval = null;
     },
 
+    startBackgroundReporting: function() {
+        if (this.backgroundReportInterval) return;
+        const clientId = localStorage.getItem('client_id') || '';
+        const spreadMs = Array.from(clientId).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 90000;
+        setTimeout(() => this.runBackgroundReport(), 30000 + spreadMs);
+        this.backgroundReportInterval = setInterval(() => this.runBackgroundReport(), this.reportEveryMs);
+    },
+
+    runBackgroundReport: async function() {
+        if (this.backgroundReportInFlight) return this.backgroundReportInFlight;
+        if (!window.CURRENT_USER || !window.supabaseClient || typeof require === 'undefined') return null;
+
+        this.backgroundReportInFlight = (async () => {
+            try {
+                await this.ensurePublicIP();
+                await this.runDiagnosticPass({ render: false, forceDbQuery: true });
+                await this.reportToCloud();
+            } catch (error) {
+                console.warn('Background network diagnostics report failed:', error);
+            } finally {
+                this.backgroundReportInFlight = null;
+            }
+        })();
+
+        return this.backgroundReportInFlight;
+    },
+
     runLoop: async function() {
         const modal = document.getElementById('netDiagModal');
         const popoutActive = this.popoutWindow && !this.popoutWindow.closed;
@@ -276,35 +306,55 @@ window.NetworkDiag = {
             return;
         }
 
+        try {
+            await this.runDiagnosticPass({ render: true, forceDbQuery: false });
+        } catch (error) {
+            console.warn('Network diagnostics loop failed:', error);
+        }
+    },
+
+    runDiagnosticPass: async function(options = {}) {
         if (typeof require === 'undefined') return;
         const { ipcRenderer } = require('electron');
+        const render = options.render !== false;
+        const forceDbQuery = options.forceDbQuery === true;
 
-        try {
-            const sys = await ipcRenderer.invoke('get-system-stats');
-            this.stats = sys || this.stats;
-            this.updateSystemStats();
+        const sys = await ipcRenderer.invoke('get-system-stats');
+        this.stats = sys || this.stats;
+        if (render) this.updateSystemStats();
 
-            const [pGate, pNet, pSrv, pDb] = await Promise.all([
-                ipcRenderer.invoke('perform-network-test', this.config.gateway),
-                ipcRenderer.invoke('perform-network-test', this.config.internet),
-                ipcRenderer.invoke('perform-network-test', this.config.server),
-                this.maybeTestDbDataConnection()
-            ]);
+        const [pGate, pNet, pSrv, pDb] = await Promise.all([
+            ipcRenderer.invoke('perform-network-test', this.config.gateway),
+            ipcRenderer.invoke('perform-network-test', this.config.internet),
+            ipcRenderer.invoke('perform-network-test', this.config.server),
+            forceDbQuery ? this.testDbDataConnection() : this.maybeTestDbDataConnection()
+        ]);
 
-            this.updateMetric('gate', pGate);
-            this.updateMetric('net', pNet);
-            this.updateMetric('srv', pSrv);
-            if (pDb) this.updateMetric('dbq', pDb);
+        this.updateMetric('gate', pGate);
+        this.updateMetric('net', pNet);
+        this.updateMetric('srv', pSrv);
+        if (pDb) this.updateMetric('dbq', pDb);
 
+        if (render) {
             this.analyze();
             this.renderFlow();
             this.renderAgentStatus();
             this.renderConsoleView();
             this.drawLatencyGraph();
             this.refreshPopout();
-        } catch (error) {
-            console.warn('Network diagnostics loop failed:', error);
         }
+    },
+
+    ensurePublicIP: async function() {
+        if (this.publicIP && this.publicIP !== 'Loading...' && this.publicIP !== 'Unknown') return this.publicIP;
+        try {
+            const res = await fetch('https://api.ipify.org?format=json');
+            const data = await res.json();
+            this.publicIP = data.ip || 'Unknown';
+        } catch (error) {
+            this.publicIP = 'Unknown';
+        }
+        return this.publicIP;
     },
 
     updateSystemStats: function() {
