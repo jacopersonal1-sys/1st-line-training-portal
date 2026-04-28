@@ -3588,6 +3588,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.33": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Main-channel rollout for Network Diagnostics, Live Assessment stability, local trainee Study Notes, Activity Monitor summaries, and Problem Report notifications.</li>
+            </ul>`,
         "2.6.32": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Realtime Presence is now disabled in favour of the existing database heartbeat to stop repeated CLOSED/SUBSCRIBED reconnect loops during live assessments.</li>
