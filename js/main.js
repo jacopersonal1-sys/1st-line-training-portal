@@ -3540,6 +3540,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.32": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Realtime Presence is now disabled in favour of the existing database heartbeat to stop repeated CLOSED/SUBSCRIBED reconnect loops during live assessments.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Row uploads now collapse duplicate IDs before batch upsert so records cannot fail with duplicate ON CONFLICT updates.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Fallback polling now stays focused on sessions, Live Assessment, and Vetting flows, with less background churn from live bookings.</li>
+            </ul>`,
         "2.6.31": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Network Diagnostics now includes an admin-only second-screen overlay with latency history, DB data health, and agent status filters.</li>

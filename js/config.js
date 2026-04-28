@@ -50,7 +50,15 @@ window.initSupabaseClient = function() {
                 return window.supabaseClient;
             }
 
-            const options = { global: { headers: { 'ngrok-skip-browser-warning': 'true' } } };
+            const options = {
+                global: { headers: { 'ngrok-skip-browser-warning': 'true' } },
+                auth: {
+                    persistSession: false,
+                    autoRefreshToken: false,
+                    detectSessionInUrl: false,
+                    storageKey: `sb-${activeTarget}-stateless-auth`
+                }
+            };
             window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
             window.SUPABASE_ACTIVE_URL = SUPABASE_URL;
             window.SUPABASE_ACTIVE_KEY = SUPABASE_ANON_KEY;

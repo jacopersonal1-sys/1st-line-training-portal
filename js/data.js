@@ -192,6 +192,7 @@ window.REALTIME_LAST_HEALTHY_AT = 0;
 window.PRESENCE_LAST_STATUS = null;
 window.PRESENCE_RECONNECT_TIMER = null;
 window.PRESENCE_INTENTIONAL_REJOIN_UNTIL = 0;
+window.USE_SUPABASE_PRESENCE = false;
 window.__REALTIME_NET_LISTENERS_BOUND = false;
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
@@ -1994,11 +1995,22 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                         return row;
                     });
 
+                    const uploadRowMap = new Map();
+                    rows.forEach(row => {
+                        if (!row || !row.id) return;
+                        uploadRowMap.set(String(row.id), row);
+                    });
+                    const uploadRows = Array.from(uploadRowMap.values());
+                    const duplicateRowCount = rows.length - uploadRows.length;
+                    if (duplicateRowCount > 0) {
+                        console.warn(`[Sync] Collapsed ${duplicateRowCount} duplicate ${tableName} rows before upload.`);
+                    }
+
                     // BATCH UPLOAD: Prevent statement timeouts on large syncs
                     const BATCH_SIZE = 100; 
-                    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-                        const chunk = rows.slice(i, i + BATCH_SIZE);
-                        if(!silent && rows.length > BATCH_SIZE) console.log(`Uploading chunk ${i / BATCH_SIZE + 1} of ${Math.ceil(rows.length / BATCH_SIZE)} to ${tableName}`);
+                    for (let i = 0; i < uploadRows.length; i += BATCH_SIZE) {
+                        const chunk = uploadRows.slice(i, i + BATCH_SIZE);
+                        if(!silent && uploadRows.length > BATCH_SIZE) console.log(`Uploading chunk ${i / BATCH_SIZE + 1} of ${Math.ceil(uploadRows.length / BATCH_SIZE)} to ${tableName}`);
 
                         try {
                             const { error } = await window.supabaseClient.from(tableName).upsert(chunk);
@@ -2748,8 +2760,8 @@ async function sendHeartbeat(forceInit = false) {
             activity: safeActivity
         };
 
-        // 1. SUPABASE PRESENCE (0-Latency, 0 Database impact)
-        if (window.PRESENCE_CHANNEL) {
+        // 1. Optional Supabase Presence. Disabled by default; DB heartbeat is more stable in this app shell.
+        if (window.USE_SUPABASE_PRESENCE && window.PRESENCE_CHANNEL) {
             window.PRESENCE_CHANNEL.track(payload).catch(()=>{});
         }
         
@@ -3005,7 +3017,7 @@ function subscribeToDocKey(docKey, onContent) {
 
 // --- DYNAMIC FALLBACK POLLER ---
 window.REALTIME_LAST_FULL_FALLBACK_AT = window.REALTIME_LAST_FULL_FALLBACK_AT || 0;
-const REALTIME_FULL_FALLBACK_INTERVAL_MS = 120000;
+const REALTIME_FULL_FALLBACK_INTERVAL_MS = 600000;
 
 async function runRealtimeFallbackPoll() {
     if (!window.supabaseClient) return;
@@ -3025,21 +3037,17 @@ async function runRealtimeFallbackPoll() {
     };
 
     try {
-        const [sessionRows, liveSessionRows, liveBookingRows, vettingRows, vettingRowsV2] = await Promise.all([
+        const [sessionRows, liveSessionRows, vettingRows, vettingRowsV2] = await Promise.all([
             fetchRows('sessions', 500),
             fetchRows('live_sessions', 250),
-            fetchRows('live_bookings', 500),
             fetchRows('vetting_sessions', 150),
             fetchRows('vetting_sessions_v2', 150)
         ]);
 
         sessionRows.forEach(row => handleSessionRealtime({ eventType: 'UPDATE', table: 'sessions', new: row }));
-        liveBookingRows.forEach(row => handleLiveBookingRealtime({ eventType: 'UPDATE', table: 'live_bookings', new: row }));
         liveSessionRows.forEach(row => handleLiveSessionRealtime({ eventType: 'UPDATE', table: 'live_sessions', new: row }));
         vettingRows.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions', new: row }));
         vettingRowsV2.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions_v2', new: row }));
-
-        if (typeof processIncomingDataQueue === 'function') processIncomingDataQueue();
 
         const now = Date.now();
         if (now - (window.REALTIME_LAST_FULL_FALLBACK_AT || 0) > REALTIME_FULL_FALLBACK_INTERVAL_MS) {
@@ -3212,15 +3220,18 @@ function startRealtimeWatchdog() {
             return;
         }
 
-        const presenceState = window.PRESENCE_CHANNEL && window.PRESENCE_CHANNEL.state;
-        const presenceJoined = !window.PRESENCE_CHANNEL || presenceState === 'joined' || presenceState === 'joining' || window.PRESENCE_LAST_STATUS === 'SUBSCRIBED';
-        if (!presenceJoined) {
-            schedulePresenceReconnect();
+        if (window.USE_SUPABASE_PRESENCE) {
+            const presenceState = window.PRESENCE_CHANNEL && window.PRESENCE_CHANNEL.state;
+            const presenceJoined = !window.PRESENCE_CHANNEL || presenceState === 'joined' || presenceState === 'joining' || window.PRESENCE_LAST_STATUS === 'SUBSCRIBED';
+            if (!presenceJoined) {
+                schedulePresenceReconnect();
+            }
         }
     }, 30000);
 }
 
 function schedulePresenceReconnect() {
+    if (!window.USE_SUPABASE_PRESENCE) return;
     if (!window.supabaseClient || !navigator.onLine || window.PRESENCE_RECONNECT_TIMER) return;
     window.PRESENCE_RECONNECT_TIMER = setTimeout(() => {
         window.PRESENCE_RECONNECT_TIMER = null;
@@ -3249,6 +3260,16 @@ function getRealtimeTableList() {
 
 function setupPresenceChannel() {
     if (!window.supabaseClient || typeof CURRENT_USER === 'undefined' || !CURRENT_USER) return;
+
+    if (!window.USE_SUPABASE_PRESENCE) {
+        if (window.PRESENCE_CHANNEL) {
+            window.PRESENCE_INTENTIONAL_REJOIN_UNTIL = Date.now() + 2500;
+            window.supabaseClient.removeChannel(window.PRESENCE_CHANNEL).catch(()=>{});
+            window.PRESENCE_CHANNEL = null;
+        }
+        window.PRESENCE_LAST_STATUS = 'DISABLED';
+        return;
+    }
 
     if (window.PRESENCE_CHANNEL) {
         window.PRESENCE_INTENTIONAL_REJOIN_UNTIL = Date.now() + 2500;
