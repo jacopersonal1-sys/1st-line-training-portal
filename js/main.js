@@ -3556,6 +3556,7 @@ function getChangelog(version) {
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Realtime Presence is now disabled in favour of the existing database heartbeat to stop repeated CLOSED/SUBSCRIBED reconnect loops during live assessments.</li>
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Row uploads now collapse duplicate IDs before batch upsert so records cannot fail with duplicate ON CONFLICT updates.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Trainees are now released from the Live Assessment Arena when a trainer ends the session, even if the realtime delete event is missed.</li>
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Network Diagnostics now sends lightweight background reports every 10 minutes, and fallback polling stays focused on sessions, Live Assessment, and Vetting flows.</li>
             </ul>`,
         "2.6.31": `

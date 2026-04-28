@@ -3784,7 +3784,29 @@ async function forceRefreshLiveSessionById(sessionId) {
             .eq('id', sessionId)
             .maybeSingle();
 
-        if (error || !row || !row.data || typeof row.data !== 'object') return false;
+        if (error) return false;
+
+        if (!row || !row.data || typeof row.data !== 'object') {
+            if (isTraineeRuntime()) {
+                let sessions = safeLocalParse('liveSessions', []) || [];
+                sessions = Array.isArray(sessions) ? sessions : [];
+                sessions = sessions.filter(s => String((s && s.sessionId) || '') !== String(sessionId));
+                localStorage.setItem('liveSessions', JSON.stringify(sessions));
+
+                const localSession = safeLocalParse('liveSession', {}) || {};
+                if (String(localSession.sessionId || '') === String(sessionId)) {
+                    localStorage.setItem('liveSession', JSON.stringify({ active: false, sessionId, endedAt: Date.now() }));
+                }
+                if (String(localStorage.getItem('currentLiveSessionId') || '') === String(sessionId)) {
+                    localStorage.removeItem('currentLiveSessionId');
+                }
+
+                emitDataChange('liveSessions', 'session_missing_cleanup');
+                if (typeof releaseTraineeLiveArena === 'function') releaseTraineeLiveArena('missing_server_row');
+                else if (typeof processLiveSessionState === 'function') processLiveSessionState(sessions);
+            }
+            return false;
+        }
 
         const refreshed = { ...row.data };
         if (!refreshed.sessionId) refreshed.sessionId = row.id;

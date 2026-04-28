@@ -47,6 +47,29 @@ function cleanupLocalLiveSessionState(sessionId) {
     }
 }
 
+function releaseTraineeLiveArena(reason = 'ended') {
+    if (!CURRENT_USER || CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') return;
+
+    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const sessionId = localStorage.getItem('currentLiveSessionId') || localSession.sessionId || '';
+    if (sessionId) cleanupLocalLiveSessionState(sessionId);
+    else localStorage.setItem('liveSession', JSON.stringify({ active: false, endedAt: Date.now(), reason }));
+
+    window.__TRAINEE_ACTIVE_LIVE_SESSION_ID = null;
+    window.__TRAINEE_LIVE_LOCK_NOTICE_FOR = null;
+    LAST_RENDERED_Q = -2;
+
+    const liveTabActive = document.getElementById('live-execution')?.classList.contains('active');
+    if (liveTabActive) {
+        if (typeof showToast === 'function') {
+            showToast(reason === 'missing_server_row' ? 'Live assessment ended by trainer.' : 'Live assessment has ended.', 'success');
+        }
+        setTimeout(() => {
+            if (typeof showTab === 'function') showTab('live-assessment');
+        }, 80);
+    }
+}
+
 async function closeLiveSessionAuthoritatively(session) {
     if (!session || !session.sessionId) return;
 
@@ -308,6 +331,15 @@ function processLiveSessionState(allSessions) {
     }
 
     enforceTraineeLiveArenaFocus(myServerSession);
+
+    if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer') {
+        const wasActiveLocally = !!(localSession && localSession.active);
+        const noActiveServerSession = !myServerSession || !myServerSession.active;
+        if (wasActiveLocally && noActiveServerSession) {
+            releaseTraineeLiveArena('ended');
+            return;
+        }
+    }
 
     // PRESERVE LOCAL ANSWERS (Trainee Only)
     if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
