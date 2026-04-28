@@ -3219,6 +3219,7 @@ function updateNotifications() {
     if (sessionStorage.getItem('update_ready') === 'true') {
         const readyChannel = normalizeClientUpdateChannel(sessionStorage.getItem('update_ready_channel'));
         const isBetaReady = readyChannel === 'beta';
+        const isOptionalReady = isBetaReady || isCurrentUserUpdateOptional();
         count++;
         notifList.innerHTML += `
         <div class="notif-item" onclick="restartAndInstall()" style="background:rgba(46, 204, 113, 0.1); border-left:3px solid #2ecc71; cursor:pointer;">
@@ -3226,7 +3227,7 @@ function updateNotifications() {
                 <i class="fas fa-arrow-circle-up" style="color:#2ecc71; font-size:1.2rem;"></i>
                 <div>
                     <strong>${isBetaReady ? 'Beta Update Ready' : 'Update Ready'}</strong>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">${isBetaReady ? 'Optional: click to Restart & Install' : 'Click to Restart & Install'}</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">${isOptionalReady ? 'Optional: click to Restart & Install' : 'Click to Restart & Install'}</div>
                 </div>
             </div>
         </div>`;
@@ -3351,6 +3352,11 @@ function normalizeClientUpdateChannel(value) {
     return 'main';
 }
 
+function isCurrentUserUpdateOptional() {
+    const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
+    return role === 'admin' || role === 'super_admin';
+}
+
 // --- GLOBAL UPDATE LISTENERS ---
 if (typeof require !== 'undefined') {
     const { ipcRenderer } = require('electron');
@@ -3381,6 +3387,12 @@ if (typeof require !== 'undefined') {
         if (readyChannel === 'beta') {
             sessionStorage.removeItem('force_update_active');
             if (typeof showToast === 'function') showToast("Optional beta update downloaded. Install when ready from Notifications.", "info");
+            return;
+        }
+
+        if (CURRENT_USER && isCurrentUserUpdateOptional()) {
+            sessionStorage.removeItem('force_update_active');
+            if (typeof showToast === 'function') showToast("Main update downloaded. Admin install is optional from Notifications.", "info");
             return;
         }
 

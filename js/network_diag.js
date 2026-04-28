@@ -9,6 +9,7 @@ window.NetworkDiag = {
     popoutInterval: null,
     popoutWindow: null,
     oneHourMs: 60 * 60 * 1000,
+    consoleLimit: 80,
     history: { gateway: [], internet: [], server: [], dbQuery: [] },
     lastResults: {
         gateway: null,
@@ -35,6 +36,8 @@ window.NetworkDiag = {
     },
 
     init: function() {
+        this.installConsoleCapture();
+
         if (!document.getElementById('net-diag-styles')) {
             const style = document.createElement('style');
             style.id = 'net-diag-styles';
@@ -66,10 +69,19 @@ window.NetworkDiag = {
                 .net-filter-group { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
                 .net-filter-group label { display:inline-flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid var(--border-color); border-radius:999px; background:var(--bg-input); color:var(--text-main); font-size:0.78rem; cursor:pointer; }
                 .net-filter-group input { margin:0; }
+                .net-console-view { margin-top:10px; border-top:1px dashed var(--border-color); padding-top:10px; }
+                .net-console-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
+                .net-console-list { max-height:160px; overflow:auto; background:rgba(0,0,0,0.16); border:1px solid var(--border-color); border-radius:6px; }
+                .net-console-row { display:grid; grid-template-columns:72px 70px 1fr; gap:8px; padding:6px 8px; border-bottom:1px solid var(--border-color); font-size:0.78rem; align-items:start; }
+                .net-console-row:last-child { border-bottom:none; }
+                .net-console-level-error { color:#ff5252; font-weight:bold; }
+                .net-console-level-warn { color:#f1c40f; font-weight:bold; }
+                .net-console-msg { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text-main); }
                 @media (max-width: 760px) {
                     .net-diag-grid, .net-flow { grid-template-columns:1fr; }
                     .net-agent-row { grid-template-columns:1fr; gap:4px; }
                     .net-agent-head { display:none; }
+                    .net-console-row { grid-template-columns:1fr; gap:3px; }
                 }
             `;
             document.head.appendChild(style);
@@ -144,6 +156,14 @@ window.NetworkDiag = {
                         <div id="nd_analysis" style="padding: 10px; background: var(--bg-input); border-radius: 4px; min-height: 60px; color: var(--text-muted);">
                             Initializing tests...
                         </div>
+                        ${isAdmin ? `
+                        <div id="nd_console_view" class="net-console-view">
+                            <div class="net-console-head">
+                                <strong style="font-size:0.86rem;"><i class="fas fa-terminal" style="color:var(--primary);"></i> Console Errors</strong>
+                                <button class="btn-secondary btn-sm" onclick="NetworkDiag.clearConsoleCapture()"><i class="fas fa-trash"></i> Clear</button>
+                            </div>
+                            <div id="nd_console_list" class="net-console-list"></div>
+                        </div>` : ''}
                     </div>
 
                     <div class="net-health-card">
@@ -279,6 +299,7 @@ window.NetworkDiag = {
             this.analyze();
             this.renderFlow();
             this.renderAgentStatus();
+            this.renderConsoleView();
             this.drawLatencyGraph();
             this.refreshPopout();
         } catch (error) {
@@ -507,6 +528,7 @@ window.NetworkDiag = {
 
         el.innerHTML = msg;
         el.style.borderLeft = `4px solid ${color}`;
+        this.renderConsoleView();
     },
 
     getAvg: function(arr) {
@@ -779,6 +801,80 @@ window.NetworkDiag = {
         };
     },
 
+    installConsoleCapture: function() {
+        if (window.__NETWORK_DIAG_CONSOLE_CAPTURED) return;
+        window.__NETWORK_DIAG_CONSOLE_CAPTURED = true;
+        window.NETWORK_DIAG_CONSOLE_EVENTS = window.NETWORK_DIAG_CONSOLE_EVENTS || [];
+
+        const pushEvent = (level, args, source = 'console') => {
+            try {
+                const events = window.NETWORK_DIAG_CONSOLE_EVENTS || [];
+                const message = Array.from(args || []).map(arg => {
+                    if (arg instanceof Error) return arg.stack || arg.message;
+                    if (typeof arg === 'string') return arg;
+                    try { return JSON.stringify(arg); } catch (error) { return String(arg); }
+                }).join(' ');
+
+                events.push({
+                    time: new Date().toISOString(),
+                    level,
+                    source,
+                    message: message.slice(0, 600)
+                });
+                while (events.length > this.consoleLimit) events.shift();
+                window.NETWORK_DIAG_CONSOLE_EVENTS = events;
+            } catch (error) {}
+        };
+
+        ['warn', 'error'].forEach(level => {
+            const original = console[level];
+            console[level] = function(...args) {
+                pushEvent(level, args);
+                return original.apply(console, args);
+            };
+        });
+
+        window.addEventListener('error', event => {
+            pushEvent('error', [event.message || 'Window error', event.filename || '', event.lineno || ''], 'window');
+        });
+
+        window.addEventListener('unhandledrejection', event => {
+            pushEvent('error', [event.reason || 'Unhandled promise rejection'], 'promise');
+        });
+    },
+
+    getConsoleEvents: function() {
+        return (window.NETWORK_DIAG_CONSOLE_EVENTS || []).slice(-12).reverse();
+    },
+
+    clearConsoleCapture: function() {
+        window.NETWORK_DIAG_CONSOLE_EVENTS = [];
+        this.renderConsoleView();
+        this.refreshPopout();
+    },
+
+    renderConsoleView: function() {
+        const list = document.getElementById('nd_console_list');
+        if (!list || !this.isAdminUser()) return;
+        const events = this.getConsoleEvents();
+        if (!events.length) {
+            list.innerHTML = '<div style="padding:10px; color:var(--text-muted); font-size:0.82rem;">No warnings or errors captured in this app session.</div>';
+            return;
+        }
+
+        list.innerHTML = events.map(item => {
+            const level = String(item.level || 'warn').toLowerCase();
+            const time = item.time ? new Date(item.time).toLocaleTimeString() : '--';
+            return `
+                <div class="net-console-row">
+                    <div style="color:var(--text-muted);">${this.escapeHtml(time)}</div>
+                    <div class="net-console-level-${level === 'error' ? 'error' : 'warn'}">${this.escapeHtml(level.toUpperCase())}</div>
+                    <div class="net-console-msg">${this.escapeHtml(item.message || '')}</div>
+                </div>
+            `;
+        }).join('');
+    },
+
     identityKey: function(value) {
         return String(value || '').trim().toLowerCase().replace(/[._-]+/g, ' ').replace(/\s+/g, '');
     },
@@ -797,6 +893,7 @@ window.NetworkDiag = {
                 server: this.getAvg(this.history.server),
                 dbQuery: this.getAvg(this.history.dbQuery)
             },
+            consoleEvents: isAdmin ? this.getConsoleEvents() : [],
             agentRows: isAdmin ? this.getAgentRows() : [],
             canViewAgents: isAdmin
         };
@@ -928,6 +1025,9 @@ window.NetworkDiag = {
                 .ok { color:#2ecc71; } .warn { color:#f1c40f; } .bad { color:#ff5252; }
                 .summary { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; }
                 .summary .value { font-size:18px; }
+                .console-list { max-height:160px; overflow:auto; margin-top:8px; border-top:1px solid #2a3343; padding-top:6px; }
+                .console-row { display:grid; grid-template-columns:68px 60px 1fr; gap:6px; padding:5px 0; border-bottom:1px solid #2a3343; font-size:12px; }
+                .console-msg { white-space:pre-wrap; overflow-wrap:anywhere; }
                 @media (max-width: 760px), (max-height: 560px) {
                     body { overflow:auto; }
                     .shell { height:auto; min-height:100vh; }
@@ -938,6 +1038,7 @@ window.NetworkDiag = {
                     .metric-card canvas { height:34px; }
                     table { font-size:12px; }
                     th, td { padding:5px; }
+                    .console-row { grid-template-columns:1fr; }
                 }
             </style>
         </head>
@@ -971,6 +1072,10 @@ window.NetworkDiag = {
                         <div class="card">
                             <div class="label">Current DB Diagnosis</div>
                             <div id="pop_db_diag" class="value" style="font-size:18px; white-space:normal;">Waiting...</div>
+                            <div class="console-list">
+                                <div class="label">Console Errors</div>
+                                <div id="pop_console"><div class="muted" style="padding-top:6px;">Waiting...</div></div>
+                            </div>
                         </div>
                     </div>
                     <div class="card scroll">
@@ -1048,6 +1153,13 @@ window.NetworkDiag = {
                         : (!dbHost && dbData ? 'Data works, ping may be blocked' : 'Host/data unavailable'));
                     document.getElementById('pop_db_diag').textContent = dbSlow ? 'Host reachable, data query slow' : diag;
                     document.getElementById('pop_db_diag').className = 'value ' + (dbHost && dbData && !dbSlow ? 'ok' : (!dbHost && !dbData ? 'bad' : 'warn'));
+                    const consoleEvents = (s.consoleEvents || []).slice(0, 10);
+                    document.getElementById('pop_console').innerHTML = consoleEvents.length ? consoleEvents.map(function(item) {
+                        const level = String(item.level || 'warn').toLowerCase();
+                        const klass = level === 'error' ? 'bad' : 'warn';
+                        const time = item.time ? new Date(item.time).toLocaleTimeString() : '--';
+                        return '<div class="console-row"><div class="muted">' + esc(time) + '</div><div class="' + klass + '">' + esc(level.toUpperCase()) + '</div><div class="console-msg">' + esc(item.message || '') + '</div></div>';
+                    }).join('') : '<div class="muted" style="padding-top:6px;">No warnings or errors captured.</div>';
                     let agentRows = (s.agentRows || []);
                     const filters = selectedStatusFilters();
                     agentRows = agentRows.filter(function(a) { return rowMatchesFilters(a, filters); });
