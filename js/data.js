@@ -187,6 +187,12 @@ window.REALTIME_MAX_RETRY_DELAY = 120000;
 window.REALTIME_COOLDOWN_UNTIL = 0;
 window.REALTIME_COOLDOWN_MS = 180000;
 window.REALTIME_COOLDOWN_TRIGGER = 8;
+window.REALTIME_WATCHDOG_TIMER = null;
+window.REALTIME_LAST_HEALTHY_AT = 0;
+window.PRESENCE_LAST_STATUS = null;
+window.PRESENCE_RECONNECT_TIMER = null;
+window.PRESENCE_INTENTIONAL_REJOIN_UNTIL = 0;
+window.__REALTIME_NET_LISTENERS_BOUND = false;
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -2998,6 +3004,54 @@ function subscribeToDocKey(docKey, onContent) {
 }
 
 // --- DYNAMIC FALLBACK POLLER ---
+window.REALTIME_LAST_FULL_FALLBACK_AT = window.REALTIME_LAST_FULL_FALLBACK_AT || 0;
+const REALTIME_FULL_FALLBACK_INTERVAL_MS = 120000;
+
+async function runRealtimeFallbackPoll() {
+    if (!window.supabaseClient) return;
+
+    const fetchRows = async (table, limit = 250) => {
+        try {
+            const { data, error } = await window.supabaseClient
+                .from(table)
+                .select('*')
+                .limit(limit);
+            if (error) throw error;
+            return Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.warn(`[Realtime Tunnel] Targeted fallback read skipped for ${table}:`, error.message || error);
+            return [];
+        }
+    };
+
+    try {
+        const [sessionRows, liveSessionRows, liveBookingRows, vettingRows, vettingRowsV2] = await Promise.all([
+            fetchRows('sessions', 500),
+            fetchRows('live_sessions', 250),
+            fetchRows('live_bookings', 500),
+            fetchRows('vetting_sessions', 150),
+            fetchRows('vetting_sessions_v2', 150)
+        ]);
+
+        sessionRows.forEach(row => handleSessionRealtime({ eventType: 'UPDATE', table: 'sessions', new: row }));
+        liveBookingRows.forEach(row => handleLiveBookingRealtime({ eventType: 'UPDATE', table: 'live_bookings', new: row }));
+        liveSessionRows.forEach(row => handleLiveSessionRealtime({ eventType: 'UPDATE', table: 'live_sessions', new: row }));
+        vettingRows.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions', new: row }));
+        vettingRowsV2.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions_v2', new: row }));
+
+        if (typeof processIncomingDataQueue === 'function') processIncomingDataQueue();
+
+        const now = Date.now();
+        if (now - (window.REALTIME_LAST_FULL_FALLBACK_AT || 0) > REALTIME_FULL_FALLBACK_INTERVAL_MS) {
+            window.REALTIME_LAST_FULL_FALLBACK_AT = now;
+            await loadFromServer(true);
+        }
+    } catch (error) {
+        console.warn('[Realtime Tunnel] Targeted fallback poll failed; running full sync fallback.', error);
+        await loadFromServer(true);
+    }
+}
+
 function setFallbackPollingRate(ms) {
     const rate = Number(ms) || 0;
     window.CURRENT_FALLBACK_RATE = rate;
@@ -3010,7 +3064,7 @@ function setFallbackPollingRate(ms) {
     }
 
     SYNC_INTERVAL = setInterval(async () => {
-        await loadFromServer(true); 
+        await runRealtimeFallbackPoll();
         if (typeof performOrphanCleanup === 'function') {
             const lastRun = parseInt(localStorage.getItem('last_orphan_cleanup_ts') || '0');
             if (Date.now() - lastRun > 86400000) { performOrphanCleanup(true); }
@@ -3118,9 +3172,127 @@ function scheduleRealtimeReconnect() {
     }, delay);
 }
 
+function startRealtimeWatchdog() {
+    if (window.REALTIME_WATCHDOG_TIMER) clearInterval(window.REALTIME_WATCHDOG_TIMER);
+    window.REALTIME_LAST_HEALTHY_AT = Date.now();
+
+    if (!window.__REALTIME_NET_LISTENERS_BOUND) {
+        window.__REALTIME_NET_LISTENERS_BOUND = true;
+        window.addEventListener('online', () => {
+            console.log('[Realtime Tunnel] Network back online. Rejoining channels.');
+            window.REALTIME_COOLDOWN_UNTIL = 0;
+            window.REALTIME_RETRY_DELAY = 3000;
+            setupRealtimeListeners();
+            if (typeof loadFromServer === 'function') loadFromServer(true).catch(()=>{});
+        });
+        window.addEventListener('offline', () => {
+            console.warn('[Realtime Tunnel] Browser offline. Fallback polling paused until network returns.');
+            updateSyncDiagnostics({
+                status: 'error',
+                statusText: 'Browser offline',
+                direction: 'idle',
+                phase: 'Realtime tunnel paused',
+                item: 'Network unavailable',
+                server: getActiveSyncServerLabel(),
+                lastError: 'navigator offline'
+            });
+        });
+    }
+
+    window.REALTIME_WATCHDOG_TIMER = setInterval(() => {
+        if (!window.supabaseClient || !navigator.onLine) return;
+
+        const dataState = window.GLOBAL_CHANGES_CHANNEL && window.GLOBAL_CHANGES_CHANNEL.state;
+        const dataJoined = dataState === 'joined' || window.REALTIME_LAST_STATUS === 'SUBSCRIBED';
+        if (!dataJoined) {
+            console.warn('[Realtime Tunnel] Watchdog detected stale data channel. Rejoining data channel.', { dataState });
+            window.REALTIME_RETRY_DELAY = 3000;
+            setupRealtimeListeners();
+            if (window.CURRENT_FALLBACK_RATE !== window.REALTIME_FAILURE_RATE) setFallbackPollingRate(window.REALTIME_FAILURE_RATE);
+            return;
+        }
+
+        const presenceState = window.PRESENCE_CHANNEL && window.PRESENCE_CHANNEL.state;
+        const presenceJoined = !window.PRESENCE_CHANNEL || presenceState === 'joined' || presenceState === 'joining' || window.PRESENCE_LAST_STATUS === 'SUBSCRIBED';
+        if (!presenceJoined) {
+            schedulePresenceReconnect();
+        }
+    }, 30000);
+}
+
+function schedulePresenceReconnect() {
+    if (!window.supabaseClient || !navigator.onLine || window.PRESENCE_RECONNECT_TIMER) return;
+    window.PRESENCE_RECONNECT_TIMER = setTimeout(() => {
+        window.PRESENCE_RECONNECT_TIMER = null;
+        setupPresenceChannel();
+    }, 5000);
+}
+
+function getRealtimeTableList() {
+    const tables = new Set([
+        'app_documents',
+        'monitor_state',
+        'attendance',
+        'sessions',
+        'live_bookings',
+        'live_sessions',
+        'vetting_sessions',
+        'vetting_sessions_v2'
+    ]);
+
+    Object.values(ROW_MAP || {}).forEach(table => {
+        if (table) tables.add(table);
+    });
+
+    return Array.from(tables);
+}
+
+function setupPresenceChannel() {
+    if (!window.supabaseClient || typeof CURRENT_USER === 'undefined' || !CURRENT_USER) return;
+
+    if (window.PRESENCE_CHANNEL) {
+        window.PRESENCE_INTENTIONAL_REJOIN_UNTIL = Date.now() + 2500;
+        window.supabaseClient.removeChannel(window.PRESENCE_CHANNEL).catch(()=>{});
+    }
+
+    window.PRESENCE_CHANNEL = window.supabaseClient.channel('online_users', {
+        config: { presence: { key: CURRENT_USER.user } }
+    });
+
+    window.PRESENCE_CHANNEL
+        .on('presence', { event: 'sync' }, () => {
+            window.REALTIME_LAST_HEALTHY_AT = Date.now();
+            const state = window.PRESENCE_CHANNEL.presenceState();
+            const nextPresenceCache = {};
+            for (const [userKey, presences] of Object.entries(state)) {
+                if (presences && presences.length > 0) {
+                    nextPresenceCache[userKey] = {
+                        ...presences[0],
+                        local_received_at: Date.now()
+                    };
+                }
+            }
+            window.ACTIVE_USERS_CACHE = nextPresenceCache;
+        })
+        .subscribe(async (status) => {
+            if (status !== window.PRESENCE_LAST_STATUS) {
+                console.log(`[Realtime Tunnel] Presence Channel Status: ${status}`);
+                window.PRESENCE_LAST_STATUS = status;
+            }
+            if (status === 'SUBSCRIBED') {
+                window.REALTIME_LAST_HEALTHY_AT = Date.now();
+                if (typeof sendHeartbeat === 'function') sendHeartbeat(true);
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                if (status === 'CLOSED' && Date.now() < (window.PRESENCE_INTENTIONAL_REJOIN_UNTIL || 0)) return;
+                schedulePresenceReconnect();
+            }
+        });
+}
+
 // --- REALTIME LISTENERS (The Fix for Live Updates) ---
 function setupRealtimeListeners() {
     if (!window.supabaseClient) return;
+    startRealtimeWatchdog();
 
     // Cleanup existing channel to prevent duplicate parallel listeners
     if (window.GLOBAL_CHANGES_CHANNEL) {
@@ -3128,6 +3300,7 @@ function setupRealtimeListeners() {
     }
 
     const routeRealtimePayload = (payload) => {
+            window.REALTIME_LAST_HEALTHY_AT = Date.now();
             const table = payload.table;
             
             // ISOLATION: Demo mode ONLY listens to app_documents
@@ -3158,35 +3331,36 @@ function setupRealtimeListeners() {
     };
     const channel = window.supabaseClient.channel('global_app_changes');
     const traineeScopedRealtime = isTraineeRuntime() && !IS_DEMO_MODE;
+    const addBinding = (table, filterColumn = null, filterValue = null) => {
+        const binding = { event: '*', schema: 'public', table };
+        if (filterColumn) {
+            const filter = makeRealtimeEqFilter(filterColumn, filterValue);
+            if (filter) binding.filter = filter;
+        }
+        channel.on('postgres_changes', binding, routeRealtimePayload);
+    };
 
     if (traineeScopedRealtime) {
         const currentUser = (CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : '';
-        const addScopedBinding = (table, filterColumn = null) => {
-            const binding = { event: '*', schema: 'public', table };
-            if (filterColumn) {
-                const filter = makeRealtimeEqFilter(filterColumn, currentUser);
-                if (filter) binding.filter = filter;
-            }
-            channel.on('postgres_changes', binding, routeRealtimePayload);
-        };
-
-        addScopedBinding('app_documents');
-        addScopedBinding('monitor_state', 'user_id');
-        addScopedBinding('attendance', 'user_id');
-        addScopedBinding('sessions', 'username');
-        addScopedBinding('records', 'trainee');
-        addScopedBinding('submissions', 'trainee');
-        addScopedBinding('live_bookings', 'trainee');
-        addScopedBinding('link_requests', 'trainee');
-        addScopedBinding('exemptions', 'trainee');
-        addScopedBinding('monitor_history', 'user_id');
-        addScopedBinding('nps_responses', 'user_id');
-        addScopedBinding('live_sessions');
-        addScopedBinding('vetting_sessions');
-        addScopedBinding('vetting_sessions_v2');
+        addBinding('app_documents');
+        addBinding('monitor_state', 'user_id', currentUser);
+        addBinding('attendance', 'user_id', currentUser);
+        addBinding('sessions', 'username', currentUser);
+        addBinding('records', 'trainee', currentUser);
+        addBinding('submissions', 'trainee', currentUser);
+        addBinding('live_bookings', 'trainee', currentUser);
+        addBinding('link_requests', 'trainee', currentUser);
+        addBinding('exemptions', 'trainee', currentUser);
+        addBinding('monitor_history', 'user_id', currentUser);
+        addBinding('nps_responses', 'user_id', currentUser);
+        addBinding('live_sessions');
+        addBinding('vetting_sessions');
+        addBinding('vetting_sessions_v2');
+    } else if (IS_DEMO_MODE) {
+        addBinding('app_documents');
     } else {
-        // Admin / team leader / demo still use broad subscription.
-        channel.on('postgres_changes', { event: '*', schema: 'public' }, routeRealtimePayload);
+        // Admin / teamleader use explicit table bindings to reduce tunnel noise.
+        getRealtimeTableList().forEach(table => addBinding(table));
     }
 
     window.GLOBAL_CHANGES_CHANNEL = channel
@@ -3202,6 +3376,7 @@ function setupRealtimeListeners() {
                 window.REALTIME_FAILURE_STREAK = 0;
                 window.REALTIME_RETRY_DELAY = 15000;
                 window.REALTIME_COOLDOWN_UNTIL = 0;
+                window.REALTIME_LAST_HEALTHY_AT = Date.now();
                 
                 // Zero-polling when the realtime tunnel is healthy.
                 if (window.CURRENT_FALLBACK_RATE !== window.NORMAL_FALLBACK_RATE) setFallbackPollingRate(window.NORMAL_FALLBACK_RATE);
@@ -3256,32 +3431,7 @@ function setupRealtimeListeners() {
         });
         
     // --- NEW: PRESENCE CHANNEL (0-Latency, 0-DB Cost Heartbeats) ---
-    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
-        if (window.PRESENCE_CHANNEL) window.supabaseClient.removeChannel(window.PRESENCE_CHANNEL).catch(()=>{});
-        window.PRESENCE_CHANNEL = window.supabaseClient.channel('online_users', {
-            config: { presence: { key: CURRENT_USER.user } }
-        });
-
-        window.PRESENCE_CHANNEL
-            .on('presence', { event: 'sync' }, () => {
-                const state = window.PRESENCE_CHANNEL.presenceState();
-                const nextPresenceCache = {};
-                for (const [userKey, presences] of Object.entries(state)) {
-                    if (presences && presences.length > 0) {
-                        nextPresenceCache[userKey] = {
-                            ...presences[0],
-                            local_received_at: Date.now()
-                        };
-                    }
-                }
-                window.ACTIVE_USERS_CACHE = nextPresenceCache;
-            })
-            .subscribe(async (status) => {
-                if (status === 'SUBSCRIBED') {
-                    if (typeof sendHeartbeat === 'function') sendHeartbeat(true);
-                }
-            });
-    }
+    setupPresenceChannel();
 }
 
 // --- NEW: QUEUE INDICATOR ---

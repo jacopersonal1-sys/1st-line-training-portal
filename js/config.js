@@ -45,8 +45,15 @@ window.initSupabaseClient = function() {
 
     if (typeof window !== 'undefined' && window.supabase) {
         try {
+            if (window.supabaseClient && window.SUPABASE_ACTIVE_URL === SUPABASE_URL && window.SUPABASE_ACTIVE_KEY === SUPABASE_ANON_KEY) {
+                console.log(`Supabase Client Reused (${activeTarget.toUpperCase()}) -> ${SUPABASE_URL}`);
+                return window.supabaseClient;
+            }
+
             const options = { global: { headers: { 'ngrok-skip-browser-warning': 'true' } } };
             window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
+            window.SUPABASE_ACTIVE_URL = SUPABASE_URL;
+            window.SUPABASE_ACTIVE_KEY = SUPABASE_ANON_KEY;
             console.log(`Supabase Client Initialized (${activeTarget.toUpperCase()}) -> ${SUPABASE_URL}`);
         } catch (e) {
             console.error("Supabase Initialization Failed:", e); 
