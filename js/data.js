@@ -106,7 +106,6 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'vettingTopics',
     'trainee_notes',
     'trainee_bookmarks',
-    'study_notes_v2',
     'monitor_whitelist',
     'monitor_reviewed',
     'liveScheduleSettings',
@@ -118,7 +117,6 @@ const TRAINEE_DEFAULT_SAVE_KEYS = new Set([
     'monitor_history',
     'trainee_notes',
     'trainee_bookmarks',
-    'study_notes_v2',
     'nps_responses'
 ]);
 

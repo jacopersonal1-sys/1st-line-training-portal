@@ -91,16 +91,9 @@
             clearTimeout(saveTimer);
             saveTimer = null;
         }
-
-        const commit = () => {
-            const host = getHost();
-            if (host && typeof host.saveToServer === 'function') {
-                host.saveToServer(['study_notes_v2'], false, true).catch(() => {});
-            }
-        };
-
-        if (immediate) commit();
-        else saveTimer = setTimeout(commit, SAVE_DEBOUNCE_MS);
+        if (!immediate) {
+            saveTimer = setTimeout(() => { saveTimer = null; }, SAVE_DEBOUNCE_MS);
+        }
     }
 
     function getBookmarksForUser(user) {
@@ -271,8 +264,7 @@
             const isActive = p.id === workspace.activePageId;
             return `
                 <button class="notes-page-btn ${isActive ? 'active' : ''}" title="${esc(p.title)}" onclick="StudyNotesWorkspace.selectPage('${esc(p.id)}')">
-                    <i class="fas fa-file-alt"></i> ${esc(p.title)}
-                    ${isActive ? '<span class="notes-page-selected-tag">Selected</span>' : ''}
+                    ${esc(p.title)}
                 </button>
             `;
         }).join('');
@@ -297,10 +289,10 @@
             <div class="notes-shell">
                 <div class="notes-card notes-shell-header">
                     <div class="notes-header-copy">
-                        <div class="notes-muted">Section -> Page -> Note space flow. Everything saves and syncs as one continuous workspace.</div>
                         <div class="notes-selection-overview">
                             <span class="notes-selection-chip"><i class="fas fa-folder"></i> Section: <strong>${esc(selectedSectionName)}</strong></span>
                             <span class="notes-selection-chip"><i class="fas fa-file-alt"></i> Page: <strong>${esc(selectedPageName)}</strong></span>
+                            <span class="notes-selection-chip"><i class="fas fa-lock"></i> Local only</span>
                         </div>
                     </div>
                     <div class="notes-shell-actions">
@@ -336,9 +328,7 @@
                         </div>
 
                         <div class="notes-editor-panel">
-                            <div class="notes-editor-head">
-                                <input id="studyNotesTitle" class="notes-title-input" type="text" value="${esc(page ? page.title : '')}" placeholder="Page title" oninput="StudyNotesWorkspace.updatePageTitle(this.value)">
-                            </div>
+                            <input id="studyNotesTitle" class="notes-title-input" type="text" value="${esc(page ? page.title : '')}" placeholder="Page title" oninput="StudyNotesWorkspace.updatePageTitle(this.value)">
                             <textarea id="studyNotesBody" class="notes-body-input" placeholder="Write your learning notes here..." oninput="StudyNotesWorkspace.updatePageContent(this.value)">${esc(page ? page.content : '')}</textarea>
 
                             <div class="notes-bookmarks-panel">
@@ -360,7 +350,7 @@
         host.addEventListener('buildzone:data-changed', (event) => {
             const changedKey = event?.detail?.key;
             if (!changedKey) return;
-            if (!['study_notes_v2', 'trainee_bookmarks'].includes(changedKey)) return;
+            if (changedKey !== 'trainee_bookmarks') return;
             renderWorkspace();
         });
         hostSyncBound = true;
@@ -368,7 +358,7 @@
 
     window.StudyNotesWorkspace = {
         renderUI: renderWorkspace,
-        refresh: renderWorkspace,
+        refresh: function () {},
         stopAutoRefresh: function () {},
 
         goPortalHome: function () {

@@ -2602,7 +2602,9 @@ function renderActivitySummary(container) {
 
         // Granular Updates (No Flicker)
         document.getElementById(`sum_total_${safeId}`).innerText = `Total Tracked: ${Math.round(totalMs/60000)} mins`;
-        document.getElementById(`sum_vio_${safeId}`).innerHTML = vioTopics.length > 0 ? `<div style="background:#ff5252; color:white; font-size:0.7rem; font-weight:bold; padding:2px 8px; border-radius:12px; margin-top:5px; display:inline-block; animation: pulse 2s infinite;"><i class="fas fa-exclamation-triangle"></i> ${vioTopics.length} Violation(s) Detected</div>` : '';
+        document.getElementById(`sum_vio_${safeId}`).innerHTML = vioTopics.length > 0
+            ? `<button class="btn-danger btn-sm" style="font-size:0.7rem; padding:3px 8px; margin-top:5px; width:auto; animation:pulse 2s infinite;" onclick="StudyMonitor.viewAgentViolations('${agent.replace(/'/g, "\\'")}')"><i class="fas fa-exclamation-triangle"></i> ${vioTopics.length} Violation(s) - View</button>`
+            : '';
         const matScoreEl = document.getElementById(`sum_mat_score_${safeId}`);
         if (matScoreEl) { matScoreEl.innerText = matText; matScoreEl.style.color = scoreColor; }
         
@@ -2648,6 +2650,55 @@ StudyMonitor.forceShowAll = function() {
     this.getScheduledAgents = () => allTrainees;
     
     renderActivityMonitorContent();
+};
+
+StudyMonitor.getViolationSegmentsForAgent = function(agent) {
+    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const activity = data[agent] || { history: [], current: 'No Data', since: Date.now() };
+    const todayStr = this.getLocalDateString();
+    return this.getLiveSegmentsForDate(activity, todayStr)
+        .map(seg => ({
+            ...seg,
+            effectiveDuration: this.getEffectiveDurationForDate(seg, todayStr)
+        }))
+        .filter(seg => seg.effectiveDuration > 0 && String(seg.activity || '').toLowerCase().includes('violation'))
+        .sort((a, b) => (a.start || 0) - (b.start || 0));
+};
+
+StudyMonitor.viewAgentViolations = function(agent) {
+    const segments = this.getViolationSegmentsForAgent(agent);
+    const rows = segments.map(seg => {
+        const start = seg.start ? new Date(seg.start).toLocaleTimeString() : '--';
+        const end = seg.end ? new Date(seg.end).toLocaleTimeString() : '--';
+        const activity = this.escapeHtml(String(seg.activity || '').replace(/^Violation:\s*/i, ''));
+        return `<tr>
+            <td style="white-space:nowrap;">${start} - ${end}</td>
+            <td>${this.formatDuration(seg.effectiveDuration)}</td>
+            <td>${activity}</td>
+        </tr>`;
+    }).join('');
+
+    const html = `<div class="modal-overlay" id="agentViolationModal" style="z-index:10004;">
+        <div class="modal-box" style="width:860px; max-height:88vh; display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div>
+                    <h3 style="margin:0; color:#ff5252;"><i class="fas fa-exclamation-triangle"></i> Violations: ${this.escapeHtml(agent)}</h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">${segments.length} violation entries for today</div>
+                </div>
+                <button class="btn-secondary btn-sm" onclick="document.getElementById('agentViolationModal').remove()">&times;</button>
+            </div>
+            <div class="table-responsive" style="overflow:auto;">
+                <table class="admin-table">
+                    <thead><tr><th>Time</th><th>Duration</th><th>Violation</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No violations found for today.</td></tr>'}</tbody>
+                </table>
+            </div>
+        </div>
+    </div>`;
+
+    const existing = document.getElementById('agentViolationModal');
+    if (existing) existing.remove();
+    document.body.insertAdjacentHTML('beforeend', html);
 };
 
 StudyMonitor.archiveLog = async function() {

@@ -2360,14 +2360,24 @@ async function unbanClient(id) {
 // --- SYSTEM ERROR REPORTS ---
 function isProblemReportEntry(report) {
     if (!report || typeof report !== 'object') return false;
-    return report.type === 'user_report' || report.source === 'report_problem';
+    const type = String(report.type || report.reportType || '').toLowerCase();
+    const source = String(report.source || report.origin || '').toLowerCase();
+    return type === 'user_report' || source === 'report_problem' || !!report.issueDetail;
 }
 
 function getErrorReportCollections() {
     const parsed = (typeof safeLocalParse === 'function')
         ? safeLocalParse('error_reports', [])
         : JSON.parse(localStorage.getItem('error_reports') || '[]');
-    const allReports = Array.isArray(parsed) ? parsed : [];
+    const rawReports = Array.isArray(parsed) ? parsed : [];
+    const allReports = rawReports.map(entry => {
+        const data = entry && entry.data && typeof entry.data === 'object' ? entry.data : entry;
+        return {
+            ...(data || {}),
+            id: (data && data.id) || (entry && entry.id) || `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: (data && (data.timestamp || data.updated_at)) || (entry && (entry.timestamp || entry.updated_at)) || new Date().toISOString()
+        };
+    }).filter(Boolean);
     const problemReports = allReports.filter(isProblemReportEntry);
     const systemReports = allReports.filter(r => !isProblemReportEntry(r));
     return { allReports, systemReports, problemReports };

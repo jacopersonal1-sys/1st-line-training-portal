@@ -41,7 +41,6 @@ const StudyNotesWorkspace = {
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         <button class="btn-secondary btn-sm" onclick="showTab('trainee-portal')"><i class="fas fa-house"></i> Home</button>
                         <button class="btn-secondary btn-sm" onclick="openStudyNotesAssist('popup')"><i class="fas fa-up-right-from-square"></i> Pop Out</button>
-                        <button class="btn-secondary btn-sm" onclick="StudyNotesWorkspace.refresh(true)"><i class="fas fa-rotate-right"></i> Refresh</button>
                     </div>
                 </div>
                 <iframe
@@ -55,37 +54,14 @@ const StudyNotesWorkspace = {
             return;
         }
 
-        this.refresh(false);
+        // Keep the iframe mounted. Study Notes are local-only and should not refresh while a trainee is typing.
     },
 
     async refresh(forcePull = false) {
         const frame = document.getElementById('study-notes-frame');
         if (!frame) return;
         if (frame.dataset.ready !== '1') return;
-
-        if (forcePull && typeof loadFromServer === 'function') {
-            try {
-                await loadFromServer(true);
-            } catch (error) {
-                console.warn('[Study Notes Loader] Host force pull failed:', error);
-            }
-        }
-
-        try {
-            if (frame.contentWindow && frame.contentWindow.StudyNotesWorkspace && typeof frame.contentWindow.StudyNotesWorkspace.refresh === 'function') {
-                frame.contentWindow.StudyNotesWorkspace.refresh();
-                return;
-            }
-        } catch (error) {
-            console.warn('[Study Notes Loader] Refresh bridge failed:', error);
-        }
-
-        const now = Date.now();
-        if ((now - this._lastHardReloadAt) > 5000) {
-            this._lastHardReloadAt = now;
-            frame.dataset.ready = '0';
-            frame.src = frame.src;
-        }
+        // Intentionally no-op: refreshing the notes iframe can move the user's cursor or active page.
     }
 };
 

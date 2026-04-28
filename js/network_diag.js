@@ -12,7 +12,7 @@ window.NetworkDiag = {
     popoutWindow: null,
     oneHourMs: 60 * 60 * 1000,
     reportEveryMs: 10 * 60 * 1000,
-    consoleLimit: 80,
+    consoleLimit: 180,
     history: { gateway: [], internet: [], server: [], dbQuery: [] },
     lastResults: {
         gateway: null,
@@ -79,7 +79,12 @@ window.NetworkDiag = {
                 .net-console-row:last-child { border-bottom:none; }
                 .net-console-level-error { color:#ff5252; font-weight:bold; }
                 .net-console-level-warn { color:#f1c40f; font-weight:bold; }
+                .net-console-level-info, .net-console-level-log { color:#5DB2FF; font-weight:bold; }
+                .net-console-level-debug { color:#a78bfa; font-weight:bold; }
                 .net-console-msg { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text-main); }
+                .net-group-online-wrap { display:inline-flex; align-items:center; gap:8px; padding:7px 9px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); }
+                .net-group-online-wrap select { max-width:230px; background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:5px 7px; }
+                .net-group-count { font-family:monospace; font-weight:800; font-size:1.05rem; color:#2ecc71; white-space:nowrap; }
                 @media (max-width: 760px) {
                     .net-diag-grid, .net-flow { grid-template-columns:1fr; }
                     .net-agent-row { grid-template-columns:1fr; gap:4px; }
@@ -156,6 +161,7 @@ window.NetworkDiag = {
                             <span><strong>CPU:</strong> <span id="nd_cpu">0%</span></span>
                             <span><strong>RAM:</strong> <span id="nd_ram">0/0 GB</span></span>
                             <span><strong>Disk:</strong> <span id="nd_disk">--</span></span>
+                            ${isAdmin ? `<span id="nd_group_online_wrap" class="net-group-online-wrap"><strong>Group Online:</strong> <select id="nd_group_online_select" onchange="NetworkDiag.renderGroupOnlineBubble()"></select> <span id="nd_group_online_count" class="net-group-count" title="Waiting...">--/--</span></span>` : ''}
                         </div>
                         <div id="nd_analysis" style="padding: 10px; background: var(--bg-input); border-radius: 4px; min-height: 60px; color: var(--text-muted);">
                             Initializing tests...
@@ -203,6 +209,8 @@ window.NetworkDiag = {
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         this.populateAgentDropdown();
+        this.populateGroupOnlineSelect();
+        this.renderGroupOnlineBubble();
         this.renderAgentStatus();
         this.startTests();
         this.startDashboardRefresh();
@@ -261,6 +269,7 @@ window.NetworkDiag = {
         if (this.dashboardInterval) clearInterval(this.dashboardInterval);
         this.dashboardInterval = setInterval(() => {
             this.renderFlow();
+            this.renderGroupOnlineBubble();
             this.renderAgentStatus();
             this.drawLatencyGraph();
         }, 5000);
@@ -368,6 +377,72 @@ window.NetworkDiag = {
         if (diskEl) diskEl.innerText = this.stats.disk || 'N/A';
         if (connTypeEl) connTypeEl.innerText = this.stats.connType || 'Unknown';
         if (ipEl) ipEl.innerText = this.publicIP || 'Unknown';
+    },
+
+    getScheduleGroupOptions: function() {
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const scheduled = new Set();
+        Object.values(schedules || {}).forEach(schedule => {
+            if (schedule && schedule.assigned && Array.isArray(rosters[schedule.assigned])) {
+                scheduled.add(schedule.assigned);
+            }
+        });
+        const groupIds = Array.from(new Set([...scheduled, ...Object.keys(rosters || {})]));
+        return groupIds
+            .filter(gid => Array.isArray(rosters[gid]) && rosters[gid].length > 0)
+            .sort()
+            .map(gid => ({
+                id: gid,
+                label: typeof getGroupLabel === 'function' ? getGroupLabel(gid, rosters[gid].length) : `${gid} (${rosters[gid].length})`
+            }));
+    },
+
+    populateGroupOnlineSelect: function() {
+        const select = document.getElementById('nd_group_online_select');
+        if (!select) return;
+        const current = select.value || localStorage.getItem('network_diag_group_online_gid') || '';
+        const options = this.getScheduleGroupOptions();
+        select.innerHTML = options.map(opt => `<option value="${this.escapeHtml(opt.id)}">${this.escapeHtml(opt.label)}</option>`).join('');
+        if (current && options.some(opt => opt.id === current)) select.value = current;
+        else if (options[0]) select.value = options[0].id;
+    },
+
+    getGroupOnlineSummary: function(groupId) {
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const members = Array.isArray(rosters[groupId]) ? rosters[groupId] : [];
+        const activeRows = Object.values(window.ACTIVE_USERS_CACHE || {});
+        const now = Date.now();
+        const online = [];
+        const missing = [];
+
+        members.forEach(member => {
+            const memberKey = this.identityKey(member);
+            const active = activeRows.find(row => this.identityKey(row && (row.user || row.username)) === memberKey);
+            const lastSeen = active && active.local_received_at ? active.local_received_at : (active && active.lastSeen ? new Date(active.lastSeen).getTime() : 0);
+            if (lastSeen && (now - lastSeen) < 90000) online.push(member);
+            else missing.push(member);
+        });
+
+        return { total: members.length, online: online.length, missing };
+    },
+
+    renderGroupOnlineBubble: function() {
+        const select = document.getElementById('nd_group_online_select');
+        const countEl = document.getElementById('nd_group_online_count');
+        if (!select || !countEl) return;
+        if (!select.options.length) this.populateGroupOnlineSelect();
+        const groupId = select.value;
+        if (!groupId) {
+            countEl.textContent = '--/--';
+            countEl.title = 'No scheduled groups found.';
+            return;
+        }
+        localStorage.setItem('network_diag_group_online_gid', groupId);
+        const summary = this.getGroupOnlineSummary(groupId);
+        countEl.textContent = `${summary.online}/${summary.total}`;
+        countEl.style.color = summary.online === summary.total ? '#2ecc71' : (summary.online === 0 ? '#ff5252' : '#f1c40f');
+        countEl.title = summary.missing.length ? `Missing/offline: ${summary.missing.join(', ')}` : 'Everyone in this group is online.';
     },
 
     testDbDataConnection: async function() {
@@ -900,8 +975,9 @@ window.NetworkDiag = {
             } catch (error) {}
         };
 
-        ['warn', 'error'].forEach(level => {
+        ['debug', 'info', 'log', 'warn', 'error'].forEach(level => {
             const original = console[level];
+            if (typeof original !== 'function') return;
             console[level] = function(...args) {
                 pushEvent(level, args);
                 return original.apply(console, args);
@@ -915,6 +991,29 @@ window.NetworkDiag = {
         window.addEventListener('unhandledrejection', event => {
             pushEvent('error', [event.reason || 'Unhandled promise rejection'], 'promise');
         });
+
+        window.addEventListener('error', event => {
+            const target = event && event.target;
+            if (!target || target === window) return;
+            const url = target.src || target.href || target.currentSrc || '';
+            if (url) pushEvent('error', [`Resource failed to load: ${url}`], 'resource');
+        }, true);
+
+        if (typeof window.fetch === 'function' && !window.__NETWORK_DIAG_FETCH_CAPTURED) {
+            window.__NETWORK_DIAG_FETCH_CAPTURED = true;
+            const originalFetch = window.fetch.bind(window);
+            window.fetch = function(...args) {
+                return originalFetch(...args).then(response => {
+                    if (response && !response.ok) {
+                        pushEvent('error', [`HTTP ${response.status} ${response.statusText || ''}: ${response.url || args[0]}`], 'fetch');
+                    }
+                    return response;
+                }).catch(error => {
+                    pushEvent('error', [`Fetch failed: ${args[0]} - ${error && error.message ? error.message : error}`], 'fetch');
+                    throw error;
+                });
+            };
+        }
     },
 
     getConsoleEvents: function() {
@@ -938,11 +1037,12 @@ window.NetworkDiag = {
 
         list.innerHTML = events.map(item => {
             const level = String(item.level || 'warn').toLowerCase();
+            const levelClass = ['error', 'warn', 'info', 'log', 'debug'].includes(level) ? level : 'info';
             const time = item.time ? new Date(item.time).toLocaleTimeString() : '--';
             return `
                 <div class="net-console-row">
                     <div style="color:var(--text-muted);">${this.escapeHtml(time)}</div>
-                    <div class="net-console-level-${level === 'error' ? 'error' : 'warn'}">${this.escapeHtml(level.toUpperCase())}</div>
+                    <div class="net-console-level-${levelClass}">${this.escapeHtml(level.toUpperCase())}</div>
                     <div class="net-console-msg">${this.escapeHtml(item.message || '')}</div>
                 </div>
             `;
@@ -955,6 +1055,8 @@ window.NetworkDiag = {
 
     getSnapshot: function() {
         const isAdmin = this.isAdminUser();
+        const fallbackGroup = isAdmin ? (this.getScheduleGroupOptions()[0] || {}).id : '';
+        const selectedGroupId = localStorage.getItem('network_diag_group_online_gid') || fallbackGroup || '';
         return {
             generatedAt: new Date().toISOString(),
             publicIP: this.publicIP,
@@ -967,6 +1069,7 @@ window.NetworkDiag = {
                 server: this.getAvg(this.history.server),
                 dbQuery: this.getAvg(this.history.dbQuery)
             },
+            groupOnline: isAdmin ? this.getGroupOnlineSummary(selectedGroupId) : null,
             consoleEvents: isAdmin ? this.getConsoleEvents() : [],
             agentRows: isAdmin ? this.getAgentRows() : [],
             canViewAgents: isAdmin
@@ -1142,6 +1245,7 @@ window.NetworkDiag = {
                             <div class="card"><div class="label">CPU</div><div id="pop_cpu" class="value">--</div></div>
                             <div class="card"><div class="label">RAM</div><div id="pop_ram" class="value">--</div></div>
                             <div class="card"><div class="label">Disk</div><div id="pop_disk" class="value">--</div></div>
+                            <div class="card"><div class="label">Group Online</div><div id="pop_group_online" class="value" title="Waiting...">--/--</div></div>
                         </div>
                         <div class="card">
                             <div class="label">Current DB Diagnosis</div>
@@ -1235,6 +1339,13 @@ window.NetworkDiag = {
                     document.getElementById('pop_cpu').textContent = ((s.stats && s.stats.cpu) || '0') + '%';
                     document.getElementById('pop_ram').textContent = ((s.stats && s.stats.ram) || '0') + 'GB';
                     document.getElementById('pop_disk').textContent = (s.stats && s.stats.disk) || 'N/A';
+                    const groupOnline = s.groupOnline || null;
+                    const groupEl = document.getElementById('pop_group_online');
+                    if (groupEl) {
+                        groupEl.textContent = groupOnline ? (groupOnline.online + '/' + groupOnline.total) : '--/--';
+                        groupEl.title = groupOnline && groupOnline.missing && groupOnline.missing.length ? 'Missing/offline: ' + groupOnline.missing.join(', ') : 'Everyone in this group is online.';
+                        groupEl.className = 'value ' + (!groupOnline ? 'warn' : (groupOnline.online === groupOnline.total ? 'ok' : (groupOnline.online === 0 ? 'bad' : 'warn')));
+                    }
                     const dbHost = r.server && r.server.success;
                     const dbData = r.dbQuery && r.dbQuery.success;
                     const dbSlow = dbData && r.dbQuery.v > 1200;
@@ -1246,7 +1357,7 @@ window.NetworkDiag = {
                     const consoleEvents = (s.consoleEvents || []).slice(0, 10);
                     document.getElementById('pop_console').innerHTML = consoleEvents.length ? consoleEvents.map(function(item) {
                         const level = String(item.level || 'warn').toLowerCase();
-                        const klass = level === 'error' ? 'bad' : 'warn';
+                        const klass = level === 'error' ? 'bad' : (level === 'warn' ? 'warn' : 'ok');
                         const time = item.time ? new Date(item.time).toLocaleTimeString() : '--';
                         return '<div class="console-row"><div class="muted">' + esc(time) + '</div><div class="' + klass + '">' + esc(level.toUpperCase()) + '</div><div class="console-msg">' + esc(item.message || '') + '</div></div>';
                     }).join('') : '<div class="muted" style="padding-top:6px;">No warnings or errors captured.</div>';
