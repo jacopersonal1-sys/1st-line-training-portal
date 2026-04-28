@@ -3540,6 +3540,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.31": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Network Diagnostics now includes an admin-only second-screen overlay with latency history, DB data health, and agent status filters.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Realtime tunnel handling now uses explicit table subscriptions, separated presence recovery, and targeted Live Assessment/Vetting fallback reads.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Supabase client reuse prevents duplicate auth clients after reconnect or system wake events.</li>
+            </ul>`,
         "2.6.30": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live Assessment Confirm &amp; Submit now closes sessions authoritatively so completed sessions do not re-open as active.</li>
