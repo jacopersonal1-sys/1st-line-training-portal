@@ -708,17 +708,17 @@ window.NetworkDiag = {
 
         const rowHtml = rows.map(r => {
             const report = r.report;
-            const pings = report && report.pings ? report.pings : {};
             const dbQuery = report && report.dbQuery ? report.dbQuery : null;
             const age = r.ageMs === null ? 'No heartbeat' : `${Math.round(r.ageMs / 1000)}s ago`;
             const status = this.getAgentStatus(r);
-            const reportSummary = this.getReportSummary(report);
+            const reportSummary = this.getReportSummary(report, r);
+            const reportMetrics = this.getReportMetricLine(r);
             return `
                 <div class="net-agent-row">
                     <div><strong>${this.escapeHtml(r.user)}</strong><br><span style="color:var(--text-muted); font-size:0.78rem;">${this.escapeHtml(r.role)}</span></div>
                     <div><span class="net-pill" style="color:${status.color};"><i class="fas ${status.icon}"></i>${status.label}</span></div>
                     <div>${this.escapeHtml(age)}</div>
-                    <div style="font-family:monospace;">G ${this.formatMs(pings.gateway)} / I ${this.formatMs(pings.internet)} / DB ${this.formatMs(pings.server)}</div>
+                    <div style="font-family:monospace;">${reportMetrics}</div>
                     <div>${reportSummary.html}${dbQuery ? `<br><span style="font-family:monospace; color:${dbQuery.success ? '#2ecc71' : '#ff5252'};">Data ${this.formatMs(dbQuery.time || dbQuery.latency || (dbQuery.success ? 0 : -1))}</span>` : ''}</div>
                 </div>
             `;
@@ -779,8 +779,32 @@ window.NetworkDiag = {
         });
     },
 
-    getReportSummary: function(report) {
-        if (!report || !report.date) return { label: 'No report', html: '<span style="color:#ff5252;">No report</span>' };
+    getReportMetricLine: function(row) {
+        const report = row && row.report;
+        if (report && report.pings) {
+            return `G ${this.formatMs(report.pings.gateway)} / I ${this.formatMs(report.pings.internet)} / DB ${this.formatMs(report.pings.server)}`;
+        }
+
+        if (row && row.presence) {
+            const version = row.presence.version && row.presence.version !== '-' ? `v${this.escapeHtml(row.presence.version)}` : 'version unknown';
+            const activity = row.presence.activity && row.presence.activity !== '-' ? this.escapeHtml(row.presence.activity) : 'active session';
+            return `${version} / ${activity}`;
+        }
+
+        return 'No live heartbeat';
+    },
+
+    getReportSummary: function(report, row = null) {
+        if (!report || !report.date) {
+            if (row && row.online) {
+                const age = row.ageMs === null ? 'now' : `${Math.round(row.ageMs / 1000)}s ago`;
+                return {
+                    label: `Live heartbeat - ${age}`,
+                    html: `<span style="color:#2ecc71;">Live heartbeat</span> <span style="color:var(--text-muted);">(${this.escapeHtml(age)})</span>`
+                };
+            }
+            return { label: 'No report', html: '<span style="color:#ff5252;">No report</span>' };
+        }
         const ageMin = Math.max(0, Math.round((Date.now() - new Date(report.date).getTime()) / 60000));
         const p = report.pings || {};
         const hostBad = p.server === -1 || p.internet === -1 || p.gateway === -1;
@@ -1120,9 +1144,25 @@ window.NetworkDiag = {
                     if (filters.indexOf('offline') > -1 && agentStatus(a).key === 'offline') return true;
                     return filters.indexOf('stale_report') > -1 && isStaleReport(a);
                 }
+                function reportMetricLine(a) {
+                    const r = a && a.report;
+                    if (r && r.pings) return 'G ' + fmt(r.pings.gateway) + ' / I ' + fmt(r.pings.internet) + ' / DB ' + fmt(r.pings.server);
+                    if (a && a.presence) {
+                        const version = a.presence.version && a.presence.version !== '-' ? 'v' + a.presence.version : 'version unknown';
+                        const activity = a.presence.activity && a.presence.activity !== '-' ? a.presence.activity : 'active session';
+                        return version + ' / ' + activity;
+                    }
+                    return 'No live heartbeat';
+                }
                 function reportSummary(a) {
                     const r = a && a.report;
-                    if (!r || !r.date) return '<span class="bad">No report</span>';
+                    if (!r || !r.date) {
+                        if (a && a.online) {
+                            const age = a.ageMs === null ? 'now' : Math.round(a.ageMs / 1000) + 's ago';
+                            return '<span class="ok">Live heartbeat</span> <span class="muted">(' + esc(age) + ')</span>';
+                        }
+                        return '<span class="bad">No report</span>';
+                    }
                     const ageMin = Math.max(0, Math.round((Date.now() - new Date(r.date).getTime()) / 60000));
                     const p = r.pings || {};
                     const hostBad = p.gateway === -1 || p.internet === -1 || p.server === -1;
@@ -1165,9 +1205,8 @@ window.NetworkDiag = {
                     agentRows = agentRows.filter(function(a) { return rowMatchesFilters(a, filters); });
                     const rows = agentRows.slice(0, 120).map(function(a) {
                         const age = a.ageMs === null ? 'No heartbeat' : Math.round(a.ageMs / 1000) + 's ago';
-                        const p = a.report && a.report.pings ? a.report.pings : {};
                         const st = agentStatus(a);
-                        return '<tr><td><strong>' + esc(a.user) + '</strong><br><span class="muted">' + esc(a.role) + '</span></td><td class="' + st.cls + '">' + st.label + '</td><td>' + age + '</td><td>' + reportSummary(a) + '<br><span class="muted">G ' + fmt(p.gateway) + ' / I ' + fmt(p.internet) + ' / DB ' + fmt(p.server) + '</span></td></tr>';
+                        return '<tr><td><strong>' + esc(a.user) + '</strong><br><span class="muted">' + esc(a.role) + '</span></td><td class="' + st.cls + '">' + st.label + '</td><td>' + age + '</td><td>' + reportSummary(a) + '<br><span class="muted">' + esc(reportMetricLine(a)) + '</span></td></tr>';
                     }).join('');
                     document.getElementById('pop_agents').innerHTML = rows || '<tr><td colspan="4" class="muted">No tracked agents found.</td></tr>';
                 };
