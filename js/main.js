@@ -3588,6 +3588,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.37": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live Assessment final summary now handles missing or delayed test definitions without crashing, and score/comment saves initialize missing session containers safely.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Problem Reports and System Errors now hide resolved or noisy historical reports by default, with a toggle to review them when needed.</li>
+            </ul>`,
         "2.6.36": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Orphan cleanup now checks only local row IDs against Supabase instead of scanning full high-volume tables like error reports, preventing statement timeouts during diagnostics.</li>

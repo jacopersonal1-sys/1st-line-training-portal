@@ -54,4 +54,31 @@ describe('Orphan cleanup stability', () => {
         expect(rangeMock).not.toHaveBeenCalled();
         expect(reports.map(r => r.id)).toEqual(['err_keep_1', 'err_keep_2']);
     });
+
+    test('classifies resolved and noisy reports so current triage can hide them', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/admin_sys.js'), 'utf8');
+        eval(src);
+
+        expect(classifyResolvedOrNoisyReport({
+            activeTab: 'live-execution',
+            appVersion: '2.6.29',
+            issueDetail: 'After the live assessment I could not exit. It says it is still running.'
+        }).hidden).toBe(true);
+
+        expect(classifyResolvedOrNoisyReport({
+            activeTab: 'study-notes',
+            appVersion: '2.6.29',
+            issueDetail: 'Notes Page kicks me to the top of the page when client starts syncing'
+        }).hidden).toBe(true);
+
+        expect(classifyResolvedOrNoisyReport({
+            appVersion: '2.6.35',
+            error: "Unhandled Promise Rejection: TypeError: Cannot read properties of undefined (reading 'questions') at confirmAndSaveLiveSession"
+        }).hidden).toBe(true);
+
+        expect(classifyResolvedOrNoisyReport({
+            appVersion: '2.6.37',
+            error: 'New unknown error after release'
+        }).hidden).toBe(false);
+    });
 });

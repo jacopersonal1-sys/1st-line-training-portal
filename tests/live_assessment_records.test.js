@@ -10,6 +10,8 @@ describe('Live assessment record finalization', () => {
         global.confirm = jest.fn(() => true);
         global.showToast = jest.fn();
         global.showTab = jest.fn();
+        global.loadFromServer = jest.fn(async () => true);
+        window.loadFromServer = global.loadFromServer;
         global.CURRENT_USER = { user: 'trainer', role: 'admin' };
         window.CURRENT_USER = global.CURRENT_USER;
 
@@ -108,5 +110,55 @@ describe('Live assessment record finalization', () => {
         expect(bookings.find(b => b.id === 'booking_new').status).toBe('Completed');
         expect(bookings.find(b => b.id === 'booking_new').score).toBe(100);
         expect(saveCalls.some(call => call.force === true && call.keys.includes('records') && call.keys.includes('submissions'))).toBe(true);
+    });
+
+    test('missing live test definition does not crash final save', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/live_execution.js'), 'utf8');
+        eval(src);
+
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        saveToServer = global.saveToServer;
+        closeLiveSessionAuthoritatively = jest.fn(async () => {});
+
+        localStorage.setItem('tests', JSON.stringify([]));
+        localStorage.setItem('liveSession', JSON.stringify({
+            sessionId: 'missing_test_session',
+            bookingId: 'booking_missing',
+            testId: 'missing_test',
+            trainee: 'Alice',
+            trainer: 'trainer',
+            active: true,
+            answers: { 0: 'done' }
+        }));
+
+        const result = await confirmAndSaveLiveSession();
+
+        expect(result).toBe(false);
+        expect(global.showToast).toHaveBeenCalled();
+        expect(global.saveToServer).not.toHaveBeenCalled();
+        expect(closeLiveSessionAuthoritatively).not.toHaveBeenCalled();
+    });
+
+    test('live score and comment saves initialize missing containers', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/live_execution.js'), 'utf8');
+        eval(src);
+
+        const updateStub = jest.fn(async () => true);
+        window.updateGlobalSessionArray = updateStub;
+        updateGlobalSessionArray = updateStub;
+
+        localStorage.setItem('liveSession', JSON.stringify({
+            sessionId: 'session_missing_maps',
+            active: true
+        }));
+
+        await saveLiveScore(8, '3.5');
+        await saveLiveComment(8, 'Observed practical step');
+
+        const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        expect(session.scores[8]).toBe(3.5);
+        expect(session.comments[8]).toBe('Observed practical step');
+        expect(updateStub).toHaveBeenCalled();
     });
 });

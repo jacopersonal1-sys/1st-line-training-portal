@@ -110,6 +110,32 @@ function resolveLiveTestDefinition(tests, assessmentName, assessmentId) {
     return null;
 }
 
+function resolveLiveTestForSession(session) {
+    if (!session || typeof session !== 'object') return null;
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const direct = Array.isArray(tests) ? tests.find(t => String(t.id) === String(session.testId)) : null;
+    if (direct && Array.isArray(direct.questions)) return direct;
+
+    const booking = session.bookingId ? getLiveBookingById(session.bookingId) : null;
+    const resolved = resolveLiveTestDefinition(
+        tests,
+        (booking && booking.assessment) || session.testTitle || session.assessment,
+        session.assessmentId || (booking && booking.assessmentId) || session.testId
+    );
+    return resolved && Array.isArray(resolved.questions) ? resolved : null;
+}
+
+function warnMissingLiveTestDefinition(session, actionLabel = 'continue') {
+    const label = actionLabel || 'continue';
+    const identifier = session && (session.assessment || session.testTitle || session.testId || session.assessmentId)
+        ? ` (${session.assessment || session.testTitle || session.testId || session.assessmentId})`
+        : '';
+    const message = `Live assessment test definition is not available${identifier}. Please refresh bookings/tests and try to ${label} again.`;
+    if (typeof showToast === 'function') showToast(message, 'warning');
+    else alert(message);
+    if (typeof loadFromServer === 'function') loadFromServer(true).catch(() => {});
+}
+
 function buildLiveSubmissionId(session) {
     const sessionId = String((session && session.sessionId) || '').trim();
     return sessionId ? `live_${sessionId}` : `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -1635,7 +1661,9 @@ async function adminJumpToQuestion(idx) {
 }
 
 async function saveLiveScore(idx, val) {
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    if (!session || !session.sessionId) return;
+    if (!session.scores || typeof session.scores !== 'object') session.scores = {};
     session.scores[idx] = parseFloat(val);
     localStorage.setItem('liveSession', JSON.stringify(session));
     
@@ -1643,7 +1671,9 @@ async function saveLiveScore(idx, val) {
 }
 
 async function saveLiveComment(idx, val) {
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    if (!session || !session.sessionId) return;
+    if (!session.comments || typeof session.comments !== 'object') session.comments = {};
     session.comments[idx] = val;
     localStorage.setItem('liveSession', JSON.stringify(session));
     
@@ -1667,10 +1697,17 @@ async function submitLiveAnswer(qIdx) {
         }
     }
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const session = JSON.parse(localStorage.getItem('liveSession'));
-    const test = tests.find(t => t.id == session.testId);
+    const test = resolveLiveTestForSession(session);
+    if (!test) {
+        warnMissingLiveTestDefinition(session, 'submit your answer');
+        return;
+    }
     const q = test.questions[qIdx];
+    if (!q) {
+        warnMissingLiveTestDefinition(session, 'submit this question');
+        return;
+    }
 
     // Allow empty for Practical (Auto-fill "Completed")
     if (q.type !== 'live_practical' && (ans === undefined || ans === null || ans === "")) {
@@ -1726,8 +1763,14 @@ async function finishLiveSession() {
     }
     localStorage.setItem('liveSession', JSON.stringify(session));
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const test = tests.find(t => t.id == session.testId);
+    if (!session.scores || typeof session.scores !== 'object') session.scores = {};
+    if (!session.comments || typeof session.comments !== 'object') session.comments = {};
+
+    const test = resolveLiveTestForSession(session);
+    if (!test) {
+        warnMissingLiveTestDefinition(session, 'finish the assessment');
+        return;
+    }
 
     let totalScore = 0;
     let maxScore = 0;
@@ -1798,9 +1841,16 @@ async function finishLiveSession() {
 }
 
 async function confirmAndSaveLiveSession() {
-    const session = JSON.parse(localStorage.getItem('liveSession'));
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const test = tests.find(t => t.id == session.testId);
+    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    if (!session || !session.sessionId) {
+        alert("Live session data is missing. Please reopen the live session before saving.");
+        return false;
+    }
+    const test = resolveLiveTestForSession(session);
+    if (!test) {
+        warnMissingLiveTestDefinition(session, 'save the assessment');
+        return false;
+    }
 
     // ROBUSTNESS: Scrape inputs to ensure latest edits are captured
     // FIX: Ensure container objects exist before assigning properties

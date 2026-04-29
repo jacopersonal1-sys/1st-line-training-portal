@@ -2432,11 +2432,97 @@ function escapeReportHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function parseReportVersion(value) {
+    const raw = String(value || '').replace(/^v/i, '').trim();
+    const parts = raw.split('.').map(n => parseInt(n, 10));
+    if (parts.some(n => Number.isNaN(n))) return null;
+    return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+}
+
+function compareReportVersions(left, right) {
+    const a = parseReportVersion(left);
+    const b = parseReportVersion(right);
+    if (!a || !b) return null;
+    for (let i = 0; i < 3; i++) {
+        if (a[i] < b[i]) return -1;
+        if (a[i] > b[i]) return 1;
+    }
+    return 0;
+}
+
+function reportVersionAtMost(report, version) {
+    const cmp = compareReportVersions(report && report.appVersion, version);
+    return cmp !== null && cmp <= 0;
+}
+
+function getReportSearchText(report) {
+    return [
+        report && report.error,
+        report && report.issueDetail,
+        report && report.consoleSnapshot,
+        report && report.activeTab,
+        report && report.pageUrl
+    ].map(v => String(v || '').toLowerCase()).join('\n');
+}
+
+function classifyResolvedOrNoisyReport(report) {
+    const text = getReportSearchText(report);
+    const tab = String((report && report.activeTab) || '').toLowerCase();
+
+    if ((text.includes('could not exit') || text.includes('can not exit') || text.includes('still running')) && tab === 'live-execution' && reportVersionAtMost(report, '2.6.29')) {
+        return { hidden: true, reason: 'Resolved: live-session release fixed after v2.6.29.' };
+    }
+    if ((text.includes('kicks me to the top') || text.includes('top of the page') || text.includes('starts syncing')) && tab === 'study-notes' && reportVersionAtMost(report, '2.6.29')) {
+        return { hidden: true, reason: 'Resolved: Study Notes no-refresh/local-only behavior is now active.' };
+    }
+    if ((text.includes("cannot read properties of undefined (reading 'questions')") || text.includes('cannot set properties of undefined')) && text.includes('live') && reportVersionAtMost(report, '2.6.36')) {
+        return { hidden: true, reason: 'Resolved: live summary save now guards missing test/session data.' };
+    }
+    if (text.includes('rest/v1/records') && text.includes('http 500') && reportVersionAtMost(report, '2.6.36')) {
+        return { hidden: true, reason: 'Resolved: records upload now dedupes duplicate IDs and fails visibly if rejected.' };
+    }
+    if (text.includes('pollvettingsession is not defined') && reportVersionAtMost(report, '2.6.29')) {
+        return { hidden: true, reason: 'Resolved: legacy Vetting runtime reference from old clients.' };
+    }
+    if (text.includes('http 503 service unavailable') || text.includes('could not query the database for the schema cache') || text.includes('pgrst002')) {
+        return { hidden: true, reason: 'Server availability event, not an app-code fault.' };
+    }
+    if (text.includes('guest_view_manager_call') || text.includes('err_name_not_resolved') || text.includes('view.genially.com') || text.includes('sharepoint.com')) {
+        return { hidden: true, reason: 'External content/network load failure.' };
+    }
+
+    return { hidden: false, reason: '' };
+}
+
+function shouldHideResolvedReports() {
+    return localStorage.getItem('hide_resolved_error_reports') !== 'false';
+}
+
+window.toggleResolvedReportVisibility = function() {
+    const next = shouldHideResolvedReports() ? 'false' : 'true';
+    localStorage.setItem('hide_resolved_error_reports', next);
+    const systemModal = document.getElementById('errorReportModal');
+    const problemModal = document.getElementById('problemReportModal');
+    if (systemModal) {
+        systemModal.remove();
+        viewSystemErrors();
+    }
+    if (problemModal) {
+        problemModal.remove();
+        viewProblemReports();
+    }
+};
+
 async function viewSystemErrors() {
-    const { systemReports: reports } = await refreshErrorReportsFromServer();
+    const { systemReports: allSystemReports } = await refreshErrorReportsFromServer();
+    const hideResolved = shouldHideResolvedReports();
+    const resolvedCount = allSystemReports.filter(r => classifyResolvedOrNoisyReport(r).hidden).length;
+    const reports = hideResolved
+        ? allSystemReports.filter(r => !classifyResolvedOrNoisyReport(r).hidden)
+        : allSystemReports;
     
     // Update "Last Seen" count to stop notifications
-    localStorage.setItem('last_seen_error_count', reports.length.toString());
+    localStorage.setItem('last_seen_error_count', allSystemReports.length.toString());
 
     const uniqueUsers = new Set(reports.map(r => r.user)).size;
 
@@ -2445,9 +2531,10 @@ async function viewSystemErrors() {
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                 <div>
                     <h3 style="margin:0; color:#ff5252;"><i class="fas fa-bug"></i> System Error Reports</h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} Errors reported by ${uniqueUsers} unique users</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} active errors from ${uniqueUsers} unique users${resolvedCount ? ` (${resolvedCount} resolved/noisy hidden)` : ''}</div>
                 </div>
                 <div style="display:flex; gap:10px;">
+                    <button class="btn-secondary btn-sm" onclick="toggleResolvedReportVisibility()">${hideResolved ? 'Show Resolved/Noise' : 'Hide Resolved/Noise'}</button>
                     <button class="btn-warning btn-sm" onclick="clearSystemErrors()">Clear All</button>
                     <button class="btn-secondary btn-sm" onclick="document.getElementById('errorReportModal').remove()">&times;</button>
                 </div>
@@ -2464,15 +2551,17 @@ async function viewSystemErrors() {
         reports.slice().reverse().forEach(r => {
             const time = new Date(r.timestamp).toLocaleString();
             const rawMsg = String(r.error || 'Unknown error');
+            const classification = classifyResolvedOrNoisyReport(r);
             const safeMsg = rawMsg.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             const safeDisplayMsg = escapeReportHtml(rawMsg.length > 180 ? `${rawMsg.slice(0, 180)}...` : rawMsg);
             const safeUser = escapeReportHtml(r.user || 'Unknown');
             const safeRole = escapeReportHtml(r.role || 'Unknown');
+            const statusBadge = classification.hidden ? `<br><span style="font-size:0.68rem; color:#f1c40f;">${escapeReportHtml(classification.reason)}</span>` : '';
             
             html += `<tr>
                 <td style="font-size:0.8rem; white-space:nowrap;">${time}</td>
                 <td><strong>${safeUser}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${safeRole}</span></td>
-                <td style="font-family:monospace; font-size:0.8rem; color:#ff5252;">${safeDisplayMsg}</td>
+                <td style="font-family:monospace; font-size:0.8rem; color:#ff5252;">${safeDisplayMsg}${statusBadge}</td>
                 <td><button class="btn-primary btn-sm" onclick="AICore.analyzeError('${safeMsg}')" title="Ask AI to Diagnose"><i class="fas fa-robot"></i> Analyze</button></td>
             </tr>`;
         });
@@ -2507,10 +2596,15 @@ async function clearSystemErrors() {
 }
 
 async function viewProblemReports() {
-    const { problemReports: reports } = await refreshErrorReportsFromServer();
+    const { problemReports: allProblemReports } = await refreshErrorReportsFromServer();
+    const hideResolved = shouldHideResolvedReports();
+    const resolvedCount = allProblemReports.filter(r => classifyResolvedOrNoisyReport(r).hidden).length;
+    const reports = hideResolved
+        ? allProblemReports.filter(r => !classifyResolvedOrNoisyReport(r).hidden)
+        : allProblemReports;
     const uniqueUsers = new Set(reports.map(r => r.user)).size;
 
-    localStorage.setItem('last_seen_problem_report_count', reports.length.toString());
+    localStorage.setItem('last_seen_problem_report_count', allProblemReports.length.toString());
     if (typeof updateNotifications === 'function') updateNotifications();
 
     let html = `<div class="modal-overlay" id="problemReportModal" style="z-index:10002;">
@@ -2518,9 +2612,10 @@ async function viewProblemReports() {
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                 <div>
                     <h3 style="margin:0; color:#ff6b6b;"><i class="fas fa-question-circle"></i> Problem Reports</h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} reports from ${uniqueUsers} unique users</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} active reports from ${uniqueUsers} unique users${resolvedCount ? ` (${resolvedCount} resolved/noisy hidden)` : ''}</div>
                 </div>
                 <div style="display:flex; gap:10px;">
+                    <button class="btn-secondary btn-sm" onclick="toggleResolvedReportVisibility()">${hideResolved ? 'Show Resolved/Noise' : 'Hide Resolved/Noise'}</button>
                     <button class="btn-warning btn-sm" onclick="clearProblemReports()">Clear Problem Reports</button>
                     <button class="btn-secondary btn-sm" onclick="document.getElementById('problemReportModal').remove()">&times;</button>
                 </div>
@@ -2538,8 +2633,9 @@ async function viewProblemReports() {
             const safeUser = escapeReportHtml(r.user || 'Unknown');
             const safeRole = escapeReportHtml(r.role || 'Unknown');
             const issueRaw = String(r.issueDetail || r.error || 'No issue details provided.');
+            const classification = classifyResolvedOrNoisyReport(r);
             const issuePreview = issueRaw.length > 150 ? `${issueRaw.slice(0, 150)}...` : issueRaw;
-            const safeIssue = escapeReportHtml(issuePreview);
+            const safeIssue = escapeReportHtml(issuePreview) + (classification.hidden ? `<br><span style="font-size:0.68rem; color:#f1c40f;">${escapeReportHtml(classification.reason)}</span>` : '');
             const context = `${r.activeTab || 'unknown tab'} | v${r.appVersion || 'Unknown'}`;
             const safeContext = escapeReportHtml(context);
             const safeId = String(r.id || '').replace(/'/g, "\\'");

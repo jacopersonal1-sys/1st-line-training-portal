@@ -513,6 +513,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Clarification: Duplicate row collapse warnings during records upload are expected protective sync cleanup messages after duplicate local IDs are deduped before upsert; they do not indicate score overwrite behavior.
 - Release: Version bump to `2.6.36` for stable main channel rollout.
 
+## v2.6.37 - 2026-04-29
+
+- Bug Fix: Live Assessment final summary/save paths now guard missing or delayed test definitions instead of throwing `Cannot read properties of undefined (reading 'questions')`, and live score/comment saves initialize missing `scores`/`comments` containers.
+- Improvement: Problem Reports and System Error Reports now classify and hide resolved/noisy historical reports by default, including old live-exit reports, old Study Notes refresh reports, fixed live-summary crashes, records duplicate-upload 500s, transient server outages, and external SharePoint/Genially load failures. A toggle keeps the hidden reports reviewable.
+- Release: Version bump to `2.6.37` for stable main channel rollout.
+
 ## v2.6.24 - 2026-04-16
 
 - Feature Added: Linked content questionnaires now support trainee popup launch for complete-and-submit flow.
