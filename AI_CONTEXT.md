@@ -565,6 +565,10 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Fix: Onboard Summary Report print styling is now scoped to report printing so the report no longer appears when printing other app pages.
 - Release: Version bump to `2.6.45` for stable main channel rollout.
 
+## v2.6.46 - 2026-04-29
+- Fix: Onboard Summary Report workspace styling no longer overrides route visibility, preventing the report page from appearing on every screen for admins, trainees, and other roles.
+- Release: Version bump to `2.6.46` for stable main channel rollout.
+
 ## v2.6.43 - 2026-04-29
 
 - Improvement: Live Assessment Booking now uses the shared admin workspace layout with pinned booking controls, live booking stats, booking rules, and a dedicated schedule grid.

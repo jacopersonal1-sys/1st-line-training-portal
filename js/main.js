@@ -3878,6 +3878,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.46": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Onboard Summary Report now stays hidden outside its own navigation tab for all roles.</li>
+            </ul>`,
         "2.6.45": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Onboard Summary Report printing now stays scoped to the report page and no longer appears when printing other app pages.</li>
