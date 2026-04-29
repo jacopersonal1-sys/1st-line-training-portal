@@ -492,6 +492,13 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Improvement: Study Notes are local-only for trainees, Activity Monitor summaries expose trainee violation drilldowns, and Problem Reports now show submitted reports with Super Admin bell notifications.
 - Release: Version bump to `2.6.33` for stable main channel rollout.
 
+## v2.6.34 - 2026-04-29
+
+- Bug Fix: Live Assessment finalization now creates separate submission-linked permanent records per booking/session instead of matching by trainee and assessment title.
+- Bug Fix: Live stale-session recovery and admin marking now preserve record identity and use saved assessment snapshots for score totals.
+- Improvement: Live Booking Integrity now includes Repair Live Records to rebuild missing live records from completed live submissions and relink completed bookings.
+- Release: Version bump to `2.6.34` for stable main channel rollout.
+
 ## v2.6.24 - 2026-04-16
 
 - Feature Added: Linked content questionnaires now support trainee popup launch for complete-and-submit flow.

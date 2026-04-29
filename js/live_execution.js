@@ -110,6 +110,15 @@ function resolveLiveTestDefinition(tests, assessmentName, assessmentId) {
     return null;
 }
 
+function buildLiveSubmissionId(session) {
+    const sessionId = String((session && session.sessionId) || '').trim();
+    return sessionId ? `live_${sessionId}` : `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function buildLiveRecordId(submissionId) {
+    return `record_${submissionId}`;
+}
+
 function getLiveSessionUpdateStamp(session) {
     if (!session || typeof session !== 'object') return 'none';
     const timer = session.timer || {};
@@ -1820,15 +1829,17 @@ async function confirmAndSaveLiveSession() {
     // 1. Create Full Submission Record (For "View Completed Test" & Marking Queue)
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
     
-    // DEDUPLICATION: Check if this booking/session already has a submission
+    // DEDUPLICATION: Only update the same booking/session. Do not collapse separate live attempts.
     const existingSubIdx = submissions.findIndex(s => 
-        (session.bookingId && String(s.bookingId) === String(session.bookingId)) || 
-        (s.testId == test.id && s.trainee === session.trainee && s.date === new Date().toISOString().split('T')[0] && s.type === 'live')
+        (session.bookingId && String(s.bookingId || '') === String(session.bookingId)) ||
+        (session.sessionId && String(s.liveSessionId || '') === String(session.sessionId))
     );
+    const submissionId = (existingSubIdx > -1) ? submissions[existingSubIdx].id : buildLiveSubmissionId(session);
 
     const newSub = {
-        id: (existingSubIdx > -1) ? submissions[existingSubIdx].id : Date.now().toString(),
+        id: submissionId,
         bookingId: session.bookingId, // Link to booking
+        liveSessionId: session.sessionId,
         testId: test.id,
         testTitle: test.title,
         // SNAPSHOT: store full test definition at time of assessment
@@ -1880,17 +1891,17 @@ async function confirmAndSaveLiveSession() {
     // Determine Phase (Vetting vs Assessment)
     const phaseVal = test.title.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
     
-    // DEDUPLICATION: Check if record exists
+    // DEDUPLICATION: Permanent records are tied to the submission/booking, not trainee+assessment.
+    const recordId = buildLiveRecordId(newSub.id);
     const existingRecIdx = records.findIndex(r => 
-        normalizeLiveText(r.trainee) === normalizeLiveText(session.trainee) &&
-        (
-            (r.assessmentId && String(r.assessmentId) === String(test.id)) ||
-            normalizeLiveText(r.assessment) === normalizeLiveText(test.title)
-        )
+        String(r.submissionId || '') === String(newSub.id) ||
+        String(r.id || '') === String(recordId) ||
+        (session.bookingId && String(r.bookingId || '') === String(session.bookingId)) ||
+        (session.sessionId && String(r.liveSessionId || '') === String(session.sessionId))
     );
 
     const newRecord = {
-        id: Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+        id: existingRecIdx > -1 ? records[existingRecIdx].id : recordId,
         groupID: groupId,
         trainee: session.trainee,
         assessment: test.title,
@@ -1901,7 +1912,12 @@ async function confirmAndSaveLiveSession() {
         link: 'Live-Session',
         docSaved: true,
         submissionId: newSub.id, // Link to specific submission
-        assessmentId: test.id
+        assessmentId: test.id,
+        bookingId: session.bookingId || null,
+        liveSessionId: session.sessionId || null,
+        createdAt: existingRecIdx > -1 ? (records[existingRecIdx].createdAt || new Date().toISOString()) : new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+        modifiedBy: CURRENT_USER?.user || 'system'
     };
 
     if (existingRecIdx > -1) {

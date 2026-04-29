@@ -3588,6 +3588,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.34": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live Assessment saves now create separate submission-linked records per session, with a repair tool for affected live records and safer snapshot-based marking scores.</li>
+            </ul>`,
         "2.6.33": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Main-channel rollout for Network Diagnostics, Live Assessment stability, local trainee Study Notes, Activity Monitor summaries, and Problem Report notifications.</li>

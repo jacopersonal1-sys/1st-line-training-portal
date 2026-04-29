@@ -894,7 +894,9 @@ async function finalizeAdminMarking(subId) {
     const editTime = new Date().toISOString();
 
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const test = tests.find(t => t.id == sub.testId);
+    const test = (sub.testSnapshot && Array.isArray(sub.testSnapshot.questions))
+        ? sub.testSnapshot
+        : tests.find(t => t.id == sub.testId);
     let maxScore = 0;
     if(test) test.questions.forEach(q => maxScore += parseFloat(q.points || 1));
     else maxScore = document.querySelectorAll('.q-mark').length;

@@ -1756,6 +1756,7 @@ window.openLiveBookingIntegrityModal = function() {
                     <button class="btn-secondary" onclick="openLiveBookingIntegrityModal()"><i class="fas fa-sync"></i> Refresh Scan</button>
                     <div style="display:flex; gap:10px;">
                         <button class="btn-warning" onclick="runLiveSessionStaleRecovery()"><i class="fas fa-life-ring"></i> Recover Stale Sessions</button>
+                        <button class="btn-secondary" onclick="runLiveRecordLinkRepair()"><i class="fas fa-link"></i> Repair Live Records</button>
                         <button class="btn-danger" onclick="runLiveBookingAutoRepair()"><i class="fas fa-wrench"></i> Auto-Repair Issues</button>
                         <button class="btn-primary" onclick="closeLiveBookingIntegrityModal()">Close</button>
                     </div>
@@ -1880,17 +1881,13 @@ window.runLiveSessionStaleRecovery = async function() {
             const groupId = findGroupForTrainee(submissionPayload.trainee);
             const existingRecordIdx = records.findIndex(r =>
                 String(r.submissionId || '') === String(subId) ||
-                (
-                    normalizeScheduleText(r.trainee) === normalizeScheduleText(submissionPayload.trainee) &&
-                    (
-                        (submissionPayload.assessmentId && String(r.assessmentId || '') === String(submissionPayload.assessmentId)) ||
-                        normalizeScheduleText(r.assessment) === normalizeScheduleText(submissionPayload.testTitle)
-                    )
-                )
+                String(r.id || '') === String(`record_${subId}`) ||
+                (submissionPayload.bookingId && String(r.bookingId || '') === String(submissionPayload.bookingId)) ||
+                (submissionPayload.liveSessionId && String(r.liveSessionId || '') === String(submissionPayload.liveSessionId))
             );
 
             const recordPayload = {
-                id: existingRecordIdx > -1 ? records[existingRecordIdx].id : Date.now() + "_" + Math.random().toString(36).substr(2, 9),
+                id: existingRecordIdx > -1 ? records[existingRecordIdx].id : `record_${subId}`,
                 groupID: groupId,
                 trainee: submissionPayload.trainee,
                 assessment: submissionPayload.testTitle,
@@ -1901,7 +1898,12 @@ window.runLiveSessionStaleRecovery = async function() {
                 link: 'Live-Session',
                 docSaved: true,
                 submissionId: subId,
-                assessmentId: submissionPayload.assessmentId
+                assessmentId: submissionPayload.assessmentId,
+                bookingId: submissionPayload.bookingId || null,
+                liveSessionId: submissionPayload.liveSessionId || null,
+                createdAt: existingRecordIdx > -1 ? (records[existingRecordIdx].createdAt || nowIso) : nowIso,
+                lastModified: nowIso,
+                modifiedBy: CURRENT_USER?.user || 'system'
             };
 
             if (existingRecordIdx > -1) {
@@ -1944,6 +1946,114 @@ window.runLiveSessionStaleRecovery = async function() {
     if (typeof renderLiveTable === 'function') renderLiveTable();
     if (typeof showToast === 'function') {
         showToast(`Recovered ${closedCount} stale session(s). Archived ${archivedCount}, rebuilt ${recoveredSubmissionCount} submission(s), ${recoveredRecordCount} record(s).`, 'success');
+    }
+    openLiveBookingIntegrityModal();
+};
+
+window.runLiveRecordLinkRepair = async function() {
+    if (!isLiveBookingManager()) return;
+    if (!confirm("Repair live assessment records from saved live submissions?\n\nThis will create any missing permanent records and relink completed live bookings without changing trainee answers.")) return;
+
+    if (typeof forceFullSync === 'function') {
+        await forceFullSync('submissions');
+        await forceFullSync('records');
+        await forceFullSync('liveBookings');
+    }
+
+    const nowIso = new Date().toISOString();
+    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    let records = JSON.parse(localStorage.getItem('records') || '[]');
+    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    records = Array.isArray(records) ? records : [];
+    bookings = Array.isArray(bookings) ? bookings : [];
+
+    const liveSubs = (Array.isArray(submissions) ? submissions : []).filter(sub => {
+        if (!sub || String(sub.status || '').toLowerCase() !== 'completed') return false;
+        return String(sub.type || '').toLowerCase() === 'live' || !!sub.bookingId || !!sub.liveSessionId;
+    });
+
+    const findGroupForTrainee = (traineeName) => {
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const normalized = normalizeScheduleText(traineeName);
+        for (const [gid, members] of Object.entries(rosters)) {
+            if (!Array.isArray(members)) continue;
+            if (members.some(member => normalizeScheduleText(member) === normalized)) return gid;
+        }
+        return 'Live-Session';
+    };
+
+    let created = 0;
+    let updated = 0;
+    let bookingUpdates = 0;
+
+    liveSubs.forEach(sub => {
+        const recordId = `record_${sub.id}`;
+        const existingIdx = records.findIndex(record =>
+            String(record?.submissionId || '') === String(sub.id) ||
+            String(record?.id || '') === recordId ||
+            (sub.bookingId && String(record?.bookingId || '') === String(sub.bookingId)) ||
+            (sub.liveSessionId && String(record?.liveSessionId || '') === String(sub.liveSessionId))
+        );
+
+        const score = Number.isFinite(Number(sub.score)) ? Number(sub.score) : 0;
+        const payload = {
+            id: existingIdx > -1 ? records[existingIdx].id : recordId,
+            groupID: findGroupForTrainee(sub.trainee),
+            trainee: sub.trainee || '',
+            assessment: sub.testTitle || 'Live Assessment',
+            score,
+            date: sub.date || nowIso.split('T')[0],
+            phase: String(sub.testTitle || '').toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment',
+            cycle: 'Live',
+            link: 'Live-Session',
+            docSaved: true,
+            submissionId: sub.id,
+            assessmentId: sub.assessmentId || sub.testId || null,
+            bookingId: sub.bookingId || null,
+            liveSessionId: sub.liveSessionId || null,
+            createdAt: existingIdx > -1 ? (records[existingIdx].createdAt || sub.createdAt || sub.lastModified || nowIso) : (sub.createdAt || sub.lastModified || nowIso),
+            lastModified: nowIso,
+            modifiedBy: CURRENT_USER?.user || 'live_record_repair'
+        };
+
+        if (existingIdx > -1) {
+            records[existingIdx] = { ...records[existingIdx], ...payload, id: records[existingIdx].id };
+            updated++;
+        } else {
+            records.push(payload);
+            created++;
+        }
+
+        if (sub.bookingId) {
+            const booking = bookings.find(b => String(b?.id || '') === String(sub.bookingId));
+            if (booking) {
+                let changed = false;
+                if (String(booking.status || '').toLowerCase() !== 'completed') {
+                    booking.status = 'Completed';
+                    changed = true;
+                }
+                if (Number(booking.score) !== score) {
+                    booking.score = score;
+                    changed = true;
+                }
+                if (changed) {
+                    booking.lastModified = nowIso;
+                    booking.modifiedBy = CURRENT_USER?.user || 'live_record_repair';
+                    bookingUpdates++;
+                }
+            }
+        }
+    });
+
+    localStorage.setItem('records', JSON.stringify(records));
+    localStorage.setItem('liveBookings', JSON.stringify(bookings));
+
+    if (typeof saveToServer === 'function') {
+        await saveToServer(['records', 'liveBookings'], true);
+    }
+
+    if (typeof showToast === 'function') {
+        showToast(`Live record repair complete. Created ${created}, updated ${updated}, booking fixes ${bookingUpdates}.`, 'success');
     }
     openLiveBookingIntegrityModal();
 };
