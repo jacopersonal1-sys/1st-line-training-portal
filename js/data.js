@@ -89,6 +89,21 @@ const STRICT_SERVER_KEYS = new Set([
     ...Array.from(STRICT_SERVER_ROW_KEYS)
 ]);
 
+// Explicit saves for these keys represent user-facing business data. If they fail,
+// callers must receive a real failure instead of a partial "sync succeeded" state.
+const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
+    'records',
+    'submissions',
+    'liveBookings',
+    'liveSessions',
+    'users',
+    'tests',
+    'schedules',
+    'liveSchedules',
+    'rosters',
+    'assessments'
+]);
+
 // --- TRAINEE RUNTIME OPTIMIZATION ---
 // Keep trainee document pulls/saves scoped to only what the trainee surface needs.
 const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
@@ -1864,6 +1879,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             const key = keysToSave[currentKeyIndex];
             const isStrictServerKey = STRICT_SERVER_KEYS.has(key);
             const hasExplicitSaveRequest = EXPLICIT_SAVE_KEYS.has(key);
+            const isCriticalExplicitSave = hasExplicitSaveRequest && CRITICAL_EXPLICIT_SAVE_KEYS.has(key);
             const keyForce = force || (isStrictServerKey && hasExplicitSaveRequest);
             const localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
             const keyBytes = estimateSyncPayloadSize(localContent);
@@ -2105,7 +2121,15 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             } catch (keyErr) {
                 console.warn(`[Sync Sandbox] Failed to process key '${key}':`, keyErr.message || keyErr);
                 const msg = keyErr.message || '';
-                if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('521') || msg.includes('503')) throw keyErr;
+                if (
+                    isCriticalExplicitSave ||
+                    msg.includes('Failed to fetch') ||
+                    msg.includes('NetworkError') ||
+                    msg.includes('521') ||
+                    msg.includes('503')
+                ) {
+                    throw keyErr;
+                }
                 if (hasExplicitSaveRequest) EXPLICIT_SAVE_KEYS.delete(key);
             }
 

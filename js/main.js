@@ -3588,6 +3588,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.35": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Critical explicit saves for assessment records, submissions, live sessions, bookings, users, and test/schedule definitions now fail visibly and stay queued if the server rejects the write.</li>
+                <li style="margin-bottom: 8px;"><strong>Verification:</strong> Full app syntax and automated test passes were run across the current release scope.</li>
+            </ul>`,
         "2.6.34": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live Assessment saves now create separate submission-linked records per session, with a repair tool for affected live records and safer snapshot-based marking scores.</li>

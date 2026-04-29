@@ -95,4 +95,38 @@ describe('Data Sync Module', () => {
         expect(merged.users[0].user).toBe('ActiveUser');
         expect(merged.revokedUsers).toContain('DeletedUser');
     });
+
+    test('saveToServer fails loudly for critical explicit row save errors', async () => {
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'rec_1', trainee: 'Alice', assessment: 'Assessment A', score: 80 }
+        ]));
+
+        const upsertMock = jest.fn().mockResolvedValue({
+            error: { message: 'ON CONFLICT DO UPDATE command cannot affect row a second time' }
+        });
+
+        global.window.supabaseClient.from = jest.fn((table) => {
+            if (table === 'records') {
+                return { upsert: upsertMock };
+            }
+            return {
+                select: jest.fn(() => ({
+                    eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }) })),
+                    not: jest.fn().mockResolvedValue({ data: [], error: null }),
+                    in: jest.fn().mockResolvedValue({ data: [], error: null })
+                })),
+                upsert: jest.fn().mockResolvedValue({ error: null }),
+                delete: jest.fn(() => ({ neq: jest.fn().mockResolvedValue({ error: null }) }))
+            };
+        });
+
+        const result = await DataModule.saveToServer(['records'], true, true);
+
+        expect(result).toBe(false);
+        expect(upsertMock).toHaveBeenCalled();
+        expect(localStorage.getItem('hash_map_records')).toBeNull();
+    });
 });

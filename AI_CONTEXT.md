@@ -501,6 +501,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Improvement: Live Booking Integrity now includes Repair Live Records to rebuild missing live records from completed live submissions and relink completed bookings.
 - Release: Version bump to `2.6.34` for stable main channel rollout.
 
+## v2.6.35 - 2026-04-29
+
+- Stability: Critical explicit saves for records, submissions, live bookings, live sessions, users, tests, schedules, live schedules, rosters, and assessments now return a visible failure and remain queued when Supabase rejects the write instead of logging a partial per-key warning while the overall save reports success.
+- Verification: Completed broad release stability pass across sync, realtime routing, live assessment save identity, completed-history editing, Assessment Records score editing, Network Diagnostics error capture, and active-view rerender behavior.
+- Release: Version bump to `2.6.35` for stable main channel rollout.
+
 ## v2.6.24 - 2026-04-16
 
 - Feature Added: Linked content questionnaires now support trainee popup launch for complete-and-submit flow.
