@@ -1,5 +1,6 @@
 /* ================= DATA & SYNC ================= */
 const DB_SCHEMA = {
+    accessControl: { enabled: false, whitelist: [] },
     monitor_data: {}, // Real-time activity tracking { username: { current, history: [] } }
     monitor_history: [], // Archived daily activity logs
     nps_surveys: [], // Admin defined surveys
@@ -153,6 +154,33 @@ function isTraineeRuntime() {
 
 function normalizeTraineeIdentity(value) {
     return String(value || '').trim().toLowerCase();
+}
+
+function parseAppVersionParts(version) {
+    return String(version || '')
+        .trim()
+        .replace(/^v/i, '')
+        .split('.')
+        .map(part => {
+            const match = String(part || '').match(/\d+/);
+            return match ? Number(match[0]) : 0;
+        });
+}
+
+function isVersionRestrictionEnabled(version) {
+    return parseAppVersionParts(version).some(part => Number(part || 0) > 0);
+}
+
+function compareAppVersions(left, right) {
+    const leftParts = parseAppVersionParts(left);
+    const rightParts = parseAppVersionParts(right);
+    for (let i = 0; i < Math.max(leftParts.length, rightParts.length); i++) {
+        const l = leftParts[i] || 0;
+        const r = rightParts[i] || 0;
+        if (l < r) return -1;
+        if (l > r) return 1;
+    }
+    return 0;
 }
 
 function isRowOwnedByCurrentTrainee(localKey, rowData) {
@@ -1096,6 +1124,12 @@ function applySystemConfig() {
         }
     }
 
+    if (config.security && config.security.lockdown_mode && typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
+        alert("⚠️ EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
+        if (typeof logout === 'function') logout();
+        return;
+    }
+
     // 2. Restart Sync Engine if rates changed (and we are logged in)
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
         // We simply restart the engine, it will read the new config values
@@ -1827,21 +1861,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             return;
         }
 
-        // VERSION GATE: Prevent old clients from pushing bad data
-        if (config.security && config.security.min_version && window.APP_VERSION) {
-            const currentParts = window.APP_VERSION.split('.').map(Number);
-            const minParts = config.security.min_version.split('.').map(Number);
-            
-            let isOutdated = false;
-            for (let i = 0; i < Math.max(currentParts.length, minParts.length); i++) {
-                const curr = currentParts[i] || 0;
-                const min = minParts[i] || 0;
-                if (curr < min) { isOutdated = true; break; }
-                if (curr > min) { isOutdated = false; break; }
-            }
-            
+        // VERSION GATE: Prevent old or unverifiable clients from pushing bad data
+        const minVersion = String((config.security && config.security.min_version) || '').trim();
+        if (isVersionRestrictionEnabled(minVersion)) {
+            const appVersion = window.APP_VERSION || '';
+            const isOutdated = !appVersion || compareAppVersions(appVersion, minVersion) < 0;
+
             if (isOutdated) {
-                console.error(`Save Blocked: Client Version ${window.APP_VERSION} is below minimum ${config.security.min_version}`);
+                console.error(`Save Blocked: Client Version ${appVersion || 'Unknown'} is below minimum ${minVersion}`);
                 if(!silent) updateSyncUI('error'); // Show error state
                 return;
             }

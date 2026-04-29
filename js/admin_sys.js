@@ -635,7 +635,7 @@ async function loadAdminAccess() {
             list.innerHTML = ac.whitelist.map((ip, i) => `
                 <li style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid #eee;">
                     <span>${ip}</span>
-                    ${(CURRENT_USER && CURRENT_USER.role === 'admin') ? `<button class="btn-danger btn-sm" onclick="removeIpAddress(${i})"><i class="fas fa-trash"></i></button>` : ''}
+                    ${(CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin')) ? `<button class="btn-danger btn-sm" onclick="removeIpAddress(${i})"><i class="fas fa-trash"></i></button>` : ''}
                 </li>
             `).join('');
         }
@@ -1242,7 +1242,8 @@ function openSuperAdminConfig() {
                             <h4><i class="fas fa-lock"></i> Access Control</h4>
                             <label><input type="checkbox" id="sa_sec_maint" ${sec.maintenance_mode ? 'checked' : ''}> Maintenance Mode</label>
                             <label><input type="checkbox" id="sa_sec_kiosk" ${sec.force_kiosk_global ? 'checked' : ''}> Force Global Kiosk</label>
-                            <label>Min Version</label><input type="text" id="sa_sec_ver" value="${sec.min_version}">
+                            <label>Minimum Required Version</label><input type="text" id="sa_sec_ver" value="${sec.min_version || ''}" placeholder="e.g. 2.6.47">
+                            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:-6px; margin-bottom:8px;">Users on versions lower than this are blocked at login and their saves are blocked. Leave blank or 0.0.0 to disable.</div>
                         </div>
                         <div class="card" style="margin-top:15px;">
                             <h4><i class="fas fa-ban"></i> Client Management</h4>

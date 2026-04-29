@@ -1050,16 +1050,18 @@ window.onload = async function() {
     }
 
     // GET APP VERSION
-    if (typeof require !== 'undefined') {
-        const { ipcRenderer } = require('electron');
-        ipcRenderer.invoke('get-app-version').then(ver => {
+    const versionApi = (window.electronAPI && window.electronAPI.ipcRenderer)
+        ? window.electronAPI.ipcRenderer
+        : (typeof require !== 'undefined' ? require('electron').ipcRenderer : null);
+    if (versionApi && typeof versionApi.invoke === 'function') {
+        versionApi.invoke('get-app-version').then(ver => {
             window.APP_VERSION = ver;
             // NEW: Check for release notes
             if (typeof checkReleaseNotes === 'function') checkReleaseNotes(ver);
         });
 
         // NEW: Check if update is ALREADY waiting (Handle Reloads/Logouts)
-        ipcRenderer.invoke('get-update-status').then(status => {
+        versionApi.invoke('get-update-status').then(status => {
             const isReady = (status && typeof status === 'object') ? !!status.ready : !!status;
             const readyChannel = (status && typeof status === 'object')
                 ? normalizeClientUpdateChannel(status.channel)
@@ -3878,6 +3880,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.47": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Super Admin minimum-version login enforcement now verifies the real app version before allowing access.</li>
+            </ul>`,
         "2.6.46": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Onboard Summary Report now stays hidden outside its own navigation tab for all roles.</li>

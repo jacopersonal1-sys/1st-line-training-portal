@@ -103,7 +103,7 @@ async function refreshAuthCriticalDataFromServer() {
         const docsQuery = window.supabaseClient
             .from('app_documents')
             .select('key, content, updated_at')
-            .in('key', ['revokedUsers', 'system_config', 'rosters']);
+            .in('key', ['revokedUsers', 'system_config', 'rosters', 'accessControl']);
 
         const [usersResult, docsResult] = await withAuthTimeout(Promise.all([usersQuery, docsQuery]));
 
@@ -187,6 +187,47 @@ async function hashPassword(message) {
         console.error("Hashing Error:", e);
         return "";
     }
+}
+
+function parseAppVersionParts(version) {
+  return String(version || '')
+      .trim()
+      .replace(/^v/i, '')
+      .split('.')
+      .map(part => {
+          const match = String(part || '').match(/\d+/);
+          return match ? Number(match[0]) : 0;
+      });
+}
+
+function isVersionRestrictionEnabled(version) {
+  const parts = parseAppVersionParts(version);
+  return parts.some(part => Number(part || 0) > 0);
+}
+
+function compareAppVersions(left, right) {
+  const leftParts = parseAppVersionParts(left);
+  const rightParts = parseAppVersionParts(right);
+  for (let i = 0; i < Math.max(leftParts.length, rightParts.length); i++) {
+      const l = leftParts[i] || 0;
+      const r = rightParts[i] || 0;
+      if (l < r) return -1;
+      if (l > r) return 1;
+  }
+  return 0;
+}
+
+async function resolveCurrentAppVersion() {
+  if (window.APP_VERSION) return window.APP_VERSION;
+  let appVer = '';
+  if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.invoke === 'function') {
+      try { appVer = await window.electronAPI.ipcRenderer.invoke('get-app-version'); } catch(e) {}
+  }
+  if (!appVer && typeof require !== 'undefined') {
+      try { appVer = await require('electron').ipcRenderer.invoke('get-app-version'); } catch(e) {}
+  }
+  if (appVer) window.APP_VERSION = appVer;
+  return appVer || '';
 }
 
 function toggleLoginMode(mode) {
@@ -454,32 +495,20 @@ async function attemptLogin() {
   const config = JSON.parse(localStorage.getItem('system_config') || '{}');
   if (config.security) {
       // Version Check (Semantic Comparison)
-      if (config.security.min_version) {
-          // Fetch dynamically if missing to allow Dev Mode (npm start) logins
-          let appVer = window.APP_VERSION;
-          if (!appVer) {
-              if (typeof require !== 'undefined') {
-                  try { appVer = await require('electron').ipcRenderer.invoke('get-app-version'); } catch(e) {}
-              }
-              if (!appVer) appVer = '999.99.99'; // Fallback for dev mode / crashes
-              window.APP_VERSION = appVer;
-          }
-          
-          const currentParts = appVer.split('.').map(Number);
-          const minParts = config.security.min_version.split('.').map(Number);
-          
-          let isOutdated = false;
-          for (let i = 0; i < Math.max(currentParts.length, minParts.length); i++) {
-              const curr = currentParts[i] || 0;
-              const min = minParts[i] || 0;
-              if (curr < min) { isOutdated = true; break; }
-              if (curr > min) { isOutdated = false; break; }
-          }
+      const minVersion = String(config.security.min_version || '').trim();
+      if (isVersionRestrictionEnabled(minVersion)) {
+          const appVer = await resolveCurrentAppVersion();
+          const versionVerified = !!appVer;
+          const isOutdated = !versionVerified || compareAppVersions(appVer, minVersion) < 0;
 
           if (isOutdated) {
-             document.getElementById('loginError').innerText = `Update Required. Min Version: ${config.security.min_version}`;
+             document.getElementById('loginError').innerText = versionVerified
+                ? `Update Required. Minimum Version: ${minVersion}`
+                : `Update Required. Could not verify app version. Minimum Version: ${minVersion}`;
              // Force check for updates if outdated
-             if (typeof require !== 'undefined') {
+             if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.send === 'function') {
+                 try { window.electronAPI.ipcRenderer.send('manual-update-check', { channel: 'main' }); } catch(e){}
+             } else if (typeof require !== 'undefined') {
                  try { require('electron').ipcRenderer.send('manual-update-check', { channel: 'main' }); } catch(e){}
              }
              return;
@@ -1162,8 +1191,12 @@ async function checkAccessControl() {
             return false; 
         }
     } catch (err) {
-        console.warn("Access Control Warning: Could not verify IP. Allowing access.", err);
-        return true; 
+        console.warn("Access Control Warning: Could not verify IP.", err);
+        if (ac.enabled || superIps.length > 0) {
+            showAccessDeniedOverlay('Unavailable');
+            return false;
+        }
+        return true;
     }
 }
 
