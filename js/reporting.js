@@ -168,8 +168,14 @@ function renderMonthly() {
              const clickAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function') 
                 ? (r.submissionId ? `onclick="viewCompletedTest('${r.submissionId}', null, 'view')"` : `disabled title="Missing submission ID"`)
                 : `onclick="alert('Assessment viewer not loaded.')"`;
+             const editAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function')
+                ? (r.submissionId ? `onclick="viewCompletedTest('${r.submissionId}', null, 'edit')"` : `onclick="updateRecordScore(${originalIndex})" title="No submission file found; edit permanent record score only"`)
+                : `onclick="updateRecordScore(${originalIndex})"`;
              
              actionHtml += `<button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button>`;
+             if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
+                actionHtml += ` <button class="btn-primary btn-sm" ${editAction} title="Edit Score"><i class="fas fa-pen"></i></button>`;
+             }
         } 
         else {
             // SMART LINK BUTTON
@@ -189,6 +195,9 @@ function renderMonthly() {
             // Admin Edit Button (Only if link exists)
             if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && r.link) {
                 actionHtml += ` <button class="btn-secondary btn-sm" onclick="updateRecordLink(${originalIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
+            }
+            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
+                actionHtml += ` <button class="btn-primary btn-sm" onclick="updateRecordScore(${originalIndex})" title="Edit Score"><i class="fas fa-star"></i></button>`;
             }
         }
         actionHtml += '</td>';
@@ -660,4 +669,67 @@ async function updateRecordLink(index) {
     }
     
     renderMonthly();
+}
+
+async function updateRecordScore(index) {
+    if (!(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin')) {
+        if (typeof showToast === 'function') showToast("Only Admins can edit assessment scores.", "error");
+        return;
+    }
+
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const record = records[index];
+    if (!record) return;
+
+    const currentScore = Number.isFinite(Number(record.score)) ? Number(record.score) : 0;
+    const rawValue = (typeof customPrompt === 'function')
+        ? await customPrompt("Edit Score", `Enter score for ${record.trainee} - ${record.assessment}`, String(currentScore))
+        : prompt(`Enter score for ${record.trainee} - ${record.assessment}`, String(currentScore));
+    if (rawValue === null) return;
+
+    const nextScore = Number(rawValue);
+    if (!Number.isFinite(nextScore) || nextScore < 0 || nextScore > 100) {
+        alert("Please enter a valid score between 0 and 100.");
+        return;
+    }
+
+    const nowIso = new Date().toISOString();
+    record.score = Math.round(nextScore * 10) / 10;
+    record.lastModified = nowIso;
+    record.modifiedBy = CURRENT_USER.user;
+    if (!record.id) record.id = Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+
+    const keysToSave = ['records'];
+
+    if (record.submissionId) {
+        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const submission = submissions.find(s => String(s.id || '') === String(record.submissionId));
+        if (submission) {
+            submission.score = record.score;
+            submission.lastEditedBy = CURRENT_USER.user;
+            submission.lastEditedDate = nowIso;
+            submission.lastModified = nowIso;
+            submission.modifiedBy = CURRENT_USER.user;
+            if (!Array.isArray(submission.markingAudit)) submission.markingAudit = [];
+            submission.markingAudit.push({
+                marker: CURRENT_USER.user,
+                action: 'Assessment record score updated',
+                score: record.score,
+                timestamp: nowIso
+            });
+            localStorage.setItem('submissions', JSON.stringify(submissions));
+            keysToSave.push('submissions');
+        }
+    }
+
+    localStorage.setItem('records', JSON.stringify(records));
+
+    if (typeof saveToServer === 'function') {
+        await saveToServer(keysToSave, true);
+    }
+
+    if (typeof showToast === 'function') showToast("Assessment score updated and synced.", "success");
+    renderMonthly();
+    if (typeof loadCompletedHistory === 'function') loadCompletedHistory();
+    if (typeof loadTestRecords === 'function') loadTestRecords();
 }

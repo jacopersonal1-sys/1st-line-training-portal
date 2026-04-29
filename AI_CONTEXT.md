@@ -497,6 +497,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Bug Fix: Live Assessment finalization now creates separate submission-linked permanent records per booking/session instead of matching by trainee and assessment title.
 - Bug Fix: Live stale-session recovery and admin marking now preserve record identity and use saved assessment snapshots for score totals.
 - Bug Fix: Test Engine history/delete safeguards now preserve separate live attempts and avoid deleting unrelated same-title records.
+- Improvement: Assessment Records score edits now force-sync permanent records and linked submissions together where applicable.
 - Improvement: Live Booking Integrity now includes Repair Live Records to rebuild missing live records from completed live submissions and relink completed bookings.
 - Release: Version bump to `2.6.34` for stable main channel rollout.
 

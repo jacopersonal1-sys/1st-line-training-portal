@@ -112,4 +112,83 @@ describe('Test engine edge cases', () => {
         expect(global.saveToServer).not.toHaveBeenCalled();
         expect(global.showToast).toHaveBeenCalledWith("View Only Mode: Changes cannot be saved.", "error");
     });
+
+    test('assessment record score edit updates record and linked submission permanently', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/reporting.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'manager', role: 'admin' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        global.customPrompt = jest.fn(async () => '88');
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        renderMonthly = jest.fn();
+        loadCompletedHistory = jest.fn();
+        loadTestRecords = jest.fn();
+
+        localStorage.setItem('records', JSON.stringify([
+            {
+                id: 'record_sub_1',
+                trainee: 'Alice',
+                assessment: 'Assessment A',
+                score: 70,
+                phase: 'Assessment',
+                submissionId: 'sub_1'
+            }
+        ]));
+        localStorage.setItem('submissions', JSON.stringify([
+            {
+                id: 'sub_1',
+                trainee: 'Alice',
+                testTitle: 'Assessment A',
+                status: 'completed',
+                score: 70
+            }
+        ]));
+
+        await updateRecordScore(0);
+
+        const record = JSON.parse(localStorage.getItem('records'))[0];
+        const submission = JSON.parse(localStorage.getItem('submissions'))[0];
+
+        expect(record.score).toBe(88);
+        expect(record.modifiedBy).toBe('manager');
+        expect(submission.score).toBe(88);
+        expect(submission.modifiedBy).toBe('manager');
+        expect(submission.markingAudit[0].action).toBe('Assessment record score updated');
+        expect(global.saveToServer).toHaveBeenCalledWith(['records', 'submissions'], true);
+    });
+
+    test('manual assessment record score edit force-syncs records only', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/reporting.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'manager', role: 'admin' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        global.customPrompt = jest.fn(async () => '76.5');
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        renderMonthly = jest.fn();
+        loadCompletedHistory = jest.fn();
+        loadTestRecords = jest.fn();
+
+        localStorage.setItem('records', JSON.stringify([
+            {
+                id: 'manual_1',
+                trainee: 'Bob',
+                assessment: 'Manual Assessment',
+                score: 60,
+                phase: 'Assessment'
+            }
+        ]));
+        localStorage.setItem('submissions', JSON.stringify([]));
+
+        await updateRecordScore(0);
+
+        const record = JSON.parse(localStorage.getItem('records'))[0];
+
+        expect(record.score).toBe(76.5);
+        expect(record.modifiedBy).toBe('manager');
+        expect(global.saveToServer).toHaveBeenCalledWith(['records'], true);
+    });
 });
