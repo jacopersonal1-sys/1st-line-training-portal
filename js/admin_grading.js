@@ -543,7 +543,8 @@ async function deleteSubmission(id) {
     let records = JSON.parse(localStorage.getItem('records') || '[]');
     const targetRecord = sub ? records.find(r => r.submissionId === sub.id)
         || records.find(r => r.id === `record_${sub.id}`)
-        || records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle) : null;
+        || records.find(r => sub.bookingId && r.bookingId === sub.bookingId)
+        || records.find(r => sub.liveSessionId && r.liveSessionId === sub.liveSessionId) : null;
     
     // 1. AUTHORITATIVE DELETE (Server First)
     if (typeof hardDelete === 'function') {

@@ -3591,6 +3591,7 @@ function getChangelog(version) {
         "2.6.34": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live Assessment saves now create separate submission-linked records per session, with a repair tool for affected live records and safer snapshot-based marking scores.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Test Engine history, delete, and builder permission safeguards were tightened to avoid same-title record mistakes.</li>
             </ul>`,
         "2.6.33": `
             <ul style="padding-left: 20px; margin: 0;">

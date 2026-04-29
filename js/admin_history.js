@@ -62,7 +62,10 @@ function loadCompletedHistory() {
     let needsRepair = false;
     const completedMap = {};
     subs.filter(s => s.status === 'completed').forEach(s => {
-        const key = `${s.trainee}_${s.testTitle}`;
+        const isDistinctLiveAttempt = String(s.type || s.testSnapshot?.type || '').toLowerCase() === 'live' || !!s.bookingId || !!s.liveSessionId;
+        const key = isDistinctLiveAttempt
+            ? `${s.trainee}_${s.testTitle}_${s.bookingId || s.liveSessionId || s.id}`
+            : `${s.trainee}_${s.testTitle}`;
         if (!completedMap[key]) completedMap[key] = [];
         completedMap[key].push(s);
     });
@@ -277,7 +280,8 @@ async function deleteHistorySubmission(id) {
     let records = JSON.parse(localStorage.getItem('records') || '[]');
     const targetRecord = records.find(r => r.submissionId === sub.id)
         || records.find(r => r.id === `record_${sub.id}`)
-        || records.find(r => r.trainee === sub.trainee && r.assessment === sub.testTitle);
+        || records.find(r => sub.bookingId && r.bookingId === sub.bookingId)
+        || records.find(r => sub.liveSessionId && r.liveSessionId === sub.liveSessionId);
     
     // 1. AUTHORITATIVE DELETE (Server First)
     if (typeof hardDelete === 'function') {

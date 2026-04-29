@@ -603,6 +603,11 @@ function highlightQuestion(card) {
 }
 
 async function saveTest() {
+    if (CURRENT_USER.role === 'special_viewer') {
+        if(typeof showToast === 'function') showToast("View Only Mode: Changes cannot be saved.", "error");
+        return;
+    }
+
     const type = document.getElementById('builderTestType').value;
     let linked = "";
     
@@ -735,12 +740,6 @@ async function saveTest() {
 
     // Clear Draft
     localStorage.removeItem('draft_builder');
-
-    // Special Viewer Check
-    if (CURRENT_USER.role === 'special_viewer') {
-        if(typeof showToast === 'function') showToast("View Only Mode: Changes cannot be saved.", "error");
-        return;
-    }
 
     if(typeof showToast === 'function') showToast("Test Saved Successfully", "success");
     EDITING_TEST_ID = null; // Reset
