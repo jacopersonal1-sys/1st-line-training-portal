@@ -507,6 +507,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Verification: Completed broad release stability pass across sync, realtime routing, live assessment save identity, completed-history editing, Assessment Records score editing, Network Diagnostics error capture, and active-view rerender behavior.
 - Release: Version bump to `2.6.35` for stable main channel rollout.
 
+## v2.6.36 - 2026-04-29
+
+- Stability: Orphan cleanup now checks only local row IDs against Supabase using targeted ID lookups instead of scanning every server ID from high-volume tables like `error_reports`, preventing statement timeouts during background diagnostics/sync checks.
+- Clarification: Duplicate row collapse warnings during records upload are expected protective sync cleanup messages after duplicate local IDs are deduped before upsert; they do not indicate score overwrite behavior.
+- Release: Version bump to `2.6.36` for stable main channel rollout.
+
 ## v2.6.24 - 2026-04-16
 
 - Feature Added: Linked content questionnaires now support trainee popup launch for complete-and-submit flow.

@@ -2827,39 +2827,47 @@ window.performOrphanCleanup = async function(silent = false) {
         if (!window.supabaseClient) throw new Error("Not connected to cloud.");
 
         for (const item of map) {
-            // 1. Fetch ALL Server IDs for this table
-            let allIds = new Set();
-            let page = 0;
-            let pageSize = 1000;
-            let fetchMore = true;
+            // 1. Load local rows first, then ask the server only about those IDs.
+            // Pulling every ID from high-volume telemetry tables can hit Supabase statement timeouts.
+            const localData = JSON.parse(localStorage.getItem(item.key) || '[]');
+            if (!Array.isArray(localData) || localData.length === 0) continue;
 
-            while (fetchMore) {
+            const idField = item.idField || 'id';
+            const localIds = Array.from(new Set(
+                localData
+                    .map(localItem => localItem && localItem[idField])
+                    .filter(localId => localId !== undefined && localId !== null && String(localId).trim() !== '')
+                    .map(localId => String(localId))
+            ));
+
+            if (localIds.length === 0) continue;
+
+            const allIds = new Set();
+            let lookupFailed = false;
+            const pageSize = 100;
+
+            for (let i = 0; i < localIds.length; i += pageSize) {
+                const chunk = localIds.slice(i, i + pageSize);
                 const { data, error } = await window.supabaseClient
                     .from(item.table)
                     .select('id')
-                    .range(page * pageSize, (page + 1) * pageSize - 1);
+                    .in('id', chunk);
                 
                 if (error) {
                     console.error(`Error fetching IDs for ${item.table}:`, error);
-                    fetchMore = false;
+                    lookupFailed = true;
                     break;
                 }
 
-                if (data.length > 0) {
+                if (Array.isArray(data) && data.length > 0) {
                     data.forEach(row => allIds.add(row.id.toString()));
-                    if (data.length < pageSize) fetchMore = false;
-                    else page++;
-                } else {
-                    fetchMore = false;
                 }
             }
 
-            // 2. Load Local
-            const localData = JSON.parse(localStorage.getItem(item.key) || '[]');
-            if (!Array.isArray(localData)) continue;
+            // If a lookup failed, leave this table untouched. Orphan cleanup must never guess-delete data.
+            if (lookupFailed) continue;
 
-            // 3. Filter Orphans
-            const idField = item.idField || 'id';
+            // 2. Filter Orphans
             const cleanData = localData.filter(localItem => {
                 const localId = localItem[idField];
                 if (!localId) return true; // Keep items without IDs (unsafe to delete)

@@ -3588,6 +3588,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.36": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Orphan cleanup now checks only local row IDs against Supabase instead of scanning full high-volume tables like error reports, preventing statement timeouts during diagnostics.</li>
+                <li style="margin-bottom: 8px;"><strong>Clarification:</strong> Duplicate-row collapse warnings are protective sync cleanup messages, not assessment overwrite errors.</li>
+            </ul>`,
         "2.6.35": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Critical explicit saves for assessment records, submissions, live sessions, bookings, users, and test/schedule definitions now fail visibly and stay queued if the server rejects the write.</li>
