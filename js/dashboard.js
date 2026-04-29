@@ -84,11 +84,9 @@ const DEFAULT_LAYOUT_ADMIN = [
     { id: 'attendance', col: 1, row: 1 },
     { id: 'monitor', col: 1, row: 1 },
     { id: 'leaderboard', col: 1, row: 1 },
-    { id: 'sys_health', col: 2, row: 1 },
     { id: 'active_users', col: 2, row: 1 },
     { id: 'tip_manager', col: 2, row: 1 },
-    { id: 'audit_log', col: 2, row: 1 },
-    { id: 'calendar', col: 2, row: 1 } // NEW
+    { id: 'calendar', col: 2, row: 2 }
 ];
 
 const DEFAULT_LAYOUT_TRAINEE = [
@@ -154,8 +152,9 @@ function renderDashboard() {
     const header = document.createElement('div');
     header.className = 'dash-header';
     header.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="dash-titlebar">
             <div>
+                <div class="dash-eyebrow">${role === 'trainee' ? 'Learning Dashboard' : role === 'teamleader' ? 'Team Leader Dashboard' : 'Operations Dashboard'}</div>
                 <h2 style="margin:0;">${timeGreeting}, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
                 <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
             </div>
@@ -651,14 +650,50 @@ function showUrgentModal(notice) {
 }
 
 // --- ADMIN DASHBOARD ---
+function buildAdminCommandCenter(stats) {
+    const item = (icon, label, value, tone, action, note) => `
+        <button class="dash-command-item ${tone || ''}" onclick="${action}" type="button">
+            <span class="dash-command-icon"><i class="fas ${icon}"></i></span>
+            <span class="dash-command-copy">
+                <strong>${value}</strong>
+                <span>${label}</span>
+                ${note ? `<em>${note}</em>` : ''}
+            </span>
+        </button>
+    `;
+
+    const reviewTone = stats.bookingIssues > 0 ? 'danger' : 'ok';
+    const lateTone = stats.unconfirmedLates > 0 || stats.openClockOuts > 0 ? 'warn' : 'ok';
+    const markingTone = stats.pendingMarking > 0 ? 'danger' : 'ok';
+    const insightTone = stats.actionRequiredCount > 0 ? 'warn' : 'ok';
+
+    return `
+        <div class="dash-command-center">
+            <div class="dash-command-heading">
+                <div>
+                    <div class="dash-eyebrow">Admin Command Center</div>
+                    <h3>Today at a glance</h3>
+                </div>
+                <button class="btn-secondary btn-sm" onclick="renderDashboard()"><i class="fas fa-sync"></i> Refresh Dashboard</button>
+            </div>
+            <div class="dash-command-grid">
+                ${item('fa-highlighter', 'Pending marking', stats.pendingMarking, markingTone, "showTab('test-manage')", stats.pendingMarking ? 'Needs marking' : 'Queue clear')}
+                ${item('fa-search', 'Insight actions', stats.actionRequiredCount, insightTone, "showTab('insights')", stats.actionRequiredCount ? 'Review trainees' : 'No urgent insight')}
+                ${item('fa-calendar-check', 'Live today', stats.todaysLiveBookings, reviewTone, "showTab('live-assessment')", stats.bookingIssues ? `${stats.bookingIssues} booking issue${stats.bookingIssues === 1 ? '' : 's'}` : `${stats.newBookingsCount} upcoming`)}
+                ${item('fa-clock', 'Attendance review', stats.unconfirmedLates, lateTone, "openAttendanceRegister()", stats.openClockOuts ? `${stats.openClockOuts} open clock-out${stats.openClockOuts === 1 ? '' : 's'}` : 'No open clock-outs')}
+            </div>
+        </div>
+    `;
+}
+
 function buildAdminWidgets(container) {
     const users = JSON.parse(localStorage.getItem('users') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
     const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const today = new Date().toISOString().split('T')[0];
+    const attRecords = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const today = (typeof getLocalISODate === 'function') ? getLocalISODate() : new Date().toISOString().split('T')[0];
     
     // 1. Stats Calculation
     const totalTrainees = users.filter(u => u.role === 'trainee').length;
@@ -718,7 +753,7 @@ function buildAdminWidgets(container) {
 
     // Live Booking "New Entry" Badge
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = today;
     const newBookingsCount = bookings.filter(b => b.date >= todayStr && b.status === 'Booked').length;
     const badgeBooking = newBookingsCount > 0 
         ? `<span class="badge-count" style="top:-8px; right:-8px; background:#2ecc71; font-size:0.8rem;">${newBookingsCount}</span>` 
@@ -729,6 +764,20 @@ function buildAdminWidgets(container) {
     const badgeAtt = unconfirmedLates > 0 
         ? `<span id="badgeAtt" class="badge-count" style="top:-8px; right:-8px; background:#e74c3c; font-size:0.8rem;">${unconfirmedLates}</span>` 
         : '';
+
+    const todaysLiveBookings = bookings.filter(b => String(b.date || '') === todayStr && b.status === 'Booked').length;
+    const openClockOuts = attRecords.filter(r => r.date === today && r.clockIn && !r.clockOut && !r.isIgnored).length;
+    const calendarTasks = (typeof CalendarModule !== 'undefined' && typeof CalendarModule.getTasks === 'function') ? CalendarModule.getTasks() : [];
+    const bookingIssues = calendarTasks.filter(task => task.type === 'issue').length;
+    const commandCenterHtml = buildAdminCommandCenter({
+        pendingMarking,
+        actionRequiredCount,
+        todaysLiveBookings,
+        newBookingsCount,
+        unconfirmedLates,
+        openClockOuts,
+        bookingIssues
+    });
 
     // --- HOVER DETAILS GENERATION ---
     
@@ -858,16 +907,6 @@ function buildAdminWidgets(container) {
                 </div>
             </div>`),
         'leaderboard': wrapWidget('leaderboard', leaderboardHtml),
-        'sys_health': wrapWidget('sys_health', `
-            <div style="width:100%;">
-                <h4><i class="fas fa-server"></i> System Health</h4>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:15px;">
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Storage</div><strong id="dashStorage"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Latency</div><strong id="dashLatency"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Sync</div><strong id="dashLastSync"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
-                    <div class="status-item"><div style="font-size:0.8rem; color:var(--text-muted);">Network</div><strong id="statusConnection" style="color:var(--primary);"><div class="skeleton skeleton-text" style="width:40px; display:inline-block;"></div></strong></div>
-                </div>
-            </div>`),
         'active_users': wrapWidget('active_users', `
             <div style="width:100%;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -886,7 +925,6 @@ function buildAdminWidgets(container) {
                 </div>
             </div>`),
         'tip_manager': wrapWidget('tip_manager', buildTipManagerHtml()),
-        'audit_log': wrapWidget('audit_log', buildAuditLogWidget()),
         'calendar': wrapWidget('calendar', `
             <div style="width:100%; height:100%; display:flex; flex-direction:column; cursor:pointer;" onclick="openFullCalendar()" title="Click to view full calendar">
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
@@ -894,7 +932,7 @@ function buildAdminWidgets(container) {
                     <h3 style="margin:0;">Today's Tasks</h3>
                 </div>
                 <div id="calendar-widget-content" style="flex:1;">Loading...</div>
-            </div>`)
+            </div>`, 2, 2)
     };
 
     // --- DYNAMIC FEATURE FLAGS ---
@@ -902,7 +940,6 @@ function buildAdminWidgets(container) {
     const features = config.features || {};
     if (features.live_assessments === false) delete widgets['live'];
     if (features.daily_tips === false) delete widgets['tip_manager'];
-    if (CURRENT_USER.role !== 'super_admin') delete widgets['audit_log'];
 
     // LOAD LAYOUT
     let layout = JSON.parse(localStorage.getItem('dashLayout_admin') || 'null');
@@ -920,7 +957,7 @@ function buildAdminWidgets(container) {
         });
     }
     
-    let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
+    let gridHtml = commandCenterHtml + '<div class="dash-grid-main" id="dash-grid-container">';
     
     layout.forEach((item, index) => {
         // Handle legacy string array or new object array
@@ -1558,8 +1595,8 @@ function buildTraineeWidgets(container) {
     myRecords.sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
     
     // 3. Attendance Status
-    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const today = new Date().toISOString().split('T')[0];
+    const attRecords = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const today = (typeof getLocalISODate === 'function') ? getLocalISODate() : new Date().toISOString().split('T')[0];
     const myAtt = attRecords.find(r => r.user && r.user.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && r.date === today);
     
     let clockOutBtn = '';
@@ -1942,36 +1979,6 @@ async function enableTipEditing() {
     localStorage.setItem('dailyTips', JSON.stringify(DEFAULT_TIPS));
     if(typeof saveToServer === 'function') await saveToServer(['dailyTips'], false);
     renderDashboard();
-}
-
-function buildAuditLogWidget() {
-    const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
-    // Sort desc
-    logs.sort((a,b) => new Date(b.date) - new Date(a.date));
-    
-    const rows = logs.slice(0, 20).map(l => `
-        <tr>
-            <td style="font-size:0.8rem; white-space:nowrap;">${new Date(l.date).toLocaleString()}</td>
-            <td><strong>${l.user}</strong></td>
-            <td>${l.action}</td>
-            <td style="font-size:0.8rem; color:var(--text-muted);">${l.details || '-'}</td>
-        </tr>
-    `).join('');
-    
-    return `
-        <div style="width:100%;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <h4><i class="fas fa-history"></i> Audit Log</h4>
-                <span class="badge-count" style="position:static; background:var(--primary);">${logs.length}</span>
-            </div>
-            <div class="table-responsive" style="max-height:200px; overflow-y:auto;">
-                <table class="admin-table compressed-table">
-                    <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="4" class="text-center">No logs found.</td></tr>'}</tbody>
-                </table>
-            </div>
-        </div>
-    `;
 }
 
 async function addDailyTip() {

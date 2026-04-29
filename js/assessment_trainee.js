@@ -238,12 +238,47 @@ function loadTraineeTests() {
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') visibleTests = tests;
     else visibleTests = tests.filter(t => allowedTestIds.has(t.id.toString()));
 
+    if (CURRENT_USER.role === 'trainee') {
+        const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const todayIso = new Date().toISOString().split('T')[0];
+        const myLiveBookings = liveBookings
+            .filter(b =>
+                b &&
+                String(b.status || 'Booked') !== 'Cancelled' &&
+                b.date >= todayIso &&
+                b.trainee &&
+                b.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase()
+            )
+            .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''), undefined, { numeric: true }));
+
+        const existingVisible = new Set(visibleTests.map(t => String(t.id)));
+        myLiveBookings.forEach((booking) => {
+            const bookedTest = booking.assessmentId
+                ? tests.find(t => String(t.id) === String(booking.assessmentId))
+                : tests.find(t => String(t.title || t.name || '').trim().toLowerCase() === String(booking.assessment || '').trim().toLowerCase());
+            if (bookedTest && existingVisible.has(String(bookedTest.id))) return;
+            const liveCard = bookedTest
+                ? { ...bookedTest }
+                : {
+                    id: `live_booking_${booking.id || booking.date + '_' + booking.time}`,
+                    title: booking.assessment || 'Live Assessment',
+                    type: 'live',
+                    questions: []
+                };
+            liveCard.type = liveCard.type || 'live';
+            liveCard._liveBooking = booking;
+            visibleTests.push(liveCard);
+            existingVisible.add(String(liveCard.id));
+        });
+    }
+
     if (visibleTests.length === 0) {
         container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No assessments available.</div>';
         return;
     }
 
     container.innerHTML = visibleTests.map(t => {
+        const liveBooking = t._liveBooking || null;
         const sub = submissions.find(s =>
             s.testId == t.id &&
             s.trainee &&
@@ -273,7 +308,12 @@ function loadTraineeTests() {
             ? `<button class="btn-secondary btn-sm" disabled style="opacity:0.6; cursor:not-allowed;"><i class="fas fa-lock"></i> ${lockReason}</button>`
             : `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}')">Start Assessment</button>`;
 
-        if (sub) {
+        if (liveBooking) {
+            statusHtml = `<span class="status-badge status-semi">Booked ${liveBooking.date || ''} ${liveBooking.time || ''}</span>`;
+            actionBtn = `<button class="btn-primary btn-sm" onclick="showTab('live-assessment')">View Live Booking</button>`;
+        }
+
+        if (sub && !liveBooking) {
             if (sub.status === 'pending') {
                 statusHtml = '<span class="status-badge status-semi">Pending Review</span>';
                 actionBtn = (String(t.type || '').toLowerCase() === 'quiz' && !isLocked)

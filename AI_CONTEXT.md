@@ -29,6 +29,7 @@
 | `users` | Array | Blob | User credentials, roles, and themes. |
 | `rosters` | Object | Blob | Group definitions `{ "GroupA": ["User1", "User2"] }`. |
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
+| `live_assessment_rules_config` | Object | Blob | Editable Live Assessment Arena rule text/HTML shown before the first pushed question. |
 | `system_tombstones` | Array | Blob | Persistent blacklist of deleted item IDs used to prevent deleted items from being resurrected during sync. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
 | `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`, `opl_hub_data`, `content_studio_data` (Content Creator workspace). |
@@ -518,6 +519,58 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Bug Fix: Live Assessment final summary/save paths now guard missing or delayed test definitions instead of throwing `Cannot read properties of undefined (reading 'questions')`, and live score/comment saves initialize missing `scores`/`comments` containers.
 - Improvement: Problem Reports and System Error Reports now classify and hide resolved/noisy historical reports by default, including old live-exit reports, old Study Notes refresh reports, fixed live-summary crashes, records duplicate-upload 500s, transient server outages, and external SharePoint/Genially load failures. A toggle keeps the hidden reports reviewable.
 - Release: Version bump to `2.6.37` for stable main channel rollout.
+
+## v2.6.38 - 2026-04-29
+
+- Improvement: Today's Tasks dashboard widget now groups admin day work into schedule, live bookings, admin actions, and booking review items, with clearer booking metadata and invalid-booking warnings.
+- Stability: Attendance records are normalized by trainee/date to reduce duplicate clock-ins and recurring late approvals, attendance modal refreshes avoid interrupting active edits, and the trainee portal shows Clock Out when a trainee is clocked in.
+- Feature Added: Live Assessment pre-question rules are now editable under Admin Tools > System Config and used by the trainee Live Assessment Arena before the first pushed question.
+- Improvement: User theme variables now sync into same-origin embedded iframes, isolated webviews, and Network Diagnostics popouts more consistently.
+- Release: Version bump to `2.6.38` for stable main channel rollout.
+
+## v2.6.39 - 2026-04-29
+
+- Improvement: Attendance Register & Review now opens as a larger admin workspace with summary cards, clearer agent/day status rows, and manual refresh while the modal is open so realtime updates do not repaint the view during review.
+- Feature Added: Live Assessment rules now support sanitized rich formatting (`rulesHtml`) for bullets, bold, italic, and text sizing while retaining plain-text `rules` for compatibility.
+- Release: Version bump to `2.6.39` for stable main channel rollout.
+
+## v2.6.40 - 2026-04-29
+
+- Improvement: Admin dashboards now include a Command Center strip that summarizes pending marking, Insight actions, live bookings, booking issues, attendance review, and open clock-outs.
+- Polish: Dashboard title bars, cards, modal shells, and shared panel surfaces now use a cleaner 8px-radius visual system with less movement-heavy hover behavior and better scan density.
+- Stability: Daily dashboard and calendar counts use the local date helper for consistency with attendance and South African working-day usage.
+- Release: Version bump to `2.6.40` for stable main channel rollout.
+
+## v2.6.41 - 2026-04-29
+
+- Improvement: Admin Tools now uses a left-side settings workspace rail, preserving existing admin subview logic while making configuration sections easier to scan.
+- Improvement: Assessment Records now has pinned filters on the left and a dedicated results panel on the right.
+- Polish: Added shared table state components for empty/loading/error states and applied them to Assessment Records and Vetting Test Submissions.
+- Release: Version bump to `2.6.41` for stable main channel rollout.
+
+## v2.6.42 - 2026-04-29
+
+- Improvement: Attendance Register & Review now uses near-fullscreen coverage so admins can review more rows without feeling boxed into a small popup.
+- Polish: Network Diagnostics and Agent Activity Monitor now use larger, cleaner modal shells with modern cards, consistent spacing, and improved popout styling.
+- Feature Added: Added global UI density preferences (`Compact`, `Comfortable`, `Spacious`), shared status chip styling, admin sync indicators, reduced-motion route transitions, and responsive row-card tables on smaller screens.
+- Release: Version bump to `2.6.42` for stable main channel rollout.
+
+## v2.6.44 - 2026-04-29
+- Improvement: Onboard Summary Report now keeps the A4 document surface while moving generation controls into a cleaner report workspace.
+- Improvement: Editable report fields auto-expand, wrap long text/links safely, and are normalized before save/print.
+- Fix: Saved report preview printing now uses a dedicated saved-report print mode so the opened report is the print target.
+- Release: Version bump to `2.6.44` for stable main channel rollout.
+
+## v2.6.45 - 2026-04-29
+- Fix: Onboard Summary Report print styling is now scoped to report printing so the report no longer appears when printing other app pages.
+- Release: Version bump to `2.6.45` for stable main channel rollout.
+
+## v2.6.43 - 2026-04-29
+
+- Improvement: Live Assessment Booking now uses the shared admin workspace layout with pinned booking controls, live booking stats, booking rules, and a dedicated schedule grid.
+- Improvement: Attendance Register & Review now keeps review filters and attendance stats pinned on the left while agent rows stay in the main review area.
+- Polish: Problem Reports and System Error Reports now use the same workspace modal pattern with triage stats and review guidance.
+- Release: Version bump to `2.6.43` for stable main channel rollout.
 
 ## v2.6.24 - 2026-04-16
 

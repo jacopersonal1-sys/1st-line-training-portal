@@ -93,6 +93,9 @@ const InsightStudioLoader = {
 
         const webview = document.getElementById('insight-studio-webview');
         if (webview) {
+            webview.addEventListener('dom-ready', () => {
+                if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+            });
             webview.addEventListener('ipc-message', (event) => {
                 if (!event || !event.channel) return;
                 const payload = Array.isArray(event.args) ? event.args[0] : null;

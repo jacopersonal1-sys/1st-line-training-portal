@@ -2,6 +2,28 @@
 /* Aggregates Schedules, Live Bookings, and Custom Events */
 
 const CalendarModule = {
+    esc: function(value) {
+        return String(value === undefined || value === null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    normalizeDate: function(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        return raw.replace(/-/g, '/');
+    },
+
+    isValidDateValue: function(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return false;
+        const normalized = raw.replace(/\//g, '-');
+        const date = new Date(`${normalized}T00:00:00`);
+        return !Number.isNaN(date.getTime());
+    },
     
     // --- CORE: GET UNIFIED EVENTS ---
     getEvents: function() {
@@ -46,13 +68,21 @@ const CalendarModule = {
                     else if (item.isLive) { type = 'live'; color = '#2ecc71'; } // Green
                     else if (item.linkedTestId) { type = 'test'; color = '#f39c12'; } // Orange
 
-                    events.push({
+                events.push({
                         title: `${item.courseName} (Sched ${schedId})`,
                         start: start,
                         end: end,
                         color: color,
                         type: type,
-                        source: `Schedule ${schedId}`
+                        source: `Schedule ${schedId}`,
+                        time: item.openTime || '',
+                        meta: {
+                            scheduleId: schedId,
+                            group: sched.assigned || '',
+                            courseName: item.courseName || '',
+                            dueDate: item.dueDate || '',
+                            closeTime: item.closeTime || ''
+                        }
                     });
                 });
             }
@@ -67,13 +97,28 @@ const CalendarModule = {
             else if (String(b.trainee || '').toLowerCase() === normalizedUser || String(b.trainer || '').toLowerCase() === normalizedUser) isVisible = true;
 
             if (isVisible) {
+                const bookingIssues = [];
+                if (!b.date || !this.isValidDateValue(b.date)) bookingIssues.push('invalid date');
+                if (!b.time) bookingIssues.push('missing time');
+                if (!b.trainee) bookingIssues.push('missing trainee');
+                if (!b.assessment) bookingIssues.push('missing assessment');
+                if (!b.trainer) bookingIssues.push('missing trainer');
                 events.push({
                     title: `Live: ${b.assessment} (${b.trainee})`,
                     start: b.date,
                     end: b.date,
-                    color: '#9b59b6',
+                    color: bookingIssues.length ? '#ff5252' : '#9b59b6',
                     type: 'booking',
-                    source: b.time
+                    source: b.time || 'No time set',
+                    time: b.time || '',
+                    action: (role === 'admin' || role === 'super_admin') ? "showTab('live-assessment')" : '',
+                    meta: {
+                        trainee: b.trainee || '',
+                        trainer: b.trainer || '',
+                        assessment: b.assessment || '',
+                        status: b.status || '',
+                        issues: bookingIssues
+                    }
                 });
             }
         });
@@ -112,12 +157,34 @@ const CalendarModule = {
 
     getTasks: function() {
         const events = this.getEvents();
-        const today = new Date().toISOString().split('T')[0].replace(/-/g, '/');
+        const today = ((typeof getLocalISODate === 'function') ? getLocalISODate() : new Date().toISOString().split('T')[0]).replace(/-/g, '/');
         
         const todaysEvents = events.filter(e => {
-            const s = e.start.replace(/-/g, '/');
-            const end = e.end.replace(/-/g, '/');
+            const s = this.normalizeDate(e.start);
+            const end = this.normalizeDate(e.end || e.start);
             return today >= s && today <= end;
+        });
+
+        events.forEach(e => {
+            const s = this.normalizeDate(e.start);
+            const end = this.normalizeDate(e.end || e.start);
+            if ((e.type === 'booking' || e.type === 'live') && (!s || !this.isValidDateValue(e.start))) {
+                todaysEvents.push({
+                    ...e,
+                    title: `Check booking: ${e.meta && e.meta.assessment ? e.meta.assessment : e.title}`,
+                    type: 'issue',
+                    color: '#ff5252',
+                    source: 'Booking needs review'
+                });
+            } else if (s && end && end < s) {
+                todaysEvents.push({
+                    ...e,
+                    title: `Check schedule dates: ${e.title}`,
+                    type: 'issue',
+                    color: '#ff5252',
+                    source: 'End date is before start date'
+                });
+            }
         });
 
         // ADMIN TASKS (Marking & Attendance)
@@ -125,17 +192,22 @@ const CalendarModule = {
             const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
             const pendingMarking = subs.filter(s => s.status === 'pending').length;
             if (pendingMarking > 0) {
-                todaysEvents.push({ title: `${pendingMarking} Assessments to Mark`, color: '#e74c3c', type: 'admin_task', action: "showTab('test-manage')" });
+                todaysEvents.push({ title: `${pendingMarking} Assessments to Mark`, color: '#e74c3c', type: 'admin_task', source: 'Admin queue', action: "showTab('test-manage')" });
             }
 
-            const att = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+            const att = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : JSON.parse(localStorage.getItem('attendance_records') || '[]');
             const unconfirmed = att.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored).length;
             if (unconfirmed > 0) {
-                todaysEvents.push({ title: `${unconfirmed} Late Arrivals to Review`, color: '#f1c40f', type: 'admin_task', action: "openAttendanceRegister()" });
+                todaysEvents.push({ title: `${unconfirmed} Late Arrivals to Review`, color: '#f1c40f', type: 'admin_task', source: 'Attendance review', action: "openAttendanceRegister()" });
             }
         }
 
-        return todaysEvents;
+        return todaysEvents.sort((a, b) => {
+            const rank = { issue: 0, admin_task: 1, booking: 2, live: 3, vetting: 4, test: 5, study: 6, custom: 7 };
+            const rankDiff = (rank[a.type] ?? 9) - (rank[b.type] ?? 9);
+            if (rankDiff !== 0) return rankDiff;
+            return String(a.time || a.source || '').localeCompare(String(b.time || b.source || ''), undefined, { numeric: true });
+        });
     },
 
     renderWidget: function() {
@@ -152,20 +224,50 @@ const CalendarModule = {
         if (tasks.length === 0) {
             container.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); flex:1;">No tasks for today.</div>`;
         } else {
-            let html = `<div class="task-list" style="flex:1; overflow-y:auto; min-height:0;">`;
-            tasks.forEach(t => {
-                let icon = 'fa-circle';
-                if (t.type === 'vetting') icon = 'fa-shield-alt';
-                if (t.type === 'live') icon = 'fa-video';
-                if (t.type === 'booking') icon = 'fa-calendar-check';
-                if (t.type === 'admin_task') icon = 'fa-exclamation-circle';
-                
-                const onclick = t.action ? `onclick="${t.action}; event.stopPropagation();"` : '';
+            const grouped = tasks.reduce((acc, task) => {
+                const key = task.type === 'issue'
+                    ? 'Needs Review'
+                    : task.type === 'admin_task'
+                        ? 'Admin Actions'
+                        : task.type === 'booking'
+                            ? 'Live Bookings'
+                            : 'Schedule';
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(task);
+                return acc;
+            }, {});
+            let html = `<div class="task-list" style="flex:1; overflow-y:auto; min-height:0; display:flex; flex-direction:column; gap:8px;">`;
+            Object.keys(grouped).forEach(group => {
+                html += `<div style="font-size:0.72rem; text-transform:uppercase; color:var(--text-muted); font-weight:700; letter-spacing:0; margin-top:2px;">${this.esc(group)}</div>`;
+                grouped[group].forEach(t => {
+                    let icon = 'fa-circle';
+                    if (t.type === 'vetting') icon = 'fa-shield-alt';
+                    if (t.type === 'live') icon = 'fa-video';
+                    if (t.type === 'booking') icon = 'fa-calendar-check';
+                    if (t.type === 'admin_task') icon = 'fa-exclamation-circle';
+                    if (t.type === 'issue') icon = 'fa-triangle-exclamation';
 
-                html += `<div style="display:flex; align-items:center; gap:10px; padding:8px; border-bottom:1px solid var(--border-color); font-size:0.9rem; ${t.action ? 'cursor:pointer;' : ''}" ${onclick}>
-                        <i class="fas ${icon}" style="color:${t.color};"></i>
-                        <div style="flex:1;"><div style="font-weight:bold;">${t.title}</div><div style="font-size:0.75rem; color:var(--text-muted);">${t.source || 'System'}</div></div>
-                    </div>`;
+                    const onclick = t.action ? `onclick="${t.action}; event.stopPropagation();"` : '';
+                    const meta = t.meta || {};
+                    const issueText = Array.isArray(meta.issues) && meta.issues.length
+                        ? `<div style="font-size:0.72rem; color:#ff8585;">${this.esc(meta.issues.join(', '))}</div>`
+                        : '';
+                    const scheduleMeta = meta.group ? ` - ${this.esc(meta.group)}` : '';
+                    const timeLabel = t.time || t.source || 'All day';
+                    const title = t.type === 'booking' && meta.assessment
+                        ? `${meta.assessment} - ${meta.trainee || 'Unassigned'}`
+                        : t.title;
+
+                    html += `<div style="display:grid; grid-template-columns:22px minmax(54px, auto) 1fr; gap:8px; align-items:start; padding:8px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input); font-size:0.86rem; ${t.action ? 'cursor:pointer;' : ''}" ${onclick}>
+                            <i class="fas ${icon}" style="color:${t.color}; margin-top:2px;"></i>
+                            <div style="font-size:0.78rem; color:var(--text-muted); white-space:nowrap;">${this.esc(timeLabel)}</div>
+                            <div style="min-width:0;">
+                                <div style="font-weight:700; overflow-wrap:anywhere;">${this.esc(title)}</div>
+                                <div style="font-size:0.75rem; color:var(--text-muted);">${this.esc(t.source || 'System')}${scheduleMeta}</div>
+                                ${issueText}
+                            </div>
+                        </div>`;
+                });
             });
             html += `</div>`;
             container.innerHTML = html;

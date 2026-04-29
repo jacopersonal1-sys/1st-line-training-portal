@@ -827,9 +827,9 @@ async function renderLiveTable() {
     if (window.IS_DRAGGING_LIVE) return; // Prevent DOM wipe during drag
     if (!document.getElementById('bookingModal').classList.contains('hidden')) return;
 
-    // Inject global refresh button for the table if missing
+    // Inject global refresh button for legacy layouts if missing
     let refreshContainer = document.getElementById('liveRefreshContainer');
-    if (!refreshContainer) {
+    if (!refreshContainer && !document.querySelector('#live-assessment .workspace-table-panel')) {
         refreshContainer = document.createElement('div');
         refreshContainer.id = 'liveRefreshContainer';
         refreshContainer.style.cssText = 'display:flex; justify-content:flex-end; margin-bottom:10px;';
@@ -963,6 +963,7 @@ async function renderLiveTable() {
     const validDays = getNextBusinessDays(startDate, daysCount);
     const defaultTrainers = currentSched.trainers || ["Trainer 1", "Trainer 2"];
     const searchTerm = document.getElementById('liveBookingSearch') ? document.getElementById('liveBookingSearch').value.toLowerCase() : '';
+    updateLiveBookingWorkspaceStats(bookings, currentSched, validDays);
 
     let html = '';
 
@@ -1559,6 +1560,29 @@ function buildLiveBookingIntegrityReport(bookings) {
 
 const LIVE_SESSION_RECOVERY_ARCHIVE_KEY = 'liveSessionRecoveryArchive';
 const LIVE_SESSION_STALE_MS = 12 * 60 * 60 * 1000;
+
+function updateLiveBookingWorkspaceStats(bookings, schedule, validDays) {
+    const container = document.getElementById('liveBookingStats');
+    if (!container) return;
+    const safeBookings = Array.isArray(bookings) ? bookings : [];
+    const visibleDates = new Set((validDays || []).map(d => d.toISOString().split('T')[0]));
+    const scopedBookings = safeBookings.filter(b => !visibleDates.size || visibleDates.has(String(b.date || '')));
+    const active = scopedBookings.filter(b => b && b.status === 'Booked').length;
+    const completed = scopedBookings.filter(b => b && b.status === 'Completed').length;
+    const cancelled = scopedBookings.filter(b => b && b.status === 'Cancelled').length;
+    const integrity = buildLiveBookingIntegrityReport(safeBookings);
+    const slots = Array.isArray(schedule && schedule.activeSlots) ? schedule.activeSlots.length : 4;
+    const trainers = Array.isArray(schedule && schedule.trainers) ? schedule.trainers.length : 2;
+    const capacity = (validDays || []).length * slots * trainers;
+
+    container.innerHTML = `
+        <div class="workspace-stat"><span>Active</span><strong>${active}</strong></div>
+        <div class="workspace-stat"><span>Completed</span><strong>${completed}</strong></div>
+        <div class="workspace-stat"><span>Capacity</span><strong>${capacity}</strong></div>
+        <div class="workspace-stat"><span>Issues</span><strong class="${integrity.totalIssues ? 'status-critical' : ''}">${integrity.totalIssues || 0}</strong></div>
+        ${cancelled ? `<div class="workspace-stat"><span>Cancelled</span><strong>${cancelled}</strong></div>` : ''}
+    `;
+}
 
 function buildLiveSessionStaleReport() {
     const sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');

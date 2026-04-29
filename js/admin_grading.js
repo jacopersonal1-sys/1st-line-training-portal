@@ -324,7 +324,11 @@ function loadTestRecords() {
 
     if (CURRENT_USER.role === 'trainee') {
         if (tbody) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#888;">Marked scripts are locked after review and cannot be reopened by trainees.</td></tr>';
+            if (typeof setTableState === 'function') {
+                setTableState(tbody, 7, 'empty', 'Marked scripts are locked after review.', 'Trainees cannot reopen completed marked scripts from this area.', 'fa-lock');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#888;">Marked scripts are locked after review and cannot be reopened by trainees.</td></tr>';
+            }
         }
         return;
     }
@@ -437,7 +441,11 @@ function loadTestRecords() {
         });
 
         if(filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#888;">No records found.</td></tr>';
+            if (typeof setTableState === 'function') {
+                setTableState(tbody, 7, 'empty', 'No vetting submissions found.', 'Try another group, test, status, or trainee search.', 'fa-magnifying-glass');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#888;">No records found.</td></tr>';
+            }
         } else {
             // Sort by Date Descending
             filtered.sort((a,b) => new Date(b.date) - new Date(a.date));

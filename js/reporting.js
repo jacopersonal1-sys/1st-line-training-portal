@@ -131,7 +131,11 @@ function renderMonthly() {
   
   if (CURRENT_USER.role !== 'trainee') {
       if (fMonth === "" && fAssess === "" && fPhase === "" && fTrainee === "") {
-          tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="color:var(--text-muted);">Please select a filter to view records.</td></tr>';
+          if (typeof setTableState === 'function') {
+              setTableState(tbody, 9, 'empty', 'Select a filter to view records.', 'Use the pinned filters on the left to choose a group, assessment, phase, or trainee.', 'fa-filter');
+          } else {
+              tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="color:var(--text-muted);">Please select a filter to view records.</td></tr>';
+          }
           return;
       }
   }
@@ -221,7 +225,13 @@ function renderMonthly() {
     html += `<tr>${checkHtml}<td>${r.date || '-'}</td><td>${groupDisplay}</td><td><div style="display:flex; align-items:center;">${getAvatarHTML(r.trainee)} <span style="font-weight:600; color:var(--primary);">${r.trainee}</span></div></td><td>${r.assessment}</td><td>${r.phase}</td><td>${r.score}%</td><td class="status-badge status-${s}">${t}</td>${actionHtml}</tr>`;
   });
   
-  if (html === '') tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="color:var(--text-muted);">No records found matching filters.</td></tr>';
+  if (html === '') {
+      if (typeof setTableState === 'function') {
+          setTableState(tbody, 9, 'empty', 'No records match these filters.', 'Adjust the filter panel or clear one of the filters to broaden the result set.', 'fa-magnifying-glass');
+      } else {
+          tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="color:var(--text-muted);">No records found matching filters.</td></tr>';
+      }
+  }
   else tbody.innerHTML = html;
 
   if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') document.querySelectorAll('.admin-only').forEach(e => e.classList.remove('hidden')); 
@@ -242,6 +252,8 @@ function loadReportTab() {
   }
   const dateEl = document.getElementById('printDate');
   if(dateEl) dateEl.innerText = new Date().toLocaleDateString();
+  installReportAutoGrow();
+  prepareReportForOutput(document.getElementById('reportContainer'));
 }
 
 function showReportSub(type, btn) {
@@ -258,7 +270,93 @@ function toggleReportDetails(section, isYes) {
     if (el) {
         if (isYes) el.classList.remove('hidden-print-field'); else el.classList.add('hidden-print-field');
     }
+    prepareReportForOutput(document.getElementById('reportContainer'));
 }
+
+function getReportEditableFields(scope) {
+    const root = scope || document;
+    if (!root.querySelectorAll) return [];
+    return Array.from(root.querySelectorAll('.report-text-area[contenteditable="true"], .report-input-display[contenteditable="true"]'));
+}
+
+function growReportEditableField(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    if (el.scrollHeight && el.scrollHeight > el.clientHeight) {
+        el.style.height = `${el.scrollHeight + 2}px`;
+    }
+}
+
+function prepareReportForOutput(scope) {
+    getReportEditableFields(scope).forEach(growReportEditableField);
+}
+
+function installReportAutoGrow() {
+    const roots = [
+        document.getElementById('reportContainer'),
+        document.getElementById('savedReportContent')
+    ].filter(Boolean);
+
+    roots.forEach(root => {
+        if (root.dataset.autoGrowInstalled === 'true') {
+            prepareReportForOutput(root);
+            return;
+        }
+        root.dataset.autoGrowInstalled = 'true';
+        root.addEventListener('input', event => {
+            if (event.target && event.target.matches('.report-text-area[contenteditable="true"], .report-input-display[contenteditable="true"]')) {
+                growReportEditableField(event.target);
+            }
+        });
+        root.addEventListener('paste', event => {
+            if (!event.target || !event.target.matches('.report-text-area[contenteditable="true"], .report-input-display[contenteditable="true"]')) return;
+            event.preventDefault();
+            const text = (event.clipboardData || window.clipboardData).getData('text/plain');
+            document.execCommand('insertText', false, text);
+            growReportEditableField(event.target);
+        });
+        prepareReportForOutput(root);
+    });
+}
+
+function createReportSnapshotHtml() {
+    const container = document.getElementById('reportContainer');
+    if (!container) return '';
+    prepareReportForOutput(container);
+    const clone = container.cloneNode(true);
+    clone.querySelectorAll('.report-text-area, .report-input-display').forEach(el => {
+        el.style.height = 'auto';
+        el.removeAttribute('data-auto-height');
+    });
+    return clone.innerHTML;
+}
+
+function printGeneratedReport() {
+    prepareReportForOutput(document.getElementById('reportContainer'));
+    document.body.classList.add('printing-generated-report');
+    window.print();
+}
+
+function printSavedReport() {
+    prepareReportForOutput(document.getElementById('savedReportContent'));
+    document.body.classList.add('printing-saved-report');
+    window.print();
+}
+
+function closeSavedReportModal() {
+    document.getElementById('savedReportModal')?.classList.add('hidden');
+    document.body.classList.remove('printing-saved-report');
+}
+
+window.addEventListener('beforeprint', () => {
+    prepareReportForOutput(document.getElementById('reportContainer'));
+    prepareReportForOutput(document.getElementById('savedReportContent'));
+});
+
+window.addEventListener('afterprint', () => {
+    document.body.classList.remove('printing-generated-report');
+    document.body.classList.remove('printing-saved-report');
+});
 
 /**
  * UPDATED: generateReport now aggregates both manual 'records' and digital 'submissions'
@@ -376,6 +474,7 @@ function generateReport() {
           document.getElementById('repFeedback').innerText = "";
           document.getElementById('repDeploy').innerText = "";
       }
+      prepareReportForOutput(document.getElementById('reportContainer'));
   }, 200);
 }
 
@@ -429,14 +528,16 @@ function renderVettingTable(phaseKey, records, submissions, tableId) {
 
 // UPDATED: Async Save (Instant Mode)
 async function saveGeneratedReport() {
-    const name = document.getElementById('repName').innerText;
-    if(!name) return alert("Generate a report first.");
+    const selectedName = document.getElementById('reportTraineeSelect')?.value || '';
+    const name = document.getElementById('repName').innerText.trim();
+    if(!selectedName || !name || name.toLowerCase().includes('generating')) return alert("Generate a report first.");
+    prepareReportForOutput(document.getElementById('reportContainer'));
     const reportData = {
         id: Date.now(),
         date: new Date().toLocaleDateString(),
         trainee: name,
         savedBy: CURRENT_USER.user,
-        html: document.getElementById('reportContainer').innerHTML,
+        html: createReportSnapshotHtml(),
         behaviorYes: document.querySelector('input[name="repBehavior"][value="Yes"]').checked,
         observeYes: document.querySelector('input[name="repObserve"][value="Yes"]').checked,
         probText: document.getElementById('repProbText').innerHTML,
@@ -469,6 +570,7 @@ async function saveGeneratedReport() {
     // --- SECURE SAVE END ---
 
     alert("Report saved successfully.");
+    loadReportTab();
 }
 
 function renderSavedReportsList() {
@@ -522,10 +624,10 @@ function renderSavedReportsList() {
 
     filtered.reverse().forEach(r => {
         tbody.innerHTML += `<tr>
-            <td>${r.date}</td>
-            <td>${r.trainee}</td>
-            <td>${r.savedBy}</td>
-            <td>
+            <td data-label="Date Saved">${r.date}</td>
+            <td data-label="Trainee">${r.trainee}</td>
+            <td data-label="Saved By">${r.savedBy}</td>
+            <td data-label="Action">
                 <button class="btn-primary" onclick="viewSavedReport(${r.id})" aria-label="View Saved Report for ${r.trainee}">View</button>
                 <button class="btn-danger" onclick="deleteSavedReport(${r.id})" style="margin-left:5px;" title="Delete Report"><i class="fas fa-trash"></i></button>
             </td>
@@ -605,6 +707,8 @@ function viewSavedReport(id) {
         if(report.checks[2]) container.querySelector('#repPass3').checked = true;
     }
     document.getElementById('savedReportModal').classList.remove('hidden');
+    installReportAutoGrow();
+    prepareReportForOutput(container);
 }
 
 // --- LINK MANAGEMENT (TL & ADMIN) ---

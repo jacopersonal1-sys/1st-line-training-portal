@@ -4,6 +4,94 @@
 // --- TRAINEE LOGIC ---
 
 let attendanceMonitorInterval = null;
+let attendanceAdminPendingRefresh = false;
+let attendanceAdminLastRenderKey = '';
+
+function normalizeAttendanceUser(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function getLocalISODate(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function normalizeAttendanceRecord(record) {
+    if (!record || typeof record !== 'object') return null;
+    const normalized = { ...record };
+    normalized.user = String(normalized.user || normalized.user_id || '').trim();
+    normalized.date = String(normalized.date || '').trim();
+    if (!normalized.user || !normalized.date) return null;
+    normalized.id = normalized.id || `${normalizeAttendanceUser(normalized.user)}_${normalized.date}`;
+    return normalized;
+}
+
+function mergeAttendanceRecord(existing, incoming) {
+    if (!existing) return incoming;
+    if (!incoming) return existing;
+    return {
+        ...existing,
+        ...incoming,
+        clockIn: incoming.clockIn || existing.clockIn || null,
+        clockOut: incoming.clockOut || existing.clockOut || null,
+        lateData: incoming.lateData || existing.lateData || null,
+        isLate: Boolean(existing.isLate || incoming.isLate),
+        lateConfirmed: Boolean(existing.lateConfirmed || incoming.lateConfirmed),
+        isIgnored: Boolean(existing.isIgnored || incoming.isIgnored),
+        adminComment: incoming.adminComment || existing.adminComment || '',
+        updatedAt: incoming.updatedAt || existing.updatedAt || null
+    };
+}
+
+function dedupeAttendanceRecords(records) {
+    const byUserDate = new Map();
+    (Array.isArray(records) ? records : []).forEach((raw) => {
+        const record = normalizeAttendanceRecord(raw);
+        if (!record) return;
+        const key = `${normalizeAttendanceUser(record.user)}|${record.date}`;
+        byUserDate.set(key, mergeAttendanceRecord(byUserDate.get(key), record));
+    });
+    return Array.from(byUserDate.values()).sort((a, b) => {
+        const dateCmp = String(a.date || '').localeCompare(String(b.date || ''));
+        if (dateCmp !== 0) return dateCmp;
+        return String(a.user || '').localeCompare(String(b.user || ''), undefined, { sensitivity: 'base' });
+    });
+}
+
+function readAttendanceRecords() {
+    return dedupeAttendanceRecords(JSON.parse(localStorage.getItem('attendance_records') || '[]'));
+}
+
+function writeAttendanceRecords(records) {
+    const clean = dedupeAttendanceRecords(records);
+    localStorage.setItem('attendance_records', JSON.stringify(clean));
+    return clean;
+}
+
+function findAttendanceRecord(records, user, dateIso) {
+    const targetUser = normalizeAttendanceUser(user);
+    const targetDate = String(dateIso || '').trim();
+    return (records || []).find(r => normalizeAttendanceUser(r.user) === targetUser && String(r.date || '').trim() === targetDate);
+}
+
+function escapeAttendanceHtml(value) {
+    if (typeof escapeHTML === 'function') return escapeHTML(String(value ?? ''));
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function setAttendanceRefreshState(message, pending = false) {
+    const el = document.getElementById('attAdminRefreshState');
+    if (!el) return;
+    el.textContent = message || '';
+    el.classList.toggle('pending', !!pending);
+}
 
 function getAttendancePromptKey(user, dateIso) {
     return `attendance_prompt_shown_${String(user || '').trim().toLowerCase()}_${String(dateIso || '').trim()}`;
@@ -31,11 +119,11 @@ function checkAttendanceStatus() {
     // CHANGED: Allow prompt until 1 hour before work end
     if (hour >= (endHour - 1)) return;
 
-    const today = now.toISOString().split('T')[0];
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const today = getLocalISODate(now);
+    const records = readAttendanceRecords();
     
     // Check if already clocked in today
-    const myRecord = records.find(r => r.user === CURRENT_USER.user && r.date === today);
+    const myRecord = findAttendanceRecord(records, CURRENT_USER.user, today);
     const promptKey = getAttendancePromptKey(CURRENT_USER.user, today);
     
     if (!myRecord) {
@@ -66,7 +154,7 @@ function checkClockOutReminder() {
     const [lunchH, lunchM] = lunchStart.split(':').map(Number);
     
     if (hour === lunchH && min >= lunchM && min < (lunchM + 5)) {
-        const todayStr = now.toISOString().split('T')[0];
+        const todayStr = getLocalISODate(now);
         const lunchKey = 'lunch_prompted_' + todayStr;
         if (!localStorage.getItem(lunchKey)) {
             localStorage.setItem(lunchKey, 'true');
@@ -84,9 +172,9 @@ function checkClockOutReminder() {
 
     // Reminder Window: From Reminder Start until Work End
     if (hour === remindH && min >= remindM) {
-        const today = now.toISOString().split('T')[0];
-        const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-        const myRecord = records.find(r => r.user === CURRENT_USER.user && r.date === today);
+        const today = getLocalISODate(now);
+        const records = readAttendanceRecords();
+        const myRecord = findAttendanceRecord(records, CURRENT_USER.user, today);
 
         if (myRecord && !myRecord.clockOut) {
             // Trigger every 5 mins
@@ -109,7 +197,7 @@ function openClockInModal() {
     if (!modal) return;
 
     if (CURRENT_USER && CURRENT_USER.user) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = getLocalISODate();
         const promptKey = getAttendancePromptKey(CURRENT_USER.user, today);
         localStorage.setItem(promptKey, '1');
     }
@@ -199,7 +287,7 @@ async function submitClockIn() {
     }
 
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const today = getLocalISODate(now);
     const timeStr = now.toLocaleTimeString();
     
     // Late Check
@@ -214,7 +302,13 @@ async function submitClockIn() {
 
     if (isLate) {
         const reason = document.getElementById('attLateReason').value.trim();
-        if (!reason) return alert("Please provide a valid reason for being late.");
+        if (!reason) {
+            if(btn && btn.tagName === 'BUTTON') {
+                btn.disabled = false;
+                btn.innerText = "Clock In";
+            }
+            return alert("Please provide a valid reason for being late.");
+        }
         
         const informed = document.getElementById('attInformed').checked;
         let platform = "";
@@ -223,7 +317,13 @@ async function submitClockIn() {
         if (informed) {
             platform = document.getElementById('attPlatform').value;
             contact = document.getElementById('attContact').value;
-            if (!platform || !contact) return alert("Please specify how and who you informed.");
+            if (!platform || !contact) {
+                if(btn && btn.tagName === 'BUTTON') {
+                    btn.disabled = false;
+                    btn.innerText = "Clock In";
+                }
+                return alert("Please specify how and who you informed.");
+            }
         }
 
         lateData = {
@@ -244,6 +344,18 @@ async function submitClockIn() {
         lateData: lateData
     };
 
+    let records = readAttendanceRecords();
+    const existing = findAttendanceRecord(records, CURRENT_USER.user, today);
+    if (existing && existing.clockIn) {
+        document.getElementById('attendanceModal').classList.add('hidden');
+        if (typeof showToast === 'function') showToast("You are already clocked in for today.", "info");
+        if(btn && btn.tagName === 'BUTTON') {
+            btn.disabled = false;
+            btn.innerText = "Clock In";
+        }
+        return;
+    }
+
     // 1. Attempt Direct Atomic Write to Supabase
     let directSuccess = false;
     if (window.supabaseClient) {
@@ -252,9 +364,8 @@ async function submitClockIn() {
         else console.warn("Direct clock-in failed, falling back to queue.");
     }
 
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
     records.push(newRecord);
-    localStorage.setItem('attendance_records', JSON.stringify(records));
+    records = writeAttendanceRecords(records);
 
     // If direct write failed (offline), force the background engine to queue it
     if (!directSuccess && typeof saveToServer === 'function') saveToServer(['attendance_records'], false);
@@ -276,11 +387,17 @@ async function submitClockOut() {
         btn.innerText = "Clocking Out...";
     }
 
-    if (!confirm("Are you sure you want to Clock Out?")) return;
+    if (!confirm("Are you sure you want to Clock Out?")) {
+        if(btn && btn.tagName === 'BUTTON') {
+            btn.disabled = false;
+            btn.innerText = "Clock Out";
+        }
+        return;
+    }
 
-    const today = new Date().toISOString().split('T')[0];
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const idx = records.findIndex(r => r.user === CURRENT_USER.user && r.date === today);
+    const today = getLocalISODate();
+    const records = readAttendanceRecords();
+    const idx = records.findIndex(r => normalizeAttendanceUser(r.user) === normalizeAttendanceUser(CURRENT_USER.user) && r.date === today);
 
     if (idx > -1) {
         records[idx].clockOut = new Date().toLocaleTimeString();
@@ -292,7 +409,7 @@ async function submitClockOut() {
             if (!error) directSuccess = true;
         }
 
-        localStorage.setItem('attendance_records', JSON.stringify(records));
+        writeAttendanceRecords(records);
         
         // Fallback queue if offline
         if (!directSuccess && typeof saveToServer === 'function') saveToServer(['attendance_records'], false);
@@ -324,7 +441,9 @@ function openAttendanceRegister() {
 window.updateAttendanceUI = function() {
     const modal = document.getElementById('attendanceAdminModal');
     if (modal && !modal.classList.contains('hidden')) {
-        renderAttendanceRegister();
+        attendanceAdminPendingRefresh = true;
+        setAttendanceRefreshState('New attendance data arrived. Press Refresh when you are ready.', true);
+        return;
     }
 };
 
@@ -350,13 +469,20 @@ function populateAttendanceGroupSelect() {
     }
 }
 
-function renderAttendanceRegister() {
+function renderAttendanceRegister(options = {}) {
     const container = document.getElementById('attAdminContent');
+    const statsContainer = document.getElementById('attAdminStats');
     const gid = document.getElementById('attAdminGroupSelect').value;
     if(!container || !gid) return;
+    const active = document.activeElement;
+    if (!options.force && active && container.contains(active) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) {
+        attendanceAdminPendingRefresh = true;
+        setAttendanceRefreshState('Refresh held while you are editing. Press Refresh when ready.', true);
+        return;
+    }
 
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const records = readAttendanceRecords();
     let members = [];
 
     if (gid === 'active_schedules') {
@@ -374,16 +500,46 @@ function renderAttendanceRegister() {
     
     members.sort();
 
-    let html = `<div class="card"><table class="admin-table"><thead><tr><th>Agent</th><th>Total Days</th><th>Lates</th><th>Unconfirmed Lates</th><th>Action</th></tr></thead><tbody>`;
+    const todayIso = getLocalISODate();
+    const memberTokens = new Set(members.map(normalizeAttendanceUser));
+    const visibleRecords = records.filter(r => memberTokens.has(normalizeAttendanceUser(r.user)));
+    const todayPresent = visibleRecords.filter(r => r.date === todayIso && r.clockIn && !r.isIgnored).length;
+    const openClockOuts = visibleRecords.filter(r => r.date === todayIso && r.clockIn && !r.clockOut && !r.isIgnored).length;
+    const totalLates = visibleRecords.filter(r => r.isLate && !r.isIgnored).length;
+    const pendingLateCount = visibleRecords.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored && r.date >= getLocalISODate(new Date(Date.now() - 1000 * 60 * 60 * 24 * 45))).length;
+
+    if (statsContainer) {
+        statsContainer.innerHTML = `
+            <div class="workspace-stat"><span>Agents</span><strong>${members.length}</strong></div>
+            <div class="workspace-stat"><span>Clocked In</span><strong>${todayPresent}</strong></div>
+            <div class="workspace-stat"><span>Open Clock-Outs</span><strong>${openClockOuts}</strong></div>
+            <div class="workspace-stat"><span>Late Reviews</span><strong>${pendingLateCount}</strong></div>
+        `;
+    }
+
+    let html = `
+        <div class="attendance-register-card">
+        <table class="admin-table">
+            <thead><tr><th>Agent</th><th>Today</th><th>Total Days</th><th>Lates</th><th>Unconfirmed</th><th>Action</th></tr></thead><tbody>
+    `;
 
     members.forEach(m => {
-        const myRecs = records.filter(r => r.user === m);
+        const myRecs = records.filter(r => normalizeAttendanceUser(r.user) === normalizeAttendanceUser(m));
         const total = myRecs.length;
         const lates = myRecs.filter(r => r.isLate && !r.isIgnored).length;
         // Unconfirmed: Late AND (lateConfirmed is undefined or false)
-        const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored);
+        const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored && r.date >= getLocalISODate(new Date(Date.now() - 1000 * 60 * 60 * 24 * 45)));
+        const todayRecord = myRecs.find(r => r.date === todayIso);
+        let todayStatus = '<span class="attendance-health danger"><i class="fas fa-circle"></i> Not clocked</span>';
+        let todayNote = 'No clock-in for today';
+        if (todayRecord && todayRecord.clockIn) {
+            const done = !!todayRecord.clockOut;
+            todayStatus = `<span class="attendance-health ${todayRecord.isLate ? 'warn' : 'ok'}"><i class="fas fa-circle"></i> ${done ? 'Complete' : 'Clocked in'}</span>`;
+            todayNote = `${todayRecord.clockIn || '-'}${todayRecord.clockOut ? ` to ${todayRecord.clockOut}` : ' to -'}`;
+        }
         
         const safeUser = m.replace(/'/g, "\\\\'");
+        const displayName = escapeAttendanceHtml(m);
         
         const unconfDisplay = unconfirmed.length > 0 
             ? `<span class="badge-count" style="position:static; background:#ff5252; font-size:0.85rem; padding:2px 8px; border-radius:12px;">${unconfirmed.length}</span>` 
@@ -401,7 +557,8 @@ function renderAttendanceRegister() {
         }
 
         html += `<tr>
-            <td><div style="display:flex; align-items:center; gap:10px;"><div style="width:30px; height:30px; background:var(--bg-input); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; color:var(--primary);">${m.charAt(0)}</div> <strong>${m}</strong></div></td>
+            <td><div class="attendance-agent-cell"><div class="attendance-avatar">${displayName.charAt(0)}</div><div><strong>${displayName}</strong><div class="attendance-mini-note">${myRecs.length ? `Last record: ${escapeAttendanceHtml(myRecs[myRecs.length - 1].date || '-')}` : 'No history yet'}</div></div></div></td>
+            <td>${todayStatus}<div class="attendance-mini-note">${escapeAttendanceHtml(todayNote)}</div></td>
             <td>${total}</td>
             <td>${lates > 0 ? `<span style="color:#f1c40f; font-weight:bold;">${lates}</span>` : lates}</td>
             <td>${unconfDisplay}</td>
@@ -409,11 +566,16 @@ function renderAttendanceRegister() {
         </tr>`;
     });
     html += `</tbody></table></div>`;
+    const renderKey = `${gid}|${records.length}|${records.map(r => `${r.id}:${r.updatedAt || r.clockIn || ''}:${r.clockOut || ''}:${r.lateConfirmed ? 1 : 0}`).join(',')}`;
+    if (!options.force && renderKey === attendanceAdminLastRenderKey && container.innerHTML) return;
+    attendanceAdminLastRenderKey = renderKey;
+    attendanceAdminPendingRefresh = false;
+    setAttendanceRefreshState(`Last refreshed ${new Date().toLocaleTimeString()}. Live updates are paused while this window is open.`, false);
     container.innerHTML = html;
 }
 
 async function confirmLate(recordId) {
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const records = readAttendanceRecords();
     const rec = records.find(r => r.id === recordId);
     
     if(!rec) return;
@@ -426,14 +588,19 @@ async function confirmLate(recordId) {
 
     if (comment !== null) {
         // --- AUTHORITATIVE UPDATE (Fix for Ghost Data) ---
-        const originalRecordsJSON = localStorage.getItem('attendance_records') || '[]';
-        const tempRecords = JSON.parse(originalRecordsJSON);
+        const tempRecords = readAttendanceRecords();
         const recIndex = tempRecords.findIndex(r => r.id === recordId);
         if (recIndex === -1) return;
 
         // 1. Prepare the change in a temporary variable
-        tempRecords[recIndex].lateConfirmed = true;
-        tempRecords[recIndex].adminComment = comment;
+        const targetUser = tempRecords[recIndex].user;
+        const targetDate = tempRecords[recIndex].date;
+        tempRecords.forEach((record) => {
+            if (normalizeAttendanceUser(record.user) === normalizeAttendanceUser(targetUser) && record.date === targetDate && record.isLate) {
+                record.lateConfirmed = true;
+                record.adminComment = comment;
+            }
+        });
 
         // 2. Direct DB Write (Atomic)
         if (window.supabaseClient) {
@@ -444,7 +611,7 @@ async function confirmLate(recordId) {
         }
 
         // 3. Apply Local Changes
-        localStorage.setItem('attendance_records', JSON.stringify(tempRecords));
+        writeAttendanceRecords(tempRecords);
         renderAttendanceRegister();
         if (typeof checkMissingClockIns === 'function') checkMissingClockIns();
     }
@@ -463,9 +630,9 @@ async function deleteLateEntry(recordId) {
     }
 
     // 2. Update Local State on Success
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const records = readAttendanceRecords();
     const updatedRecords = records.filter(r => r.id !== recordId);
-    localStorage.setItem('attendance_records', JSON.stringify(updatedRecords));
+    writeAttendanceRecords(updatedRecords);
     
     renderAttendanceRegister();
     if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
@@ -473,8 +640,8 @@ async function deleteLateEntry(recordId) {
 
 function manageAgentAttendance(username) {
     const container = document.getElementById('attAdminContent');
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    let myRecs = records.filter(r => r.user === username);
+    const records = readAttendanceRecords();
+    let myRecs = records.filter(r => normalizeAttendanceUser(r.user) === normalizeAttendanceUser(username));
     
     // --- AUTO-GENERATE ABSENTEEISM ---
     // Scan last 30 days for missing weekdays
@@ -489,7 +656,7 @@ function manageAgentAttendance(username) {
         const dayOfWeek = d.getDay();
         if (dayOfWeek === 0 || dayOfWeek === 6) continue; // Skip Sat/Sun
         
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = getLocalISODate(d);
         if (!existingDates.has(dateStr)) {
             absents.push({
                 id: 'absent_' + dateStr,
@@ -507,13 +674,23 @@ function manageAgentAttendance(username) {
     
     myRecs.sort((a,b) => new Date(b.date) - new Date(a.date));
 
+    const realRows = myRecs.filter(r => !r.isAbsent);
+    const absentRows = myRecs.filter(r => r.isAbsent);
+    const lateRows = realRows.filter(r => r.isLate && !r.isIgnored);
+    const openRows = realRows.filter(r => r.clockIn && !r.clockOut && !r.isIgnored);
     let html = `
-        <div class="card" style="border-top: 4px solid var(--primary);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding-bottom:10px; border-bottom:1px solid var(--border-color);">
-                <h3 style="margin:0;"><i class="fas fa-history"></i> Attendance History: <span style="color:var(--primary);">${username}</span></h3>
-                <button class="btn-secondary btn-sm" onclick="renderAttendanceRegister()">&larr; Back to Register</button>
+        <div class="attendance-summary-grid">
+            <div class="attendance-summary-card"><div class="attendance-summary-label">Recorded Days</div><div class="attendance-summary-value">${realRows.length}</div></div>
+            <div class="attendance-summary-card"><div class="attendance-summary-label">Lates</div><div class="attendance-summary-value">${lateRows.length}</div></div>
+            <div class="attendance-summary-card"><div class="attendance-summary-label">Missing Weekdays</div><div class="attendance-summary-value">${absentRows.length}</div></div>
+            <div class="attendance-summary-card"><div class="attendance-summary-label">Open Clock-Outs</div><div class="attendance-summary-value">${openRows.length}</div></div>
+        </div>
+        <div class="attendance-register-card" style="border-top: 4px solid var(--primary);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0; padding:14px; border-bottom:1px solid var(--border-color);">
+                <h3 style="margin:0;"><i class="fas fa-history"></i> Attendance History: <span style="color:var(--primary);">${escapeAttendanceHtml(username)}</span></h3>
+                <button class="btn-secondary btn-sm" onclick="renderAttendanceRegister({ force: true })">&larr; Back to Register</button>
             </div>
-            <div class="table-responsive" style="max-height:60vh; overflow-y:auto;">
+            <div class="table-responsive">
             <table class="admin-table">
                 <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody>
@@ -530,12 +707,12 @@ function manageAgentAttendance(username) {
             else status = '<span style="color:#2ecc71;">On Time</span>';
 
             const safeUser = username.replace(/'/g, "\\\\'");
-            const commentHtml = r.adminComment ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px; font-style:italic;">Admin: ${r.adminComment}</div>` : '';
+            const commentHtml = r.adminComment ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px; font-style:italic;">Admin: ${escapeAttendanceHtml(r.adminComment)}</div>` : '';
             html += `
                 <tr>
-                    <td>${r.date}</td>
-                    <td>${r.clockIn}</td>
-                    <td>${r.clockOut || '-'}</td>
+                    <td>${escapeAttendanceHtml(r.date)}</td>
+                    <td>${escapeAttendanceHtml(r.clockIn || '-')}</td>
+                    <td>${escapeAttendanceHtml(r.clockOut || '-')}</td>
                     <td>${status}${commentHtml}</td>
                     <td>
                         <button class="btn-secondary btn-sm" onclick="editAttendanceRecord('${r.id}', '${safeUser}')" title="Edit Record"><i class="fas fa-pen"></i></button>
@@ -551,7 +728,7 @@ function manageAgentAttendance(username) {
 }
 
 function editAttendanceRecord(id, username) {
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const records = readAttendanceRecords();
     let rec = records.find(r => r.id === id);
 
     // Handle Generated Absent Record (Create temporary object for editing)
@@ -608,7 +785,7 @@ function editAttendanceRecord(id, username) {
 }
 
 window.saveAttendanceEdit = async function(id, username) {
-    let records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    let records = readAttendanceRecords();
     let rec = records.find(r => r.id === id);
 
     const dateVal = document.getElementById('editAttDate').value;
@@ -645,7 +822,7 @@ window.saveAttendanceEdit = async function(id, username) {
         if (error) return alert("Failed to save edit to server.");
     }
 
-    localStorage.setItem('attendance_records', JSON.stringify(records));
+    records = writeAttendanceRecords(records);
     
     // Close modal FIRST to ensure UI responsiveness
     const modal = document.getElementById('attendanceEditModal');
@@ -667,9 +844,9 @@ async function deleteAttendanceRecord(id, username) {
     }
 
     // 2. Update Local State
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const records = readAttendanceRecords();
     const updatedRecords = records.filter(r => r.id !== id);
-    localStorage.setItem('attendance_records', JSON.stringify(updatedRecords));
+    writeAttendanceRecords(updatedRecords);
     
     manageAgentAttendance(username);
     if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
@@ -677,10 +854,10 @@ async function deleteAttendanceRecord(id, username) {
 
 function checkMissingClockIns() {
     // Admin Alert Widget Logic
-    const records = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const records = readAttendanceRecords();
     
     // Count Unconfirmed Lates
-    const unconfirmedCount = records.filter(r => r.isLate && !r.lateConfirmed).length;
+    const unconfirmedCount = records.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored).length;
     
     const widget = document.getElementById('attAlertWidget');
     // We don't use the widget anymore, we use the Dashboard Badge.

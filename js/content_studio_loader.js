@@ -97,6 +97,10 @@ const ContentStudioLoader = {
         const webview = document.getElementById('content-studio-webview');
         if (!webview) return;
 
+        webview.addEventListener('dom-ready', () => {
+            if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+        });
+
         webview.addEventListener('ipc-message', (event) => {
             if (!event || event.channel !== 'content-studio-open-quiz') return;
             const payload = Array.isArray(event.args) ? event.args[0] : null;

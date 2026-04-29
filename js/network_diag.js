@@ -45,24 +45,27 @@ window.NetworkDiag = {
             const style = document.createElement('style');
             style.id = 'net-diag-styles';
             style.innerHTML = `
-                .net-metric-box { background: var(--bg-input); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); text-align: center; min-width:0; }
-                .net-val { font-size: 1.5rem; font-weight: bold; margin: 5px 0; font-family: monospace; white-space:nowrap; }
-                .net-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; }
-                .net-status { font-size: 0.8rem; font-weight: bold; padding: 2px 6px; border-radius: 4px; display:inline-block; }
+                .net-diag-modal { width:min(1500px, 98vw); max-width:98vw; height:94vh; max-height:94vh; display:flex; flex-direction:column; overflow:hidden; }
+                .net-diag-body { flex:1; min-height:0; overflow:auto; padding-right:4px; }
+                .net-diag-modal .modal-header { flex:0 0 auto; }
+                .net-metric-box { background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01)), var(--bg-input); padding: 16px; border-radius: 8px; border: 1px solid var(--border-color); min-width:0; box-shadow:0 14px 30px rgba(0,0,0,0.1); }
+                .net-val { font-size: 1.55rem; font-weight: 800; margin: 7px 0; font-family: Consolas, monospace; white-space:nowrap; }
+                .net-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing:0.05em; font-weight:800; }
+                .net-status { font-size: 0.76rem; font-weight: 800; padding: 4px 8px; border-radius: 999px; display:inline-flex; align-items:center; gap:5px; }
                 .status-good { color: #2ecc71; background: rgba(46, 204, 113, 0.1); }
                 .status-warn { color: #f1c40f; background: rgba(241, 196, 15, 0.1); }
                 .status-bad { color: #ff5252; background: rgba(255, 82, 82, 0.1); }
-                .net-diag-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:15px; margin-bottom:20px; }
-                .net-health-card { background: var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:14px; margin-bottom:20px; }
+                .net-diag-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:12px; margin-bottom:14px; }
+                .net-health-card { background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.008)), var(--bg-card); border:1px solid var(--border-color); border-radius:8px; padding:14px; margin-bottom:14px; box-shadow:0 12px 28px rgba(0,0,0,0.09); }
                 .net-card-title { margin:0 0 10px; display:flex; align-items:center; gap:8px; }
                 .net-history-wrap { height:170px; background: var(--bg-input); border:1px solid var(--border-color); border-radius:6px; padding:10px; }
                 .net-history-legend { display:flex; gap:14px; flex-wrap:wrap; font-size:0.78rem; color:var(--text-muted); margin-top:8px; }
                 .net-legend-dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; }
                 .net-flow { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; align-items:stretch; }
-                .net-flow-step { background:var(--bg-input); border:1px solid var(--border-color); border-radius:6px; padding:10px; min-height:76px; }
+                .net-flow-step { background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:10px; min-height:76px; }
                 .net-flow-step strong { display:block; font-size:0.9rem; margin-bottom:4px; }
                 .net-flow-step span { font-size:0.8rem; color:var(--text-muted); overflow-wrap:anywhere; }
-                .net-agent-row { display:grid; grid-template-columns: 1.2fr 0.8fr 1fr 1fr 1fr; gap:10px; padding:8px 10px; border-bottom:1px solid var(--border-color); align-items:center; font-size:0.86rem; }
+                .net-agent-row { display:grid; grid-template-columns: 1.2fr 0.8fr 1fr 1fr 1fr; gap:10px; padding:9px 10px; border-bottom:1px solid var(--border-color); align-items:center; font-size:0.86rem; }
                 .net-agent-row:last-child { border-bottom:none; }
                 .net-agent-head { color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; font-weight:bold; }
                 .net-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 7px; border-radius:999px; border:1px solid var(--border-color); background:var(--bg-input); font-size:0.78rem; white-space:nowrap; }
@@ -115,15 +118,19 @@ window.NetworkDiag = {
 
         const modalHtml = `
             <div id="netDiagModal" class="modal-overlay" style="z-index: 10005;">
-                <div class="modal-box" style="width: 1040px; max-width: 96%; max-height:92vh; overflow:auto;">
-                    <div class="net-toolbar" style="margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-                        <h3 style="margin:0;"><i class="fas fa-network-wired" style="color:var(--primary);"></i> Network Diagnostics</h3>
+                <div class="modal-box net-diag-modal">
+                    <div class="modal-header">
+                        <div>
+                            <h3><i class="fas fa-network-wired" style="color:var(--primary);"></i> Network Diagnostics</h3>
+                            <div class="modal-subtitle">Live gateway, internet, database, console, and group connectivity health.</div>
+                        </div>
                         <div class="net-toolbar-actions">
                             ${isAdmin ? `<button class="btn-secondary btn-sm" onclick="NetworkDiag.openPopout()" title="Open diagnostics on a second screen"><i class="fas fa-up-right-from-square"></i> Pop Out</button>` : ''}
                             <button class="btn-secondary" onclick="NetworkDiag.closeModal()">&times;</button>
                         </div>
                     </div>
 
+                    <div class="net-diag-body">
                     <div class="net-diag-grid">
                         <div class="net-metric-box">
                             <div class="net-label">Gateway</div>
@@ -203,6 +210,7 @@ window.NetworkDiag = {
                             ${isAdmin ? `<button class="btn-secondary" onclick="NetworkDiag.openAdminView()"><i class="fas fa-history"></i> View History</button>` : ''}
                             <button class="btn-danger" onclick="NetworkDiag.closeAll()">Stop & Close</button>
                         </div>
+                    </div>
                     </div>
                 </div>
             </div>`;
@@ -1188,6 +1196,32 @@ window.NetworkDiag = {
         ctx.stroke();
     },
 
+    getPopoutThemeStyle: function() {
+        try {
+            const rootStyle = getComputedStyle(document.documentElement);
+            const names = [
+                '--primary',
+                '--primary-hover',
+                '--primary-soft',
+                '--bg-app',
+                '--bg-card',
+                '--bg-input',
+                '--bg-header',
+                '--bg-hover',
+                '--text-main',
+                '--text-muted',
+                '--border-color'
+            ];
+            const declarations = names.map(name => {
+                const value = rootStyle.getPropertyValue(name);
+                return value && value.trim() ? `${name}:${value.trim()};` : '';
+            }).join('');
+            return declarations ? `:root{${declarations}}` : '';
+        } catch (error) {
+            return '';
+        }
+    },
+
     getPopoutHTML: function() {
         return `<!doctype html>
         <html>
@@ -1195,38 +1229,40 @@ window.NetworkDiag = {
             <title>Network Diagnostics</title>
             <meta charset="utf-8">
             <style>
+                ${this.getPopoutThemeStyle()}
                 * { box-sizing:border-box; }
-                body { margin:0; background:rgba(16,20,28,0.96); color:#eef2f7; font-family:Segoe UI, Arial, sans-serif; overflow:hidden; }
-                .shell { height:100vh; padding:10px; display:flex; flex-direction:column; gap:8px; }
-                .top { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:32px; }
-                h1 { font-size:18px; margin:0; white-space:nowrap; }
+                body { margin:0; background:radial-gradient(circle at top left, rgba(243,112,33,0.12), transparent 34%), var(--bg-app, rgba(16,20,28,0.96)); color:var(--text-main, #eef2f7); font-family:Segoe UI, Arial, sans-serif; overflow:hidden; }
+                .shell { height:100vh; padding:14px; display:flex; flex-direction:column; gap:10px; }
+                .top { display:flex; justify-content:space-between; align-items:center; gap:10px; min-height:44px; padding:12px 14px; border:1px solid var(--border-color, #2a3343); border-radius:10px; background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)), var(--bg-card, #171d28); box-shadow:0 16px 36px rgba(0,0,0,0.18); }
+                h1 { font-size:19px; margin:0; white-space:nowrap; }
                 .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
                 .filter-group { display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
-                .filter-group label { display:inline-flex; align-items:center; gap:4px; padding:4px 7px; border:1px solid #2a3343; border-radius:999px; background:#111827; color:#eef2f7; font-size:12px; cursor:pointer; }
+                .filter-group label { display:inline-flex; align-items:center; gap:4px; padding:5px 8px; border:1px solid var(--border-color, #2a3343); border-radius:999px; background:var(--bg-input, #111827); color:var(--text-main, #eef2f7); font-size:12px; cursor:pointer; }
                 .filter-group input { margin:0; }
-                .metric-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:8px; }
-                .card { background:#171d28; border:1px solid #2a3343; border-radius:8px; padding:9px; min-width:0; }
-                .metric-card { display:grid; grid-template-columns:auto 1fr; grid-template-rows:auto auto; gap:3px 8px; align-items:center; min-height:98px; }
-                .label { color:#9ca3af; font-size:11px; text-transform:uppercase; letter-spacing:0; }
-                .value { font-size:24px; font-weight:700; font-family:Consolas, monospace; white-space:nowrap; }
+                .metric-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:10px; }
+                .card { background:linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012)), var(--bg-card, #171d28); border:1px solid var(--border-color, #2a3343); border-radius:10px; padding:11px; min-width:0; box-shadow:0 14px 28px rgba(0,0,0,0.14); }
+                .metric-card { display:grid; grid-template-columns:auto 1fr; grid-template-rows:auto auto; gap:4px 8px; align-items:center; min-height:104px; }
+                .label { color:var(--text-muted, #9ca3af); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; font-weight:800; }
+                .value { font-size:25px; font-weight:800; font-family:Consolas, monospace; white-space:nowrap; }
                 .metric-card canvas { grid-column:1 / -1; height:42px; }
-                .main { flex:1; min-height:0; display:grid; grid-template-columns:minmax(280px, 0.9fr) minmax(360px, 1.5fr); gap:8px; }
-                .stack { min-height:0; display:flex; flex-direction:column; gap:8px; }
+                .main { flex:1; min-height:0; display:grid; grid-template-columns:minmax(280px, 0.9fr) minmax(360px, 1.5fr); gap:10px; }
+                .stack { min-height:0; display:flex; flex-direction:column; gap:10px; }
                 .scroll { min-height:0; overflow:auto; }
-                .muted { color:#9ca3af; font-size:12px; }
-                canvas { width:100%; background:#111827; border-radius:6px; }
+                .muted { color:var(--text-muted, #9ca3af); font-size:12px; }
+                canvas { width:100%; background:var(--bg-input, #111827); border-radius:8px; }
                 table { width:100%; border-collapse:collapse; font-size:13px; }
-                th, td { text-align:left; border-bottom:1px solid #2a3343; padding:6px; vertical-align:top; }
-                th { color:#9ca3af; text-transform:uppercase; font-size:11px; }
+                th, td { text-align:left; border-bottom:1px solid var(--border-color, #2a3343); padding:6px; vertical-align:top; }
+                th { color:var(--text-muted, #9ca3af); text-transform:uppercase; font-size:11px; }
                 .ok { color:#2ecc71; } .warn { color:#f1c40f; } .bad { color:#ff5252; }
                 .summary { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; }
                 .summary .value { font-size:18px; }
                 .console-list { max-height:280px; overflow:auto; margin-top:8px; padding-right:4px; }
-                .console-row { display:grid; grid-template-columns:68px 60px 1fr; gap:6px; padding:7px 0; border-bottom:1px solid #2a3343; font-size:12px; }
+                .console-row { display:grid; grid-template-columns:68px 60px 1fr; gap:6px; padding:7px 0; border-bottom:1px solid var(--border-color, #2a3343); font-size:12px; }
                 .console-msg { white-space:pre-wrap; overflow-wrap:anywhere; }
                 @media (max-width: 760px), (max-height: 560px) {
                     body { overflow:auto; }
-                    .shell { height:auto; min-height:100vh; }
+                    .shell { height:auto; min-height:100vh; padding:10px; }
+                    .top { align-items:flex-start; flex-direction:column; }
                     .main { grid-template-columns:1fr; }
                     .metric-grid { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
                     .value { font-size:19px; }

@@ -3,6 +3,13 @@
 (function() {
     const INSIGHT_RULE_KEY = 'insight_rule_config';
     const INSIGHT_PROGRESS_KEY = 'insight_progress_config';
+    const LIVE_RULES_KEY = 'live_assessment_rules_config';
+    const DEFAULT_LIVE_ASSESSMENT_RULES = [
+        'This assessment takes approximately 1 hour to complete.',
+        'You are allowed to reference the training material. However, if the material is referenced constantly and it is clear the material was not studied, the live session will be ended.',
+        'If you are unable to answer a question within 5 minutes of it being provided, the marks obtained for that question are final and the next question will be provided.'
+    ];
+    const DEFAULT_LIVE_ASSESSMENT_RULES_HTML = `<ul>${DEFAULT_LIVE_ASSESSMENT_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
 
     const AUTO_PROGRESS_ITEMS = [
         { name: 'Onboard Report', type: 'report', source: 'auto' },
@@ -13,7 +20,9 @@
         loaded: false,
         config: null,
         progressLoaded: false,
-        progressConfig: null
+        progressConfig: null,
+        liveRulesLoaded: false,
+        liveRulesConfig: null
     };
 
     function normalizeText(value) {
@@ -148,6 +157,15 @@
         };
     }
 
+    function getDefaultLiveRulesConfig() {
+        return {
+            rules: DEFAULT_LIVE_ASSESSMENT_RULES.slice(),
+            rulesHtml: DEFAULT_LIVE_ASSESSMENT_RULES_HTML,
+            updatedAt: null,
+            updatedBy: null
+        };
+    }
+
     function pushPreset(map, name, severity, scoreThreshold, defaultThreshold) {
         const cleanName = String(name || '').trim();
         if (!cleanName) return;
@@ -250,6 +268,70 @@
         };
     }
 
+    function sanitizeLiveRulesConfig(rawConfig) {
+        const defaults = getDefaultLiveRulesConfig();
+        const raw = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+        const rulesHtml = sanitizeLiveRulesHtml(raw.rulesHtml || raw.html || '');
+        const sourceRules = Array.isArray(raw.rules)
+            ? raw.rules
+            : (rulesHtml ? htmlToLiveRuleLines(rulesHtml) : defaults.rules);
+        const rules = uniqueStrings(sourceRules.map(rule => String(rule || '').trim())).slice(0, 20);
+        return {
+            rules: rules.length ? rules : defaults.rules,
+            rulesHtml: rulesHtml || rulesToLiveRulesHtml(rules.length ? rules : defaults.rules),
+            updatedAt: raw.updatedAt || defaults.updatedAt,
+            updatedBy: raw.updatedBy || defaults.updatedBy
+        };
+    }
+
+    function sanitizeLiveRulesHtml(html) {
+        const raw = String(html || '').trim();
+        if (!raw) return '';
+        const template = document.createElement('template');
+        template.innerHTML = raw;
+        const allowed = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'UL', 'OL', 'LI', 'P', 'DIV', 'BR', 'SPAN', 'FONT']);
+        const walk = (node) => {
+            Array.from(node.childNodes).forEach((child) => {
+                if (child.nodeType === Node.TEXT_NODE) return;
+                if (child.nodeType !== Node.ELEMENT_NODE || !allowed.has(child.tagName)) {
+                    if (child.tagName === 'SCRIPT' || child.tagName === 'STYLE') {
+                        child.remove();
+                        return;
+                    }
+                    child.replaceWith(...Array.from(child.childNodes));
+                    return;
+                }
+                Array.from(child.attributes).forEach((attr) => {
+                    const name = attr.name.toLowerCase();
+                    if (child.tagName === 'FONT' && name === 'size') return;
+                    if (child.tagName === 'SPAN' && name === 'style' && /^font-size\s*:\s*(0\.\d+|1(\.\d+)?|1\.\d+|2)rem;?$/i.test(attr.value.trim())) return;
+                    child.removeAttribute(attr.name);
+                });
+                walk(child);
+            });
+        };
+        walk(template.content);
+        return template.innerHTML.trim();
+    }
+
+    function htmlToLiveRuleLines(html) {
+        const template = document.createElement('template');
+        template.innerHTML = sanitizeLiveRulesHtml(html);
+        const listItems = Array.from(template.content.querySelectorAll('li'))
+            .map(li => String(li.textContent || '').trim())
+            .filter(Boolean);
+        if (listItems.length) return listItems;
+        return String(template.content.textContent || '')
+            .split(/\n+/)
+            .map(line => line.trim())
+            .filter(Boolean);
+    }
+
+    function rulesToLiveRulesHtml(rules) {
+        const lines = uniqueStrings(rules || DEFAULT_LIVE_ASSESSMENT_RULES);
+        return `<ul>${lines.map(rule => `<li>${escapeHtml(rule)}</li>`).join('')}</ul>`;
+    }
+
     function withAutoProgressItems(requiredItems) {
         const map = new Map();
         AUTO_PROGRESS_ITEMS.forEach((item) => {
@@ -295,6 +377,22 @@
         } catch (error) {
             return sanitizeProgressConfig(null);
         }
+    }
+
+    function getLiveAssessmentRulesConfig() {
+        try {
+            return sanitizeLiveRulesConfig(JSON.parse(localStorage.getItem(LIVE_RULES_KEY) || 'null'));
+        } catch (error) {
+            return getDefaultLiveRulesConfig();
+        }
+    }
+
+    function getLiveAssessmentRules() {
+        return getLiveAssessmentRulesConfig().rules;
+    }
+
+    function getLiveAssessmentRulesHtml() {
+        return getLiveAssessmentRulesConfig().rulesHtml;
     }
 
     function getInsightProgressRequiredItems() {
@@ -357,6 +455,19 @@
     function setDraftProgressConfig(config) {
         draftState.progressConfig = sanitizeProgressConfig(config);
         draftState.progressLoaded = true;
+    }
+
+    function getDraftLiveRulesConfig() {
+        if (!draftState.liveRulesLoaded || !draftState.liveRulesConfig) {
+            draftState.liveRulesConfig = sanitizeLiveRulesConfig(getLiveAssessmentRulesConfig());
+            draftState.liveRulesLoaded = true;
+        }
+        return draftState.liveRulesConfig;
+    }
+
+    function setDraftLiveRulesConfig(config) {
+        draftState.liveRulesConfig = sanitizeLiveRulesConfig(config);
+        draftState.liveRulesLoaded = true;
     }
 
     function escapeHtml(value) {
@@ -501,6 +612,7 @@
     function refreshInsightRulesView() {
         const config = getDraftConfig();
         const progressConfig = getDraftProgressConfig();
+        const liveRulesConfig = getDraftLiveRulesConfig();
         renderAssessmentSelector();
 
         const severitySelect = document.getElementById('insightPresetSeveritySelect');
@@ -513,6 +625,11 @@
 
         renderMappingTable(config);
         renderProgressTable(progressConfig);
+
+        const rulesInput = document.getElementById('liveAssessmentRulesInput');
+        if (rulesInput && document.activeElement !== rulesInput && !rulesInput.dataset.dirty) {
+            rulesInput.innerHTML = liveRulesConfig.rulesHtml || rulesToLiveRulesHtml(liveRulesConfig.rules);
+        }
     }
 
     function addInsightTriggerPreset() {
@@ -624,6 +741,54 @@
         }
     }
 
+    async function saveLiveAssessmentRulesConfig() {
+        const input = document.getElementById('liveAssessmentRulesInput');
+        const rulesHtml = sanitizeLiveRulesHtml(input ? input.innerHTML : '');
+        const lines = htmlToLiveRuleLines(rulesHtml);
+
+        const stamp = new Date().toISOString();
+        const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        const clean = sanitizeLiveRulesConfig({ rules: lines, rulesHtml, updatedAt: stamp, updatedBy: actor });
+
+        localStorage.setItem(LIVE_RULES_KEY, JSON.stringify(clean));
+        setDraftLiveRulesConfig(clean);
+        if (input) {
+            input.innerHTML = clean.rulesHtml;
+            delete input.dataset.dirty;
+        }
+
+        try {
+            if (typeof saveToServer === 'function') {
+                await saveToServer([LIVE_RULES_KEY], true);
+            }
+        } catch (error) {
+            console.warn('[Live Rules] Cloud sync failed:', error);
+        }
+
+        refreshInsightRulesView();
+        if (typeof showToast === 'function') showToast('Live assessment rules saved.', 'success');
+    }
+
+    function resetLiveAssessmentRulesDraft() {
+        setDraftLiveRulesConfig(getDefaultLiveRulesConfig());
+        const input = document.getElementById('liveAssessmentRulesInput');
+        if (input) delete input.dataset.dirty;
+        refreshInsightRulesView();
+    }
+
+    function markLiveAssessmentRulesDirty() {
+        const input = document.getElementById('liveAssessmentRulesInput');
+        if (input) input.dataset.dirty = '1';
+    }
+
+    function formatLiveRulesDoc(cmd, value = null) {
+        const input = document.getElementById('liveAssessmentRulesInput');
+        if (!input) return;
+        input.focus();
+        document.execCommand(cmd, false, value);
+        markLiveAssessmentRulesDirty();
+    }
+
     async function resetInsightRuleConfig() {
         if (!confirm('Reset Insight trigger presets and Agent Progress builder to defaults?')) return;
 
@@ -666,13 +831,21 @@
     window.getInsightThresholdForAssessment = getInsightThresholdForAssessment;
     window.getInsightTriggerPresets = getInsightTriggerPresets;
     window.getInsightProgressConfig = getInsightProgressConfig;
+    window.getLiveAssessmentRules = getLiveAssessmentRules;
+    window.getLiveAssessmentRulesHtml = getLiveAssessmentRulesHtml;
+    window.getLiveAssessmentRulesConfig = getLiveAssessmentRulesConfig;
     window.getInsightProgressRequiredItems = getInsightProgressRequiredItems;
     window.loadAdminInsightRules = function() {
         setDraftConfig(getInsightRuleConfig());
         setDraftProgressConfig(getInsightProgressConfig());
+        setDraftLiveRulesConfig(getLiveAssessmentRulesConfig());
         refreshInsightRulesView();
     };
     window.saveInsightRuleConfig = saveInsightRuleConfig;
+    window.saveLiveAssessmentRulesConfig = saveLiveAssessmentRulesConfig;
+    window.resetLiveAssessmentRulesDraft = resetLiveAssessmentRulesDraft;
+    window.markLiveAssessmentRulesDirty = markLiveAssessmentRulesDirty;
+    window.formatLiveRulesDoc = formatLiveRulesDoc;
     window.resetInsightRuleConfig = resetInsightRuleConfig;
     window.addInsightTriggerPreset = addInsightTriggerPreset;
     window.addInsightProgressItem = addInsightProgressItem;

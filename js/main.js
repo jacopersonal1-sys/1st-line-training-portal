@@ -172,6 +172,40 @@ window.addEventListener('unhandledrejection', (event) => {
     captureLog('unhandled-rejection', ['Unhandled Promise Rejection:', event.reason]);
 });
 
+// Some Electron/Chromium builds occasionally lose the editable focus target after
+// webview/iframe activity. Remembering and gently restoring the target avoids the
+// "textbox will not type until minimize/maximize" failure mode.
+window.__lastEditableFocus = null;
+
+function isEditableTarget(el) {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+}
+
+document.addEventListener('focusin', (event) => {
+    if (isEditableTarget(event.target)) window.__lastEditableFocus = event.target;
+}, true);
+
+document.addEventListener('pointerdown', (event) => {
+    const editable = event.target && event.target.closest ? event.target.closest('input, textarea, select, [contenteditable="true"]') : null;
+    if (!editable) return;
+    window.__lastEditableFocus = editable;
+    setTimeout(() => {
+        if (document.activeElement !== editable && editable.isConnected && typeof editable.focus === 'function') {
+            editable.focus({ preventScroll: true });
+        }
+    }, 0);
+}, true);
+
+window.addEventListener('focus', () => {
+    const editable = window.__lastEditableFocus;
+    if (!editable || !editable.isConnected || document.activeElement === editable) return;
+    setTimeout(() => {
+        if (editable.isConnected && typeof editable.focus === 'function') editable.focus({ preventScroll: true });
+    }, 50);
+});
+
 // Capture resource failures that often appear as "silent" UI issues (script/css/img/webview assets).
 window.addEventListener('error', (event) => {
     try {
@@ -556,6 +590,9 @@ window.onload = async function() {
     if (typeof refreshAdaptiveViewportLayout === 'function') {
         refreshAdaptiveViewportLayout();
     }
+    if (typeof applyUIDensity === 'function') applyUIDensity();
+    if (typeof installResponsiveTableCards === 'function') installResponsiveTableCards();
+    if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
     ensureReportProblemUI();
 
     // --- INJECT GLOBAL VISUAL STYLES ---
@@ -1412,6 +1449,9 @@ window.onload = async function() {
     setInterval(updateNotifications, 60000);
     // Also run once immediately if logged in
     if(savedSession) setTimeout(updateNotifications, 1000); 
+    if (typeof updateViewSyncIndicators === 'function') {
+        setInterval(updateViewSyncIndicators, 60000);
+    }
 
     // --- NEW: AUTO-UPDATE POLLER ---
     // Actively check for updates every 30 minutes so the bell icon appears for open apps
@@ -1647,8 +1687,235 @@ function applyUserTheme() {
         }
     }
 
+    applyUIDensity(localTheme.density || localStorage.getItem('ui_density') || 'comfortable');
     refreshAdaptiveViewportLayout();
+    syncThemeToEmbeddedPrograms();
 }
+
+function getThemeVariableSnapshot() {
+    const style = getComputedStyle(document.documentElement);
+    const vars = [
+        '--primary',
+        '--primary-hover',
+        '--primary-soft',
+        '--bg-app',
+        '--bg-card',
+        '--bg-input',
+        '--bg-header',
+        '--bg-hover',
+        '--text-main',
+        '--text-muted',
+        '--border-color',
+        '--border-radius',
+        '--shadow-card',
+        '--shadow-hover',
+        '--focus-ring',
+        '--transition'
+    ];
+    return vars.reduce((acc, name) => {
+        const value = style.getPropertyValue(name);
+        if (value && value.trim()) acc[name] = value.trim();
+        return acc;
+    }, {});
+}
+
+function applyThemeToEmbeddedFrame(frame) {
+    if (!frame) return;
+    try {
+        const doc = frame.contentDocument || (frame.contentWindow && frame.contentWindow.document);
+        if (!doc || !doc.documentElement) return;
+        const vars = getThemeVariableSnapshot();
+        Object.keys(vars).forEach(name => doc.documentElement.style.setProperty(name, vars[name]));
+        const density = getCurrentUIDensity();
+        doc.body.classList.remove('density-compact', 'density-comfortable', 'density-spacious');
+        doc.body.classList.add(`density-${density}`);
+        if (frame.contentWindow && typeof frame.contentWindow.syncThemeFromHost === 'function') {
+            frame.contentWindow.syncThemeFromHost();
+        }
+    } catch (error) {
+        // Cross-origin webviews cannot be styled directly; same-origin modules are handled here.
+    }
+}
+
+function applyThemeToWebview(webview) {
+    if (!webview || typeof webview.executeJavaScript !== 'function') return;
+    try {
+        const vars = getThemeVariableSnapshot();
+        const script = `
+            (function(vars, density) {
+                try {
+                    Object.keys(vars || {}).forEach(function(name) {
+                        document.documentElement.style.setProperty(name, vars[name]);
+                    });
+                    if (document.body) {
+                        document.body.classList.remove('density-compact', 'density-comfortable', 'density-spacious');
+                        document.body.classList.add('density-' + density);
+                    }
+                } catch (error) {}
+            })(${JSON.stringify(vars)}, ${JSON.stringify(getCurrentUIDensity())});
+        `;
+        webview.executeJavaScript(script, true).catch(() => {});
+    } catch (error) {}
+}
+
+function syncThemeToEmbeddedPrograms() {
+    document.querySelectorAll('iframe').forEach(applyThemeToEmbeddedFrame);
+    document.querySelectorAll('webview').forEach(applyThemeToWebview);
+}
+
+function getCurrentUIDensity() {
+    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    const stored = localStorage.getItem('ui_density') || localTheme.density || 'comfortable';
+    return ['compact', 'comfortable', 'spacious'].includes(stored) ? stored : 'comfortable';
+}
+
+function applyUIDensity(mode) {
+    const density = ['compact', 'comfortable', 'spacious'].includes(mode) ? mode : getCurrentUIDensity();
+    document.body.classList.remove('density-compact', 'density-comfortable', 'density-spacious');
+    document.body.classList.add(`density-${density}`);
+    localStorage.setItem('ui_density', density);
+    if (typeof syncThemeToEmbeddedPrograms === 'function') syncThemeToEmbeddedPrograms();
+    return density;
+}
+
+function setUIDensity(mode) {
+    const density = applyUIDensity(mode);
+    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    localTheme.density = density;
+    localStorage.setItem('local_theme_config', JSON.stringify(localTheme));
+    const input = document.getElementById('themeDensity');
+    if (input) input.value = density;
+    return density;
+}
+
+function applyResponsiveTableLabels(root = document) {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('table').forEach(table => {
+        const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim());
+        if (!headers.length) return;
+        table.classList.add('responsive-row-card-table');
+        table.querySelectorAll('tbody tr').forEach(row => {
+            Array.from(row.children || []).forEach((cell, index) => {
+                if (cell.tagName && cell.tagName.toLowerCase() === 'td' && !cell.hasAttribute('colspan')) {
+                    cell.setAttribute('data-label', headers[index] || '');
+                }
+            });
+        });
+    });
+}
+
+function installResponsiveTableCards() {
+    applyResponsiveTableLabels(document);
+    if (window.__responsiveTableObserver) return;
+    let queued = false;
+    window.__responsiveTableObserver = new MutationObserver(() => {
+        if (queued) return;
+        queued = true;
+        setTimeout(() => {
+            queued = false;
+            applyResponsiveTableLabels(document);
+        }, 80);
+    });
+    window.__responsiveTableObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+function getLastSyncTimestamp() {
+    const candidates = [
+        '_last_full_sync_at',
+        'last_full_sync_at',
+        'last_server_sync',
+        'lastCloudSync',
+        'last_sync_at',
+        'disk_cache_recovered_at'
+    ];
+    let latest = 0;
+    candidates.forEach(key => {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const parsed = /^\d+$/.test(raw) ? Number(raw) : Date.parse(raw);
+        if (Number.isFinite(parsed) && parsed > latest) latest = parsed;
+    });
+    if (window._lastSuccessfulServerSyncAt && window._lastSuccessfulServerSyncAt > latest) {
+        latest = window._lastSuccessfulServerSyncAt;
+    }
+    return latest;
+}
+
+function formatRelativeTime(timestamp) {
+    if (!timestamp) return 'not yet';
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (seconds < 45) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+}
+
+function ensureSyncIndicator(container, paused = false) {
+    if (!container) return null;
+    let indicator = container.querySelector(':scope > .sync-view-indicator');
+    if (!indicator) {
+        indicator = document.createElement('span');
+        indicator.className = 'sync-view-indicator live';
+        container.appendChild(indicator);
+    }
+    indicator.classList.toggle('paused', !!paused);
+    indicator.classList.toggle('live', !paused);
+    return indicator;
+}
+
+function updateViewSyncIndicators() {
+    const activeSection = document.querySelector('section.active');
+    const lastSync = getLastSyncTimestamp();
+    const label = `Last synced ${formatRelativeTime(lastSync)}`;
+    const adminHeavyIds = new Set([
+        'dashboard-view',
+        'monthly',
+        'admin-panel',
+        'insights',
+        'insight-studio',
+        'assessment-schedule',
+        'live-assessment',
+        'manage',
+        'capture',
+        'vetting-rework',
+        'superadmin-studio',
+        'opl-hub',
+        'content-studio'
+    ]);
+
+    document.querySelectorAll('.page-titlebar, .dash-titlebar').forEach(titlebar => {
+        const owner = titlebar.closest('section');
+        if (owner && (!owner.classList.contains('active') || !adminHeavyIds.has(owner.id))) return;
+        const indicator = ensureSyncIndicator(titlebar, false);
+        if (indicator) indicator.innerHTML = `<i class="fas fa-rotate"></i> ${label}`;
+    });
+
+    const attendanceState = document.getElementById('attAdminRefreshState');
+    if (attendanceState) {
+        attendanceState.textContent = `Live updates paused while this window is open. ${label}.`;
+    }
+
+    if (activeSection && adminHeavyIds.has(activeSection.id) && !activeSection.querySelector('.page-titlebar, .dash-titlebar')) {
+        const heading = activeSection.querySelector('h2');
+        if (heading && heading.parentElement) {
+            const indicator = ensureSyncIndicator(heading.parentElement, false);
+            if (indicator) indicator.innerHTML = `<i class="fas fa-rotate"></i> ${label}`;
+        }
+    }
+}
+
+window.getThemeVariableSnapshot = getThemeVariableSnapshot;
+window.applyThemeToEmbeddedFrame = applyThemeToEmbeddedFrame;
+window.applyThemeToWebview = applyThemeToWebview;
+window.syncThemeToEmbeddedPrograms = syncThemeToEmbeddedPrograms;
+window.getCurrentUIDensity = getCurrentUIDensity;
+window.applyUIDensity = applyUIDensity;
+window.setUIDensity = setUIDensity;
+window.applyResponsiveTableLabels = applyResponsiveTableLabels;
+window.installResponsiveTableCards = installResponsiveTableCards;
+window.updateViewSyncIndicators = updateViewSyncIndicators;
 
 // --- HELPER: Lighten/Darken Hex Color ---
 function lightenColor(col, amt) {
@@ -2036,6 +2303,7 @@ function applyExperimentalTheme(themeName) {
     }
 
     updateExperimentalThemePickerState();
+    syncThemeToEmbeddedPrograms();
 }
 
 // --- SIDEBAR VISIBILITY LOGIC ---
@@ -2855,11 +3123,14 @@ async function syncFreshDataForView(id) {
     VIEW_SYNC_IN_FLIGHT = true;
     try {
         await loadFromServer(true);
+        window._lastSuccessfulServerSyncAt = Date.now();
+        localStorage.setItem('last_server_sync', String(window._lastSuccessfulServerSyncAt));
     } catch (error) {
         console.warn(`[View Sync] Fresh pull failed for ${id}:`, error);
     } finally {
         VIEW_SYNC_IN_FLIGHT = false;
         rerenderActiveViewAfterFreshPull(id);
+        if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
     }
 }
 
@@ -2996,10 +3267,12 @@ function showTab(id, btn) {
   const current = document.querySelector('section.active');
   if (current && current.id === id) {
       syncFreshDataForView(id);
+      if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
       return;
   }
 
   const executeSwitch = () => {
+      document.body.classList.add('route-transitioning');
       if (typeof refreshAdaptiveViewportLayout === 'function') {
           refreshAdaptiveViewportLayout();
       }
@@ -3039,8 +3312,11 @@ function showTab(id, btn) {
         
       // --- DYNAMIC DATA REFRESH ---
       renderViewById(id, { source: 'switch' });
+      if (typeof applyResponsiveTableLabels === 'function') applyResponsiveTableLabels(document.getElementById(id) || document);
+      if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
 
       syncFreshDataForView(id);
+      setTimeout(() => document.body.classList.remove('route-transitioning'), 320);
   };
 
   if (current) {
@@ -3079,7 +3355,7 @@ function showAdminSub(viewName, btn) {
   if(viewName === 'attendance' && typeof loadAttendanceDashboard === 'function') {
       loadAttendanceDashboard();
   }
-  if(viewName === 'graduated' && typeof loadGraduatedAgents === 'function') {
+  if((viewName === 'graduates' || viewName === 'graduated') && typeof loadGraduatedAgents === 'function') {
       loadGraduatedAgents();
   }
 }
@@ -3356,6 +3632,20 @@ function autoResize(el) {
 }
 
 /* ================= UI UTILS ================= */
+function getTableStateHtml(type = 'empty', title = 'No data found.', detail = '', icon = null) {
+    const state = ['loading', 'error', 'empty'].includes(type) ? type : 'empty';
+    const defaultIcon = state === 'loading' ? 'fa-circle-notch' : state === 'error' ? 'fa-triangle-exclamation' : 'fa-inbox';
+    const safeTitle = (typeof escapeHTML === 'function') ? escapeHTML(title) : String(title || '');
+    const safeDetail = (typeof escapeHTML === 'function') ? escapeHTML(detail) : String(detail || '');
+    return `<div class="table-state ${state}"><i class="fas ${icon || defaultIcon}"></i><strong>${safeTitle}</strong>${safeDetail ? `<span>${safeDetail}</span>` : ''}</div>`;
+}
+
+function setTableState(tbodyOrSelector, colspan, type, title, detail, icon = null) {
+    const body = typeof tbodyOrSelector === 'string' ? document.querySelector(tbodyOrSelector) : tbodyOrSelector;
+    if (!body) return;
+    body.innerHTML = `<tr><td colspan="${Number(colspan) || 1}">${getTableStateHtml(type, title, detail, icon)}</td></tr>`;
+}
+
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -3588,6 +3878,52 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.45": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Onboard Summary Report printing now stays scoped to the report page and no longer appears when printing other app pages.</li>
+            </ul>`,
+        "2.6.44": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Onboard Summary Report now has a cleaner A4 report workspace with dedicated report controls and saved-report preview actions.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Editable report fields now expand as content grows, wrap long links/text safely, and normalize before save or print.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Saved report printing now targets the opened report preview instead of relying on the generic page print path.</li>
+            </ul>`,
+        "2.6.43": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Live Assessment Booking now uses a left controls/sidebar workspace with booking stats, rules, and a dedicated schedule grid.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Attendance Register &amp; Review now has pinned review filters and stats on the left with the agent register on the right.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> Problem Reports and System Error Reports now open in the same admin workspace pattern with triage stats and review guidance.</li>
+            </ul>`,
+        "2.6.42": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Attendance Register now opens with near-fullscreen admin coverage for easier review.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> Network Diagnostics and Agent Activity Monitor received larger modern modal shells and cleaner card styling.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Added Compact, Comfortable, and Spacious interface density settings, responsive row cards for tables on small screens, shared status chip styling, and admin sync indicators.</li>
+            </ul>`,
+        "2.6.41": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Admin Tools now uses a left-side settings rail instead of a long horizontal subtab row.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Assessment Records now has pinned filters on the left and a dedicated results workspace on the right.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> Shared table empty/loading/error states were added and applied to key records tables.</li>
+            </ul>`,
+        "2.6.40": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Admin dashboards now start with a Command Center strip for marking, Insight actions, live bookings, and attendance review.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> Dashboard headers, cards, and modal shells have a cleaner shared visual style with less jumpy hover movement and better scan density.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Dashboard date counts now use local dates consistently for live bookings and daily tasks.</li>
+            </ul>`,
+        "2.6.39": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Attendance Register &amp; Review now opens in a larger workspace with summary cards, cleaner agent rows, and manual refresh while the window is open.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Live Assessment rules now support rich formatting such as bullets, bold, italic, and text sizing from Admin Tools &gt; System Config.</li>
+            </ul>`,
+        "2.6.38": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Today's Tasks now maps the day more clearly for admins, including grouped schedule items, live bookings, admin actions, and booking records that need review.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Attendance now normalizes one record per trainee per day, reduces approval refresh flicker, and exposes trainee clock-out in the portal widget.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Live Assessment pre-question rules are now editable from Admin Tools &gt; System Config.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Theme colors are pushed into embedded modules, Network Diagnostics popouts, and isolated program views more consistently.</li>
+            </ul>`,
         "2.6.37": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live Assessment final summary now handles missing or delayed test definitions without crashing, and score/comment saves initialize missing session containers safely.</li>

@@ -22,6 +22,7 @@ const StudyNotesWorkspace = {
         const frame = document.getElementById('study-notes-frame');
         if (!frame) return;
         frame.dataset.ready = '1';
+        if (typeof applyThemeToEmbeddedFrame === 'function') applyThemeToEmbeddedFrame(frame);
     },
 
     renderUI() {

@@ -503,7 +503,11 @@ const TraineePortalApp = {
                     <div class="portal-row"><span>Late entries (last 30)</span><strong>${Number(model.lateCount || 0)}</strong></div>
                     <div class="portal-row"><span>On-time entries (last 30)</span><strong>${Number(model.onTimeCount || 0)}</strong></div>
                     <div class="portal-row"><span>Missing clock-out</span><strong>${Number(model.missedClockOuts || 0)}</strong></div>
-                    ${model.attendancePromptNeeded ? '<button class="portal-btn primary" style="width:auto;" data-action="clock-in"><i class="fas fa-clock"></i> Clock In Now</button>' : '<div class="portal-muted">Attendance status captured for today.</div>'}
+                    ${model.attendancePromptNeeded
+                        ? '<button class="portal-btn primary" style="width:auto;" data-action="clock-in"><i class="fas fa-clock"></i> Clock In Now</button>'
+                        : (model.attendanceToday && !model.attendanceToday.clockOut)
+                            ? '<button class="portal-btn warning" style="width:auto;" data-action="clock-out"><i class="fas fa-right-from-bracket"></i> Clock Out</button>'
+                            : '<div class="portal-muted">Attendance status captured for today.</div>'}
                 `
             },
             available_now: {
@@ -620,6 +624,7 @@ const TraineePortalApp = {
                     event.stopPropagation();
                     const action = String(btn.dataset.action || '');
                     if (action === 'clock-in') this.openClockInModal();
+                    if (action === 'clock-out') this.submitClockOut();
                 });
             });
 
@@ -748,6 +753,15 @@ const TraineePortalApp = {
             return;
         }
         this.notify('Attendance clock-in is not available right now.', 'warning');
+    },
+
+    submitClockOut() {
+        const host = this.getHost();
+        if (host && typeof host.submitClockOut === 'function') {
+            host.submitClockOut();
+            return;
+        }
+        this.notify('Attendance clock-out is not available right now.', 'warning');
     },
 
     notify(message, type) {

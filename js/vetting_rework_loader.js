@@ -81,6 +81,12 @@ const VettingReworkLoader = {
                 preload="${preloadPath}"
                 partition="${partitionName}"
                 allowpopups></webview>`;
+        const webview = container.querySelector('.vetting-rework-webview');
+        if (webview) {
+            webview.addEventListener('dom-ready', () => {
+                if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+            });
+        }
     }
 };
 window.VettingReworkLoader = VettingReworkLoader;

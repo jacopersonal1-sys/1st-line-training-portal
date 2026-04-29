@@ -30,6 +30,7 @@ const TraineePortalLoader = {
         const frame = document.getElementById('trainee-portal-frame');
         if (!frame) return;
         frame.dataset.ready = '1';
+        if (typeof applyThemeToEmbeddedFrame === 'function') applyThemeToEmbeddedFrame(frame);
         this.startAutoRefresh();
     },
 

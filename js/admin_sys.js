@@ -728,11 +728,41 @@ function loadAdminTheme() {
         }
     }
 
+    if (colorInput && !document.getElementById('themeDensityContainer')) {
+        const container = document.createElement('div');
+        container.id = 'themeDensityContainer';
+        container.style.marginTop = '20px';
+        container.style.paddingTop = '15px';
+        container.style.borderTop = '1px dashed var(--border-color)';
+        container.innerHTML = `
+            <label for="themeDensity" style="display:block; margin-bottom:10px; font-weight:bold;">Interface Density</label>
+            <select id="themeDensity" onchange="setUIDensity(this.value)" style="width:100%; margin-bottom:6px;">
+                <option value="compact">Compact</option>
+                <option value="comfortable">Comfortable</option>
+                <option value="spacious">Spacious</option>
+            </select>
+            <div style="font-size:0.7rem; color:var(--text-muted);">Controls the spacing used by dashboards, modals, cards, and tables on this PC.</div>
+        `;
+        const zoomContainer = document.getElementById('themeZoomContainer');
+        if (zoomContainer && zoomContainer.parentNode) {
+            zoomContainer.parentNode.insertBefore(container, zoomContainer.nextSibling);
+        } else if (wallInput && wallInput.parentNode) {
+            wallInput.parentNode.insertBefore(container, wallInput.nextSibling);
+        } else if (colorInput.parentNode) {
+            colorInput.parentNode.insertBefore(container, colorInput.nextSibling);
+        }
+    }
+
     if (colorInput) colorInput.value = localTheme.primaryColor || '#F37021';
     if (wallInput) wallInput.value = localTheme.wallpaper || '';
     
     if (document.getElementById('themeBgColor')) {
         document.getElementById('themeBgColor').value = localTheme.backgroundColor || '#1A1410';
+    }
+
+    const densityInput = document.getElementById('themeDensity');
+    if (densityInput) {
+        densityInput.value = (typeof getCurrentUIDensity === 'function') ? getCurrentUIDensity() : (localTheme.density || 'comfortable');
     }
     
     const zoomInput = document.getElementById('themeZoom');
@@ -794,16 +824,19 @@ async function saveThemeSettings() {
     const wallpaper = document.getElementById('themeWallpaper').value;
     const bgColor = document.getElementById('themeBgColor') ? document.getElementById('themeBgColor').value : '#1A1410';
     const zoom = document.getElementById('themeZoom') ? parseFloat(document.getElementById('themeZoom').value) : 1.0;
+    const density = document.getElementById('themeDensity') ? document.getElementById('themeDensity').value : (localStorage.getItem('ui_density') || 'comfortable');
     
     const themeConfig = {
         primaryColor: color,
         backgroundColor: bgColor,
         wallpaper: wallpaper,
-        zoomLevel: zoom
+        zoomLevel: zoom,
+        density: density
     };
     
     // Save locally only
     localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));
+    localStorage.setItem('ui_density', density);
     
     if (typeof applyUserTheme === 'function') applyUserTheme();
     
@@ -2527,8 +2560,8 @@ async function viewSystemErrors() {
     const uniqueUsers = new Set(reports.map(r => r.user)).size;
 
     let html = `<div class="modal-overlay" id="errorReportModal" style="z-index:10002;">
-        <div class="modal-box" style="width:900px; max-height:90vh; display:flex; flex-direction:column;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <div class="modal-box report-workspace-modal">
+            <div class="modal-header">
                 <div>
                     <h3 style="margin:0; color:#ff5252;"><i class="fas fa-bug"></i> System Error Reports</h3>
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} active errors from ${uniqueUsers} unique users${resolvedCount ? ` (${resolvedCount} resolved/noisy hidden)` : ''}</div>
@@ -2539,7 +2572,25 @@ async function viewSystemErrors() {
                     <button class="btn-secondary btn-sm" onclick="document.getElementById('errorReportModal').remove()">&times;</button>
                 </div>
             </div>
-            <div class="table-responsive" style="flex:1; overflow-y:auto;">
+            <div class="admin-data-workspace">
+                <aside class="admin-data-sidebar">
+                    <div class="workspace-stat-grid">
+                        <div class="workspace-stat"><span>Active</span><strong>${reports.length}</strong></div>
+                        <div class="workspace-stat"><span>Users</span><strong>${uniqueUsers}</strong></div>
+                        <div class="workspace-stat"><span>Hidden</span><strong>${resolvedCount}</strong></div>
+                        <div class="workspace-stat"><span>Mode</span><strong>${hideResolved ? 'Clean' : 'All'}</strong></div>
+                    </div>
+                    <div class="workspace-rule-box">
+                        <h4>Triage Focus</h4>
+                        <ul>
+                            <li>Newest reports are shown first.</li>
+                            <li>Resolved/noisy items are hidden by default.</li>
+                            <li>Use Analyze for app errors that repeat across users.</li>
+                        </ul>
+                    </div>
+                </aside>
+                <main class="report-workspace-detail">
+            <div class="table-responsive">
                 <table class="admin-table">
                     <thead><tr><th>Time</th><th>User</th><th>Error Message</th><th>Action</th></tr></thead>
                     <tbody>`;
@@ -2567,7 +2618,7 @@ async function viewSystemErrors() {
         });
     }
 
-    html += `</tbody></table></div></div></div>`;
+    html += `</tbody></table></div></main></div></div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
 }
 
@@ -2608,8 +2659,8 @@ async function viewProblemReports() {
     if (typeof updateNotifications === 'function') updateNotifications();
 
     let html = `<div class="modal-overlay" id="problemReportModal" style="z-index:10002;">
-        <div class="modal-box" style="width:980px; max-height:90vh; display:flex; flex-direction:column;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <div class="modal-box report-workspace-modal">
+            <div class="modal-header">
                 <div>
                     <h3 style="margin:0; color:#ff6b6b;"><i class="fas fa-question-circle"></i> Problem Reports</h3>
                     <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">${reports.length} active reports from ${uniqueUsers} unique users${resolvedCount ? ` (${resolvedCount} resolved/noisy hidden)` : ''}</div>
@@ -2620,7 +2671,25 @@ async function viewProblemReports() {
                     <button class="btn-secondary btn-sm" onclick="document.getElementById('problemReportModal').remove()">&times;</button>
                 </div>
             </div>
-            <div class="table-responsive" style="flex:1; overflow-y:auto;">
+            <div class="admin-data-workspace">
+                <aside class="admin-data-sidebar">
+                    <div class="workspace-stat-grid">
+                        <div class="workspace-stat"><span>Active</span><strong>${reports.length}</strong></div>
+                        <div class="workspace-stat"><span>Users</span><strong>${uniqueUsers}</strong></div>
+                        <div class="workspace-stat"><span>Hidden</span><strong>${resolvedCount}</strong></div>
+                        <div class="workspace-stat"><span>Mode</span><strong>${hideResolved ? 'Clean' : 'All'}</strong></div>
+                    </div>
+                    <div class="workspace-rule-box">
+                        <h4>Review Flow</h4>
+                        <ul>
+                            <li>Open details for user wording and console snapshots.</li>
+                            <li>Ignore resolved historical noise while checking current problems.</li>
+                            <li>Clear only after you are happy the latest release covers it.</li>
+                        </ul>
+                    </div>
+                </aside>
+                <main class="report-workspace-detail">
+            <div class="table-responsive">
                 <table class="admin-table">
                     <thead><tr><th>Time</th><th>User</th><th>Issue</th><th>Context</th><th>Action</th></tr></thead>
                     <tbody>`;
@@ -2650,7 +2719,7 @@ async function viewProblemReports() {
         });
     }
 
-    html += `</tbody></table></div></div></div>`;
+    html += `</tbody></table></div></main></div></div></div>`;
     const existing = document.getElementById('problemReportModal');
     if (existing) existing.remove();
     document.body.insertAdjacentHTML('beforeend', html);

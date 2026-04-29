@@ -28,6 +28,12 @@ const TLTasks = {
                 allowpopups
             ></webview>
         `;
+        const webview = document.getElementById('tl-hub-webview');
+        if (webview) {
+            webview.addEventListener('dom-ready', () => {
+                if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+            });
+        }
     }
 };
 window.TLTasks = TLTasks;

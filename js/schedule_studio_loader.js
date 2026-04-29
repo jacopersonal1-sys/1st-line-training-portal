@@ -29,6 +29,7 @@
                         id="schedule-studio-frame"
                         src="${modulePath}"
                         title="Schedule Studio"
+                        onload="if (typeof applyThemeToEmbeddedFrame === 'function') applyThemeToEmbeddedFrame(this)"
                         style="width:100%; height:calc(100vh - 230px); border:none; border-radius:14px; background:var(--bg-card); box-shadow:0 10px 30px rgba(0,0,0,0.2);"
                     ></iframe>
                 `;
@@ -52,6 +53,7 @@
             }
 
             try {
+                if (typeof applyThemeToEmbeddedFrame === 'function') applyThemeToEmbeddedFrame(frame);
                 if (frame.contentWindow && frame.contentWindow.App && typeof frame.contentWindow.App.refresh === 'function') {
                     frame.contentWindow.App.refresh({ forcePull: false });
                     return;

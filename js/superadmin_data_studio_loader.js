@@ -41,6 +41,12 @@ const SuperAdminDataStudioLoader = {
                 allowpopups
             ></webview>
         `;
+        const webview = document.getElementById('superadmin-data-studio-webview');
+        if (webview) {
+            webview.addEventListener('dom-ready', () => {
+                if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+            });
+        }
     }
 };
 

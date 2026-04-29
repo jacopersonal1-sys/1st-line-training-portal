@@ -37,6 +37,12 @@ const OPLHubLoader = {
                 allowpopups
             ></webview>
         `;
+        const webview = document.getElementById('opl-hub-webview');
+        if (webview) {
+            webview.addEventListener('dom-ready', () => {
+                if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+            });
+        }
     }
 };
 

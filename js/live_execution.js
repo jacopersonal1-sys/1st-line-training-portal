@@ -1399,6 +1399,16 @@ function renderTraineeLivePanel(container) {
     let btnText = '';
 
     if (session.currentQ === -1) {
+        const ruleContent = (typeof getLiveAssessmentRulesHtml === 'function' && getLiveAssessmentRulesHtml())
+            ? getLiveAssessmentRulesHtml()
+            : `<ul>${(typeof getLiveAssessmentRules === 'function' ? getLiveAssessmentRules() : [
+                'This assessment takes approximately 1 hour to complete.',
+                'You are allowed to reference the training material. However, if the material is referenced constantly and it is clear the material was not studied, the live session will be ended.',
+                'If you are unable to answer a question within 5 minutes of it being provided, the marks obtained for that question are final and the next question will be provided.'
+            ]).map(rule => {
+                const safeRule = (typeof escapeHTML === 'function') ? escapeHTML(rule) : String(rule || '');
+                return `<li>${safeRule}</li>`;
+            }).join('')}</ul>`;
         mainContent = `
             <div style="text-align:center; padding:50px; max-width: 800px; margin: 0 auto;">
                 <h1>${test.title}</h1>
@@ -1407,11 +1417,7 @@ function renderTraineeLivePanel(container) {
                 
                 <div style="background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:20px; margin:30px 0; text-align:left;">
                     <h4 style="margin-top:0; color:var(--primary);"><i class="fas fa-info-circle"></i> Assessment Rules</h4>
-                    <ul style="margin-bottom:0; line-height:1.6;">
-                        <li>This assessment takes approximately <strong>1 hour</strong> to complete.</li>
-                        <li>You are allowed to reference the training material. However, if the material is referenced constantly and it is clear the material was not studied, the live session will be ended.</li>
-                        <li>If you are unable to answer a question within <strong>5 minutes</strong> of it being provided, the marks obtained for that question are final & the next question will be provided.</li>
-                    </ul>
+                    <div class="live-rules-display">${ruleContent}</div>
                 </div>
                 <div class="loader" style="margin:20px auto;"></div>
                 <div style="color:var(--text-muted); font-size:0.9rem;">Waiting for trainer to push the first question...</div>
