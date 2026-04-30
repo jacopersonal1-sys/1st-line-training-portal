@@ -467,7 +467,10 @@ const App = {
             contentSelect.value = item.contentModuleKey || '';
         }
 
-        document.getElementById('schedule-modal').classList.remove('hidden');
+        const modal = document.getElementById('schedule-modal');
+        modal.classList.remove('hidden');
+        const modalCard = modal.querySelector('.studio-modal-card');
+        if (modalCard) modalCard.scrollTop = 0;
         this.previewEditorFromDuration();
     },
 

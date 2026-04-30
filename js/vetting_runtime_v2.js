@@ -323,6 +323,7 @@
     function isTargetSessionForUser(session, username) {
         if (!session || !session.active || !username) return false;
         if (!session.targetGroup || session.targetGroup === 'all') return true;
+        if (getTraineeData(session, username)) return true;
         try {
             const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
             const members = Array.isArray(rosters[session.targetGroup]) ? rosters[session.targetGroup] : [];

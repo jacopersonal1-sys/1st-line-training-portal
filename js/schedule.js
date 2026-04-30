@@ -3631,7 +3631,10 @@ function editTimelineItem(index) {
     tests.forEach(t => select.add(new Option(t.title, t.id)));
     if (item.linkedTestId) select.value = item.linkedTestId;
 
-    document.getElementById('scheduleModal').classList.remove('hidden');
+    const modal = document.getElementById('scheduleModal');
+    modal.classList.remove('hidden');
+    const modalBox = modal.querySelector('.schedule-edit-modal-box');
+    if (modalBox) modalBox.scrollTop = 0;
 }
 
 async function saveScheduleItem() {

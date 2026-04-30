@@ -26,16 +26,31 @@ const DataService = {
 
     loadInitialData: async function() {
         if (!AppContext.supabase) return;
-        try {
-            const [testsRes, rostersRes] = await Promise.all([
-                AppContext.supabase.from('app_documents').select('content').eq('key', 'tests').single(),
-                AppContext.supabase.from('app_documents').select('content').eq('key', 'rosters').single()
-            ]);
-            if (testsRes.data) localStorage.setItem('tests', JSON.stringify(testsRes.data.content || []));
-            if (rostersRes.data) localStorage.setItem('rosters', JSON.stringify(rostersRes.data.content || {}));
-        } catch (e) {
-            console.error("Sandbox Initialization Error:", e);
-        }
+        const unwrap = (result) => result && result.status === 'fulfilled' ? result.value : null;
+        const [testsRes, rostersRes, usersDocRes, usersRowsRes] = await Promise.allSettled([
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'tests').single(),
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'rosters').single(),
+            AppContext.supabase.from('app_documents').select('content').eq('key', 'users').maybeSingle(),
+            AppContext.supabase.from('users').select('data').limit(5000)
+        ]);
+
+        const tests = unwrap(testsRes);
+        const rosters = unwrap(rostersRes);
+        const usersDoc = unwrap(usersDocRes);
+        const usersRows = unwrap(usersRowsRes);
+
+        if (tests && tests.data) localStorage.setItem('tests', JSON.stringify(tests.data.content || []));
+        if (rosters && rosters.data) localStorage.setItem('rosters', JSON.stringify(rosters.data.content || {}));
+
+        const rowUsers = usersRows && Array.isArray(usersRows.data)
+            ? usersRows.data.map(r => r && r.data).filter(Boolean)
+            : [];
+        const docUsers = usersDoc && usersDoc.data && Array.isArray(usersDoc.data.content) ? usersDoc.data.content : [];
+        if (rowUsers.length || docUsers.length) localStorage.setItem('users', JSON.stringify(rowUsers.length ? rowUsers : docUsers));
+
+        [tests, rosters].forEach((res, idx) => {
+            if (res && res.error) console.warn(`[Vetting Rework] Failed to load ${idx === 0 ? 'tests' : 'rosters'}:`, res.error.message || res.error);
+        });
         this.startRetryLoop();
         await this.flushPendingOps();
     },
@@ -46,6 +61,60 @@ const DataService = {
 
     getRosters: function() {
         return JSON.parse(localStorage.getItem('rosters') || '{}');
+    },
+
+    getUsers: function() {
+        try {
+            const users = JSON.parse(localStorage.getItem('users') || '[]');
+            return Array.isArray(users) ? users : [];
+        } catch (e) {
+            return [];
+        }
+    },
+
+    getUserIdentityCandidates: function(user) {
+        if (!user || typeof user !== 'object') return [];
+        const traineeData = user.traineeData || {};
+        return [
+            user.user,
+            user.username,
+            user.name,
+            user.fullName,
+            user.displayName,
+            user.email,
+            user.contact,
+            traineeData.email,
+            traineeData.contact,
+            traineeData.phone
+        ].map(v => String(v || '').trim()).filter(Boolean);
+    },
+
+    resolveTraineeUsername: function(candidate, users = this.getUsers()) {
+        const raw = String(candidate || '').trim();
+        if (!raw) return '';
+        const trainees = (Array.isArray(users) ? users : [])
+            .filter(u => String((u && u.role) || '').toLowerCase() === 'trainee');
+        const exact = trainees.find(u => String(u.user || '').trim().toLowerCase() === raw.toLowerCase());
+        if (exact && exact.user) return String(exact.user).trim();
+        const mapped = trainees.find(u => this.getUserIdentityCandidates(u).some(alias => this.identitiesMatch(alias, raw)));
+        return mapped && mapped.user ? String(mapped.user).trim() : raw;
+    },
+
+    resolveSessionTargets: function(session) {
+        const rosters = this.getRosters();
+        const users = this.getUsers();
+        const trainees = users.filter(u => String((u && u.role) || '').toLowerCase() === 'trainee');
+        const allUsernames = trainees.map(u => String(u.user || '').trim()).filter(Boolean);
+        const targetCandidates = (!session || !session.targetGroup || session.targetGroup === 'all')
+            ? allUsernames
+            : (Array.isArray(rosters[session.targetGroup]) ? rosters[session.targetGroup] : []);
+
+        const resolved = new Set();
+        targetCandidates.forEach(candidate => {
+            const username = this.resolveTraineeUsername(candidate, users);
+            if (username) resolved.add(username);
+        });
+        return resolved;
     },
 
     getPendingOps: function() {
@@ -295,31 +364,7 @@ const DataService = {
     nudgeTraineesForSession: async function(session) {
         if (!AppContext.supabase || !session || !session.active) return;
 
-        const rosters = this.getRosters();
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-
-        const allTraineeUsers = (Array.isArray(users) ? users : [])
-            .filter(u => String((u && u.role) || '').toLowerCase() === 'trainee')
-            .map(u => String(u.user || '').trim())
-            .filter(Boolean);
-
-        let targetCandidates = [];
-        if (!session.targetGroup || session.targetGroup === 'all') {
-            targetCandidates = allTraineeUsers;
-        } else {
-            targetCandidates = Array.isArray(rosters[session.targetGroup]) ? rosters[session.targetGroup] : [];
-        }
-
-        const resolvedTargets = new Set();
-        targetCandidates.forEach(candidate => {
-            const exact = allTraineeUsers.find(u => String(u).toLowerCase() === String(candidate || '').toLowerCase());
-            if (exact) {
-                resolvedTargets.add(exact);
-                return;
-            }
-            const mapped = allTraineeUsers.find(u => this.identitiesMatch(u, candidate));
-            if (mapped) resolvedTargets.add(mapped);
-        });
+        const resolvedTargets = this.resolveSessionTargets(session);
 
         if (!resolvedTargets.size) return;
 

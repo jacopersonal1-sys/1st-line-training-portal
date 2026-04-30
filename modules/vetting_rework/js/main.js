@@ -653,20 +653,9 @@ const App = {
             if(!confirm(`A session is already active for group: ${groupId}. Continue?`)) return;
         }
 
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const allTrainees = (Array.isArray(users) ? users : [])
-            .filter(u => String((u && u.role) || '').toLowerCase() === 'trainee')
-            .map(u => String((u && u.user) || '').trim())
-            .filter(Boolean);
-        const seedCandidates = (groupId === 'all')
-            ? allTrainees
-            : (Array.isArray(rosters[groupId]) ? rosters[groupId] : []);
         const seededTrainees = {};
-        seedCandidates.forEach(candidate => {
-            const exact = allTrainees.find(u => String(u).toLowerCase() === String(candidate || '').toLowerCase());
-            const mapped = exact || allTrainees.find(u => this.identitiesMatch(u, candidate));
-            if (mapped) seededTrainees[mapped] = { status: 'waiting' };
+        DataService.resolveSessionTargets({ targetGroup: groupId }).forEach(username => {
+            if (username) seededTrainees[username] = { status: 'waiting' };
         });
 
         const session = {

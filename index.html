@@ -129,7 +129,7 @@
 </div>
 
 <div id="scheduleModal" class="modal-overlay hidden" style="z-index: 3000;">
-  <div class="modal-box" style="width:500px;">
+  <div class="modal-box schedule-edit-modal-box" style="width:500px;">
     <h3>Edit Schedule Step</h3>
     <input type="hidden" id="editStepIndex">
     <input type="hidden" id="editStepType">
@@ -193,7 +193,7 @@
     <label for="editDueDate">Due Date (YYYY/MM/DD)</label>
     <input type="text" id="editDueDate" placeholder="e.g. 2026/01/07">
     
-    <div style="display:flex; gap:10px; margin-top:15px;">
+    <div class="schedule-edit-actions" style="display:flex; gap:10px; margin-top:15px;">
       <button class="btn-secondary" onclick="document.getElementById('scheduleModal').classList.add('hidden')">Cancel</button>
       <button class="btn-primary" onclick="saveScheduleItem()">Save Changes</button>
     </div>

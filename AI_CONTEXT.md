@@ -26,7 +26,7 @@
 ### Global Schema (`DB_SCHEMA`)
 | Key | Type | Sync Strategy | Description |
 | :--- | :--- | :--- | :--- |
-| `users` | Array | Blob | User credentials, roles, and themes. |
+| `users` | Array | Row (`users`) with legacy blob fallback | User credentials, roles, themes, and trainee contact metadata. |
 | `rosters` | Object | Blob | Group definitions `{ "GroupA": ["User1", "User2"] }`. |
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
 | `live_assessment_rules_config` | Object | Blob | Editable Live Assessment Arena rule text/HTML shown before the first pushed question. |
@@ -56,6 +56,7 @@
 
 ### Row-Level Map (`ROW_MAP`)
 Maps local `localStorage` keys to Supabase tables.
+- `users` -> `public.users`
 - `records` -> `public.records`
 - `submissions` -> `public.submissions`
 - `auditLogs` -> `public.audit_logs`
@@ -178,6 +179,8 @@ Maps local `localStorage` keys to Supabase tables.
     - `App.startSession()` / `App.endSession()`: Creates/closes vetting sessions.
     - `App.toggleSecurity()` / `App.overrideSecurity()`: Per-trainee strict/relaxed control and unblock flow.
     - `App.forceRefreshSession()` / `App.forceRefreshTrainee()`: Session-level and per-trainee refresh controls.
+    - `DataService.loadInitialData()`: Loads `tests`, `rosters`, and row-synced `users` into the isolated runtime so vetting sessions can resolve roster entries to canonical trainee usernames.
+    - `DataService.resolveSessionTargets()`: Resolves targets by username/email/contact aliases before seeding sessions and sending `sessions.pending_action` nudges.
     - `DataService.patchSessionUser()`: Safe per-trainee patching with retry queue.
     - `DataService.pollSessions()` / `DataService.setupRealtime()`: Dual-table session merge (`vetting_sessions_v2` + `vetting_sessions`) with realtime + fallback polling.
 
@@ -259,10 +262,11 @@ Maps local `localStorage` keys to Supabase tables.
 - **Architecture:** Program-within-a-program schedule editor running in an isolated iframe.
 - **Entry Point:** `modules/schedule_studio/index.html`
 - **Key Files:**
-    - `js/main.js`: Timeline app controller, admin template manager/apply flow, duration-based date automation, linked content expand/collapse previews, and signed URL asset launchers for linked module video/document playback.
+    - `js/main.js`: Timeline app controller, admin template manager/apply flow, duration-based date automation, linked content expand/collapse previews, signed URL asset launchers for linked module video/document playback, and editor modal open/scroll reset.
     - `js/data.js`: Shared localStorage/Supabase bridge helpers, business-day date math, template serialization, and content-module discovery that reads both `content_studio_data_local` and canonical `content_studio_data` cache keys.
     - `js/ui_timeline.js`: Timeline tabs, toolbar actions, timeline cards.
     - `js/ui_calendar.js`: Calendar view rendering.
+    - `style.css`: Includes sticky modal action footers so Save controls remain reachable on short displays.
 
 #### `js/network_diag.js` (Network Diagnostics)
 - **Responsibility:** Real-time network health check (Ping Gateway/Internet/Server) and System Stats (CPU/RAM/Disk).
@@ -452,6 +456,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 ---
 
 ## 5. Recent Architectural Notes
+
+- **v2.6.47 (Vetting Delivery + Schedule Modal Guardrail, 2026-04-30):** Hardened Vetting Arena 2.0 session launch so the isolated admin runtime loads row-synced `users`, resolves roster/email/contact aliases to canonical trainee usernames, seeds sessions with those usernames, and allows trainee clients to accept a session if their username appears in the session trainee map. Also made both legacy and isolated Schedule Studio edit modals scroll from the top with sticky Save/Cancel footers so schedule edits remain saveable on short screens.
 
 - **v2.6.30 (Live Session Completion + Stale Recovery Rollout, 2026-04-24):** Hardened Live Assessment completion so `Confirm & Submit` now executes authoritative session close semantics (inactive marker + server row cleanup + local pointer cleanup), preventing completed sessions from resurfacing as active. Expanded Live Booking Integrity with stale-session detection and one-click recovery that archives stale session payloads (`liveSessionRecoveryArchive`), rebuilds missing submission/record artifacts for completed stale sessions, then safely closes stale active rows.
 
