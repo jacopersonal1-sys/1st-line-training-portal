@@ -3880,6 +3880,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.48": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Final Vetting sessions now resolve roster, email, and contact aliases to the correct trainee accounts before sending arena nudges.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Schedule edit windows now keep Save and Cancel visible on shorter screens.</li>
+            </ul>`,
         "2.6.47": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Super Admin minimum-version login enforcement now verifies the real app version before allowing access.</li>
