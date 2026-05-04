@@ -16,6 +16,8 @@ const StudyMonitor = {
     queueSelection: new Set(), // Persist selections across refreshes
     cachedWhitelist: [], // Cache for performance
     lastSyncedPayload: null, // OPTIMIZATION: Track last sync to prevent duplicate pushes
+    pendingViolationPrompt: null,
+    currentViolationReportId: null,
     // --- NEW: Tabbed Browser State ---
     browserState: {
         tabs: [],
@@ -430,6 +432,20 @@ const StudyMonitor = {
         if (!gate.allowed) return false;
 
         const popUrl = this.getStudyNotesModuleUrl(false);
+        if (window.electronAPI?.studyBrowser?.openPopout) {
+            window.electronAPI.studyBrowser.openPopout({
+                url: popUrl,
+                title: 'Study Notes',
+                kind: 'notes'
+            }).then(() => {
+                this.track('Navigating: Study Notes (Second Screen)');
+            }).catch((error) => {
+                console.warn('Study Notes pop-out failed:', error);
+                if (typeof showToast === 'function') showToast('Could not open Study Notes pop-out.', 'error');
+            });
+            return true;
+        }
+
         if (this.studyNotesPopup && !this.studyNotesPopup.closed) {
             try {
                 this.studyNotesPopup.focus();
@@ -447,6 +463,45 @@ const StudyMonitor = {
         this.studyNotesPopup = child;
         this.track('Navigating: Study Notes (Second Screen)');
         return true;
+    },
+
+    popOutActiveTab: function(tabId = null) {
+        const tab = tabId
+            ? this.browserState.tabs.find(t => t.id === tabId)
+            : this.browserState.tabs.find(t => t.id === this.browserState.activeTabId);
+        if (!tab) {
+            if (typeof showToast === 'function') showToast('No study tab is active.', 'warning');
+            return false;
+        }
+
+        let liveUrl = tab.url;
+        try {
+            if (tab.webview && typeof tab.webview.getURL === 'function') {
+                liveUrl = tab.webview.getURL() || liveUrl;
+            }
+        } catch (error) {}
+
+        if (!this.isStudyBrowserUrl(liveUrl)) {
+            this.openExternalUrl(liveUrl);
+            return false;
+        }
+
+        if (window.electronAPI?.studyBrowser?.openPopout) {
+            window.electronAPI.studyBrowser.openPopout({
+                url: liveUrl,
+                title: tab.title || 'Study Material',
+                kind: 'study-material'
+            }).then(() => {
+                this.track(`Study Pop Out: ${tab.title || 'Study Material'}`);
+            }).catch((error) => {
+                console.warn('Study tab pop-out failed:', error);
+                if (typeof showToast === 'function') showToast('Could not pop out this study tab.', 'error');
+            });
+            return true;
+        }
+
+        this.openExternalUrl(liveUrl);
+        return false;
     },
 
     enforceStudyNotesPolicy: function(options = {}) {
@@ -707,7 +762,9 @@ const StudyMonitor = {
                         
                         if (isViolation) {
                             activityLabel = `Violation: ${activeWindow}`;
-                            this.triggerExternalAppWarning();
+                            if (this.currentActivity !== activityLabel) {
+                                this.triggerExternalAppWarning(activeWindow, activityLabel);
+                            }
                         }
                     }
 
@@ -724,37 +781,125 @@ const StudyMonitor = {
         }
     },
 
-    triggerExternalAppWarning: function() {
-        // DEFUSAL 3: Prevent infinite stacking of warning modals
+    getViolationReports: function() {
+        try {
+            const reports = JSON.parse(localStorage.getItem('violation_reports') || '[]');
+            return Array.isArray(reports) ? reports : [];
+        } catch (e) {
+            return [];
+        }
+    },
+
+    writeViolationReports: function(reports) {
+        const clean = (Array.isArray(reports) ? reports : [])
+            .filter(r => r && r.id && r.user)
+            .sort((a, b) => new Date(b.detectedAt || b.reportedAt || 0) - new Date(a.detectedAt || a.reportedAt || 0));
+        localStorage.setItem('violation_reports', JSON.stringify(clean));
+        return clean;
+    },
+
+    getViolationDropdownOptions: function() {
+        return {
+            platforms: ['Teams', 'WhatsApp', 'Phone Call', 'In Person'],
+            contacts: ['Darren', 'Netta', 'Jaco']
+        };
+    },
+
+    triggerExternalAppWarning: function(triggerWindow, activityLabel) {
         if (document.getElementById('external-app-warning-modal')) return;
 
-        // Throttle: show once every 5 minutes max
-        const lastWarning = sessionStorage.getItem('last_ext_warn');
-        if (lastWarning && (Date.now() - Number.parseInt(lastWarning) < 300000)) {
-            return;
-        }
-
-        // Validation is now handled upstream in startActivityPoller
-        
-        sessionStorage.setItem('last_ext_warn', Date.now().toString());
-
+        const promptId = `vio_prompt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const detectedAt = Date.now();
+        this.pendingViolationPrompt = {
+            id: promptId,
+            trigger: String(triggerWindow || 'Unknown external app'),
+            activity: String(activityLabel || `Violation: ${triggerWindow || 'Unknown external app'}`),
+            detectedAt
+        };
+        const options = this.getViolationDropdownOptions();
+        const platformOptions = ['<option value="">-- Select Platform --</option>']
+            .concat(options.platforms.map(p => `<option value="${this.escapeHtml(p)}">${this.escapeHtml(p)}</option>`))
+            .join('');
+        const contactOptions = ['<option value="">-- Select Person --</option>']
+            .concat(options.contacts.map(c => `<option value="${this.escapeHtml(c)}">${this.escapeHtml(c)}</option>`))
+            .join('');
+        const triggerText = this.escapeHtml(triggerWindow || 'Unknown external app');
         const modalHtml = `
             <div id="external-app-warning-modal">
-                <div class="modal-box">
-                    <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: #f1c40f; margin-bottom: 15px;"></i>
-                    <h2 style="color: #f1c40f;">Attention</h2>
-                    <p style="line-height: 1.6;">
-                        Moving outside of the scope of your Training Period is Prohibited during your study times.
-                        <br><br>
-                        <strong>Exceptions:</strong> Lunch, Live Assessments (if Required), or before 8 AM and after 5 PM.
-                        <br><br>
-                        <strong style="color: #ff5252;">Violation of this Protocol will be noted for Disciplinary action.</strong>
+                <div class="modal-box violation-capture-modal">
+                    <i class="fas fa-triangle-exclamation" style="font-size: 3rem; color: #ff5252; margin-bottom: 12px;"></i>
+                    <h2 style="color:#ff5252; margin-bottom:6px;">Training Scope Violation</h2>
+                    <p style="line-height:1.55; color:var(--text-muted); margin-bottom:14px;">
+                        You left the approved training workspace during monitored training hours. This must be explained before continuing.
                     </p>
-                    <button class="btn-primary" style="margin-top: 20px;" onclick="document.getElementById('external-app-warning-modal').remove()">I Understand</button>
+                    <div class="violation-trigger-box">
+                        <span>Trigger detected</span>
+                        <strong>${triggerText}</strong>
+                    </div>
+                    <label for="violationReason_${promptId}">Reason for this violation</label>
+                    <textarea id="violationReason_${promptId}" placeholder="Explain why you left the training app..." style="height:82px;"></textarea>
+                    <div class="grid-2" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+                        <div>
+                            <label for="violationPlatform_${promptId}">Platform Used</label>
+                            <select id="violationPlatform_${promptId}">${platformOptions}</select>
+                        </div>
+                        <div>
+                            <label for="violationContact_${promptId}">Person Informed</label>
+                            <select id="violationContact_${promptId}">${contactOptions}</select>
+                        </div>
+                    </div>
+                    <button class="btn-danger btn-lg" style="width:100%; margin-top:16px;" onclick="StudyMonitor.submitViolationReason('${promptId}')">
+                        <i class="fas fa-lock"></i> Submit Violation Explanation
+                    </button>
                 </div>
             </div>
         `;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
+    },
+
+    submitViolationReason: async function(promptId) {
+        const prompt = this.pendingViolationPrompt;
+        if (!prompt || prompt.id !== promptId) return;
+
+        const reasonEl = document.getElementById(`violationReason_${promptId}`);
+        const platformEl = document.getElementById(`violationPlatform_${promptId}`);
+        const contactEl = document.getElementById(`violationContact_${promptId}`);
+        const reason = String(reasonEl?.value || '').trim();
+        const platform = String(platformEl?.value || '').trim();
+        const contact = String(contactEl?.value || '').trim();
+
+        if (!reason) return alert("Please provide the reason for this violation.");
+        if (!platform || !contact) return alert("Please specify how and who you informed.");
+
+        const reports = this.getViolationReports();
+        const record = {
+            id: `vio_${prompt.detectedAt}_${Math.random().toString(36).slice(2, 8)}`,
+            user: CURRENT_USER?.user || 'unknown',
+            date: this.getLocalDateString(new Date(prompt.detectedAt)),
+            trigger: prompt.trigger,
+            activity: prompt.activity,
+            reason,
+            platform,
+            contact,
+            detectedAt: new Date(prompt.detectedAt).toISOString(),
+            reportedAt: new Date().toISOString(),
+            status: 'pending_review',
+            reviewed: false,
+            reviewedAt: null,
+            reviewedBy: '',
+            adminComment: ''
+        };
+
+        reports.push(record);
+        this.writeViolationReports(reports);
+        this.currentViolationReportId = record.id;
+        this.pendingViolationPrompt = null;
+
+        if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
+        if (typeof updateNotifications === 'function') updateNotifications();
+
+        document.getElementById('external-app-warning-modal')?.remove();
+        if (typeof showToast === 'function') showToast("Violation explanation submitted for review.", "warning");
     },
 
     track: function(activityName) {
@@ -763,18 +908,25 @@ const StudyMonitor = {
 
         // Log previous activity if it lasted > 1 second
         if (duration > 1000) {
-            this.history.push({
+            const previousSegment = {
                 activity: this.currentActivity,
                 start: this.startTime,
                 end: now,
                 duration: duration,
                 clicks: this.clickCount // Save clicks for this session
-            });
+            };
+            if (String(this.currentActivity || '').startsWith('Violation:') && this.currentViolationReportId) {
+                previousSegment.violationReportId = this.currentViolationReportId;
+            }
+            this.history.push(previousSegment);
         }
 
         this.currentActivity = activityName;
         this.startTime = now;
         this.clickCount = 0; // Reset click count for new activity
+        if (!String(activityName || '').startsWith('Violation:')) {
+            this.currentViolationReportId = null;
+        }
         
         // SAFETY: Prevent infinite array growth (Memory Protection)
         if (this.history.length > 2000) {
@@ -959,8 +1111,8 @@ const StudyMonitor = {
     },
 
     // --- HELPER: LOCAL DATE STRING (YYYY-MM-DD) ---
-    getLocalDateString: function() {
-        const now = new Date();
+    getLocalDateString: function(date = new Date()) {
+        const now = date instanceof Date ? date : new Date(date);
         const y = now.getFullYear();
         const m = String(now.getMonth() + 1).padStart(2, '0');
         const d = String(now.getDate()).padStart(2, '0');
@@ -1276,6 +1428,9 @@ const StudyMonitor = {
                         <button type="button" id="study-notes-popout-btn" class="study-action-btn study-action-secondary" title="Open Study Notes in a separate window for a second screen">
                             <i class="fas fa-up-right-from-square"></i> Pop Out Notes
                         </button>
+                        <button type="button" id="study-tab-popout-btn" class="study-action-btn study-action-secondary" title="Pop out the active study tab into a separate app window">
+                            <i class="fas fa-window-restore"></i> Pop Out Tab
+                        </button>
                         <button type="button" id="study-bookmark-btn" class="study-action-btn study-action-secondary" title="Mark a specific spot to ask for clarity later">
                             <i class="fas fa-crop-alt"></i> Mark for Clarity
                         </button>
@@ -1326,6 +1481,7 @@ const StudyMonitor = {
         document.getElementById('study-nav-home').onclick = () => this.goHomeActiveTab();
         document.getElementById('study-notes-toggle-btn').onclick = () => this.toggleStudyNotesDock();
         document.getElementById('study-notes-popout-btn').onclick = () => this.openStudyNotesPopout();
+        document.getElementById('study-tab-popout-btn').onclick = () => this.popOutActiveTab();
         document.getElementById('study-notes-dock-popout-btn').onclick = () => this.openStudyNotesPopout();
         document.getElementById('study-notes-dock-close-btn').onclick = () => this.closeStudyNotesDock();
         document.getElementById('study-bookmark-btn').onclick = () => this.startMarkForClarity();
@@ -1608,6 +1764,7 @@ const StudyMonitor = {
             return `
                 <button type="button" class="study-tab ${isActive ? 'active' : ''}" onclick="StudyMonitor.switchTab('${tab.id}')" title="${this.escapeHtml(tab.title)}">
                     <span class="study-tab-title">${tab.title}</span>
+                    <span class="study-tab-popout" role="presentation" title="Pop out this tab" onclick="event.stopPropagation(); StudyMonitor.popOutActiveTab('${tab.id}')"><i class="fas fa-up-right-from-square"></i></span>
                     <span class="study-tab-close" role="presentation" onclick="event.stopPropagation(); StudyMonitor.closeTab('${tab.id}')"><i class="fas fa-times"></i></span>
                 </button>
             `;
@@ -1995,12 +2152,36 @@ const StudyMonitor = {
         }, { total: 0, onTask: 0, attention: 0, idle: 0, noData: 0 });
     },
 
+    getPendingViolationReviewCount: function(agent = null) {
+        const target = String(agent || '').trim().toLowerCase();
+        return this.getViolationReports().filter(report => {
+            if (target && String(report.user || '').trim().toLowerCase() !== target) return false;
+            return !report.reviewed && String(report.status || 'pending_review') !== 'reviewed';
+        }).length;
+    },
+
+    getViolationReportCountForAgent: function(agent) {
+        const target = String(agent || '').trim().toLowerCase();
+        if (!target) return { total: 0, pending: 0 };
+        return this.getViolationReports().reduce((acc, report) => {
+            if (String(report.user || '').trim().toLowerCase() !== target) return acc;
+            acc.total += 1;
+            if (!report.reviewed && String(report.status || 'pending_review') !== 'reviewed') acc.pending += 1;
+            return acc;
+        }, { total: 0, pending: 0 });
+    },
+
     renderScopeControls: function() {
+        const pendingViolations = this.getPendingViolationReviewCount();
         return `
             <div class="btn-group">
                 <button class="${this.monitorScope === 'scheduled' ? 'active' : ''}" onclick="StudyMonitor.setMonitorScope('scheduled')">Scheduled Today</button>
                 <button class="${this.monitorScope === 'all' ? 'active' : ''}" onclick="StudyMonitor.setMonitorScope('all')">All Trainees</button>
             </div>
+            <button class="btn-secondary btn-sm violation-review-btn" onclick="StudyMonitor.openViolationReviewModal()" title="Review submitted violation explanations">
+                <i class="fas fa-triangle-exclamation" style="color:#ff5252;"></i>
+                ${pendingViolations > 0 ? `<span class="violation-review-count">${pendingViolations}</span>` : ''}
+            </button>
         `;
     }
 };
@@ -2116,6 +2297,7 @@ function renderActivityMonitorContent() {
         const taskLabel = StudyMonitor.getCurrentTaskForAgent(agent);
         const readable = StudyMonitor.getReadableActivity(activity);
         const status = StudyMonitor.getStatusMeta(activity);
+        const violationCounts = StudyMonitor.getViolationReportCountForAgent(agent);
         
         // Safe ID for DOM elements
         const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
@@ -2177,7 +2359,12 @@ function renderActivityMonitorContent() {
         document.getElementById(`mon_help_${safeId}`).innerText = readable.detail;
         document.getElementById(`mon_start_${safeId}`).innerText = startedAt;
         document.getElementById(`mon_duration_${safeId}`).innerText = durationStr;
-        document.getElementById(`mon_badge_${safeId}`).innerHTML = `<span class="status-badge ${status.className}">${StudyMonitor.escapeHtml(status.label)}</span>`;
+        document.getElementById(`mon_badge_${safeId}`).innerHTML = `
+            <div style="display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
+                ${violationCounts.total > 0 ? `<button class="activity-monitor-violation-icon ${violationCounts.pending > 0 ? '' : 'reviewed'}" onclick="StudyMonitor.openViolationReviewModal('${agent.replace(/'/g, "\\'")}')" title="Review violation reports for ${StudyMonitor.escapeHtml(agent)}"><i class="fas fa-triangle-exclamation"></i>${violationCounts.pending > 0 ? violationCounts.pending : violationCounts.total}</button>` : ''}
+                <span class="status-badge ${status.className}">${StudyMonitor.escapeHtml(status.label)}</span>
+            </div>
+        `;
 
         // Update History (Only if details are visible to save DOM ops, or always?)
         // Let's update always for now so it's ready when expanded
@@ -2699,6 +2886,130 @@ StudyMonitor.viewAgentViolations = function(agent) {
     const existing = document.getElementById('agentViolationModal');
     if (existing) existing.remove();
     document.body.insertAdjacentHTML('beforeend', html);
+};
+
+StudyMonitor.openViolationReviewModal = function(agent = '') {
+    const reports = this.getViolationReports();
+    const users = Array.from(new Set(reports.map(r => r.user).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    const safeAgent = String(agent || '');
+    const userOptions = ['<option value="">All Trainees</option>']
+        .concat(users.map(u => `<option value="${this.escapeHtml(u)}" ${u === safeAgent ? 'selected' : ''}>${this.escapeHtml(u)}</option>`))
+        .join('');
+
+    const html = `<div class="modal-overlay" id="violationReviewModal" style="z-index:10005;">
+        <div class="modal-box" style="width:min(1120px, 96vw); max-height:90vh; display:flex; flex-direction:column;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+                <div>
+                    <h3 style="margin:0; color:#ff5252;"><i class="fas fa-triangle-exclamation"></i> Violation Review</h3>
+                    <div style="font-size:0.82rem; color:var(--text-muted); margin-top:4px;">Review mandatory trainee explanations for leaving the approved training workspace.</div>
+                </div>
+                <button class="btn-secondary btn-sm" onclick="document.getElementById('violationReviewModal').remove()">&times;</button>
+            </div>
+            <div class="violation-review-filters">
+                <div>
+                    <label>Status</label>
+                    <select id="vioReviewStatus" onchange="StudyMonitor.renderViolationReviewRows()">
+                        <option value="pending_review">Pending Review</option>
+                        <option value="all">All Statuses</option>
+                        <option value="reviewed">Reviewed</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Trainee</label>
+                    <select id="vioReviewUser" onchange="StudyMonitor.renderViolationReviewRows()">${userOptions}</select>
+                </div>
+                <div>
+                    <label>Date</label>
+                    <input id="vioReviewDate" type="date" onchange="StudyMonitor.renderViolationReviewRows()">
+                </div>
+                <div>
+                    <label>Search</label>
+                    <input id="vioReviewSearch" type="text" placeholder="Trigger, reason, person..." oninput="StudyMonitor.renderViolationReviewRows()">
+                </div>
+            </div>
+            <div class="table-responsive" style="overflow:auto; border:1px solid var(--border-color); border-radius:8px;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Trainee</th>
+                            <th>Detected</th>
+                            <th>Trigger</th>
+                            <th>Reason</th>
+                            <th>Informed</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="violationReviewRows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>`;
+
+    document.getElementById('violationReviewModal')?.remove();
+    document.body.insertAdjacentHTML('beforeend', html);
+    this.renderViolationReviewRows();
+};
+
+StudyMonitor.renderViolationReviewRows = function() {
+    const tbody = document.getElementById('violationReviewRows');
+    if (!tbody) return;
+
+    const status = String(document.getElementById('vioReviewStatus')?.value || 'pending_review');
+    const user = String(document.getElementById('vioReviewUser')?.value || '').trim().toLowerCase();
+    const date = String(document.getElementById('vioReviewDate')?.value || '').trim();
+    const search = String(document.getElementById('vioReviewSearch')?.value || '').trim().toLowerCase();
+
+    const reports = this.getViolationReports().filter(report => {
+        const reportStatus = report.reviewed ? 'reviewed' : String(report.status || 'pending_review');
+        if (status !== 'all' && reportStatus !== status) return false;
+        if (user && String(report.user || '').trim().toLowerCase() !== user) return false;
+        if (date && String(report.date || '').trim() !== date) return false;
+        if (search) {
+            const haystack = [report.user, report.trigger, report.activity, report.reason, report.platform, report.contact, report.adminComment]
+                .map(v => String(v || '').toLowerCase())
+                .join(' ');
+            if (!haystack.includes(search)) return false;
+        }
+        return true;
+    });
+
+    tbody.innerHTML = reports.map(report => {
+        const detected = report.detectedAt ? new Date(report.detectedAt).toLocaleString() : (report.date || '-');
+        const isReviewed = !!report.reviewed || String(report.status || '') === 'reviewed';
+        return `<tr>
+            <td>${this.escapeHtml(report.user || '-')}</td>
+            <td style="white-space:nowrap;">${this.escapeHtml(detected)}</td>
+            <td>${this.escapeHtml(report.trigger || report.activity || '-')}</td>
+            <td>${this.escapeHtml(report.reason || '-')}</td>
+            <td>${this.escapeHtml([report.platform, report.contact].filter(Boolean).join(' / ') || '-')}</td>
+            <td><span class="status-badge ${isReviewed ? 'status-pass' : 'status-fail'}">${isReviewed ? 'Reviewed' : 'Pending'}</span></td>
+            <td style="white-space:nowrap;">
+                ${isReviewed
+                    ? `<span style="font-size:0.78rem; color:var(--text-muted);">By ${this.escapeHtml(report.reviewedBy || '-')}</span>`
+                    : `<button class="btn-success btn-sm" onclick="StudyMonitor.markViolationReviewed('${this.escapeHtml(report.id)}')"><i class="fas fa-check"></i> Mark Reviewed</button>`}
+            </td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:18px;">No violation reports match the current filters.</td></tr>';
+};
+
+StudyMonitor.markViolationReviewed = async function(reportId) {
+    const reports = this.getViolationReports();
+    const idx = reports.findIndex(r => String(r.id || '') === String(reportId || ''));
+    if (idx < 0) return;
+
+    reports[idx] = {
+        ...reports[idx],
+        reviewed: true,
+        status: 'reviewed',
+        reviewedAt: new Date().toISOString(),
+        reviewedBy: CURRENT_USER?.user || 'admin'
+    };
+    this.writeViolationReports(reports);
+    if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
+    this.renderViolationReviewRows();
+    renderActivityMonitorContent();
+    if (typeof updateNotifications === 'function') updateNotifications();
 };
 
 StudyMonitor.archiveLog = async function() {

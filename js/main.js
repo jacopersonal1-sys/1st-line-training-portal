@@ -3589,7 +3589,24 @@ function updateNotifications() {
         }
     }
 
-    // 4. EMPTY STATE
+    // 4. ACTIVITY VIOLATION REVIEW NOTIFICATIONS
+    if (CURRENT_USER && ['super_admin', 'admin', 'teamleader'].includes(String(CURRENT_USER.role || '').toLowerCase())) {
+        const pendingViolations = (typeof StudyMonitor !== 'undefined' && StudyMonitor.getPendingViolationReviewCount)
+            ? StudyMonitor.getPendingViolationReviewCount()
+            : (JSON.parse(localStorage.getItem('violation_reports') || '[]') || []).filter(r => r && !r.reviewed && String(r.status || 'pending_review') !== 'reviewed').length;
+
+        if (pendingViolations > 0) {
+            count += pendingViolations;
+            notifList.innerHTML += `
+            <div class="notif-item" onclick="StudyMonitor.openViolationReviewModal()" style="border-left:3px solid #ff5252;" aria-label="${pendingViolations} pending violation reviews">
+                <i class="fas fa-triangle-exclamation" style="color:#ff5252;"></i>
+                <strong>${pendingViolations} Violation Review${pendingViolations === 1 ? '' : 's'}</strong>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">Open Activity Monitor violation review.</div>
+            </div>`;
+        }
+    }
+
+    // 5. EMPTY STATE
     if (notifList.innerHTML === '') {
         notifList.innerHTML = '<div style="padding:15px; text-align:center; color:#888;">No new notifications</div>';
     }
@@ -3880,6 +3897,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.49": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Study Browser tabs can now pop out into frameless app windows with built-in minimize, maximize, close, navigation, and reload controls.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Training-scope violations now require a mandatory trainee explanation with trigger, reason, platform, and informed-person capture before continuing.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Activity Monitor now includes violation review notifications, searchable review filters, per-agent violation badges, and reviewed-state tracking.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> Manage Users now uses one unified searchable list and Study Notes received cleaner dark-theme styling.</li>
+            </ul>`,
         "2.6.48": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Final Vetting sessions now resolve roster, email, and contact aliases to the correct trainee accounts before sending arena nudges.</li>

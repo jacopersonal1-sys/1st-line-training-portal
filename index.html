@@ -1046,7 +1046,7 @@
                 <div class="admin-users-header">
                     <div>
                         <h3 style="margin:0;">Manage Users</h3>
-                        <p style="margin:6px 0 0 0; font-size:0.84rem; color:var(--text-muted);">Unified user management with role buckets, group-aware trainee filtering, and server-authoritative sync.</p>
+                        <p style="margin:6px 0 0 0; font-size:0.84rem; color:var(--text-muted);">Unified user management with one searchable list, group-aware trainee filtering, and server-authoritative sync.</p>
                     </div>
                     <span style="font-size:0.75rem; color:var(--text-muted); border:1px solid var(--border-color); border-radius:999px; padding:3px 10px; white-space:nowrap;">Server-Authoritative</span>
                 </div>
@@ -1072,28 +1072,8 @@
                     <button id="btnMyProfileAdmin" class="btn-secondary" style="width:auto; white-space:nowrap;" onclick="openUnifiedProfileSettings()"><i class="fas fa-user-cog"></i> My Profile Settings</button>
                 </div>
 
-                <div id="adminUsersColumns" class="admin-users-columns">
-                    <section class="admin-user-role-column">
-                        <div class="admin-user-column-head">
-                            <h4>Admin / Super Admin</h4>
-                            <span id="adminUserCountAdmins" class="admin-user-count">0</span>
-                        </div>
-                        <div id="adminUserBucketAdmins" class="admin-user-bucket"></div>
-                    </section>
-                    <section class="admin-user-role-column">
-                        <div class="admin-user-column-head">
-                            <h4>Trainee</h4>
-                            <span id="adminUserCountTrainees" class="admin-user-count">0</span>
-                        </div>
-                        <div id="adminUserBucketTrainees" class="admin-user-bucket"></div>
-                    </section>
-                    <section class="admin-user-role-column">
-                        <div class="admin-user-column-head">
-                            <h4>Team Leader</h4>
-                            <span id="adminUserCountTeamleaders" class="admin-user-count">0</span>
-                        </div>
-                        <div id="adminUserBucketTeamleaders" class="admin-user-bucket"></div>
-                    </section>
+                <div id="adminUsersColumns" class="admin-users-columns admin-users-single-list">
+                    <div id="adminUserUnifiedList" class="admin-user-bucket"></div>
                 </div>
             </div>
         </div>

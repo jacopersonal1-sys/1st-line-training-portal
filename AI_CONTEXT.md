@@ -36,6 +36,7 @@
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
+| `violation_reports` | Array | Blob (`app_documents`) | Mandatory trainee explanations for external-app training-scope violations. Stores trigger, reason, platform, person informed, status, and review metadata. |
 | `liveSessions` | Array | Row (`live_sessions`) | Active state of Live Assessments. |
 | `tests` | Array | Blob | Assessment definitions (Questions, Settings). |
 | `liveBookings` | Array | Row (`live_bookings`) | Scheduled slots for live assessments. |
@@ -85,6 +86,7 @@ Maps local `localStorage` keys to Supabase tables.
 #### `preload.js` (Secure OS Bridge)
 - **Responsibility:** Provides a controlled bridge between renderer code and OS capabilities via `window.electronAPI`.
 - **Key Objects:** Exposes `window.electronAPI` containing safe wrappers for `ipcRenderer.invoke/send`, `shell.openExternal`, `notifications.show`, and `disk.saveCache/loadCache`.
+- **Study Browser Bridge:** Exposes `studyBrowser.clearCache()` and `studyBrowser.openPopout(payload)` for the secure study browser, plus `windowControls.minimize/maximize/close` for frameless app windows.
 - **Security:** Mediates access to Node APIs and restricts direct module usage; renderer code still guards `require`/`ipcRenderer` usage and relies on the preload bridge for native operations.
 
 #### `js/main.js` (Bootloader)
@@ -284,6 +286,8 @@ Maps local `localStorage` keys to Supabase tables.
 - **Key Functions:**
     - `startActivityPoller()`: **No Frontend Timers.** Listens to `activity-update` from the `electron-main.js` background thread.
     - **Security Model:** The internal study browser (`<webview>`) allows all navigation, as there is no URL bar. Violations are only triggered by the OS-level `startActivityPoller` when the user switches to an unauthorized external application. Trainee study links must route through `window.StudyMonitor.openStudyWindow(...)` so they stay inside the secured Electron overlay instead of using raw `window.open(...)`. The browser shell now uses a dedicated control deck above the `webview`, active overlay mode temporarily disables global floating controls, and inactive webviews are forced off-canvas/non-interactive to prevent embedded-page click dead zones. The Electron `persist:study_session` partition is intentionally kept persistent to improve Microsoft/SharePoint study-session reliability across restarts.
+    - **Popout Browser:** `popOutActiveTab(...)` and `openStudyNotesPopout()` use `window.electronAPI.studyBrowser.openPopout(...)` to open the active study tab or notes page in a frameless BrowserWindow with custom minimize/maximize/close/navigation controls. Popout windows keep the `persist:study_session` partition so Microsoft/SharePoint auth continuity is preserved.
+    - **Mandatory Violation Capture:** `triggerExternalAppWarning(...)` now opens a blocking violation form that records the triggering external window, required reason, platform, and person informed (`Darren`, `Netta`, `Jaco`) into `violation_reports`. `openViolationReviewModal()` / `renderViolationReviewRows()` provide admin/teamleader review with filters, search, per-agent badges, notification counts, and `markViolationReviewed(...)`.
     - `startMarkForClarity()`: Interactive drawing engine overlay injected into the `<webview>` for precision bounding-box screenshots/bookmarks.
     - `track(activity)`: Logs current activity.
     - `sync()`: Pushes `monitor_data` to server.
@@ -413,6 +417,13 @@ Maps local `localStorage` keys to Supabase tables.
         *   **Deletes:** Explicitly executes `DELETE` on Supabase for items removed locally to prevent "Ghost Data". Critical items use `force=true` (Authoritative) logic.
     *   **Protection:** `system_config` is only saved if user is Super Admin and save is explicit.
 
+### B1. Violation Review Workflow
+1. **Detection:** During working hours, `StudyMonitor.startActivityPoller()` classifies unapproved external windows as `Violation: <window title>`.
+2. **Mandatory Capture:** The trainee cannot dismiss the prompt until they submit a reason, platform, and informed person. The informed-person dropdown is intentionally restricted to Darren, Netta, and Jaco.
+3. **Sync:** Entries are saved into `violation_reports` as an `app_documents` blob so no SQL migration/table is required.
+4. **Admin Review:** Activity Monitor shows pending counts in its toolbar, per-agent violation badges, a searchable review modal, and a notification-bell item for Admin/Teamleader/Super Admin users.
+5. **Review State:** `markViolationReviewed(...)` marks entries reviewed with reviewer and timestamp metadata.
+
 ### C. Vetting Arena Security
 1.  **Entry:** Trainee clicks "Enter Arena".
 2.  **Lockdown:** `ipcRenderer` triggers Kiosk Mode (Fullscreen, No Exit) and Content Protection (No Screenshots).
@@ -457,6 +468,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.49 (Study Popout + Violation Review, 2026-05-04):** Added frameless Study Browser/Study Notes popout windows via the preload `studyBrowser.openPopout(...)` bridge, removed native app menus for those windows, and gave popouts custom app-style minimize/maximize/close/navigation controls. Replaced soft external-app warnings with mandatory violation explanation capture (`violation_reports`) including trigger, reason, platform, and restricted informed-person choices (`Darren`, `Netta`, `Jaco`). Added Activity Monitor violation review badges, searchable filters, notification-bell counts, and reviewed-state tracking. Simplified Admin Tools > Manage Users from role buckets into one unified searchable list while preserving filters, details, and actions.
 - **v2.6.48 (Vetting Delivery + Schedule Modal Guardrail, 2026-04-30):** Hardened Vetting Arena 2.0 session launch so the isolated admin runtime loads row-synced `users`, resolves roster/email/contact aliases to canonical trainee usernames, seeds sessions with those usernames, and allows trainee clients to accept a session if their username appears in the session trainee map. Also made both legacy and isolated Schedule Studio edit modals scroll from the top with sticky Save/Cancel footers so schedule edits remain saveable on short screens.
 
 - **v2.6.30 (Live Session Completion + Stale Recovery Rollout, 2026-04-24):** Hardened Live Assessment completion so `Confirm & Submit` now executes authoritative session close semantics (inactive marker + server row cleanup + local pointer cleanup), preventing completed sessions from resurfacing as active. Expanded Live Booking Integrity with stale-session detection and one-click recovery that archives stale session payloads (`liveSessionRecoveryArchive`), rebuilds missing submission/record artifacts for completed stale sessions, then safely closes stale active rows.

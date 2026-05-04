@@ -36,6 +36,7 @@ let suppressNextLatestYmlErrorToast = false;
 let studySessionConfigured = false;
 let isFlushingStudySession = false;
 let isSafeToQuit = false;
+const studyPopoutWindows = new Set();
 const STUDY_SESSION_PARTITION = 'persist:study_session';
 const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0';
 const UPDATE_RETRY_DELAY_MS = 15000;
@@ -45,6 +46,8 @@ const UPDATE_FEED_CONFIG = {
     owner: 'jacopersonal1-sys',
     repo: '1st-line-training-portal'
 };
+
+Menu.setApplicationMenu(null);
 
 autoUpdater.allowPrerelease = false;
 
@@ -372,15 +375,301 @@ function createWindow() {
     });
 }
 
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(value) {
+    return escapeHtml(value).replace(/`/g, '&#96;');
+}
+
+function buildStudyPopoutHtml({ url, title, kind }) {
+    const safeUrl = escapeAttr(url);
+    const safeTitle = escapeHtml(title || 'Study Material');
+    const safeKind = escapeHtml(kind === 'notes' ? 'Study Notes' : 'Study Material');
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${safeTitle}</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --primary: #f37021;
+      --bg-app: #121212;
+      --bg-card: #1e1e1e;
+      --bg-input: #252525;
+      --text-main: #e8e8e8;
+      --text-muted: #a8a8a8;
+      --border-color: rgba(255,255,255,0.1);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg-app);
+      color: var(--text-main);
+      font-family: Inter, "Segoe UI", Tahoma, sans-serif;
+      border: 1px solid var(--border-color);
+    }
+    .popout-shell {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background:
+        radial-gradient(circle at top right, rgba(243,112,33,0.14), transparent 30%),
+        var(--bg-app);
+    }
+    .popout-titlebar {
+      height: 42px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 0 8px 0 14px;
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(0,0,0,0.22);
+      -webkit-app-region: drag;
+      user-select: none;
+      flex: 0 0 auto;
+    }
+    .popout-title {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .popout-title strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.92rem;
+    }
+    .popout-title span {
+      color: var(--primary);
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      flex: 0 0 auto;
+    }
+    .popout-window-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      -webkit-app-region: no-drag;
+    }
+    .popout-window-controls button {
+      width: 38px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-main);
+      cursor: pointer;
+      font-size: 15px;
+      line-height: 1;
+    }
+    .popout-window-controls button:hover {
+      background: var(--bg-input);
+      border-color: var(--border-color);
+    }
+    .popout-window-controls button.close:hover {
+      background: #c42b1c;
+      border-color: #c42b1c;
+      color: white;
+    }
+    .popout-browser-controls {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(0,0,0,0.12);
+      flex: 0 0 auto;
+    }
+    .popout-browser-controls button {
+      min-width: 36px;
+      height: 30px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-card);
+      color: var(--text-main);
+      cursor: pointer;
+    }
+    .popout-browser-controls button:hover {
+      border-color: rgba(243,112,33,0.55);
+      color: var(--primary);
+    }
+    .popout-url {
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-muted);
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      background: var(--bg-input);
+      padding: 6px 12px;
+      font-size: 0.78rem;
+    }
+    webview {
+      flex: 1 1 auto;
+      width: 100%;
+      min-height: 0;
+      border: 0;
+      background: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="popout-shell">
+    <header class="popout-titlebar">
+      <div class="popout-title">
+        <span>${safeKind}</span>
+        <strong id="popout-title">${safeTitle}</strong>
+      </div>
+      <div class="popout-window-controls">
+        <button type="button" onclick="window.electronAPI.windowControls.minimize()" title="Minimize">−</button>
+        <button type="button" onclick="window.electronAPI.windowControls.maximize()" title="Maximize">□</button>
+        <button type="button" class="close" onclick="window.electronAPI.windowControls.close()" title="Close">×</button>
+      </div>
+    </header>
+    <div class="popout-browser-controls">
+      <button type="button" id="back" title="Back">←</button>
+      <button type="button" id="forward" title="Forward">→</button>
+      <button type="button" id="reload" title="Reload">↻</button>
+      <div class="popout-url" id="url-label">${safeUrl}</div>
+    </div>
+    <webview id="popout-webview" src="${safeUrl}" partition="${STUDY_SESSION_PARTITION}" allowpopups useragent="${STUDY_BROWSER_USER_AGENT}"></webview>
+  </div>
+  <script>
+    const webview = document.getElementById('popout-webview');
+    const title = document.getElementById('popout-title');
+    const urlLabel = document.getElementById('url-label');
+    const back = document.getElementById('back');
+    const forward = document.getElementById('forward');
+    const updateNav = () => {
+      try {
+        back.disabled = !webview.canGoBack();
+        forward.disabled = !webview.canGoForward();
+        const liveUrl = webview.getURL();
+        if (liveUrl) urlLabel.textContent = liveUrl;
+      } catch (error) {}
+    };
+    back.onclick = () => { try { if (webview.canGoBack()) webview.goBack(); } catch (error) {} };
+    forward.onclick = () => { try { if (webview.canGoForward()) webview.goForward(); } catch (error) {} };
+    reload.onclick = () => { try { webview.reload(); } catch (error) {} };
+    webview.addEventListener('page-title-updated', (event) => {
+      title.textContent = event.title || '${safeTitle}';
+      document.title = event.title || '${safeTitle}';
+    });
+    webview.addEventListener('did-navigate', updateNav);
+    webview.addEventListener('did-navigate-in-page', updateNav);
+    webview.addEventListener('did-stop-loading', updateNav);
+    webview.addEventListener('new-window', (event) => {
+      event.preventDefault();
+      if (event.url) webview.loadURL(event.url);
+    });
+    updateNav();
+  </script>
+</body>
+</html>`;
+}
+
+function openStudyPopoutWindow(payload = {}) {
+    const rawUrl = String(payload.url || '').trim();
+    if (!rawUrl) throw new Error('No study URL supplied.');
+
+    const popout = new BrowserWindow({
+        width: payload.kind === 'notes' ? 1260 : 1380,
+        height: payload.kind === 'notes' ? 860 : 900,
+        minWidth: 900,
+        minHeight: 560,
+        title: payload.title || 'Study Material',
+        icon: path.join(__dirname, 'ico.ico'),
+        frame: false,
+        backgroundColor: '#121212',
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js'),
+            backgroundThrottling: false,
+            webviewTag: true,
+            devTools: !app.isPackaged
+        }
+    });
+
+    studyPopoutWindows.add(popout);
+    popout.on('closed', () => {
+        studyPopoutWindows.delete(popout);
+    });
+
+    popout.setMenuBarVisibility(false);
+    popout.webContents.setWindowOpenHandler(({ url }) => {
+        if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+            shell.openExternal(url);
+            return { action: 'deny' };
+        }
+        return { action: 'deny' };
+    });
+
+    const html = buildStudyPopoutHtml({
+        url: rawUrl,
+        title: payload.title || 'Study Material',
+        kind: payload.kind || 'study-material'
+    });
+    popout.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`);
+    return true;
+}
+
 // NEW: Catch Webview Window Spawns at OS Level (Fix for PDF Links)
 app.on('web-contents-created', (event, contents) => {
     if (contents.getType() === 'webview') {
         contents.setWindowOpenHandler(({ url }) => {
+            const ownerWindow = BrowserWindow.fromWebContents(contents.hostWebContents || contents);
+            if (ownerWindow && studyPopoutWindows.has(ownerWindow)) {
+                if (url) shell.openExternal(url);
+                return { action: 'deny' };
+            }
             if (mainWindow) {
                 mainWindow.webContents.send('webview-new-window', url);
             }
             return { action: 'deny' }; // Prevent the external Electron window from opening
         });
+    }
+});
+
+ipcMain.handle('open-study-popout', async (event, payload) => {
+    openStudyPopoutWindow(payload);
+    return true;
+});
+
+ipcMain.on('window-control', (event, action) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    if (action === 'minimize') {
+        win.minimize();
+    } else if (action === 'maximize') {
+        if (win.isMaximized()) win.unmaximize();
+        else win.maximize();
+    } else if (action === 'close') {
+        win.close();
     }
 });
 

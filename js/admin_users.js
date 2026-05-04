@@ -725,13 +725,6 @@ function getUserRoleBadge(role) {
     return `<span style="color:var(--text-muted); font-size:0.85rem;">Trainee</span>`;
 }
 
-function getUserBucketByRole(role) {
-    const normalizedRole = String(role || '').toLowerCase().trim();
-    if (normalizedRole === 'trainee') return 'trainees';
-    if (normalizedRole === 'teamleader') return 'teamleaders';
-    return 'admins';
-}
-
 function getUserGroupLabels(username, rosters) {
     const labels = [];
     Object.entries(rosters || {}).forEach(([gid, members]) => {
@@ -912,34 +905,15 @@ function loadAdminUsers(forceRender = false) {
         activeNow
     });
 
-    const bucketEls = {
-        admins: document.getElementById('adminUserBucketAdmins'),
-        trainees: document.getElementById('adminUserBucketTrainees'),
-        teamleaders: document.getElementById('adminUserBucketTeamleaders')
-    };
-
-    if (!bucketEls.admins || !bucketEls.trainees || !bucketEls.teamleaders) {
+    const unifiedList = document.getElementById('adminUserUnifiedList');
+    if (!unifiedList) {
         const userList = document.getElementById('userList');
         if (userList) userList.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">New user manager layout unavailable in this runtime.</td></tr>';
         return;
     }
 
-    const buckets = { admins: [], trainees: [], teamleaders: [] };
-    displayUsers.forEach((u, i) => {
-        const key = getUserBucketByRole(u.role);
-        buckets[key].push(renderAdminUserCard(u, i, rosters, savedReports));
-    });
-
-    bucketEls.admins.innerHTML = buckets.admins.length > 0 ? buckets.admins.join('') : '<div class="admin-user-empty">No users in this list.</div>';
-    bucketEls.trainees.innerHTML = buckets.trainees.length > 0 ? buckets.trainees.join('') : '<div class="admin-user-empty">No users in this list.</div>';
-    bucketEls.teamleaders.innerHTML = buckets.teamleaders.length > 0 ? buckets.teamleaders.join('') : '<div class="admin-user-empty">No users in this list.</div>';
-
-    const countAdmins = document.getElementById('adminUserCountAdmins');
-    const countTrainees = document.getElementById('adminUserCountTrainees');
-    const countTeamleaders = document.getElementById('adminUserCountTeamleaders');
-    if (countAdmins) countAdmins.innerText = String(buckets.admins.length);
-    if (countTrainees) countTrainees.innerText = String(buckets.trainees.length);
-    if (countTeamleaders) countTeamleaders.innerText = String(buckets.teamleaders.length);
+    const rows = displayUsers.map((u, i) => renderAdminUserCard(u, i, rosters, savedReports));
+    unifiedList.innerHTML = rows.length > 0 ? rows.join('') : '<div class="admin-user-empty">No users match the current filters.</div>';
 }
 
 function togglePasswordView(elementId) {

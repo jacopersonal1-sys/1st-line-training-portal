@@ -24,7 +24,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
         loadCache: () => ipcRenderer.invoke('load-disk-cache')
     },
     studyBrowser: {
-        clearCache: () => ipcRenderer.invoke('clear-study-browser-cache')
+        clearCache: () => ipcRenderer.invoke('clear-study-browser-cache'),
+        openPopout: (payload) => ipcRenderer.invoke('open-study-popout', payload)
+    },
+    windowControls: {
+        minimize: () => ipcRenderer.send('window-control', 'minimize'),
+        maximize: () => ipcRenderer.send('window-control', 'maximize'),
+        close: () => ipcRenderer.send('window-control', 'close')
     },
     webFrame: {
         setZoomFactor: (factor) => webFrame.setZoomFactor(factor)

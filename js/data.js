@@ -11,6 +11,7 @@ const DB_SCHEMA = {
     trainee_bookmarks: {}, // Unified syncable bookmarks { "username": [ { id, url... } ] }
     monitor_whitelist: [], // Custom whitelist for work-related apps
     monitor_reviewed: [], // Apps confirmed as External/Idle (Dismissed from queue)
+    violation_reports: [], // Mandatory trainee explanations for security/activity violations
     dailyTips: [], // Admin controlled daily tips
     calendarEvents: [], // Custom Admin Events
     error_reports: [] // Centralized error logging for Super Admin
@@ -124,6 +125,7 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'trainee_bookmarks',
     'monitor_whitelist',
     'monitor_reviewed',
+    'violation_reports',
     'liveScheduleSettings',
     'cancellationCounts'
 ]);
@@ -131,6 +133,7 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
 const TRAINEE_DEFAULT_SAVE_KEYS = new Set([
     'monitor_data',
     'monitor_history',
+    'violation_reports',
     'trainee_notes',
     'trainee_bookmarks',
     'nps_responses'
@@ -529,6 +532,9 @@ async function loadFromServer(silent = false) {
                 }
                 localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
                 emitDataChange(localKey, 'load_from_server');
+                if (localKey === 'violation_reports' && typeof updateNotifications === 'function') {
+                    updateNotifications();
+                }
 
                 const docBytes = estimateSyncPayloadSize(doc.content);
                 pullProgressDone += 1;
