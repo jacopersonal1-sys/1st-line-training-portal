@@ -11,13 +11,93 @@ let DRAG_SRC_INDEX = null; // Track item being dragged
 let CALENDAR_MONTH = new Date();
 window.IS_DRAGGING_LIVE = false; // Global lock for drag operations
 
+const LIVE_BOOKING_TIME_SLOTS = [
+    "8:00 AM",
+    "9:00 AM",
+    "10:00 AM",
+    "11:00 AM",
+    "1:00 PM",
+    "2:00 PM",
+    "3:00 PM",
+    "4:00 PM",
+    "5:00 PM"
+];
+const DEFAULT_LIVE_ACTIVE_SLOTS = LIVE_BOOKING_TIME_SLOTS.slice();
+const DEFAULT_LIVE_BOOKING_RULES_HTML = '<ul><li>Trainees may book only one live assessment session per hour.</li><li>Book assessments in the correct training sequence where possible.</li><li>Booking times may change depending on facilitator availability.</li><li><strong>Cancellation Policy:</strong> trainees can cancel one session; further cancellations require admin approval.</li></ul>';
+
+function getLiveBookingTimeSlots() {
+    return LIVE_BOOKING_TIME_SLOTS.slice();
+}
+
+function getDefaultLiveActiveSlots() {
+    return DEFAULT_LIVE_ACTIVE_SLOTS.slice();
+}
+
+function getLiveSlotInputId(slot) {
+    return `slot_${String(slot || '').replace(/[^a-z0-9]/gi, '')}`;
+}
+
+function normalizeLiveActiveSlots(slots, fallbackSlots = DEFAULT_LIVE_ACTIVE_SLOTS) {
+    const allowed = new Set(LIVE_BOOKING_TIME_SLOTS);
+    const normalized = [];
+    (Array.isArray(slots) ? slots : []).forEach(slot => {
+        const value = String(slot || '').trim();
+        if (allowed.has(value) && !normalized.includes(value)) normalized.push(value);
+    });
+    if (normalized.length) return normalized;
+    return (Array.isArray(fallbackSlots) ? fallbackSlots : DEFAULT_LIVE_ACTIVE_SLOTS)
+        .filter(slot => allowed.has(slot));
+}
+
+function renderLiveBookingTableHeader(activeSlots) {
+    const table = document.querySelector('#live-assessment .booking-table');
+    if (!table) return;
+    let thead = table.querySelector('thead');
+    if (!thead) {
+        thead = document.createElement('thead');
+        table.insertBefore(thead, table.firstChild);
+    }
+
+    const slots = normalizeLiveActiveSlots(activeSlots);
+    const dateWidth = '150px';
+    const slotWidth = '150px';
+    thead.innerHTML = `<tr>
+        <th style="min-width:${dateWidth}; width:${dateWidth};">Date</th>
+        ${slots.map(slot => `<th style="min-width:${slotWidth};">${escapeHtml(slot)}</th>`).join('')}
+    </tr>`;
+}
+
+function getLiveBookingRulesDisplayHtml() {
+    if (typeof getLiveBookingRulesHtml === 'function') {
+        const html = String(getLiveBookingRulesHtml() || '').trim();
+        if (html) return html;
+    }
+    try {
+        const parsed = JSON.parse(localStorage.getItem('live_booking_rules_config') || 'null');
+        const html = String((parsed && (parsed.rulesHtml || parsed.html)) || '').trim();
+        if (html) return html;
+    } catch (error) {
+        // Keep the booking view available even if local config is malformed.
+    }
+    return DEFAULT_LIVE_BOOKING_RULES_HTML;
+}
+
+function renderLiveBookingRulesPanel() {
+    const target = document.getElementById('liveBookingRulesDisplay');
+    if (!target) return;
+    target.innerHTML = getLiveBookingRulesDisplayHtml();
+}
+
 // --- NEW: URL CLEANER FOR SHAREPOINT ---
 function cleanSharePointUrl(url) {
     const raw = String(url || '').trim().replace(/^<|>$/g, '');
     if (!raw) return '';
+    const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)
+        ? raw
+        : (/^[\w.-]+\.[a-z]{2,}(\/|$|:|\?)/i.test(raw) ? `https://${raw}` : raw);
 
     try {
-        const parsed = new URL(raw);
+        const parsed = new URL(withProtocol);
         const host = parsed.hostname.toLowerCase();
         if (host.includes('safelinks.protection.outlook.com')) {
             const safeTarget = parsed.searchParams.get('url') || parsed.searchParams.get('u') || '';
@@ -37,7 +117,7 @@ function cleanSharePointUrl(url) {
             host.includes('safelinks.protection.outlook.com');
 
         // User request: keep Microsoft links exactly as provided.
-        if (isMicrosoftLink) return raw;
+        if (isMicrosoftLink) return withProtocol;
         return parsed.toString();
     } catch (e) {
         return raw; // Return original if URL is malformed
@@ -451,6 +531,149 @@ function bookingMatchesAssessment(booking, assessmentMeta) {
     return isSameScheduleValue(booking.assessment, assessmentMeta.title);
 }
 
+function artifactMatchesTrainee(artifact, traineeName) {
+    return isSameScheduleValue(artifact && (artifact.trainee || artifact.user || artifact.userName), traineeName);
+}
+
+function artifactMatchesLiveAssessment(artifact, assessmentMeta) {
+    if (!artifact || !assessmentMeta) return false;
+    const ids = [artifact.assessmentId, artifact.testId, artifact.liveAssessmentId].filter(Boolean).map(String);
+    if (assessmentMeta.id && ids.includes(String(assessmentMeta.id))) return true;
+
+    const titles = [artifact.assessment, artifact.testTitle, artifact.title].filter(Boolean);
+    return titles.some(title => isSameScheduleValue(title, assessmentMeta.title));
+}
+
+function isCompletedLiveSubmission(submission, assessmentMeta) {
+    if (!submission || String(submission.status || '').toLowerCase() !== 'completed') return false;
+    const type = String(submission.type || '').toLowerCase();
+    if (type === 'live') return true;
+    if (submission.bookingId || submission.liveSessionId) return true;
+    if (type && type !== 'live') return false;
+    return artifactMatchesLiveAssessment(submission, assessmentMeta);
+}
+
+function isLiveRecordEvidence(record, assessmentMeta) {
+    if (!record) return false;
+    if (record.bookingId || record.liveSessionId) return true;
+    if (String(record.link || '').toLowerCase().includes('live')) return true;
+    const cycle = String(record.cycle || '').toLowerCase();
+    if (cycle) return cycle === 'live';
+    return artifactMatchesLiveAssessment(record, assessmentMeta);
+}
+
+function getLiveEvidenceDate(evidence) {
+    if (!evidence) return '';
+    return evidence.date || evidence.completedAt || evidence.submittedAt || evidence.updatedAt || evidence.updated_at || '';
+}
+
+function getLiveEvidenceScore(evidence) {
+    if (!evidence) return null;
+    const value = evidence.score ?? evidence.percentage ?? evidence.finalScore;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getLiveEvidenceTimeValue(evidence) {
+    const dateValue = getLiveEvidenceDate(evidence);
+    if (!dateValue) return 0;
+    const parsed = new Date(dateValue).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function pickLatestLiveEvidence(items) {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    return items.slice().sort((a, b) => getLiveEvidenceTimeValue(b) - getLiveEvidenceTimeValue(a))[0];
+}
+
+function getLiveAssessmentProgressForTrainee(trainee, liveAssessments, data = {}) {
+    const bookings = Array.isArray(data.bookings) ? data.bookings : [];
+    const submissions = Array.isArray(data.submissions) ? data.submissions : [];
+    const records = Array.isArray(data.records) ? data.records : [];
+
+    const assessments = (Array.isArray(liveAssessments) ? liveAssessments : []).map(assessment => {
+        const relatedBookings = bookings.filter(booking =>
+            booking &&
+            String(booking.status || '').toLowerCase() !== 'cancelled' &&
+            bookingMatchesTrainee(booking, trainee) &&
+            bookingMatchesAssessment(booking, assessment)
+        );
+        const completedBookings = relatedBookings.filter(booking => String(booking.status || '').toLowerCase() === 'completed');
+        const bookedBookings = relatedBookings.filter(booking => String(booking.status || '').toLowerCase() === 'booked');
+        const completedSubmissions = submissions.filter(submission =>
+            artifactMatchesTrainee(submission, trainee) &&
+            artifactMatchesLiveAssessment(submission, assessment) &&
+            isCompletedLiveSubmission(submission, assessment)
+        );
+        const completedRecords = records.filter(record =>
+            artifactMatchesTrainee(record, trainee) &&
+            artifactMatchesLiveAssessment(record, assessment) &&
+            isLiveRecordEvidence(record, assessment)
+        );
+
+        const completed = completedBookings.length > 0 || completedSubmissions.length > 0 || completedRecords.length > 0;
+        const booked = !completed && bookedBookings.length > 0;
+        const latestEvidence = pickLatestLiveEvidence([
+            ...completedSubmissions,
+            ...completedRecords,
+            ...completedBookings
+        ]);
+        const primaryBooking = pickPrimaryBooking(relatedBookings);
+        const score = getLiveEvidenceScore(latestEvidence) ?? getLiveEvidenceScore(primaryBooking);
+        const evidence = [];
+        if (completedSubmissions.length > 0) evidence.push('Submission');
+        if (completedRecords.length > 0) evidence.push('Record');
+        if (completedBookings.length > 0) evidence.push('Booking');
+
+        return {
+            assessment,
+            relatedBookings,
+            primaryBooking,
+            latestEvidence,
+            score,
+            completed,
+            booked,
+            status: completed ? 'Completed' : booked ? 'Booked' : 'Not Started',
+            evidence,
+            evidenceLabel: evidence.length > 0 ? evidence.join(' + ') : booked ? 'Booking' : '-'
+        };
+    });
+
+    const completedCount = assessments.filter(item => item.completed).length;
+    const bookedCount = assessments.filter(item => item.booked).length;
+    const remaining = Math.max(0, assessments.length - completedCount - bookedCount);
+    const progressPct = assessments.length > 0 ? Math.round((completedCount / assessments.length) * 100) : 0;
+
+    return {
+        trainee,
+        totalAvailable: assessments.length,
+        completedCount,
+        bookedCount,
+        remaining,
+        progressPct,
+        assessments
+    };
+}
+
+function buildLiveStatsProgressRows(trainees, liveAssessments, data = {}) {
+    const rows = (Array.isArray(trainees) ? trainees : [])
+        .slice()
+        .sort((a, b) => String(a).localeCompare(String(b)))
+        .map(trainee => getLiveAssessmentProgressForTrainee(trainee, liveAssessments, data));
+
+    const totals = rows.reduce((acc, row) => {
+        acc.trainees += 1;
+        acc.totalAvailable += row.totalAvailable;
+        acc.booked += row.bookedCount;
+        acc.completed += row.completedCount;
+        acc.remaining += row.remaining;
+        return acc;
+    }, { trainees: 0, totalAvailable: 0, booked: 0, completed: 0, remaining: 0 });
+    totals.progressPct = totals.totalAvailable > 0 ? Math.round((totals.completed / totals.totalAvailable) * 100) : 0;
+
+    return { rows, totals };
+}
+
 // --- PART A: ASSESSMENT TIMELINE (STANDARD) ---
 
 function renderSchedule() {
@@ -822,6 +1045,7 @@ window.forceLiveSync = async function(btn) {
 async function renderLiveTable() {
     const tbody = document.getElementById('liveBookingBody');
     if(!tbody) return;
+    renderLiveBookingRulesPanel();
 
     // --- FOCUS & INTERACTION PROTECTION (TIMEBOMB 2 FIX) ---
     if (window.IS_DRAGGING_LIVE) return; // Prevent DOM wipe during drag
@@ -862,7 +1086,7 @@ async function renderLiveTable() {
             "A": {
                 startDate: oldSettings.startDate || new Date().toISOString().split('T')[0],
                 days: oldSettings.days || 5,
-                activeSlots: oldSettings.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+                activeSlots: normalizeLiveActiveSlots(oldSettings.activeSlots, getDefaultLiveActiveSlots()),
                 trainers: ["Trainer 1", "Trainer 2"], // Default
                 dailyTrainers: {}, // NEW: Per-day overrides
                 assigned: null
@@ -917,28 +1141,31 @@ async function renderLiveTable() {
             
             // Inject Settings Form (Existing inputs)
             controlsHtml += `
-                <div class="card" style="margin-top:15px; background:var(--bg-input);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <h4 style="margin:0;"><i class="fas fa-cogs"></i> Schedule Configuration</h4>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                <div class="card live-schedule-config-card">
+                    <div class="live-config-head">
+                        <div>
+                            <span>Admin Setup</span>
+                            <h4><i class="fas fa-cogs"></i> Schedule Configuration</h4>
+                        </div>
+                        <div class="live-config-actions">
                             <button class="btn-secondary btn-sm" onclick="openLiveStatsModal()"><i class="fas fa-chart-pie"></i> View Trainee Stats Breakdown</button>
                             ${canManageLive ? '<button class="btn-secondary btn-sm" onclick="openLiveBookingIntegrityModal()"><i class="fas fa-shield-alt"></i> Booking Integrity Check</button>' : ''}
                         </div>
                     </div>
-                    <div style="display:flex; gap:15px; align-items:end; margin-bottom:10px;">
+                    <div class="live-config-grid">
                         <div><label>Start Date</label><input type="date" id="liveStartDate" value="${currentSched.startDate}" ${canManageLive ? '' : 'disabled'}></div>
-                        <div><label>Days</label><input type="number" id="liveNumDays" value="${currentSched.days}" min="1" max="30" style="width:80px;" ${canManageLive ? '' : 'disabled'}></div>
-                        <div style="flex:1;"><label>Default Trainers</label><input type="text" id="liveTrainersInput" value="${(currentSched.trainers || ['Trainer 1', 'Trainer 2']).join(', ')}" placeholder="Trainer 1, Trainer 2..." ${canManageLive ? '' : 'disabled'}></div>
-                        ${canManageLive ? '<button class="btn-primary" onclick="saveLiveScheduleSettings()" style="height:38px;">Update Settings</button>' : '<span style="font-size:0.85rem; color:var(--text-muted);">Read Only</span>'}
+                        <div><label>Days</label><input type="number" id="liveNumDays" value="${currentSched.days}" min="1" max="30" ${canManageLive ? '' : 'disabled'}></div>
+                        <div class="live-config-trainers"><label>Default Trainers</label><input type="text" id="liveTrainersInput" value="${(currentSched.trainers || ['Trainer 1', 'Trainer 2']).join(', ')}" placeholder="Trainer 1, Trainer 2..." ${canManageLive ? '' : 'disabled'}></div>
+                        ${canManageLive ? '<button class="btn-primary live-config-save" onclick="saveLiveScheduleSettings()">Update Settings</button>' : '<span class="live-readonly-note">Read Only</span>'}
                     </div>
-                    <div id="liveSlotConfig" style="margin-top:10px; display:flex; gap:15px; flex-wrap:wrap;">
-                        <label style="font-size:0.9rem; font-weight:bold;">Active Hours:</label>
-                        ${["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].map(slot => `
-                            <label style="cursor:pointer;">
-                                <input type="checkbox" id="slot_${slot.replace(/[: ]/g, '')}" ${currentSched.activeSlots && currentSched.activeSlots.includes(slot) ? 'checked' : ''} ${canManageLive ? '' : 'disabled'}> ${slot}
+                    <div id="liveSlotConfig" class="live-slot-config">
+                        <label>Active Hours</label>
+                        ${getLiveBookingTimeSlots().map(slot => `
+                            <label class="live-slot-toggle">
+                                <input type="checkbox" id="${getLiveSlotInputId(slot)}" ${normalizeLiveActiveSlots(currentSched.activeSlots).includes(slot) ? 'checked' : ''} ${canManageLive ? '' : 'disabled'}> ${slot}
                             </label>
                         `).join('')}
-                        ${canManageLive ? '<button class="btn-danger btn-sm" onclick="clearLiveBookings()" style="margin-left:auto;">Reset / Clear</button>' : ''}
+                        ${canManageLive ? '<button class="btn-danger btn-sm live-reset-bookings" onclick="clearLiveBookings()">Reset / Clear</button>' : ''}
                     </div>
                 </div>
             `;
@@ -958,7 +1185,9 @@ async function renderLiveTable() {
     // 4. GENERATE TABLE
     const startDate = currentSched.startDate;
     const daysCount = parseInt(currentSched.days) || 5;
-    const activeSlots = currentSched.activeSlots || ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
+    const activeSlots = normalizeLiveActiveSlots(currentSched.activeSlots, getDefaultLiveActiveSlots());
+    currentSched.activeSlots = activeSlots;
+    renderLiveBookingTableHeader(activeSlots);
     
     const validDays = getNextBusinessDays(startDate, daysCount);
     const defaultTrainers = currentSched.trainers || ["Trainer 1", "Trainer 2"];
@@ -978,13 +1207,13 @@ async function renderLiveTable() {
             dayTrainers = currentSched.dailyTrainers[dateKey];
         }
         
-        html += `<tr><td style="background:var(--bg-input); border-right:2px solid var(--border-color); vertical-align:middle;">
-            <strong>${dayStr}</strong><br><span style="font-size:0.8rem; color:var(--text-muted);">${dateKey}</span>
-            ${canManageLive ? `<button class="btn-secondary btn-sm" style="display:block; margin-top:8px; width:100%; font-size:0.7rem;" onclick="editDailyTrainers('${dateKey}')"><i class="fas fa-user-edit"></i> Edit Trainers</button>` : ''}
+        html += `<tr><td class="live-date-cell">
+            <strong>${dayStr}</strong><span>${dateKey}</span>
+            ${canManageLive ? `<button class="btn-secondary btn-sm live-edit-trainers" onclick="editDailyTrainers('${dateKey}')"><i class="fas fa-user-edit"></i> Edit Trainers</button>` : ''}
         </td>`;
 
         activeSlots.forEach(time => {
-            html += `<td style="vertical-align:top; padding:5px;">`;
+            html += `<td class="live-slot-cell">`;
             
             // SMART TRAINER LIST: Merge Config + Actual Bookings
             // This ensures if a trainer is removed from settings, their existing booking stays visible.
@@ -1003,7 +1232,7 @@ async function renderLiveTable() {
                 // data attributes store the target coordinates.
                 html += `<div class="live-drop-zone" data-date="${dateKey}" data-time="${time}" data-trainer="${safeTrainerAttr}" 
                     ondragover="liveDragOver(event)" ondragleave="liveDragLeave(event)" ondrop="liveDrop(event)"
-                    style="min-height:50px; border:2px dashed transparent; border-radius:4px; padding:4px; transition:0.2s; margin-bottom:5px;">`;
+                    >`;
                 
                 // Find booking for this SPECIFIC slot (Trainer + Time + Date)
                 // We already filtered slotBookings above, just find the match
@@ -1021,7 +1250,7 @@ async function renderLiveTable() {
                 }
                 
                 // HEADER FOR TRAINER
-                html += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:2px; font-weight:bold; text-transform:uppercase;">${escapeHtml(trainer)}</div>`;
+                html += `<div class="live-trainer-label">${escapeHtml(trainer)}</div>`;
 
                 if (isTaken) {
                     // BOOKED STATE
@@ -1031,10 +1260,10 @@ async function renderLiveTable() {
                     // Info Display
                     let info = '';
                     if (isMine || ['admin', 'super_admin', 'teamleader', 'special_viewer'].includes(CURRENT_USER.role)) {
-                        info = `<div style="font-weight:bold; font-size:0.85rem;">${escapeHtml(booking.trainee)}</div>
-                                <div style="font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(booking.assessment)}</div>`;
+                        info = `<div class="live-booking-trainee">${escapeHtml(booking.trainee)}</div>
+                                <div class="live-booking-assessment">${escapeHtml(booking.assessment)}</div>`;
                     } else {
-                        info = `<div style="font-style:italic; color:var(--text-muted);">Booked</div>`;
+                        info = `<div class="live-booking-private">Booked</div>`;
                     }
 
                     // Actions
@@ -1047,13 +1276,13 @@ async function renderLiveTable() {
 
                         if(!isCompleted) {
                             if (existingSession) {
-                                actions += `<button class="btn-warning btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="rejoinLiveSession('${existingSession.sessionId}')" title="Rejoin Active Session"><i class="fas fa-sign-in-alt"></i> Rejoin</button>`;
+                                actions += `<button class="btn-warning btn-sm" onclick="rejoinLiveSession('${existingSession.sessionId}')" title="Rejoin Active Session"><i class="fas fa-sign-in-alt"></i> Rejoin</button>`;
                             } else {
-                                actions += `<button class="btn-primary btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="initiateLiveSession('${escapeInlineJs(booking.id)}')" title="Start Live Session"><i class="fas fa-play"></i> Start</button>`;
-                                actions += `<button class="btn-success btn-sm" style="padding:2px 6px; margin-right:5px;" onclick="markBookingComplete('${booking.id}')" title="Mark Complete"><i class="fas fa-check"></i></button>`;
+                                actions += `<button class="btn-primary btn-sm" onclick="initiateLiveSession('${escapeInlineJs(booking.id)}')" title="Start Live Session"><i class="fas fa-play"></i> Start</button>`;
+                                actions += `<button class="btn-success btn-sm" onclick="markBookingComplete('${booking.id}')" title="Mark Complete"><i class="fas fa-check"></i></button>`;
                             }
                         }
-                        actions += `<button class="btn-danger btn-sm" style="padding:2px 6px;" onclick="cancelBooking('${booking.id}')" title="Cancel"><i class="fas fa-times"></i></button>`;
+                        actions += `<button class="btn-danger btn-sm" onclick="cancelBooking('${booking.id}')" title="Cancel"><i class="fas fa-times"></i></button>`;
                     } else if (isMine && !isCompleted) {
                         // User: Cancel only
                         actions += `<button class="btn-cancel" onclick="cancelBooking('${booking.id}')">Cancel</button>`;
@@ -1065,7 +1294,7 @@ async function renderLiveTable() {
                     html += `
                         <div class="slot-item ${statusClass} ${highlightClass}" ${dragAttr} style="margin-bottom:8px;">
                             ${info}
-                            <div style="margin-top:4px;">${actions}</div>
+                            <div class="live-booking-actions">${actions}</div>
                         </div>`;
 
                 } else {
@@ -1083,16 +1312,16 @@ async function renderLiveTable() {
                     if (CURRENT_USER.role === 'trainee') {
                         if (userBookedThisHour) {
                             // User is already booked in the other trainer slot for this hour
-                            html += `<div style="padding:5px; background:var(--bg-input); border-radius:4px; color:var(--text-muted); font-size:0.75rem; text-align:center; margin-bottom:8px;">Slot Limit</div>`;
+                            html += `<div class="live-slot-placeholder">Slot Limit</div>`;
                         } else {
                             // Available to book
-                            html += `<button class="btn-slot btn-book" style="margin-bottom:8px;" onclick="openBookingModal('${dateKey}', '${time}', '${safeTrainerJs}')">+ Book</button>`;
+                            html += `<button class="btn-slot btn-book" onclick="openBookingModal('${dateKey}', '${time}', '${safeTrainerJs}')">+ Book</button>`;
                         }
                     } else if (canManageLive) {
                          // Admin can manually assign a trainee
-                         html += `<button class="btn-slot" style="margin-bottom:8px; border:1px dashed var(--border-color); color:var(--text-muted); background:transparent;" onclick="openAdminBookingModal('${dateKey}', '${time}', '${safeTrainerJs}')" title="Manually add a trainee to this slot">+ Assign Trainee</button>`;
+                         html += `<button class="btn-slot live-admin-assign" onclick="openAdminBookingModal('${dateKey}', '${time}', '${safeTrainerJs}')" title="Manually add a trainee to this slot">+ Assign Trainee</button>`;
                     } else {
-                         html += `<div style="padding:5px; background:var(--bg-input); border-radius:4px; color:var(--text-muted); font-size:0.75rem; text-align:center; margin-bottom:8px;">Open Slot</div>`;
+                         html += `<div class="live-slot-placeholder">Open Slot</div>`;
                     }
                 }
 
@@ -1296,6 +1525,8 @@ window.openLiveStatsModal = function() {
     
     // Get Data
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
     const catalog = buildLiveAssessmentCatalog();
     const liveAssessments = Array.from(catalog.byTitle.values()).sort((a, b) => a.title.localeCompare(b.title));
     const totalAvailable = liveAssessments.length;
@@ -1304,74 +1535,73 @@ window.openLiveStatsModal = function() {
         localStorage.setItem('liveBookings', JSON.stringify(bookings));
     }
 
+    const progress = buildLiveStatsProgressRows(trainees, liveAssessments, { bookings, submissions, records });
     let rows = '';
-    
-    // Aggregate stats per trainee
-    trainees.sort().forEach(t => {
-        // Filter bookings for this trainee
-        // Note: We don't filter by date here, we look at ALL history for completion status
-        const myBookings = bookings.filter(b => bookingMatchesTrainee(b, t) && b.status !== 'Cancelled');
-        
-        let completedCount = 0;
-        let bookedCount = 0;
 
-        liveAssessments.forEach(assessment => {
-            const relatedBookings = myBookings.filter(b => {
-                if (assessment.id && b.assessmentId) return String(b.assessmentId) === String(assessment.id);
-                return isSameScheduleValue(b.assessment, assessment.title);
-            });
-            if (relatedBookings.length > 0) {
-                if (relatedBookings.some(b => b.status === 'Completed')) {
-                    completedCount++;
-                } else if (relatedBookings.some(b => b.status === 'Booked')) {
-                    bookedCount++;
-                }
-            }
-        });
-
-        const remaining = Math.max(0, totalAvailable - completedCount);
-        
-        // Calculate progress percentage
-        const pct = totalAvailable > 0 ? Math.round((completedCount / totalAvailable) * 100) : 0;
-        let statusColor = '#f1c40f'; // Orange
-        if (pct >= 100) statusColor = '#2ecc71'; // Green
-        else if (pct === 0) statusColor = '#e74c3c'; // Red
+    progress.rows.forEach(row => {
+        const pct = row.progressPct;
+        let statusColor = '#f1c40f';
+        if (pct >= 100) statusColor = '#2ecc71';
+        else if (pct === 0) statusColor = '#e74c3c';
+        const provenCompleted = row.assessments.filter(item => item.completed && (item.evidence.includes('Submission') || item.evidence.includes('Record'))).length;
 
         rows += `
             <tr>
-                <td><div style="display:flex; align-items:center;">${getAvatarHTML(t, 24)} <strong>${escapeHtml(t)}</strong></div></td>
-                <td class="text-center">${bookedCount}</td>
-                <td class="text-center" style="font-weight:bold; color:#2ecc71;">${completedCount}</td>
-                <td class="text-center">${remaining}</td>
+                <td><div class="live-stats-trainee">${getAvatarHTML(row.trainee, 24)} <strong>${escapeHtml(row.trainee)}</strong></div></td>
+                <td class="text-center">${row.bookedCount}</td>
+                <td class="text-center live-stat-completed">${row.completedCount}</td>
+                <td class="text-center">${row.remaining}</td>
                 <td>
-                    <div style="display:flex; align-items:center; gap:10px;">
-                        <div style="flex:1; height:6px; background:#333; border-radius:3px; overflow:hidden;">
-                            <div style="width:${pct}%; background:${statusColor}; height:100%;"></div>
+                    <div class="live-progress-cell">
+                        <div class="live-progress-bar">
+                            <div style="width:${pct}%; background:${statusColor};"></div>
                         </div>
-                        <span style="font-size:0.8rem; width:35px;">${pct}%</span>
+                        <span>${pct}%</span>
                     </div>
                 </td>
+                <td class="text-center"><span class="live-evidence-chip">${provenCompleted}/${row.completedCount}</span></td>
                 <td class="text-right">
-                    <button class="btn-secondary btn-sm" onclick="viewTraineeLiveDetails('${escapeInlineJs(t)}')"><i class="fas fa-eye"></i> Details</button>
+                    <button class="btn-secondary btn-sm" onclick="viewTraineeLiveDetails('${escapeInlineJs(row.trainee)}')"><i class="fas fa-eye"></i> Details</button>
                 </td>
             </tr>
         `;
     });
 
+    const emptyRows = rows || `<tr><td colspan="7" class="text-center" style="color:var(--text-muted);">No trainees found for this group.</td></tr>`;
+
     const modalHtml = `
         <div id="liveStatsModal" class="modal-overlay">
-            <div class="modal-box" style="width:800px; max-width:95%;">
+            <div class="modal-box live-stats-modal">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
                     <h3 style="margin:0;"><i class="fas fa-chart-pie"></i> Assessment Breakdown: ${escapeHtml(groupId)}</h3>
                     <button class="btn-secondary" onclick="document.getElementById('liveStatsModal').remove()">&times;</button>
                 </div>
-                <div style="margin-bottom:15px; font-size:0.9rem; color:var(--text-muted);">
-                    <strong>Total Live Assessments Available:</strong> ${totalAvailable}
+                <div class="live-stats-summary">
+                    <div class="live-stats-card"><span>Trainees</span><strong>${progress.totals.trainees}</strong></div>
+                    <div class="live-stats-card"><span>Assessments Each</span><strong>${totalAvailable}</strong></div>
+                    <div class="live-stats-card"><span>Total Booked</span><strong>${progress.totals.booked}</strong></div>
+                    <div class="live-stats-card success"><span>Total Completed</span><strong>${progress.totals.completed}</strong></div>
+                    <div class="live-stats-card"><span>Total Remaining</span><strong>${progress.totals.remaining}</strong></div>
+                    <div class="live-stats-card"><span>Overall Progress</span><strong>${progress.totals.progressPct}%</strong></div>
+                </div>
+                <div class="live-stats-note">
+                    Completed counts are matched against live bookings, completed live submissions, and permanent live records. Remaining means not booked and not completed.
                 </div>
                 <div class="table-responsive" style="max-height:60vh; overflow-y:auto;">
-                    <table class="admin-table">
-                        <thead><tr><th>Trainee</th><th class="text-center">Booked</th><th class="text-center">Completed</th><th class="text-center">Remaining</th><th>Progress</th><th>Action</th></tr></thead>
-                        <tbody>${rows}</tbody>
+                    <table class="admin-table live-stats-table">
+                        <thead><tr><th>Trainee</th><th class="text-center">Booked</th><th class="text-center">Completed</th><th class="text-center">Remaining</th><th>Progress</th><th class="text-center">Proven</th><th>Action</th></tr></thead>
+                        <tbody>${emptyRows}</tbody>
+                        <tfoot>
+                            <tr>
+                                <td>Totals</td>
+                                <td class="text-center">${progress.totals.booked}</td>
+                                <td class="text-center">${progress.totals.completed}</td>
+                                <td class="text-center">${progress.totals.remaining}</td>
+                                <td>${progress.totals.completed}/${progress.totals.totalAvailable} completed</td>
+                                <td class="text-center">-</td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -1387,39 +1617,32 @@ window.viewTraineeLiveDetails = function(trainee) {
     
     // Get Data
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
     if (hydrateBookingAssessmentIds(bookings, catalog)) {
         localStorage.setItem('liveBookings', JSON.stringify(bookings));
     }
-    const myBookings = bookings.filter(b => bookingMatchesTrainee(b, trainee) && b.status !== 'Cancelled');
+    const progress = getLiveAssessmentProgressForTrainee(trainee, liveAssessments, { bookings, submissions, records });
     
     let rows = '';
     
-    liveAssessments.forEach(assessment => {
-        const relatedBookings = myBookings.filter(b => {
-            if (assessment.id && b.assessmentId) return String(b.assessmentId) === String(assessment.id);
-            return isSameScheduleValue(b.assessment, assessment.title);
-        });
-        let booking = null;
-        if (relatedBookings.length > 0) {
-            booking = relatedBookings.find(b => b.status === 'Completed') || relatedBookings.find(b => b.status === 'Booked') || relatedBookings[0];
-        }
-        
+    progress.assessments.forEach(item => {
         let statusHtml = '<span class="status-badge" style="background:var(--bg-input); color:var(--text-muted);">Not Started</span>';
         let details = '-';
         
-        if (booking) {
-            if (booking.status === 'Completed') {
-                statusHtml = `<span class="status-badge status-pass">Completed</span>`;
-                details = `<div style="font-size:0.8rem;">Score: <strong>${booking.score || 0}%</strong></div><div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(booking.date)}</div>`;
-            } else {
-                statusHtml = `<span class="status-badge status-improve">Booked</span>`;
-                details = `<div style="font-size:0.8rem;">${escapeHtml(booking.date)} @ ${escapeHtml(booking.time)}</div><div style="font-size:0.75rem; color:var(--text-muted);">Trainer: ${escapeHtml(booking.trainer)}</div>`;
-            }
+        if (item.completed) {
+            const date = getLiveEvidenceDate(item.latestEvidence) || (item.primaryBooking && item.primaryBooking.date) || '';
+            const score = item.score === null || item.score === undefined ? '-' : `${Math.round(item.score)}%`;
+            statusHtml = `<span class="status-badge status-pass">Completed</span>`;
+            details = `<div class="live-detail-main">Score: <strong>${escapeHtml(score)}</strong></div><div class="live-detail-meta">${escapeHtml(date)} <span class="live-evidence-chip">${escapeHtml(item.evidenceLabel)}</span></div>`;
+        } else if (item.booked && item.primaryBooking) {
+            statusHtml = `<span class="status-badge status-improve">Booked</span>`;
+            details = `<div class="live-detail-main">${escapeHtml(item.primaryBooking.date)} @ ${escapeHtml(item.primaryBooking.time)}</div><div class="live-detail-meta">Trainer: ${escapeHtml(item.primaryBooking.trainer)}</div>`;
         }
         
         rows += `
             <tr>
-                <td>${escapeHtml(assessment.title)}</td>
+                <td>${escapeHtml(item.assessment.title)}</td>
                 <td>${statusHtml}</td>
                 <td>${details}</td>
             </tr>
@@ -1428,10 +1651,16 @@ window.viewTraineeLiveDetails = function(trainee) {
     
     const modalHtml = `
         <div id="liveDetailsModal" class="modal-overlay" style="z-index:10005;">
-            <div class="modal-box" style="width:600px;">
+            <div class="modal-box" style="width:700px; max-width:95%;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
                     <h3 style="margin:0;"><i class="fas fa-list"></i> ${escapeHtml(trainee)} - Live Assessments</h3>
                     <button class="btn-secondary" onclick="document.getElementById('liveDetailsModal').remove()">&times;</button>
+                </div>
+                <div class="live-stats-summary compact">
+                    <div class="live-stats-card"><span>Booked</span><strong>${progress.bookedCount}</strong></div>
+                    <div class="live-stats-card success"><span>Completed</span><strong>${progress.completedCount}</strong></div>
+                    <div class="live-stats-card"><span>Remaining</span><strong>${progress.remaining}</strong></div>
+                    <div class="live-stats-card"><span>Progress</span><strong>${progress.progressPct}%</strong></div>
                 </div>
                 <div class="table-responsive">
                     <table class="admin-table">
@@ -1571,7 +1800,7 @@ function updateLiveBookingWorkspaceStats(bookings, schedule, validDays) {
     const completed = scopedBookings.filter(b => b && b.status === 'Completed').length;
     const cancelled = scopedBookings.filter(b => b && b.status === 'Cancelled').length;
     const integrity = buildLiveBookingIntegrityReport(safeBookings);
-    const slots = Array.isArray(schedule && schedule.activeSlots) ? schedule.activeSlots.length : 4;
+    const slots = normalizeLiveActiveSlots(schedule && schedule.activeSlots, getDefaultLiveActiveSlots()).length;
     const trainers = Array.isArray(schedule && schedule.trainers) ? schedule.trainers.length : 2;
     const capacity = (validDays || []).length * slots * trainers;
 
@@ -1862,9 +2091,12 @@ window.runLiveSessionStaleRecovery = async function() {
                 const questions = Array.isArray(test && test.questions) ? test.questions : [];
                 const maxScore = questions.reduce((sum, q) => sum + (parseFloat(q?.points || 1) || 0), 0);
                 const totalScore = questions.reduce((sum, q, idx) => sum + (parseFloat((session.scores && session.scores[idx]) || 0) || 0), 0);
-                score = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
+                score = maxScore > 0
+                    ? (typeof clampAssessmentPercent === 'function' ? clampAssessmentPercent((totalScore / maxScore) * 100) : Math.max(0, Math.min(100, Math.round((totalScore / maxScore) * 100))))
+                    : 0;
             }
             if (!Number.isFinite(score)) score = 0;
+            score = typeof clampAssessmentPercent === 'function' ? clampAssessmentPercent(score) : Math.max(0, Math.min(100, Math.round(score)));
 
             const existingSubIdx = submissions.findIndex(s =>
                 (session.bookingId && String(s.bookingId || '') === String(session.bookingId)) ||
@@ -2272,7 +2504,7 @@ async function createNewLiveSchedule() {
         liveSchedules[nextKey] = { 
             startDate: new Date().toISOString().split('T')[0],
             days: 5,
-            activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+            activeSlots: getDefaultLiveActiveSlots(),
             trainers: ["Trainer 1", "Trainer 2"],
             dailyTrainers: {},
             assigned: null 
@@ -2295,7 +2527,7 @@ async function deleteLiveSchedule(id) {
         liveSchedules["A"] = {
             startDate: new Date().toISOString().split('T')[0],
             days: 5,
-            activeSlots: ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"],
+            activeSlots: getDefaultLiveActiveSlots(),
             trainers: ["Trainer 1", "Trainer 2"],
             dailyTrainers: {},
             assigned: null
@@ -2833,8 +3065,8 @@ async function saveLiveScheduleSettings() {
 
     // Capture Active Slots
     const activeSlots = [];
-    ["1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"].forEach(slot => {
-        const cb = document.getElementById(`slot_${slot.replace(/[: ]/g, '')}`);
+    getLiveBookingTimeSlots().forEach(slot => {
+        const cb = document.getElementById(getLiveSlotInputId(slot));
         if(cb && cb.checked) activeSlots.push(slot);
     });
 
@@ -2851,6 +3083,39 @@ async function saveLiveScheduleSettings() {
     await secureScheduleSave();
     renderLiveTable();
     alert("Schedule settings updated.");
+}
+
+async function generateLiveTable() {
+    if (typeof saveLiveScheduleSettings === 'function' && document.getElementById('liveTrainersInput')) {
+        return saveLiveScheduleSettings();
+    }
+
+    if (!isLiveBookingManager()) return;
+    const startInput = document.getElementById('liveStartDate');
+    const daysInput = document.getElementById('liveNumDays');
+    const start = String(startInput ? startInput.value : '').trim();
+    const days = String(daysInput ? daysInput.value : '').trim();
+    if (!start || !days) return alert("Please fill in start date and duration.");
+
+    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+    const activeId = ACTIVE_LIVE_SCHED_ID || Object.keys(liveSchedules).sort()[0] || 'A';
+    if (!liveSchedules[activeId]) {
+        liveSchedules[activeId] = {
+            startDate: start,
+            days,
+            activeSlots: getDefaultLiveActiveSlots(),
+            trainers: ["Trainer 1", "Trainer 2"],
+            dailyTrainers: {},
+            assigned: null
+        };
+    } else {
+        liveSchedules[activeId].startDate = start;
+        liveSchedules[activeId].days = days;
+    }
+    ACTIVE_LIVE_SCHED_ID = activeId;
+    localStorage.setItem('liveSchedules', JSON.stringify(liveSchedules));
+    await secureScheduleSave();
+    return renderLiveTable();
 }
 
 async function clearLiveBookings() {
@@ -3903,4 +4168,16 @@ async function schedDrop(e, targetIndex) {
         renderSchedule();
     }
     return false;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        getLiveBookingTimeSlots,
+        getDefaultLiveActiveSlots,
+        getLiveSlotInputId,
+        normalizeLiveActiveSlots,
+        getLiveBookingRulesDisplayHtml,
+        getLiveAssessmentProgressForTrainee,
+        buildLiveStatsProgressRows
+    };
 }

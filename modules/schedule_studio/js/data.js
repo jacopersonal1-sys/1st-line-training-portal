@@ -545,6 +545,29 @@ const ScheduleData = {
         });
     },
 
+    recalculateScheduleItems(items, timelineStartDate) {
+        if (!Array.isArray(items)) return [];
+
+        let cursor = this.moveToBusinessDay(this.parseStrictDate(timelineStartDate));
+        if (!cursor) return null;
+
+        return items.map((item, index) => {
+            const cloned = JSON.parse(JSON.stringify(item || {}));
+            const durationDays = this.normalizeDurationDays(cloned.durationDays) || this.inferDurationDays(cloned) || 1;
+            const window = this.calculateWindow(this.toDateDash(cursor), durationDays);
+            if (!window) throw new Error('Unable to recalculate timeline window.');
+
+            cloned.courseName = String(cloned.courseName || '').trim() || `Step ${index + 1}`;
+            cloned.durationDays = durationDays;
+            cloned.dateRange = window.dateRange;
+            cloned.dueDate = window.endDateSlash;
+
+            const endDate = this.parseStrictDate(window.endDateSlash);
+            cursor = endDate ? this.getNextBusinessDate(endDate) : this.moveToBusinessDay(new Date());
+            return cloned;
+        });
+    },
+
     migrateDurationDaysInSchedules(schedules) {
         if (!schedules || typeof schedules !== 'object') return false;
         let touched = false;
@@ -589,3 +612,7 @@ const ScheduleData = {
         return Object.keys(schedules).find(key => this.getIdentityToken(schedules[key].assigned || '') === normalizedGroup) || null;
     }
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = ScheduleData;
+}

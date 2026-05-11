@@ -22,6 +22,7 @@ function showTestEngineSub(viewName, btn) {
     document.getElementById('engine-view-history').classList.add('hidden');
     if(document.getElementById('engine-view-nps')) document.getElementById('engine-view-nps').classList.add('hidden');
     if(document.getElementById('engine-view-search')) document.getElementById('engine-view-search').classList.add('hidden');
+    if(document.getElementById('engine-view-integrity')) document.getElementById('engine-view-integrity').classList.add('hidden');
     
     document.getElementById('engine-view-' + viewName).classList.remove('hidden');
     
@@ -40,6 +41,9 @@ function showTestEngineSub(viewName, btn) {
             NPSSystem.renderAdminPanel();
         }
     }
+    if (viewName === 'integrity' && typeof renderTestIntegrityReview === 'function') {
+        renderTestIntegrityReview();
+    }
 }
 
 function loadCompletedHistory() {
@@ -50,18 +54,27 @@ function loadCompletedHistory() {
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const testsById = {};
     tests.forEach(t => { testsById[String(t.id)] = String(t.type || 'standard').toLowerCase(); });
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
+        ? filterRowsToCurrentTraineeLifecycle(allRecords)
+        : allRecords;
     const recordBySubmissionId = new Map();
     records.forEach(record => {
         if (!record || !record.submissionId) return;
         const recScore = Number(record.score);
         if (Number.isFinite(recScore)) recordBySubmissionId.set(String(record.submissionId), recScore);
     });
+    const currentSubs = subs.filter(sub => {
+        if (!sub) return false;
+        if (recordBySubmissionId.has(String(sub.id))) return true;
+        if (typeof isRowInCurrentTraineeLifecycle !== 'function') return true;
+        return isRowInCurrentTraineeLifecycle(sub, { includeArchived: true });
+    });
     
     // --- AUTO-REPAIR: RECOVER INVISIBLE GRADED TESTS ---
     let needsRepair = false;
     const completedMap = {};
-    subs.filter(s => s.status === 'completed').forEach(s => {
+    currentSubs.filter(s => s.status === 'completed').forEach(s => {
         const isDistinctLiveAttempt = String(s.type || s.testSnapshot?.type || '').toLowerCase() === 'live' || !!s.bookingId || !!s.liveSessionId;
         const key = isDistinctLiveAttempt
             ? `${s.trainee}_${s.testTitle}_${s.bookingId || s.liveSessionId || s.id}`
@@ -124,7 +137,7 @@ function loadCompletedHistory() {
     };
 
     // Filter for Completed items
-    let completed = subs.filter(s => s.status === 'completed' && !s.archived);
+    let completed = currentSubs.filter(s => s.status === 'completed' && !s.archived);
 
     // Apply Group Filter
     if (groupFilter) {
@@ -203,7 +216,11 @@ function loadCompletedHistory() {
             <tr>
                 <td>${s.date}</td>
                 <td><div style="display:flex; align-items:center;">${getAvatarHTML(s.trainee)} <strong>${s.trainee}</strong></div></td>
-                <td><strong>${s.testTitle}</strong>${attemptHtml}${auditHtml}</td>
+                <td>
+                    <strong>${s.testTitle}</strong>
+                    ${(CURRENT_USER && ['admin', 'super_admin'].includes(CURRENT_USER.role)) ? `<button class="btn-secondary btn-sm" onclick="renameHistoryAssessmentTitle('${s.id}')" title="Rename this history title and linked records" style="margin-left:8px; padding:2px 6px;"><i class="fas fa-signature"></i></button>` : ''}
+                    ${attemptHtml}${auditHtml}
+                </td>
                 <td><span style="font-weight:bold; color:${scoreColor};">${s.score}%</span></td>
                 <td>${editedBy}</td>
                 <td>
@@ -321,6 +338,37 @@ async function deleteHistorySubmission(id) {
     
     // Refresh other views if needed
     if (typeof renderMonthly === 'function') renderMonthly();
+}
+
+async function renameHistoryAssessmentTitle(subId) {
+    if (!CURRENT_USER || !['admin', 'super_admin'].includes(CURRENT_USER.role)) {
+        if (typeof showToast === 'function') showToast("Only Admins can rename assessment history.", "error");
+        return;
+    }
+
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const sub = subs.find(s => s && s.id === subId);
+    if (!sub) {
+        if (typeof showToast === 'function') showToast("History entry not found.", "error");
+        return;
+    }
+
+    const oldTitle = String(sub.testTitle || '').trim();
+    const newTitle = await customPrompt("Rename History Title", "Enter the corrected assessment name. Matching history rows, linked records, and the active test title will be updated when applicable.", oldTitle);
+    const cleanNew = String(newTitle || '').trim();
+    if (!cleanNew || cleanNew.toLowerCase() === oldTitle.toLowerCase()) return;
+
+    if (typeof window.renameAssessmentEverywhere !== 'function') {
+        if (typeof showToast === 'function') showToast("Rename helper is unavailable. Refresh the app and try again.", "error");
+        return;
+    }
+
+    const result = await window.renameAssessmentEverywhere(oldTitle, cleanNew, sub.testId || null);
+    populateHistoryFilters();
+    loadCompletedHistory();
+    if (typeof loadManageTests === 'function') loadManageTests();
+    if (typeof loadAdminInsightRules === 'function') loadAdminInsightRules();
+    if (result.changed && typeof showToast === 'function') showToast("History title renamed and linked rows updated.", "success");
 }
 
 async function processHistoryRetake(subId) {

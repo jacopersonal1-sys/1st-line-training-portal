@@ -23,6 +23,11 @@ function clampAssessmentScore(value, max) {
     return Math.min(numericMax, Math.max(0, numericValue));
 }
 
+function clampAssessmentPercent(value) {
+    const numericValue = Number.isFinite(Number(value)) ? Number(value) : 0;
+    return Math.max(0, Math.min(100, Math.round(numericValue)));
+}
+
 function isManualAssessmentQuestion(questionType) {
     return questionType === 'text' || questionType === 'live_practical';
 }
@@ -149,7 +154,7 @@ function calculateAssessmentAutoResult(test, answers = {}) {
 
     autoPoints = roundAssessmentScore(autoPoints);
     maxPoints = roundAssessmentScore(maxPoints);
-    const percent = maxPoints > 0 ? Math.round((autoPoints / maxPoints) * 100) : 0;
+    const percent = maxPoints > 0 ? clampAssessmentPercent((autoPoints / maxPoints) * 100) : 0;
 
     return { autoPoints, maxPoints, percent, needsManual, questionScores };
 }

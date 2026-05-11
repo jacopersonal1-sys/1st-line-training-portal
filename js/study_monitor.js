@@ -211,6 +211,21 @@ const StudyMonitor = {
         this.lastSpawnedLink = { url: normalizedUrl, time: now };
 
         if (this.isStudyBrowserUrl(normalizedUrl)) {
+            const activeTab = this.getActiveTab();
+            const activeUrl = String(activeTab?.url || '').trim();
+            if (
+                activeTab?.webview &&
+                activeTab.webview.isConnected &&
+                this.isCpanelCompatibilityUrl(activeUrl) &&
+                this.isCpanelCompatibilityUrl(normalizedUrl)
+            ) {
+                activeTab.usedCachedFallback = false;
+                activeTab.url = this.cleanUrl(normalizedUrl);
+                activeTab.webview.loadURL(activeTab.url).catch(() => {
+                    this.addTab(normalizedUrl, title, true);
+                });
+                return;
+            }
             this.addTab(normalizedUrl, title, true);
         } else {
             this.openExternalUrl(normalizedUrl);
@@ -240,13 +255,67 @@ const StudyMonitor = {
         }
     },
 
-    openExternalUrl: function(url) {
+    isCpanelCompatibilityUrl: function(url) {
+        try {
+            const parsed = new URL(url, window.location.href);
+            const host = parsed.hostname.toLowerCase();
+            const port = String(parsed.port || '').trim();
+            const path = String(parsed.pathname || '').toLowerCase();
+            return (
+                host === 'cp1.herotel.com' ||
+                host === 'cp2.herotel.com' ||
+                (host.endsWith('.herotel.com') && (
+                    path.includes('/cpsess') ||
+                    path.includes('/cpanel') ||
+                    path.includes('/webmail') ||
+                    path.includes('/xfercpanel') ||
+                    ['2082', '2083', '2086', '2087', '2095', '2096'].includes(port)
+                ))
+            );
+        } catch (e) {
+            return false;
+        }
+    },
+
+    isCpanelTransferUrl: function(url) {
+        try {
+            const parsed = new URL(url, window.location.href);
+            return parsed.pathname.toLowerCase().includes('/xfercpanel');
+        } catch (e) {
+            return false;
+        }
+    },
+
+    getCpanelSafeEntryUrl: function(url) {
+        try {
+            const parsed = new URL(url, window.location.href);
+            return `${parsed.protocol}//${parsed.host}/`;
+        } catch (e) {
+            return 'https://cp1.herotel.com:2087/';
+        }
+    },
+
+    openCpanelInSystemBrowser: function(url) {
         if (!url) return;
-        if (window.electronAPI?.shell?.openExternal) {
-            window.electronAPI.shell.openExternal(url).catch((e) => console.warn("External open failed:", e));
+        this.openExternalUrl(url);
+        this.track('Studying: cPanel / Webmail (System Browser)');
+        if (typeof showToast === 'function') {
+            showToast('Opening cPanel/Webmail in your normal browser for compatibility.', 'info');
+        }
+    },
+
+    openExternalUrl: function(url) {
+        const targetUrl = String(url || '').trim();
+        if (!targetUrl) return;
+        const openViaBridge = window.electronAPI?.shell?.openExternal;
+        if (typeof openViaBridge === 'function') {
+            openViaBridge(targetUrl).catch((e) => {
+                console.warn("External open failed:", e);
+                window.open(targetUrl, '_blank', 'noopener');
+            });
             return;
         }
-        window.open(url, '_blank', 'noopener');
+        window.open(targetUrl, '_blank', 'noopener');
     },
 
     isWebviewReady: function(webview) {
@@ -432,20 +501,8 @@ const StudyMonitor = {
         if (!gate.allowed) return false;
 
         const popUrl = this.getStudyNotesModuleUrl(false);
-        if (window.electronAPI?.studyBrowser?.openPopout) {
-            window.electronAPI.studyBrowser.openPopout({
-                url: popUrl,
-                title: 'Study Notes',
-                kind: 'notes'
-            }).then(() => {
-                this.track('Navigating: Study Notes (Second Screen)');
-            }).catch((error) => {
-                console.warn('Study Notes pop-out failed:', error);
-                if (typeof showToast === 'function') showToast('Could not open Study Notes pop-out.', 'error');
-            });
-            return true;
-        }
-
+        // Use a normal opener-linked popout for notes so the module reads/writes
+        // the main app's local Study Notes store instead of a webview partition.
         if (this.studyNotesPopup && !this.studyNotesPopup.closed) {
             try {
                 this.studyNotesPopup.focus();
@@ -674,6 +731,39 @@ const StudyMonitor = {
         }
     },
 
+    getTrainingScopeLimitMs: function() {
+        return 8 * 60 * 1000;
+    },
+
+    isViolationReviewException: function(value) {
+        const text = typeof value === 'object' && value
+            ? [value.trigger, value.activity, value.reason, value.platform].map(v => String(v || '')).join(' ')
+            : String(value || '');
+        const normalized = text.toLowerCase().replace(/\s+/g, '');
+        return normalized.includes('draw.io') || normalized.includes('[draw.io]') || normalized.includes('drawio') || normalized.includes('diagrams.net');
+    },
+
+    shouldCaptureTrainingScopeViolation: function() {
+        try {
+            const now = new Date();
+            const hour = now.getHours();
+            if (hour < 8 || hour >= 17 || hour === 12) return false;
+            const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+            const myLive = liveSessions.find(s => s && CURRENT_USER && s.trainee === CURRENT_USER.user && s.active);
+            const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+            const inVetting = vSession.active && vSession.trainees && CURRENT_USER && vSession.trainees[CURRENT_USER.user];
+            return !myLive && !inVetting;
+        } catch (error) {
+            console.warn('Violation window check failed:', error);
+            return false;
+        }
+    },
+
+    resetGraceTrackedActivities: function(activeKey) {
+        if (activeKey !== 'teams') this.teamsFocusStart = null;
+        if (activeKey !== 'idle') this.idleViolationPrompted = false;
+    },
+
     // --- OS-AWARE ACTIVITY POLLING ---
     startActivityPoller: function() {
         if (this.activityPoller) clearInterval(this.activityPoller); // Clear legacy timeouts
@@ -686,6 +776,7 @@ const StudyMonitor = {
                     const activeWindow = data.activeWindow;
                         
                     if (osIdleSeconds > 60) {
+                        this.resetGraceTrackedActivities('idle');
                         // Allow idling if waiting in Vetting Arena after submission
                         const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
                         if (vSession.active && vSession.trainees && CURRENT_USER && vSession.trainees[CURRENT_USER.user]?.status === 'completed') {
@@ -693,17 +784,29 @@ const StudyMonitor = {
                              return;
                         }
 
+                        const idleMs = Number(osIdleSeconds || 0) * 1000;
+                        if (idleMs >= this.getTrainingScopeLimitMs() && this.shouldCaptureTrainingScopeViolation()) {
+                            const idleTrigger = `Idle / Away for ${Math.floor(idleMs / 60000)} minutes`;
+                            const violationLabel = `Violation: ${idleTrigger}`;
+                            if (!this.idleViolationPrompted && this.currentActivity !== violationLabel) {
+                                this.idleViolationPrompted = true;
+                                this.triggerExternalAppWarning(idleTrigger, violationLabel);
+                            }
+                            if (this.currentActivity !== violationLabel) this.track(violationLabel);
+                            return;
+                        }
+
                         if (this.currentActivity !== 'Idle') this.track('Idle');
                         return;
                     }
 
-                    
                     let activityLabel = `External: ${activeWindow || 'Unknown App'}`;
                     let isPermitted = false;
+                    let isTeamsWindow = false;
 
                     if (activeWindow) {
                         const normalizedWindow = activeWindow.toLowerCase();
-                        if (activeWindow.includes('1st Line Training Portal')) {
+                        if (normalizedWindow.includes('1st line training portal') || normalizedWindow.includes('msedgewebview2')) {
                             isPermitted = true;
                             if (this.isStudyOpen) return; // Specific activity handled by webview events
                             activityLabel = "Navigating Portal";
@@ -716,7 +819,7 @@ const StudyMonitor = {
                             const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
 
                             // Ensure all training and program keywords are permitted OS-level
-                            const trainingKeywords = ['sharepoint', '.pdf', 'training', 'course', 'document', 'word', 'excel', 'powerpoint', 'onenote', 'odoo', 'genially', 'macvendor'];
+                            const trainingKeywords = ['sharepoint', '.pdf', 'training', 'course', 'document', 'word', 'excel', 'powerpoint', 'onenote', 'odoo', 'genially', 'macvendor', 'draw.io', 'drawio', 'diagrams.net', 'cpanel', 'webmail', 'herotel webmail'];
                             const allPermitted = [...workSites, ...trainingKeywords];
 
                             // Check if window title contains any of the work sites
@@ -727,6 +830,7 @@ const StudyMonitor = {
                                 activityLabel = `Studying: ${matchedSite} (Work System)`;
                                 isPermitted = true;
                             } else if (normalizedWindow.includes('teams') || normalizedWindow.includes('microsoft teams')) {
+                                isTeamsWindow = true;
                                 activityLabel = `Studying: MS Teams (Communication)`;
                                 isPermitted = true;
                             } else if (normalizedWindow.includes('outlook') || normalizedWindow.includes('mail')) {
@@ -745,23 +849,27 @@ const StudyMonitor = {
                         }
                     }
 
+                    if (!isTeamsWindow) this.resetGraceTrackedActivities(null);
+                    if (isTeamsWindow) {
+                        this.resetGraceTrackedActivities('teams');
+                        const nowMs = Date.now();
+                        if (!this.teamsFocusStart) this.teamsFocusStart = nowMs;
+                        const teamsMs = nowMs - this.teamsFocusStart;
+                        if (teamsMs >= this.getTrainingScopeLimitMs() && this.shouldCaptureTrainingScopeViolation()) {
+                            activityLabel = `Violation: MS Teams over 8 minutes - ${activeWindow || 'Microsoft Teams'}`;
+                            isPermitted = false;
+                            if (this.currentActivity !== activityLabel) {
+                                this.triggerExternalAppWarning(activeWindow || 'Microsoft Teams over 8 minutes', activityLabel);
+                            }
+                        }
+                    }
+
                     // Only trigger the warning & violation if it's strictly an external, non-permitted app
                     if (!isPermitted && activeWindow) {
-                        const now = new Date();
-                        const hour = now.getHours();
-                        let isViolation = false;
-                        
-                        // Check Working Hours & Exclusions
-                        if (hour >= 8 && hour < 17 && hour !== 12) {
-                            const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-                            const myLive = liveSessions.find(s => s.trainee === CURRENT_USER.user && s.active);
-                            const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
-                            const inVetting = vSession.active && vSession.trainees && vSession.trainees[CURRENT_USER.user];
-                            if (!myLive && !inVetting) isViolation = true;
-                        }
+                        const isViolation = this.shouldCaptureTrainingScopeViolation();
                         
                         if (isViolation) {
-                            activityLabel = `Violation: ${activeWindow}`;
+                            if (!String(activityLabel || '').startsWith('Violation:')) activityLabel = `Violation: ${activeWindow}`;
                             if (this.currentActivity !== activityLabel) {
                                 this.triggerExternalAppWarning(activeWindow, activityLabel);
                             }
@@ -781,13 +889,17 @@ const StudyMonitor = {
         }
     },
 
-    getViolationReports: function() {
+    getRawViolationReports: function() {
         try {
             const reports = JSON.parse(localStorage.getItem('violation_reports') || '[]');
             return Array.isArray(reports) ? reports : [];
         } catch (e) {
             return [];
         }
+    },
+
+    getViolationReports: function() {
+        return this.getRawViolationReports().filter(report => !this.isViolationReviewException(report));
     },
 
     writeViolationReports: function(reports) {
@@ -954,6 +1066,9 @@ const StudyMonitor = {
         const applyWhitelist = (activityString) => {
             if ((activityString.startsWith('External: ') || activityString.startsWith('Violation: ')) && !activityString.includes('(Reclassified)')) {
                 const raw = activityString.replace(/^(External|Violation):\s*/, '').trim();
+                if (this.isViolationReviewException(raw)) {
+                    return `Studying: ${raw} (Reclassified)`;
+                }
                 if (this.cachedWhitelist.some(w => raw.toLowerCase().includes(w.toLowerCase()))) {
                     return `Studying: ${raw} (Reclassified)`;
                 }
@@ -1124,13 +1239,15 @@ const StudyMonitor = {
         if (!activityString) return 'idle';
         const act = activityString.toLowerCase();
         
+        if (this.isViolationReviewException(act)) return 'tool';
+
         // 0. Violation is always external
         if (act.startsWith('violation:')) return 'external';
         if (act.startsWith('in-app study:')) return 'material';
 
         // Define keywords
-        const materialKeywords = ['.pdf', '.mp4', 'genially', 'sharepoint', 'course', 'document', 'standards', 'training', 'vetting', 'study material', 'assessment overview'];
-        const toolKeywords = ['qcontact', 'crm', 'radius', 'preseem', 'acs', 'hosting', 'odoo', 'cp1', 'cp2', 'teams', 'outlook', 'mail', 'notepad', 'onenote', 'macvendor', 'genieacs', 'devices - genieacs'];
+        const materialKeywords = ['.pdf', '.mp4', 'genially', 'sharepoint', 'course', 'document', 'standards', 'training', 'vetting', 'study material', 'assessment overview', 'draw.io', 'drawio', 'diagrams.net'];
+        const toolKeywords = ['qcontact', 'crm', 'radius', 'preseem', 'acs', 'hosting', 'odoo', 'cp1', 'cp2', 'cpanel', 'webmail', 'herotel webmail', 'teams', 'outlook', 'mail', 'notepad', 'onenote', 'macvendor', 'genieacs', 'devices - genieacs'];
 
         // 1. Check for specific material keywords
         if (materialKeywords.some(m => act.includes(m))) {
@@ -1674,7 +1791,6 @@ const StudyMonitor = {
             this.openExternalUrl(cleanUrl);
             return;
         }
-
         const webview = document.createElement('webview');
         webview.id = `webview-${tabId}`;
         webview.src = cleanUrl;
@@ -1705,7 +1821,8 @@ const StudyMonitor = {
             targetScrollY: targetScrollY,
             canGoBackCached: false,
             canGoForwardCached: false,
-            usedCachedFallback: false
+            usedCachedFallback: false,
+            cpanelRecoveryAttempted: false
         };
         this.browserState.tabs.push(newTab);
 
@@ -1783,6 +1900,7 @@ const StudyMonitor = {
         webview.addEventListener('did-start-loading', () => {
             webview.dataset.navReady = '0';
             tab.usedCachedFallback = false;
+            tab.cpanelRecoveryAttempted = false;
             tab.title = 'Loading...';
             this.renderTabs();
             this.updateBrowserChrome();
@@ -1807,6 +1925,7 @@ const StudyMonitor = {
             if (!String(tab.url || '').startsWith('data:')) {
                 this.cacheStudyPageLocally(tab);
             }
+            this.recoverCpanelServerError(tab);
             
             // Restore Scroll Position if requested
             if (tab.targetScrollY) {
@@ -1847,9 +1966,13 @@ const StudyMonitor = {
         });
 
         webview.addEventListener('new-window', (e) => {
+            if (this.isCpanelTransferUrl(e.url)) {
+                return;
+            }
             e.preventDefault();
-            // Fallback only. Main-process interception already routes spawned windows for normal Electron runs.
-            if (!window.electronAPI?.ipcRenderer) {
+            if (this.isCpanelCompatibilityUrl(e.url)) {
+                this.handleSpawnedStudyUrl(e.url, "cPanel");
+            } else if (!window.electronAPI?.ipcRenderer) {
                 this.handleSpawnedStudyUrl(e.url, "New Tab");
             }
         });
@@ -1905,6 +2028,38 @@ const StudyMonitor = {
                 this.processMarkForClarity(dataStr, tab.id);
             }
         });
+    },
+
+    recoverCpanelServerError: function(tab) {
+        const webview = tab?.webview;
+        const currentUrl = String(tab?.url || '').trim();
+        if (!webview || !webview.isConnected || !currentUrl || tab.cpanelRecoveryAttempted) return;
+        if (!this.isCpanelCompatibilityUrl(currentUrl)) return;
+        const safeEntryUrl = this.getCpanelSafeEntryUrl(currentUrl);
+        if (currentUrl === safeEntryUrl) return;
+
+        const detectScript = `
+            (function() {
+                const text = ((document.body && document.body.innerText) || '').slice(0, 1000);
+                const title = document.title || '';
+                return /Internal Server Error/i.test(text + ' ' + title) && /cpsrvd Server/i.test(text);
+            })();
+        `;
+
+        webview.executeJavaScript(detectScript, true).then((isCpanelServerError) => {
+            if (!isCpanelServerError || tab.cpanelRecoveryAttempted) return;
+            tab.cpanelRecoveryAttempted = true;
+            tab.url = safeEntryUrl;
+            tab.title = 'cPanel Login';
+            this.renderTabs();
+            this.updateBrowserChrome();
+            if (typeof showToast === 'function') {
+                showToast('cPanel returned a server error, so the study browser reopened the WHM login page.', 'warning');
+            }
+            webview.loadURL(safeEntryUrl).catch((error) => {
+                console.warn('cPanel recovery navigation failed:', error);
+            });
+        }).catch(() => {});
     },
 
     reload: function() {
@@ -2927,22 +3082,7 @@ StudyMonitor.openViolationReviewModal = function(agent = '') {
                     <input id="vioReviewSearch" type="text" placeholder="Trigger, reason, person..." oninput="StudyMonitor.renderViolationReviewRows()">
                 </div>
             </div>
-            <div class="table-responsive" style="overflow:auto; border:1px solid var(--border-color); border-radius:8px;">
-                <table class="admin-table">
-                    <thead>
-                        <tr>
-                            <th>Trainee</th>
-                            <th>Detected</th>
-                            <th>Trigger</th>
-                            <th>Reason</th>
-                            <th>Informed</th>
-                            <th>Status</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="violationReviewRows"></tbody>
-                </table>
-            </div>
+            <div id="violationReviewRows" class="violation-review-list"></div>
         </div>
     </div>`;
 
@@ -2952,8 +3092,8 @@ StudyMonitor.openViolationReviewModal = function(agent = '') {
 };
 
 StudyMonitor.renderViolationReviewRows = function() {
-    const tbody = document.getElementById('violationReviewRows');
-    if (!tbody) return;
+    const container = document.getElementById('violationReviewRows');
+    if (!container) return;
 
     const status = String(document.getElementById('vioReviewStatus')?.value || 'pending_review');
     const user = String(document.getElementById('vioReviewUser')?.value || '').trim().toLowerCase();
@@ -2974,27 +3114,49 @@ StudyMonitor.renderViolationReviewRows = function() {
         return true;
     });
 
-    tbody.innerHTML = reports.map(report => {
+    container.innerHTML = reports.map(report => {
         const detected = report.detectedAt ? new Date(report.detectedAt).toLocaleString() : (report.date || '-');
         const isReviewed = !!report.reviewed || String(report.status || '') === 'reviewed';
-        return `<tr>
-            <td>${this.escapeHtml(report.user || '-')}</td>
-            <td style="white-space:nowrap;">${this.escapeHtml(detected)}</td>
-            <td>${this.escapeHtml(report.trigger || report.activity || '-')}</td>
-            <td>${this.escapeHtml(report.reason || '-')}</td>
-            <td>${this.escapeHtml([report.platform, report.contact].filter(Boolean).join(' / ') || '-')}</td>
-            <td><span class="status-badge ${isReviewed ? 'status-pass' : 'status-fail'}">${isReviewed ? 'Reviewed' : 'Pending'}</span></td>
-            <td style="white-space:nowrap;">
+        const reviewedMeta = isReviewed
+            ? [report.reviewedBy ? `By ${report.reviewedBy}` : '', report.reviewedAt ? new Date(report.reviewedAt).toLocaleString() : ''].filter(Boolean).join(' | ')
+            : '';
+        const safeId = encodeURIComponent(String(report.id || ''));
+        return `<article class="violation-review-card">
+            <div class="violation-review-card-main">
+                <div class="violation-review-card-head">
+                    <div>
+                        <div class="violation-review-agent">${this.escapeHtml(report.user || '-')}</div>
+                        <div class="violation-review-meta">${this.escapeHtml(detected)}</div>
+                    </div>
+                    <span class="status-badge ${isReviewed ? 'status-pass' : 'status-fail'}">${isReviewed ? 'Reviewed' : 'Pending'}</span>
+                </div>
+                <div class="violation-review-grid">
+                    <div>
+                        <span>Trigger</span>
+                        <strong>${this.escapeHtml(report.trigger || report.activity || '-')}</strong>
+                    </div>
+                    <div>
+                        <span>Platform / Person Informed</span>
+                        <strong>${this.escapeHtml([report.platform, report.contact].filter(Boolean).join(' / ') || '-')}</strong>
+                    </div>
+                </div>
+                <div class="violation-review-reason">
+                    <span>Reason</span>
+                    <p>${this.escapeHtml(report.reason || '-')}</p>
+                </div>
+                ${report.adminComment ? `<div class="violation-review-reason"><span>Admin Note</span><p>${this.escapeHtml(report.adminComment)}</p></div>` : ''}
+            </div>
+            <div class="violation-review-actions">
                 ${isReviewed
-                    ? `<span style="font-size:0.78rem; color:var(--text-muted);">By ${this.escapeHtml(report.reviewedBy || '-')}</span>`
-                    : `<button class="btn-success btn-sm" onclick="StudyMonitor.markViolationReviewed('${this.escapeHtml(report.id)}')"><i class="fas fa-check"></i> Mark Reviewed</button>`}
-            </td>
-        </tr>`;
-    }).join('') || '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:18px;">No violation reports match the current filters.</td></tr>';
+                    ? `<span class="violation-review-meta">${this.escapeHtml(reviewedMeta || 'Reviewed')}</span>`
+                    : `<button class="btn-success btn-sm" onclick="StudyMonitor.markViolationReviewed(decodeURIComponent('${safeId}'))"><i class="fas fa-check"></i> Mark Reviewed</button>`}
+            </div>
+        </article>`;
+    }).join('') || '<div class="violation-review-empty">No violation reports match the current filters.</div>';
 };
 
 StudyMonitor.markViolationReviewed = async function(reportId) {
-    const reports = this.getViolationReports();
+    const reports = this.getRawViolationReports();
     const idx = reports.findIndex(r => String(r.id || '') === String(reportId || ''));
     if (idx < 0) return;
 

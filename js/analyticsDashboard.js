@@ -42,6 +42,13 @@ const AnalyticsEngine = {
         return this.filterRecordsForTrainees(records, [traineeName], groupId, { assessmentOnly: true });
     },
 
+    getReliableRecords: function(records) {
+        if (typeof getCurrentLiveAssessmentRecords === 'function') {
+            return getCurrentLiveAssessmentRecords(records);
+        }
+        return Array.isArray(records) ? records.filter(r => r && r.archived !== true) : [];
+    },
+
     // 1. Department Health (Critical vs On-Track)
     calculateDepartmentHealth: function(groupId) {
         const users = JSON.parse(localStorage.getItem('users') || '[]');
@@ -58,7 +65,7 @@ const AnalyticsEngine = {
         if (totalTrainees === 0) return { critical: 0, warning: 0, onTrack: 0, total: 0 };
 
         const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const records = this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]'));
         
         let criticalCount = 0;
         let warningCount = 0;
@@ -234,7 +241,7 @@ const AnalyticsEngine = {
             else if (review.status === 'Semi-Critical') riskScore += (weights.admin / 2);
         } else {
             // Fallback to record average if no review
-            const records = JSON.parse(localStorage.getItem('records') || '[]');
+            const records = this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]'));
             const myRecords = records.filter(r => r.trainee === userId);
             if (myRecords.length > 0) {
                 let totalScore = 0;
@@ -280,7 +287,7 @@ const AnalyticsEngine = {
             trainees = trainees.filter(t => rosters[groupId].includes(t.user));
         }
 
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const records = this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]'));
         const groupRecords = this.filterRecordsForTrainees(records, trainees, groupId);
         const groupAssessmentRecords = groupRecords.filter(r => this.isAssessmentRecord(r));
         

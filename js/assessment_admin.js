@@ -832,9 +832,20 @@ async function openAdminMarking(subId, options = {}) {
     } else {
         submitBtn.style.display = 'inline-block';
         submitBtn.innerText = sub.status === 'completed' ? "Save Changes" : "Finalize Score & Push to Records";
+        submitBtn.dataset.submissionId = subId;
         submitBtn.onclick = () => finalizeAdminMarking(subId);
     }
     validateActiveMarkingModalLock();
+}
+
+function submitMarking() {
+    const submitBtn = document.getElementById('markingSubmitBtn');
+    const subId = submitBtn ? String(submitBtn.dataset.submissionId || '').trim() : '';
+    if (!subId) {
+        alert("No active submission is loaded for marking.");
+        return;
+    }
+    return finalizeAdminMarking(subId);
 }
 
 function viewCompletedTest(submissionId, arg2, arg3) {
@@ -908,9 +919,13 @@ async function finalizeAdminMarking(subId) {
     const specificComments = sub.comments || {};
 
     markInputs.forEach(input => {
-        const val = parseFloat(input.value) || 0;
+        const questionIdx = input.getAttribute('data-idx');
+        const question = test && Array.isArray(test.questions) && questionIdx !== null ? test.questions[Number(questionIdx)] : null;
+        const pointsMax = question ? parseFloat(question.points || 1) : maxScore;
+        const rawVal = parseFloat(input.value) || 0;
+        const val = Math.max(0, Math.min(Number.isFinite(pointsMax) ? pointsMax : rawVal, rawVal));
         earnedPoints += val;
-        const idx = input.getAttribute('data-idx');
+        const idx = questionIdx;
         if (idx !== null) specificScores[idx] = val;
     });
     
@@ -919,7 +934,9 @@ async function finalizeAdminMarking(subId) {
         if (idx !== null) specificComments[idx] = input.value;
     });
 
-    const percentage = maxScore > 0 ? Math.round((earnedPoints / maxScore) * 100) : 0;
+    const percentage = maxScore > 0
+        ? (typeof clampAssessmentPercent === 'function' ? clampAssessmentPercent((earnedPoints / maxScore) * 100) : Math.max(0, Math.min(100, Math.round((earnedPoints / maxScore) * 100))))
+        : 0;
     const auditAction = sub.status === 'completed' ? 'Score updated' : 'Score finalized';
 
     sub.score = percentage;

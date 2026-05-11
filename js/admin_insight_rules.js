@@ -4,12 +4,27 @@
     const INSIGHT_RULE_KEY = 'insight_rule_config';
     const INSIGHT_PROGRESS_KEY = 'insight_progress_config';
     const LIVE_RULES_KEY = 'live_assessment_rules_config';
+    const LIVE_BOOKING_RULES_KEY = 'live_booking_rules_config';
+    const TRAINING_RULES_KEY = 'training_rules_config';
     const DEFAULT_LIVE_ASSESSMENT_RULES = [
         'This assessment takes approximately 1 hour to complete.',
         'You are allowed to reference the training material. However, if the material is referenced constantly and it is clear the material was not studied, the live session will be ended.',
         'If you are unable to answer a question within 5 minutes of it being provided, the marks obtained for that question are final and the next question will be provided.'
     ];
     const DEFAULT_LIVE_ASSESSMENT_RULES_HTML = `<ul>${DEFAULT_LIVE_ASSESSMENT_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
+    const DEFAULT_LIVE_BOOKING_RULES = [
+        'Trainees may book only one live assessment session per hour.',
+        'Book assessments in the correct training sequence where possible.',
+        'Booking times may change depending on facilitator availability.',
+        'Cancellation Policy: trainees can cancel one session; further cancellations require admin approval.'
+    ];
+    const DEFAULT_LIVE_BOOKING_RULES_HTML = `<ul>${DEFAULT_LIVE_BOOKING_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
+    const DEFAULT_TRAINING_RULES = [
+        'Be present and ready for training at your scheduled start time.',
+        'Keep your contact details, office, and training background up to date.',
+        'Use approved training systems and ask your trainer when anything is unclear.'
+    ];
+    const DEFAULT_TRAINING_RULES_HTML = `<ul>${DEFAULT_TRAINING_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
 
     const AUTO_PROGRESS_ITEMS = [
         { name: 'Onboard Report', type: 'report', source: 'auto' },
@@ -22,7 +37,11 @@
         progressLoaded: false,
         progressConfig: null,
         liveRulesLoaded: false,
-        liveRulesConfig: null
+        liveRulesConfig: null,
+        liveBookingRulesLoaded: false,
+        liveBookingRulesConfig: null,
+        trainingRulesLoaded: false,
+        trainingRulesConfig: null
     };
 
     function normalizeText(value) {
@@ -71,6 +90,39 @@
         return 'assessment';
     }
 
+    function isVettingOneName(name) {
+        const normalized = normalizeText(name);
+        return normalized.includes('1st vetting') || normalized.includes('test 1');
+    }
+
+    function isFinalVettingName(name) {
+        const normalized = normalizeText(name);
+        return normalized.includes('final vetting') || normalized.includes('test 2') || normalized.includes('final');
+    }
+
+    function sanitizeReportSections(rawSections, itemName, itemType) {
+        const source = rawSections && typeof rawSections === 'object' ? rawSections : {};
+        const type = inferProgressType(itemName, itemType);
+        const hasExplicit = ['trainingGoal', 'assessmentScores', 'vettingTest1', 'vettingFinal']
+            .some(key => Object.prototype.hasOwnProperty.call(source, key));
+
+        if (hasExplicit) {
+            return {
+                trainingGoal: source.trainingGoal === true,
+                assessmentScores: source.assessmentScores === true,
+                vettingTest1: source.vettingTest1 === true,
+                vettingFinal: source.vettingFinal === true
+            };
+        }
+
+        return {
+            trainingGoal: type === 'assessment' || type === 'test',
+            assessmentScores: type === 'assessment' || type === 'test',
+            vettingTest1: type === 'vetting' && !isFinalVettingName(itemName),
+            vettingFinal: type === 'vetting' && !isVettingOneName(itemName)
+        };
+    }
+
     function parseArrayFromLocalStorage(key) {
         try {
             const parsed = JSON.parse(localStorage.getItem(key) || '[]');
@@ -81,26 +133,8 @@
     }
 
     function getAssessmentCatalog() {
-        const assessments = parseArrayFromLocalStorage('assessments');
-        const vettingTopics = parseArrayFromLocalStorage('vettingTopics');
         const tests = parseArrayFromLocalStorage('tests');
         const names = [];
-
-        if (Array.isArray(assessments)) {
-            assessments.forEach((item) => {
-                const name = item && item.name ? String(item.name).trim() : '';
-                if (name) names.push(name);
-            });
-        }
-
-        if (Array.isArray(vettingTopics)) {
-            vettingTopics.forEach((topic) => {
-                const clean = String(topic || '').trim();
-                if (!clean) return;
-                names.push(`1st Vetting - ${clean}`);
-                names.push(`Final Vetting - ${clean}`);
-            });
-        }
 
         if (Array.isArray(tests)) {
             tests.forEach((test) => {
@@ -110,6 +144,10 @@
         }
 
         return uniqueStrings(names).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    }
+
+    function getAssessmentCatalogNameSet() {
+        return new Set(getAssessmentCatalog().map(name => normalizeText(name)));
     }
 
     function getDefaultThreshold() {
@@ -161,6 +199,30 @@
         return {
             rules: DEFAULT_LIVE_ASSESSMENT_RULES.slice(),
             rulesHtml: DEFAULT_LIVE_ASSESSMENT_RULES_HTML,
+            updatedAt: null,
+            updatedBy: null
+        };
+    }
+
+    function getDefaultLiveBookingRulesConfig() {
+        return {
+            rules: DEFAULT_LIVE_BOOKING_RULES.slice(),
+            rulesHtml: DEFAULT_LIVE_BOOKING_RULES_HTML,
+            updatedAt: null,
+            updatedBy: null
+        };
+    }
+
+    function getDefaultTrainingRulesConfig() {
+        return {
+            rules: DEFAULT_TRAINING_RULES.slice(),
+            rulesHtml: DEFAULT_TRAINING_RULES_HTML,
+            showOnFirstLogin: true,
+            showOnLogin: false,
+            targetMode: 'all',
+            targetUsers: [],
+            targetGroups: [],
+            officeOptions: ['Head Office', 'Regional Office', 'Remote'],
             updatedAt: null,
             updatedBy: null
         };
@@ -238,19 +300,24 @@
         const raw = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
         const map = new Map();
 
-        const pushItem = (name, type) => {
+        const pushItem = (name, type, reportSections) => {
             const cleanName = String(name || '').trim();
             if (!cleanName) return;
             if (AUTO_PROGRESS_ITEMS.some(item => normalizeText(item.name) === normalizeText(cleanName))) return;
             const cleanType = inferProgressType(cleanName, type);
-            map.set(normalizeText(cleanName), { name: cleanName, type: cleanType, source: 'manual' });
+            map.set(normalizeText(cleanName), {
+                name: cleanName,
+                type: cleanType,
+                source: 'manual',
+                reportSections: sanitizeReportSections(reportSections, cleanName, cleanType)
+            });
         };
 
         if (Array.isArray(raw.requiredItems)) {
             raw.requiredItems.forEach((item) => {
                 if (!item) return;
-                if (typeof item === 'string') pushItem(item, null);
-                else if (typeof item === 'object') pushItem(item.name, item.type);
+                if (typeof item === 'string') pushItem(item, null, null);
+                else if (typeof item === 'object') pushItem(item.name, item.type, item.reportSections);
             });
         }
 
@@ -279,6 +346,45 @@
         return {
             rules: rules.length ? rules : defaults.rules,
             rulesHtml: rulesHtml || rulesToLiveRulesHtml(rules.length ? rules : defaults.rules),
+            updatedAt: raw.updatedAt || defaults.updatedAt,
+            updatedBy: raw.updatedBy || defaults.updatedBy
+        };
+    }
+
+    function sanitizeLiveBookingRulesConfig(rawConfig) {
+        const defaults = getDefaultLiveBookingRulesConfig();
+        const raw = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+        const rulesHtml = sanitizeLiveRulesHtml(raw.rulesHtml || raw.html || '');
+        const sourceRules = Array.isArray(raw.rules)
+            ? raw.rules
+            : (rulesHtml ? htmlToLiveRuleLines(rulesHtml) : defaults.rules);
+        const rules = uniqueStrings(sourceRules.map(rule => String(rule || '').trim())).slice(0, 20);
+        return {
+            rules: rules.length ? rules : defaults.rules,
+            rulesHtml: rulesHtml || rulesToLiveRulesHtml(rules.length ? rules : defaults.rules),
+            updatedAt: raw.updatedAt || defaults.updatedAt,
+            updatedBy: raw.updatedBy || defaults.updatedBy
+        };
+    }
+
+    function sanitizeTrainingRulesConfig(rawConfig) {
+        const defaults = getDefaultTrainingRulesConfig();
+        const raw = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+        const rulesHtml = sanitizeLiveRulesHtml(raw.rulesHtml || raw.html || '');
+        const sourceRules = Array.isArray(raw.rules)
+            ? raw.rules
+            : (rulesHtml ? htmlToLiveRuleLines(rulesHtml) : defaults.rules);
+        const rules = uniqueStrings(sourceRules.map(rule => String(rule || '').trim())).slice(0, 40);
+        const targetMode = ['all', 'users', 'groups'].includes(normalizeText(raw.targetMode)) ? normalizeText(raw.targetMode) : 'all';
+        return {
+            rules: rules.length ? rules : defaults.rules,
+            rulesHtml: rulesHtml || rulesToLiveRulesHtml(rules.length ? rules : defaults.rules),
+            showOnFirstLogin: raw.showOnFirstLogin !== false,
+            showOnLogin: raw.showOnLogin === true,
+            targetMode,
+            targetUsers: uniqueStrings(Array.isArray(raw.targetUsers) ? raw.targetUsers : []),
+            targetGroups: uniqueStrings(Array.isArray(raw.targetGroups) ? raw.targetGroups : []),
+            officeOptions: uniqueStrings(Array.isArray(raw.officeOptions) ? raw.officeOptions : defaults.officeOptions),
             updatedAt: raw.updatedAt || defaults.updatedAt,
             updatedBy: raw.updatedBy || defaults.updatedBy
         };
@@ -348,7 +454,8 @@
             map.set(normalizeText(cleanName), {
                 name: cleanName,
                 type: inferProgressType(cleanName, item.type),
-                source: 'manual'
+                source: 'manual',
+                reportSections: sanitizeReportSections(item.reportSections, cleanName, item.type)
             });
         });
         const out = Array.from(map.values());
@@ -387,12 +494,40 @@
         }
     }
 
+    function getLiveBookingRulesConfig() {
+        try {
+            return sanitizeLiveBookingRulesConfig(JSON.parse(localStorage.getItem(LIVE_BOOKING_RULES_KEY) || 'null'));
+        } catch (error) {
+            return getDefaultLiveBookingRulesConfig();
+        }
+    }
+
+    function getTrainingRulesConfig() {
+        try {
+            return sanitizeTrainingRulesConfig(JSON.parse(localStorage.getItem(TRAINING_RULES_KEY) || 'null'));
+        } catch (error) {
+            return getDefaultTrainingRulesConfig();
+        }
+    }
+
     function getLiveAssessmentRules() {
         return getLiveAssessmentRulesConfig().rules;
     }
 
     function getLiveAssessmentRulesHtml() {
         return getLiveAssessmentRulesConfig().rulesHtml;
+    }
+
+    function getLiveBookingRulesHtml() {
+        return getLiveBookingRulesConfig().rulesHtml;
+    }
+
+    function getTrainingRulesHtml() {
+        return getTrainingRulesConfig().rulesHtml;
+    }
+
+    function getTrainingOfficeOptions() {
+        return getTrainingRulesConfig().officeOptions || [];
     }
 
     function getInsightProgressRequiredItems() {
@@ -470,6 +605,32 @@
         draftState.liveRulesLoaded = true;
     }
 
+    function getDraftLiveBookingRulesConfig() {
+        if (!draftState.liveBookingRulesLoaded || !draftState.liveBookingRulesConfig) {
+            draftState.liveBookingRulesConfig = sanitizeLiveBookingRulesConfig(getLiveBookingRulesConfig());
+            draftState.liveBookingRulesLoaded = true;
+        }
+        return draftState.liveBookingRulesConfig;
+    }
+
+    function setDraftLiveBookingRulesConfig(config) {
+        draftState.liveBookingRulesConfig = sanitizeLiveBookingRulesConfig(config);
+        draftState.liveBookingRulesLoaded = true;
+    }
+
+    function getDraftTrainingRulesConfig() {
+        if (!draftState.trainingRulesLoaded || !draftState.trainingRulesConfig) {
+            draftState.trainingRulesConfig = sanitizeTrainingRulesConfig(getTrainingRulesConfig());
+            draftState.trainingRulesLoaded = true;
+        }
+        return draftState.trainingRulesConfig;
+    }
+
+    function setDraftTrainingRulesConfig(config) {
+        draftState.trainingRulesConfig = sanitizeTrainingRulesConfig(config);
+        draftState.trainingRulesLoaded = true;
+    }
+
     function escapeHtml(value) {
         return String(value === undefined || value === null ? '' : value)
             .replace(/&/g, '&amp;')
@@ -479,16 +640,145 @@
             .replace(/'/g, '&#39;');
     }
 
+    function getTrainingConfigUsers() {
+        const users = parseArrayFromLocalStorage('users')
+            .filter(u => u && String(u.role || '').toLowerCase() === 'trainee')
+            .map(u => String(u.user || u.username || '').trim())
+            .filter(Boolean);
+        return uniqueStrings(users).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    }
+
+    function getTrainingConfigGroups() {
+        try {
+            return Object.keys(JSON.parse(localStorage.getItem('rosters') || '{}') || {})
+                .sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function getGroupsForTrainee(username) {
+        const target = normalizeText(username);
+        if (!target) return [];
+        try {
+            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}') || {};
+            return Object.entries(rosters)
+                .filter(([, members]) => Array.isArray(members) && members.some(member => normalizeText(member) === target))
+                .map(([gid]) => String(gid));
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function isTrainingRulesTargetedToCurrentUser(configInput) {
+        const config = sanitizeTrainingRulesConfig(configInput || getTrainingRulesConfig());
+        if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || String(CURRENT_USER.role || '').toLowerCase() !== 'trainee') return false;
+        if (config.targetMode === 'all') return true;
+        const username = String(CURRENT_USER.user || '').trim();
+        if (config.targetMode === 'users') {
+            return (config.targetUsers || []).some(user => normalizeText(user) === normalizeText(username));
+        }
+        if (config.targetMode === 'groups') {
+            const myGroups = getGroupsForTrainee(username).map(group => normalizeText(group));
+            return (config.targetGroups || []).some(group => myGroups.includes(normalizeText(group)));
+        }
+        return true;
+    }
+
+    function shouldShowTrainingRulesOnLogin(isFirstLogin) {
+        const config = getTrainingRulesConfig();
+        if (!isTrainingRulesTargetedToCurrentUser(config)) return false;
+        if (isFirstLogin && config.showOnFirstLogin !== false) return true;
+        return config.showOnLogin === true;
+    }
+
+    function openTrainingRulesModal(options = {}) {
+        const config = getTrainingRulesConfig();
+        const modalId = 'trainingRulesModal';
+        document.getElementById(modalId)?.remove();
+        const title = options && options.title ? String(options.title) : 'Training Rules';
+        const html = `
+            <div id="${modalId}" class="modal-overlay" style="z-index:12050;">
+                <div class="modal-box" style="width:min(760px, 96vw); max-height:88vh; overflow-y:auto;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; border-bottom:1px solid var(--border-color); padding-bottom:10px; margin-bottom:14px;">
+                        <h3 style="margin:0;"><i class="fas fa-scale-balanced"></i> ${escapeHtml(title)}</h3>
+                        ${options && options.blocking ? '' : `<button class="btn-secondary btn-sm" onclick="document.getElementById('${modalId}')?.remove()">&times;</button>`}
+                    </div>
+                    <div class="rich-content" style="background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:14px; line-height:1.55;">
+                        ${config.rulesHtml || rulesToLiveRulesHtml(config.rules)}
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+                        <button class="btn-primary" onclick="document.getElementById('${modalId}')?.remove()">${options && options.blocking ? 'I Understand' : 'Close'}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', html);
+    }
+
+    function maybeShowTrainingRulesOnLogin(isFirstLogin) {
+        if (shouldShowTrainingRulesOnLogin(isFirstLogin)) {
+            const config = getTrainingRulesConfig();
+            const sessionKey = `training_rules_seen_${config.updatedAt || 'default'}`;
+            if (sessionStorage.getItem(sessionKey) === 'true') return;
+            sessionStorage.setItem(sessionKey, 'true');
+            setTimeout(() => openTrainingRulesModal({ title: 'Training Rules', blocking: true }), isFirstLogin ? 450 : 800);
+        }
+    }
+
     function renderAssessmentSelector() {
         const select = document.getElementById('insightPresetAssessmentSelect');
         const progressSelect = document.getElementById('insightProgressItemSelect');
         const catalog = getAssessmentCatalog();
         const optionsHtml = catalog.length
             ? catalog.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')
-            : '<option value="">No configured assessments/tests</option>';
+            : '<option value="">No active Test Engine assessments</option>';
 
         if (select) select.innerHTML = optionsHtml;
         if (progressSelect) progressSelect.innerHTML = optionsHtml;
+    }
+
+    function renderTrainingRulesControls(config) {
+        const targetMode = document.getElementById('trainingRulesTargetMode');
+        const targetUsers = document.getElementById('trainingRulesTargetUsers');
+        const targetGroups = document.getElementById('trainingRulesTargetGroups');
+        const offices = document.getElementById('trainingOfficeOptions');
+        const firstLogin = document.getElementById('trainingRulesFirstLogin');
+        const everyLogin = document.getElementById('trainingRulesEveryLogin');
+
+        if (targetMode) targetMode.value = config.targetMode || 'all';
+        if (firstLogin) firstLogin.checked = config.showOnFirstLogin !== false;
+        if (everyLogin) everyLogin.checked = config.showOnLogin === true;
+
+        if (targetUsers) {
+            const selected = new Set((config.targetUsers || []).map(normalizeText));
+            targetUsers.innerHTML = getTrainingConfigUsers()
+                .map(user => `<option value="${escapeHtml(user)}" ${selected.has(normalizeText(user)) ? 'selected' : ''}>${escapeHtml(user)}</option>`)
+                .join('') || '<option value="">No trainees found</option>';
+        }
+
+        if (targetGroups) {
+            const selected = new Set((config.targetGroups || []).map(normalizeText));
+            targetGroups.innerHTML = getTrainingConfigGroups()
+                .map(group => {
+                    let label = group;
+                    try {
+                        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}') || {};
+                        label = (typeof getGroupLabel === 'function') ? getGroupLabel(group, Array.isArray(rosters[group]) ? rosters[group].length : 0) : group;
+                    } catch (error) {}
+                    return `<option value="${escapeHtml(group)}" ${selected.has(normalizeText(group)) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+                })
+                .join('') || '<option value="">No groups found</option>';
+        }
+
+        if (offices && document.activeElement !== offices) {
+            offices.value = (config.officeOptions || []).join('\n');
+        }
+
+        const userBlock = document.getElementById('trainingRulesUserTargetBlock');
+        const groupBlock = document.getElementById('trainingRulesGroupTargetBlock');
+        if (userBlock) userBlock.style.display = (config.targetMode === 'users') ? 'block' : 'none';
+        if (groupBlock) groupBlock.style.display = (config.targetMode === 'groups') ? 'block' : 'none';
     }
 
     function upsertPreset(name, severity, scoreThreshold) {
@@ -528,7 +818,8 @@
         const next = {
             name: cleanName,
             type: inferProgressType(cleanName, null),
-            source: 'manual'
+            source: 'manual',
+            reportSections: sanitizeReportSections(null, cleanName, inferProgressType(cleanName, null))
         };
 
         const required = Array.isArray(config.requiredItems) ? config.requiredItems.slice() : [];
@@ -546,6 +837,45 @@
         const normalizedName = normalizeText(name);
         config.requiredItems = (config.requiredItems || []).filter(item => normalizeText(item.name) !== normalizedName);
         setDraftProgressConfig(config);
+    }
+
+    function updateProgressItem(encodedName, patch) {
+        const name = decodeURIComponent(String(encodedName || ''));
+        const cleanName = String(name || '').trim();
+        if (!cleanName) return;
+        const config = getDraftProgressConfig();
+        const required = Array.isArray(config.requiredItems) ? config.requiredItems.slice() : [];
+        const idx = required.findIndex(item => normalizeText(item.name) === normalizeText(cleanName));
+        if (idx < 0) return;
+        const current = required[idx] || {};
+        const nextType = patch && patch.type ? inferProgressType(cleanName, patch.type) : inferProgressType(cleanName, current.type);
+        const nextSections = {
+            ...sanitizeReportSections(current.reportSections, cleanName, nextType),
+            ...((patch && patch.reportSections) || {})
+        };
+        required[idx] = {
+            ...current,
+            name: cleanName,
+            type: nextType,
+            source: 'manual',
+            reportSections: sanitizeReportSections(nextSections, cleanName, nextType)
+        };
+        config.requiredItems = required;
+        setDraftProgressConfig(config);
+    }
+
+    function persistProgressDraftLocally() {
+        const progressConfig = getDraftProgressConfig();
+        const stamp = new Date().toISOString();
+        const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        const cleanProgress = sanitizeProgressConfig({
+            ...progressConfig,
+            updatedAt: progressConfig.updatedAt || stamp,
+            updatedBy: progressConfig.updatedBy || actor
+        });
+        localStorage.setItem(INSIGHT_PROGRESS_KEY, JSON.stringify(cleanProgress));
+        setDraftProgressConfig(cleanProgress);
+        return cleanProgress;
     }
 
     function renderMappingTable(config) {
@@ -587,22 +917,41 @@
 
         const rows = withAutoProgressItems(Array.isArray(config.requiredItems) ? config.requiredItems : []);
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No progress items configured.</td></tr>';
+            body.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No progress items configured.</td></tr>';
             return;
         }
 
+        const activeCatalogNames = getAssessmentCatalogNameSet();
         body.innerHTML = rows.map((item, index) => {
-            const typeLabel = String(item.type || '').replace('_', ' ');
-            const sourceLabel = item.source === 'auto' ? 'Auto' : 'Manual';
+            const sections = sanitizeReportSections(item.reportSections, item.name, item.type);
+            const encodedName = encodeURIComponent(item.name);
+            const locked = item.source === 'auto';
+            const missingFromTestEngine = !locked && !activeCatalogNames.has(normalizeText(item.name));
+            const typeHtml = locked
+                ? `<span style="color:var(--text-muted); font-size:0.78rem;">${escapeHtml(String(item.type || '').replace('_', ' '))}</span>`
+                : `<select style="margin:0; width:100%;" onchange="changeInsightProgressType('${encodedName}', this.value)">
+                    <option value="assessment" ${item.type === 'assessment' ? 'selected' : ''}>Assessment</option>
+                    <option value="vetting" ${item.type === 'vetting' ? 'selected' : ''}>Vetting Test</option>
+                    <option value="test" ${item.type === 'test' ? 'selected' : ''}>Test</option>
+                </select>`;
+            const nameHtml = missingFromTestEngine
+                ? `${escapeHtml(item.name)}<div style="margin-top:4px; color:#f1c40f; font-size:0.76rem;">Missing from active Test Engine list</div>`
+                : escapeHtml(item.name);
+            const check = (key, label) => locked
+                ? '<span style="color:var(--text-muted); font-size:0.78rem;">-</span>'
+                : `<input type="checkbox" ${sections[key] ? 'checked' : ''} aria-label="${escapeHtml(label)} for ${escapeHtml(item.name)}" onchange="toggleInsightProgressReportSection('${encodedName}', '${key}', this.checked)">`;
             const actionHtml = item.source === 'auto'
                 ? '<span style="color:var(--text-muted); font-size:0.78rem;">Locked</span>'
-                : `<button class="btn-danger btn-sm" onclick="removeInsightProgressItem('${encodeURIComponent(item.name)}')">Remove</button>`;
+                : `<button class="btn-danger btn-sm" onclick="removeInsightProgressItem('${encodedName}')">Remove</button>`;
             return `
                 <tr>
                     <td>${index + 1}</td>
-                    <td>${escapeHtml(item.name)}</td>
-                    <td>${escapeHtml(typeLabel)}</td>
-                    <td>${escapeHtml(sourceLabel)}</td>
+                    <td>${nameHtml}</td>
+                    <td>${typeHtml}</td>
+                    <td style="text-align:center;">${check('trainingGoal', 'Training Goal Feedback')}</td>
+                    <td style="text-align:center;">${check('assessmentScores', 'Assessment Scores')}</td>
+                    <td style="text-align:center;">${check('vettingTest1', 'Vetting Test 1')}</td>
+                    <td style="text-align:center;">${check('vettingFinal', 'Final Vetting')}</td>
                     <td>${actionHtml}</td>
                 </tr>
             `;
@@ -613,6 +962,8 @@
         const config = getDraftConfig();
         const progressConfig = getDraftProgressConfig();
         const liveRulesConfig = getDraftLiveRulesConfig();
+        const liveBookingRulesConfig = getDraftLiveBookingRulesConfig();
+        const trainingRulesConfig = getDraftTrainingRulesConfig();
         renderAssessmentSelector();
 
         const severitySelect = document.getElementById('insightPresetSeveritySelect');
@@ -629,6 +980,17 @@
         const rulesInput = document.getElementById('liveAssessmentRulesInput');
         if (rulesInput && document.activeElement !== rulesInput && !rulesInput.dataset.dirty) {
             rulesInput.innerHTML = liveRulesConfig.rulesHtml || rulesToLiveRulesHtml(liveRulesConfig.rules);
+        }
+
+        const bookingRulesInput = document.getElementById('liveBookingRulesInput');
+        if (bookingRulesInput && document.activeElement !== bookingRulesInput && !bookingRulesInput.dataset.dirty) {
+            bookingRulesInput.innerHTML = liveBookingRulesConfig.rulesHtml || rulesToLiveRulesHtml(liveBookingRulesConfig.rules);
+        }
+
+        renderTrainingRulesControls(trainingRulesConfig);
+        const trainingInput = document.getElementById('trainingRulesInput');
+        if (trainingInput && document.activeElement !== trainingInput && !trainingInput.dataset.dirty) {
+            trainingInput.innerHTML = trainingRulesConfig.rulesHtml || rulesToLiveRulesHtml(trainingRulesConfig.rules);
         }
     }
 
@@ -663,9 +1025,10 @@
         }
 
         const ok = upsertProgressItem(name);
+        if (ok) persistProgressDraftLocally();
         refreshInsightRulesView();
         if (ok && typeof showToast === 'function') {
-            showToast('Progress item added to draft list.', 'success');
+            showToast('Progress item added. Click Save Presets to sync it to the server.', 'success');
         }
     }
 
@@ -698,6 +1061,20 @@
         const name = decodeURIComponent(String(encodedName || ''));
         if (!name) return;
         removeProgressItem(name);
+        persistProgressDraftLocally();
+        refreshInsightRulesView();
+    }
+
+    function changeInsightProgressType(encodedName, type) {
+        updateProgressItem(encodedName, { type });
+        persistProgressDraftLocally();
+        refreshInsightRulesView();
+    }
+
+    function toggleInsightProgressReportSection(encodedName, sectionKey, enabled) {
+        if (!['trainingGoal', 'assessmentScores', 'vettingTest1', 'vettingFinal'].includes(sectionKey)) return;
+        updateProgressItem(encodedName, { reportSections: { [sectionKey]: enabled === true } });
+        persistProgressDraftLocally();
         refreshInsightRulesView();
     }
 
@@ -736,8 +1113,8 @@
         }
 
         const activeSection = document.querySelector('section.active');
-        if (activeSection && activeSection.id === 'insights' && typeof renderInsightDashboard === 'function') {
-            renderInsightDashboard();
+        if (activeSection && activeSection.id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
+            InsightStudioLoader.refresh();
         }
     }
 
@@ -769,9 +1146,91 @@
         if (typeof showToast === 'function') showToast('Live assessment rules saved.', 'success');
     }
 
+    async function saveLiveBookingRulesConfig() {
+        const input = document.getElementById('liveBookingRulesInput');
+        const rulesHtml = sanitizeLiveRulesHtml(input ? input.innerHTML : '');
+        const lines = htmlToLiveRuleLines(rulesHtml);
+
+        const stamp = new Date().toISOString();
+        const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        const clean = sanitizeLiveBookingRulesConfig({ rules: lines, rulesHtml, updatedAt: stamp, updatedBy: actor });
+
+        localStorage.setItem(LIVE_BOOKING_RULES_KEY, JSON.stringify(clean));
+        setDraftLiveBookingRulesConfig(clean);
+        if (input) {
+            input.innerHTML = clean.rulesHtml;
+            delete input.dataset.dirty;
+        }
+
+        try {
+            if (typeof saveToServer === 'function') {
+                await saveToServer([LIVE_BOOKING_RULES_KEY], true);
+            }
+        } catch (error) {
+            console.warn('[Live Booking Rules] Cloud sync failed:', error);
+        }
+
+        if (typeof renderLiveBookingRulesPanel === 'function') renderLiveBookingRulesPanel();
+        refreshInsightRulesView();
+        if (typeof showToast === 'function') showToast('Live booking rules saved.', 'success');
+    }
+
+    async function saveTrainingRulesConfig() {
+        const input = document.getElementById('trainingRulesInput');
+        const rulesHtml = sanitizeLiveRulesHtml(input ? input.innerHTML : '');
+        const lines = htmlToLiveRuleLines(rulesHtml);
+        const targetMode = String(document.getElementById('trainingRulesTargetMode')?.value || 'all').trim().toLowerCase();
+        const targetUsers = Array.from(document.getElementById('trainingRulesTargetUsers')?.selectedOptions || []).map(opt => opt.value);
+        const targetGroups = Array.from(document.getElementById('trainingRulesTargetGroups')?.selectedOptions || []).map(opt => opt.value);
+        const officeOptions = String(document.getElementById('trainingOfficeOptions')?.value || '')
+            .split(/\r?\n|,/)
+            .map(item => item.trim())
+            .filter(Boolean);
+
+        const stamp = new Date().toISOString();
+        const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        const clean = sanitizeTrainingRulesConfig({
+            rules: lines,
+            rulesHtml,
+            showOnFirstLogin: document.getElementById('trainingRulesFirstLogin')?.checked !== false,
+            showOnLogin: document.getElementById('trainingRulesEveryLogin')?.checked === true,
+            targetMode,
+            targetUsers,
+            targetGroups,
+            officeOptions,
+            updatedAt: stamp,
+            updatedBy: actor
+        });
+
+        localStorage.setItem(TRAINING_RULES_KEY, JSON.stringify(clean));
+        setDraftTrainingRulesConfig(clean);
+        if (input) {
+            input.innerHTML = clean.rulesHtml;
+            delete input.dataset.dirty;
+        }
+
+        try {
+            if (typeof saveToServer === 'function') {
+                await saveToServer([TRAINING_RULES_KEY], true);
+            }
+        } catch (error) {
+            console.warn('[Training Rules] Cloud sync failed:', error);
+        }
+
+        refreshInsightRulesView();
+        if (typeof showToast === 'function') showToast('Training rules and office list saved.', 'success');
+    }
+
     function resetLiveAssessmentRulesDraft() {
         setDraftLiveRulesConfig(getDefaultLiveRulesConfig());
         const input = document.getElementById('liveAssessmentRulesInput');
+        if (input) delete input.dataset.dirty;
+        refreshInsightRulesView();
+    }
+
+    function resetLiveBookingRulesDraft() {
+        setDraftLiveBookingRulesConfig(getDefaultLiveBookingRulesConfig());
+        const input = document.getElementById('liveBookingRulesInput');
         if (input) delete input.dataset.dirty;
         refreshInsightRulesView();
     }
@@ -781,12 +1240,52 @@
         if (input) input.dataset.dirty = '1';
     }
 
+    function markLiveBookingRulesDirty() {
+        const input = document.getElementById('liveBookingRulesInput');
+        if (input) input.dataset.dirty = '1';
+    }
+
     function formatLiveRulesDoc(cmd, value = null) {
         const input = document.getElementById('liveAssessmentRulesInput');
         if (!input) return;
         input.focus();
         document.execCommand(cmd, false, value);
         markLiveAssessmentRulesDirty();
+    }
+
+    function formatLiveBookingRulesDoc(cmd, value = null) {
+        const input = document.getElementById('liveBookingRulesInput');
+        if (!input) return;
+        input.focus();
+        document.execCommand(cmd, false, value);
+        markLiveBookingRulesDirty();
+    }
+
+    function resetTrainingRulesDraft() {
+        setDraftTrainingRulesConfig(getDefaultTrainingRulesConfig());
+        const input = document.getElementById('trainingRulesInput');
+        if (input) delete input.dataset.dirty;
+        refreshInsightRulesView();
+    }
+
+    function markTrainingRulesDirty() {
+        const input = document.getElementById('trainingRulesInput');
+        if (input) input.dataset.dirty = '1';
+    }
+
+    function formatTrainingRulesDoc(cmd, value = null) {
+        const input = document.getElementById('trainingRulesInput');
+        if (!input) return;
+        input.focus();
+        document.execCommand(cmd, false, value);
+        markTrainingRulesDirty();
+    }
+
+    function updateTrainingRulesTargetMode() {
+        const config = getDraftTrainingRulesConfig();
+        config.targetMode = String(document.getElementById('trainingRulesTargetMode')?.value || 'all').trim().toLowerCase();
+        setDraftTrainingRulesConfig(config);
+        renderTrainingRulesControls(getDraftTrainingRulesConfig());
     }
 
     async function resetInsightRuleConfig() {
@@ -834,18 +1333,37 @@
     window.getLiveAssessmentRules = getLiveAssessmentRules;
     window.getLiveAssessmentRulesHtml = getLiveAssessmentRulesHtml;
     window.getLiveAssessmentRulesConfig = getLiveAssessmentRulesConfig;
+    window.getLiveBookingRulesConfig = getLiveBookingRulesConfig;
+    window.getLiveBookingRulesHtml = getLiveBookingRulesHtml;
+    window.getTrainingRulesConfig = getTrainingRulesConfig;
+    window.getTrainingRulesHtml = getTrainingRulesHtml;
+    window.getTrainingOfficeOptions = getTrainingOfficeOptions;
+    window.openTrainingRulesModal = openTrainingRulesModal;
+    window.maybeShowTrainingRulesOnLogin = maybeShowTrainingRulesOnLogin;
+    window.shouldShowTrainingRulesOnLogin = shouldShowTrainingRulesOnLogin;
     window.getInsightProgressRequiredItems = getInsightProgressRequiredItems;
     window.loadAdminInsightRules = function() {
         setDraftConfig(getInsightRuleConfig());
         setDraftProgressConfig(getInsightProgressConfig());
         setDraftLiveRulesConfig(getLiveAssessmentRulesConfig());
+        setDraftLiveBookingRulesConfig(getLiveBookingRulesConfig());
+        setDraftTrainingRulesConfig(getTrainingRulesConfig());
         refreshInsightRulesView();
     };
     window.saveInsightRuleConfig = saveInsightRuleConfig;
     window.saveLiveAssessmentRulesConfig = saveLiveAssessmentRulesConfig;
+    window.saveLiveBookingRulesConfig = saveLiveBookingRulesConfig;
+    window.saveTrainingRulesConfig = saveTrainingRulesConfig;
     window.resetLiveAssessmentRulesDraft = resetLiveAssessmentRulesDraft;
+    window.resetLiveBookingRulesDraft = resetLiveBookingRulesDraft;
+    window.resetTrainingRulesDraft = resetTrainingRulesDraft;
     window.markLiveAssessmentRulesDirty = markLiveAssessmentRulesDirty;
+    window.markLiveBookingRulesDirty = markLiveBookingRulesDirty;
+    window.markTrainingRulesDirty = markTrainingRulesDirty;
     window.formatLiveRulesDoc = formatLiveRulesDoc;
+    window.formatLiveBookingRulesDoc = formatLiveBookingRulesDoc;
+    window.formatTrainingRulesDoc = formatTrainingRulesDoc;
+    window.updateTrainingRulesTargetMode = updateTrainingRulesTargetMode;
     window.resetInsightRuleConfig = resetInsightRuleConfig;
     window.addInsightTriggerPreset = addInsightTriggerPreset;
     window.addInsightProgressItem = addInsightProgressItem;
@@ -853,4 +1371,6 @@
     window.changeInsightRuleThreshold = changeInsightRuleThreshold;
     window.removeInsightRuleByName = removeInsightRuleByName;
     window.removeInsightProgressItem = removeInsightProgressItem;
+    window.changeInsightProgressType = changeInsightProgressType;
+    window.toggleInsightProgressReportSection = toggleInsightProgressReportSection;
 })();

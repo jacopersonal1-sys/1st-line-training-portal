@@ -30,6 +30,8 @@
 | `rosters` | Object | Blob | Group definitions `{ "GroupA": ["User1", "User2"] }`. |
 | `system_config` | Object | Blob | Global settings (Sync rates, Security, Failover). **Protected**. |
 | `live_assessment_rules_config` | Object | Blob | Editable Live Assessment Arena rule text/HTML shown before the first pushed question. |
+| `live_booking_rules_config` | Object | Blob (`app_documents`) | Editable Live Assessment Booking sidebar Rules of Booking text/HTML. |
+| `training_rules_config` | Object | Blob (`app_documents`) | Editable Training Rules shown to trainees on first login and/or every login, with all/user/group targeting plus admin-configured office dropdown options. |
 | `system_tombstones` | Array | Blob | Persistent blacklist of deleted item IDs used to prevent deleted items from being resurrected during sync. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
 | `app_documents` | Object | Blob | Generic JSON storage. Used for `tl_personal_lists`, `tl_backend_data`, `tl_agent_feedback`, `opl_hub_data`, `content_studio_data` (Content Creator workspace). |
@@ -37,6 +39,12 @@
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
 | `violation_reports` | Array | Blob (`app_documents`) | Mandatory trainee explanations for external-app training-scope violations. Stores trigger, reason, platform, person informed, status, and review metadata. |
+| `insight_progress_config` | Object | Blob (`app_documents`) | Agent Progress Builder checklist configuration, including checklist type and Onboard Report section flags. |
+| `insight_rule_config` | Object | Blob (`app_documents`) | Insight severity/threshold trigger mapping. |
+| `live_assessment_rules_config` | Object | Blob (`app_documents`) | Rich-text Live Assessment pre-question rules shown in the arena. |
+| `live_booking_rules_config` | Object | Blob (`app_documents`) | Rich-text Rules of Booking shown in the Live Assessment Booking sidebar and edited from Admin Tools > System Config. |
+| `test_integrity_overrides` | Object | Blob (`app_documents`) | Admin overrides for Test Engine Integrity Review, keyed by whole assessment/live/vetting entry. Stores validity and attempt 1/2 classifications. |
+| `adminDecisions` | Object | Blob (`app_documents`) | Legacy Onboard Report manual review decisions keyed by trainee name; kept for report compatibility. |
 | `liveSessions` | Array | Row (`live_sessions`) | Active state of Live Assessments. |
 | `tests` | Array | Blob | Assessment definitions (Questions, Settings). |
 | `liveBookings` | Array | Row (`live_bookings`) | Scheduled slots for live assessments. |
@@ -163,6 +171,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `loadMarkingQueue()`: Lists pending submissions. Includes "Ghost Data" cleanup to hide invalid retakes and "Auto-Repair" to recover falsely archived tests.
     - `openAdminMarking(id)`: Opens the grading modal.
     - `finalizeAdminMarking(id)`: Saves final scores and creates a permanent `record`.
+    - `submitMarking()`: Legacy modal-button compatibility wrapper that resolves the active submission ID from `#markingSubmitBtn.dataset.submissionId` and routes to `finalizeAdminMarking(...)`.
     - `viewCompletedTest(submissionId, ...)`: Digital script view path is strict by `submissionId`; trainee+assessment fallback lookup is retired to prevent duplicate-attempt misbinding.
 
 #### `js/live_execution.js` (Live Arena)
@@ -249,6 +258,7 @@ Maps local `localStorage` keys to Supabase tables.
 - **Key Functions:**
     - `renderSchedule()`: Delegates the Assessment Schedule tab to `ScheduleStudioLoader` (isolated module render path).
     - `renderLiveTable()`: Renders the Live Assessment booking grid.
+    - `generateLiveTable()`: Legacy Live Booking "Update Dates" compatibility wrapper; saves current live schedule start/duration and rerenders the grid.
     - `confirmBooking()`: Validates and saves a new booking.
     - `editDailyTrainers(date)`: Configures specific trainers for a single day.
     - `openAdminBookingModal()`: Allows Admins to manually assign a trainee to any empty slot.
@@ -293,15 +303,16 @@ Maps local `localStorage` keys to Supabase tables.
     - `sync()`: Pushes `monitor_data` to server.
     - `checkDailyReset()`: Archives daily logs to `monitor_history` at midnight.
 
-#### `js/insight.js` (Analytics)
-- **Responsibility:** Performance dashboards.
+#### `modules/insight_studio/` (Insight)
+- **Responsibility:** Admin/super-admin Insight workspace replacing the retired Training Insight Dashboard.
 - **Key Functions:**
-    - `renderInsightDashboard()`: Renders Action Required / Full Overview.
-    - `calculateAgentStatus()`: Determines if an agent is Critical/Pass based on scores.
-    - `renderProgressView()`: Shows checklist of required assessments vs completed.
+    - `InsightDataService.getAgentDetail(...)`: Builds agent-level status, attendance, activity, content engagement, TL feedback, timeline, and subject-review state.
+    - `InsightDataService.getDepartmentOverview(...)`: Builds department-level health, activity, effort/performance, content engagement, and feedback summaries.
+    - `InsightDataService.buildKnowledgeGaps(...)`: Groups failed questions by assessment, individual, and all groups. A question is failed when its awarded score is below the full available marks, including partial scores like `1/2`.
+    - `InsightApp.renderKnowledgeGaps()`: Renders the Knowledge Gaps sub-view inside Insight.
 
-#### `js/analyticsDashboard.js` (Visuals)
-- **Responsibility:** Charts and Graphs.
+#### `js/analyticsDashboard.js` (Legacy Analytics Helpers)
+- **Responsibility:** Shared analytics helpers retained for Agent Search and tests after the old Training Insight Dashboard view was removed.
 - **Key Functions:**
     - `renderDepartmentDashboard()`: Renders Effort vs Performance matrix.
     - `renderIndividualProfile()`: Renders detailed agent history and risk score.
@@ -312,17 +323,20 @@ Maps local `localStorage` keys to Supabase tables.
     - `renderDashboard()`: Builds the grid layout based on user role.
     - `updateDashboardHealth()`: Reads Active Users instantly from `window.ACTIVE_USERS_CACHE` without hitting the database.
     - `buildNoticeManager()`: Admin tool for posting broadcasts.
+    - **Training Rules Quick Link:** Legacy trainee-dashboard fallback includes a `training_rules` widget that opens the shared Training Rules modal; the isolated Trainee Portal is the primary trainee landing surface.
 
 #### `js/reporting.js` (Reports)
 - **Responsibility:** Onboard Reports and Link Requests.
 - **Key Functions:**
     - `generateReport()`: Aggregates data into a printable format.
+    - `submitInsightReview()`: Legacy Onboard Report review-modal compatibility handler that saves `adminDecisions` and refreshes the report surface.
     - `saveGeneratedReport()`: Saves snapshot to `savedReports`.
     - `requestRecordLink()`: Handles TL requests for assessment links.
 
 #### `js/attendance.js` (Clock In/Out)
 - **Responsibility:** Time tracking.
 - **Key Functions:**
+    - `readAttendanceRecords()`: Safely parses `attendance_records` with `safeLocalParse` fallback and dedupes by trainee/date.
     - `checkAttendanceStatus()`: Prompts user to clock in.
     - `submitClockIn()` / `submitClockOut()`: Saves timestamp.
     - `renderAttendanceRegister()`: Admin view of lates/absences.
@@ -372,6 +386,7 @@ Maps local `localStorage` keys to Supabase tables.
     - Visual widget dashboard with drag/reorder/resize layout persistence per trainee (`trainee_portal_layout_v2_<user>`).
     - Widget actions route to existing host tabs (`assessment-schedule`, `my-tests`, `live-assessment`, `live-execution`, `study-notes`) while keeping trainee runtime isolation boundaries.
     - Attendance + badges + results + notes/clarity metrics are aggregated from trainee-scoped local cache (`records`, `submissions`, `liveBookings`, `attendance_records`, `trainee_bookmarks`).
+    - Training Rules are exposed in the header action row and as a configurable `training_rules` widget, both bridged to host `openTrainingRulesModal()`.
     - Loader bridges module auto-refresh lifecycle directly (start/stop), avoiding duplicate host interval polling.
 
 #### `js/study_notes.js` + `modules/study_notes/` (Study Notes Runtime - Isolated Module)
@@ -468,6 +483,27 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.70 (Live Booking Polish + Rules Config, 2026-05-11):** Live Assessment Booking received a cleaner schedule workspace and now reads Rules of Booking from the synced `live_booking_rules_config` document edited in Admin Tools > System Config. Live trainee stats now count completed live submissions/records as completion evidence even when a booking row is missing. Study Notes pop-out uses an opener-linked notes window so it reads/writes the same local notes store as the main app.
+- **v2.6.69 (Compare Graph Full Selection, 2026-05-08):** Insight Compare Viewer breakdown graphs now render every selected trainee/group row instead of capping at 8, and line colors are generated from a larger hue sequence so larger selections are easier to distinguish.
+- **v2.6.68 (Compare Attempt 1 vs Current Live, 2026-05-08):** Insight Compare Viewer now includes an `Attempt 1 vs Current Live` scope. In this mode, the picker selects trainees and the viewer plots two rows/lines per selected trainee: retrain archive Attempt 1 and the trainee's current live attempt.
+- **v2.6.67 (Retrain Archive Integrity Review, 2026-05-08):** Test Engine Integrity Review now includes `retrain_archives` snapshots as reviewable/editable rows. Admins can filter to Retrain Archives, inspect archive contents (records/submissions/attendance), mark archives Valid/Review/Invalid, classify snapshots as A1/A2, clear archive decisions, or delete confirmed invalid archive snapshots.
+- **v2.6.66 (Retrain Archive Clean Slate, 2026-05-07):** Moving a trainee to another group now archives the outgoing attempt into `retrain_archives`, stores a cleanup summary, and queues exact row-table hard deletes/tombstones for the archived records/submissions/attendance/supporting rows so Supabase cannot rehydrate old attempt clutter into the new live group. Agent Search labels retrain archives by stored attempt number/label and keeps Current Attempt separate.
+- **v2.6.65 (Integrity Review Whole-Entry Overrides, 2026-05-07):** Test Engine Integrity Review now presents each assessment/live/vetting attempt as a whole entry. Admins can mark entries Valid, Review, or Invalid and classify them as Attempt 1 or Attempt 2; these manual decisions persist in the synced `test_integrity_overrides` app document and override the date-gap guess.
+- **v2.6.64 (Test Engine Integrity Review, 2026-05-07):** Added Test Engine > Integrity Review for assessment, live assessment, and vetting entries. It evaluates submission answer coverage, missing test snapshots, manual-question grading completeness, invalid scores, linked record mismatches, suspicious completed 0% entries, and inferred repeat attempts by trainee/title/date gaps. The tool is review-first and deletes only after explicit admin confirmation.
+- **v2.6.63 (Compare Viewer Attempt Scope, 2026-05-06):** Compare Viewer now replaces the Per Person button with an attempt selector for Current Live Attempt, Training Attempt 1 Archive, and Training Attempt 2 Archive. Insight hydrates `retrain_archives`, builds archived comparison rows from the snapshot's records/submissions/attendance/monitor history, and caps visible archive attempts to the first two safe retrain snapshots so broken retain-attempt counts above 2 do not skew release graphs.
+- **v2.6.62 (Compare Viewer Live Data Integrity, 2026-05-06):** Compare Viewer now uses current live roster data only. It excludes blocked or ungrouped agents and filters assessment/submission graph inputs to rows for the agent's current roster group with valid score/date and non-archived/non-deleted/non-invalid status, preventing archived or previous-group records from skewing comparison graphs.
+- **v2.6.61 (Compare Viewer Refinement, 2026-05-06):** Refined Insight Compare Viewer by removing the Metric Shape panel, keeping Ranked Overall, adding a selectable result set for one/multiple trainees or groups, showing selected group members directly when a specific group is chosen, thinning graph lines, replacing unreadable x-axis subject text with numbered labels plus an axis key, and separating performance, attendance, and focus into separate graphs.
+- **v2.6.60 (Compare Viewer Breakdown Graph, 2026-05-06):** Updated Insight Compare Viewer so the graph is a true breakdown line comparison. Each agent or group average now gets one straight polyline across actual scored items (`Assessment: ...`, `Vetting: ...`, `Live: ...`, `Test: ...`) plus Attendance and Focus Level. Group mode averages member values per metric label.
+- **v2.6.59 (Insight Compare Viewer, 2026-05-06):** Added an Insight sub-menu called Compare Viewer with per-person and per-group modes. It builds comparison rows from current Insight live data and graphs assessment, vetting, live assessment, test submission, attendance punctuality, focus, progress, violations, late-coming, and overall score metrics through KPI cards, ranked bars, an SVG metric radar, trend graph, and detailed matrix.
+- **v2.6.58 (External Link Bridge Hotfix, 2026-05-06):** `window.electronAPI.shell.openExternal(...)` now delegates to a main-process `open-external-url` IPC handler instead of calling Electron `shell.openExternal` directly inside preload. This fixes packaged clients where sandboxed preload exposes the function but `shell` is unavailable, which caused cPanel/Webmail links to throw before the browser opened.
+- **v2.6.57 (cPanel/Webmail Compatibility, 2026-05-06):** Study Browser now detects Herotel cPanel/Webmail targets (`cp1.herotel.com`, `cp2.herotel.com`, cPanel/Webmail paths, and standard cPanel ports) and opens them in the system browser instead of the embedded Electron webview because the embedded path can trigger a server-side `500 Internal Server Error` from `cpsrvd`. Activity Monitor also recognises cPanel/Webmail titles as permitted work activity while those program links run externally. Verification included focused `js/study_monitor.js` syntax check, full JavaScript syntax sweep, and Jest suite.
+- **v2.6.56 (Training Rules + Release Readiness, 2026-05-05):** Finalized Training Rules as a configurable Admin Tools > System Config workflow with rich text, first-login display, optional every-login redisplay, and all/user/group targeting. Trainees can open rules from the isolated Trainee Portal and legacy dashboard fallback, and first-time setup now uses the admin-configured Office dropdown. Hardened delete-agent cleanup and attendance parsing against literal `"undefined"` localStorage values, kept partial cloud row-delete failures non-fatal, restored compatibility wrappers for legacy marking/review/live-date buttons, routed dashboard Insight actions to Insight Studio, and configured Windows packaging to use `ico.ico`. Release verification included JS syntax sweep, literal route scan, inline handler scan, Jest suite, and Electron Builder unpacked package check.
+- **v2.6.55 (Agent Progress Catalog + Activity Grace Rules, 2026-05-05):** Agent Progress Builder now builds its add-list from active Test Engine definitions only and flags configured progress rows that are no longer present in the active test list. Added assessment rename propagation from Test Engine/History into linked submissions, records, Insight trigger presets, and Agent Progress mappings. Activity Monitor now treats MS Teams as permitted communication for the first 8 continuous minutes and only captures a violation after that grace window; OS idle also becomes a violation only after more than 8 minutes during monitored hours.
+- **v2.6.54 (Arcade Logo Click + Main Dist Script Release Prep, 2026-05-05):** Hardened the hidden Arcade Vault logo trigger so `#arcade-logo-trigger` is explicitly outside the Electron draggable header region and stops click propagation before the window can maximize/restore. Kept the `dist` script as a main-channel alias for token-based publishing (`npm run dist` -> `npm run dist:main`) alongside explicit `dist:main` and `dist:beta` commands.
+- **v2.6.53 (Arcade Vault Game Pack, 2026-05-04):** Expanded the hidden Arcade Vault with Pong, Memory Match, Simon Says, Typing Speed Challenge, and Tic-Tac-Toe while keeping the existing Tetris, Snake, Space Impact, and Hangman games under the same five-click logo unlock.
+- **v2.6.52 (Arcade Logo Trigger Hotfix, 2026-05-04):** Restored the hidden Arcade Vault unlock by making the top-header logo click target explicit (`#arcade-logo-trigger`) and routing five rapid logo clicks through `handleEasterArcadeLogoClick(...)`. The arcade module still opens local-only games for any user once unlocked.
+- **v2.6.51 (Insight Replacement + Realtime Fallback Controls, 2026-05-04):** Retired the old Training Insight Dashboard route and navigation entry so the new Insight workspace is the single admin insight surface. Added Super Admin Console controls for realtime-tunnel failure fallback polling by server target and role, replacing the previous hardcoded 1-second admin failover with configurable conservative defaults. Hardened Insight data matching across alternate field names (`trainee`, `user`, `username`, `agent`, `email`), included `violation_reports` in activity/violation totals, surfaced explicit `No data` states for missing activity metrics, and added a Knowledge Gaps sub-view that groups below-full-mark questions by assessment, individual, and all groups.
+- **v2.6.50 (Configurable Report Checklist, 2026-05-04):** Extended Admin Tools > System Config > Agent Progress Builder Insight so each checklist item can be classified as Assessment, Vetting Test, or Test and can be ticked into specific Onboard Report sections (`Training Goal Feedback`, `Assessment Scores`, `Vetting Test Scores (Test 1)`, `Vetting Test Scores (Test 2 / Final)`). The Onboard Report now reads those checklist report-section flags first and falls back to the legacy static assessment/vetting lists only when no report mapping is configured. `insight_progress_config`, `insight_rule_config`, and `live_assessment_rules_config` are registered in `DB_SCHEMA` so they are pulled/saved as first-class app document configs, and progress-builder tick changes persist locally immediately before server sync.
 - **v2.6.49 (Study Popout + Violation Review, 2026-05-04):** Added frameless Study Browser/Study Notes popout windows via the preload `studyBrowser.openPopout(...)` bridge, removed native app menus for those windows, and gave popouts custom app-style minimize/maximize/close/navigation controls. Replaced soft external-app warnings with mandatory violation explanation capture (`violation_reports`) including trigger, reason, platform, and restricted informed-person choices (`Darren`, `Netta`, `Jaco`). Added Activity Monitor violation review badges, searchable filters, notification-bell counts, and reviewed-state tracking. Simplified Admin Tools > Manage Users from role buckets into one unified searchable list while preserving filters, details, and actions.
 - **v2.6.48 (Vetting Delivery + Schedule Modal Guardrail, 2026-04-30):** Hardened Vetting Arena 2.0 session launch so the isolated admin runtime loads row-synced `users`, resolves roster/email/contact aliases to canonical trainee usernames, seeds sessions with those usernames, and allows trainee clients to accept a session if their username appears in the session trainee map. Also made both legacy and isolated Schedule Studio edit modals scroll from the top with sticky Save/Cancel footers so schedule edits remain saveable on short screens.
 
@@ -503,6 +539,94 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.70 - 2026-05-11
+
+- Improvement: Live Assessment Booking now has a cleaner schedule workspace with more professional slot cards, admin controls, and rule display.
+- Feature: Rules of Booking are editable from Admin Tools > System Config and sync through `live_booking_rules_config`.
+- Fix: Live trainee stats count completed live submissions and permanent records even if the completed booking row is missing.
+- Fix: Study Notes pop-out opens with the trainee's existing local notes instead of an empty isolated store.
+- Verification: Syntax checks and Jest suite passed.
+
+## v2.6.69 - 2026-05-08
+
+- Fix: Insight Compare Viewer breakdown graphs now render every selected trainee/group instead of only the first 8.
+- Improvement: Compare graph line colors now use a generated hue sequence for more distinct colors on larger selections.
+- Verification: Focused syntax checks, Jest suite, and Electron Builder unpacked package check passed.
+
+## v2.6.68 - 2026-05-08
+
+- Feature: Insight Compare Viewer now includes an `Attempt 1 vs Current Live` scope that plots selected trainees' retrain Attempt 1 archive against their current live attempt.
+- Verification: Focused syntax checks, Jest suite, and Electron Builder unpacked package check passed.
+
+## v2.6.67 - 2026-05-08
+
+- Feature: Test Engine Integrity Review now includes retrain archive snapshots, with flags for repeated snapshots, mixed-trainee data, empty archives, and excess archive attempts.
+- Improvement: Admins can filter to Retrain Archives, inspect archive contents, mark archive snapshots Valid/Review/Invalid, classify them as A1/A2, clear decisions, or delete confirmed invalid archive snapshots.
+- Verification: Focused syntax checks, Jest suite, and Electron Builder unpacked package check passed.
+
+## v2.6.66 - 2026-05-07
+
+- Fix: Retrain migration now archives the outgoing attempt before cleanup and queues exact hard deletes/tombstones for the archived Supabase row-table entries.
+- Improvement: Agent Search now labels retrain archive tabs using the stored attempt label/number and keeps the current live attempt separate from archive history.
+- Verification: Focused syntax checks, Jest suite, and Electron Builder unpacked package check passed.
+
+## v2.6.65 - 2026-05-07
+
+- Improvement: Test Engine Integrity Review now treats each assessment/live/vetting attempt as one whole entry, with question-level answers and marking used only as supporting evidence.
+- Feature: Admins can manually override an integrity entry as Valid, Review, or Invalid and classify it as Attempt 1 or Attempt 2. Overrides persist in `test_integrity_overrides`.
+- Verification: Focused syntax checks, full JavaScript syntax sweep, Jest suite, and Electron Builder unpacked package check passed.
+
+## v2.6.64 - 2026-05-07
+
+- Feature: Test Engine now includes an Integrity Review view for assessment, live assessment, and vetting entries. It flags missing test snapshots, low answer coverage, missing manual grading, invalid scores, submission/record mismatches, suspicious zero-score attempts, and inferred repeat attempts by date gaps.
+- Safety: Integrity Review is review-first. It does not auto-remove entries; admins must explicitly confirm a flagged submission/record deletion.
+- Verification: Focused syntax checks, full JavaScript syntax sweep, Jest suite, and Electron Builder unpacked package check passed.
+
+## v2.6.63 - 2026-05-06
+
+- Improvement: Insight Compare Viewer now replaces the Per Person button with an attempt selector for Current Live Attempt, Training Attempt 1 Archive, and Training Attempt 2 Archive.
+- Fix: Insight now hydrates `retrain_archives` for Compare Viewer and only exposes safe archive attempts 1/2, preventing bogus higher retain-attempt counts from appearing in release graphs.
+- Verification: Focused Insight syntax checks, full JavaScript syntax sweep, Jest suite, and Electron Builder unpacked package check passed.
+
+## v2.6.62 - 2026-05-06
+
+- Fix: Insight Compare Viewer now uses current live roster data only and excludes archived, invalid, blocked, ungrouped, and previous-group rows from comparison graphs.
+- Verification: Focused Insight syntax checks passed.
+
+## v2.6.61 - 2026-05-06
+
+- Improvement: Insight Compare Viewer now removes Metric Shape, adds selectable comparison filters, shows group members for selected groups, and separates assessment/test, attendance, and focus graphs with clearer axis labels.
+- Verification: Focused Insight syntax check passed.
+
+## v2.6.60 - 2026-05-06
+
+- Improvement: Insight Compare Viewer graph now plots straight per-agent/per-group lines across actual breakdown items: assessments, vetting, live assessments, test submissions, attendance, and focus level.
+- Verification: Focused Insight syntax check passed.
+
+## v2.6.59 - 2026-05-06
+
+- Feature: Insight now includes Compare Viewer for per-person and per-group graph comparison across assessment, vetting, live assessment, test, attendance, focus, progress, and activity risk metrics.
+- Verification: Focused Insight syntax checks and Jest suite passed.
+
+## v2.6.58 - 2026-05-06
+
+- Fix: External program links now open through a main-process IPC bridge so cPanel/Webmail links do not crash when packaged preload cannot access Electron `shell` directly.
+- Verification: Focused syntax checks passed for `preload.js`, `electron-main.js`, `js/main.js`, and `js/study_monitor.js`.
+
+## v2.6.57 - 2026-05-06
+
+- Fix: Herotel cPanel/Webmail links now open in the system browser instead of the embedded Electron webview to avoid the `cpsrvd` 500 error seen on `cp1.herotel.com`.
+- Fix: External cPanel/Webmail windows are recognised as permitted work activity by Activity Monitor.
+- Verification: Focused `js/study_monitor.js` syntax check, full JavaScript syntax sweep, and Jest suite passed.
+
+## v2.6.56 - 2026-05-05
+
+- Feature: Training Rules are release-ready with admin rich-text editing, first-login/every-login display controls, all/user/group targeting, trainee portal quick access, and legacy dashboard fallback access.
+- Feature: First-time trainee setup includes the Office dropdown sourced from Admin Tools > System Config.
+- Fix: Delete-agent and attendance flows now tolerate malformed local JSON values such as literal `"undefined"`, and cloud row-delete cleanup failures no longer abort the entire delete action.
+- Fix: Legacy admin modal buttons for marking, Insight review decisions, and Live Booking date updates route to current workflows.
+- Release: Windows packaging now applies `ico.ico`; release checks passed for JS syntax, route targets, inline handlers, Jest, and Electron Builder unpacked packaging.
 
 ## v2.6.33 - 2026-04-28
 
@@ -763,7 +887,12 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
     *   Keep changelog wording concise: use only high-level labels such as `Bug Fix`, `Improvement`, `Feature Added` (no deep technical breakdown).
 
 3.  **Build Command Rules (Token-Based):**
-    *   Ensure scripts are ready so user only needs to provide token:
+    *   Ensure scripts are ready so user only needs to provide token. `npm run dist` must remain a main-channel alias for `npm run dist:main`:
+        ```bash
+        $env:GH_TOKEN="<token>"
+        npm run dist
+        ```
+        or explicitly:
         ```bash
         $env:GH_TOKEN="<token>"
         npm run dist:main

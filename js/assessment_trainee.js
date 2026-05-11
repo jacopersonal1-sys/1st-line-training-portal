@@ -696,6 +696,9 @@ async function submitTest(forceSubmit = false, options = {}) {
     if(btn) { btn.disabled = true; btn.innerText = "Processing..."; }
 
     const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const myGroupId = getCurrentTraineeGroupId();
+    const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
     
     try {
     // FIX: Strict check to prevent false positives ("Already Submitted" error)
@@ -703,8 +706,23 @@ async function submitTest(forceSubmit = false, options = {}) {
         s.testId && window.CURRENT_TEST.id && 
         s.testId.toString() === window.CURRENT_TEST.id.toString() && 
         s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && 
-        !s.archived
+        !isLegacySubmissionForCurrentAttempt(s, myGroupId, latestMoveTs, records)
     );
+    const legacyExisting = subs.find(s =>
+        s.testId && window.CURRENT_TEST.id &&
+        s.testId.toString() === window.CURRENT_TEST.id.toString() &&
+        s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
+        isLegacySubmissionForCurrentAttempt(s, myGroupId, latestMoveTs, records)
+    );
+    if (legacyExisting && !legacyExisting.archived) {
+        legacyExisting.archived = true;
+        legacyExisting.status = legacyExisting.status === 'completed' ? 'retake_allowed' : legacyExisting.status;
+        legacyExisting.lastModified = new Date().toISOString();
+        localStorage.setItem('submissions', JSON.stringify(subs));
+        if (typeof saveToServer === 'function') {
+            await saveToServer(['submissions'], true);
+        }
+    }
     const isRepeatableQuiz = String(window.CURRENT_TEST?.type || '').trim().toLowerCase() === 'quiz';
     if (existing) {
         // If the test was already successfully completed, DO NOT archive it on a forced timeout/kick
@@ -749,7 +767,9 @@ async function submitTest(forceSubmit = false, options = {}) {
         ? calculateAssessmentAutoResult(window.CURRENT_TEST, window.USER_ANSWERS)
         : { autoPoints: 0, maxPoints: 0, percent: 0, needsManual: false };
 
-    const finalPercent = autoResult.percent;
+    const finalPercent = typeof clampAssessmentPercent === 'function'
+        ? clampAssessmentPercent(autoResult.percent)
+        : Math.max(0, Math.min(100, Math.round(Number(autoResult.percent) || 0)));
     const finalStatus = autoResult.needsManual ? 'pending' : 'completed';
     const quizMeta = String(window.CURRENT_TEST?.type || '').toLowerCase() === 'quiz'
         ? buildQuizSubmissionMeta(window.CURRENT_TEST, window.USER_ANSWERS, autoResult)

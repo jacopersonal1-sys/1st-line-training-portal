@@ -33,6 +33,18 @@ function userIdentityMatches(left, right) {
     return !!leftToken && !!rightToken && leftToken === rightToken;
 }
 
+function readAdminUsersJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === 'undefined') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`Admin Users: failed parsing localStorage['${key}']`, error);
+        return fallback;
+    }
+}
+
 function getRoleRank(role) {
     return USER_ROLE_RANK[String(role || '').toLowerCase()] || 0;
 }
@@ -154,6 +166,153 @@ function isRetrainArchiveEntry(entry) {
 
 function readRetrainArchives() {
     return JSON.parse(localStorage.getItem('retrain_archives') || '[]');
+}
+
+function queueRetrainArchiveServerDeletes(archiveData) {
+    if (!archiveData || typeof archiveData !== 'object') return { queued: 0, skipped: 0 };
+
+    const deleteTargets = [
+        { rows: archiveData.records, table: 'records' },
+        { rows: archiveData.submissions, table: 'submissions' },
+        { rows: archiveData.attendance, table: 'attendance' },
+        { rows: archiveData.reports, table: 'saved_reports' },
+        { rows: archiveData.reviews, table: 'insight_reviews' },
+        { rows: archiveData.exemptions, table: 'exemptions' },
+        { rows: archiveData.liveBookings, table: 'live_bookings' },
+        { rows: archiveData.linkRequests, table: 'link_requests' },
+        { rows: archiveData.monitorHistory, table: 'monitor_history' },
+        { rows: archiveData.tlTaskSubmissions, table: 'tl_task_submissions' }
+    ];
+
+    const pendingKey = 'system_pending_deletes';
+    const tombstoneKey = 'system_tombstones';
+    const rawQueue = readAdminUsersJson(pendingKey, []);
+    const rawTombstones = readAdminUsersJson(tombstoneKey, []);
+    const queue = Array.isArray(rawQueue) ? rawQueue : [];
+    const tombstones = Array.isArray(rawTombstones) ? rawTombstones : [];
+    const tombstoneSet = new Set(Array.isArray(tombstones) ? tombstones.map(String) : []);
+    const queueSet = new Set((Array.isArray(queue) ? queue : [])
+        .filter(item => item && item.type === 'id')
+        .map(item => `${item.table}:${item.id}`));
+
+    let queued = 0;
+    let skipped = 0;
+    let tombstoneChanged = false;
+    deleteTargets.forEach(target => {
+        const rows = Array.isArray(target.rows) ? target.rows : [];
+        rows.forEach(row => {
+            const id = row && row.id;
+            if (!id) {
+                skipped += 1;
+                return;
+            }
+            const idValue = String(id);
+            const key = `${target.table}:${idValue}`;
+            if (!queueSet.has(key)) {
+                queue.push({ type: 'id', table: target.table, id: idValue, ts: Date.now(), reason: 'retrain_archive' });
+                queueSet.add(key);
+                queued += 1;
+            }
+            if (!tombstoneSet.has(idValue)) {
+                tombstones.push(idValue);
+                tombstoneSet.add(idValue);
+                tombstoneChanged = true;
+            }
+        });
+    });
+
+    if (queued > 0) localStorage.setItem(pendingKey, JSON.stringify(queue));
+    if (tombstoneChanged) localStorage.setItem(tombstoneKey, JSON.stringify(tombstones));
+    return { queued, skipped };
+}
+
+function getRetrainArchiveDeleteTargets(archiveData) {
+    if (!archiveData || typeof archiveData !== 'object') return [];
+    return [
+        { rows: archiveData.records, table: 'records' },
+        { rows: archiveData.submissions, table: 'submissions' },
+        { rows: archiveData.attendance, table: 'attendance' },
+        { rows: archiveData.reports, table: 'saved_reports' },
+        { rows: archiveData.reviews, table: 'insight_reviews' },
+        { rows: archiveData.exemptions, table: 'exemptions' },
+        { rows: archiveData.liveBookings, table: 'live_bookings' },
+        { rows: archiveData.linkRequests, table: 'link_requests' },
+        { rows: archiveData.monitorHistory, table: 'monitor_history' },
+        { rows: archiveData.tlTaskSubmissions, table: 'tl_task_submissions' }
+    ];
+}
+
+async function executeRetrainArchiveServerDeletes(archiveData) {
+    const client = window.supabaseClient;
+    const summary = { deleted: 0, queued: 0, skipped: 0, failed: [] };
+    if (!client) {
+        const queued = queueRetrainArchiveServerDeletes(archiveData);
+        return { ...summary, queued: queued.queued, skipped: queued.skipped };
+    }
+
+    for (const target of getRetrainArchiveDeleteTargets(archiveData)) {
+        const ids = [...new Set((Array.isArray(target.rows) ? target.rows : [])
+            .map(row => row && row.id)
+            .filter(id => id !== undefined && id !== null && id !== '')
+            .map(String))];
+        const rowCount = Array.isArray(target.rows) ? target.rows.length : 0;
+        summary.skipped += Math.max(0, rowCount - ids.length);
+        if (!ids.length) continue;
+
+        const { error } = await client.from(target.table).delete().in('id', ids);
+        if (error) {
+            summary.failed.push({ table: target.table, ids, error: error.message || String(error) });
+            const pendingKey = 'system_pending_deletes';
+            const tombstoneKey = 'system_tombstones';
+            const queue = readAdminUsersJson(pendingKey, []);
+            const tombstones = readAdminUsersJson(tombstoneKey, []);
+            const queueSet = new Set((Array.isArray(queue) ? queue : [])
+                .filter(item => item && item.type === 'id')
+                .map(item => `${item.table}:${item.id}`));
+            const tombstoneSet = new Set((Array.isArray(tombstones) ? tombstones : []).map(String));
+            ids.forEach(id => {
+                const key = `${target.table}:${id}`;
+                if (!queueSet.has(key)) {
+                    queue.push({ type: 'id', table: target.table, id, ts: Date.now(), reason: 'retrain_archive_direct_delete_failed' });
+                    queueSet.add(key);
+                    summary.queued += 1;
+                }
+                if (!tombstoneSet.has(id)) {
+                    tombstones.push(id);
+                    tombstoneSet.add(id);
+                }
+            });
+            localStorage.setItem(pendingKey, JSON.stringify(queue));
+            localStorage.setItem(tombstoneKey, JSON.stringify(tombstones));
+            continue;
+        }
+        summary.deleted += ids.length;
+    }
+
+    return summary;
+}
+
+async function verifyRetrainArchiveServerCleanup(userName) {
+    const client = window.supabaseClient;
+    const userToken = getUserIdentityToken(userName);
+    const summary = { records: 0, submissions: 0 };
+    if (!client || !userToken) return summary;
+
+    const checks = [
+        { key: 'records', table: 'records' },
+        { key: 'submissions', table: 'submissions' }
+    ];
+
+    for (const check of checks) {
+        const { data, error } = await client.from(check.table).select('id, data').limit(10000);
+        if (error || !Array.isArray(data)) continue;
+        summary[check.key] = data.filter(row => {
+            const payload = row && row.data && typeof row.data === 'object' ? row.data : row;
+            return getUserIdentityToken(payload && (payload.trainee || payload.user || payload.user_id)) === userToken;
+        }).length;
+    }
+
+    return summary;
 }
 
 async function splitLegacyRetrainArchives() {
@@ -501,7 +660,7 @@ async function deleteAgentFromSystem(agentName, groupKey) {
         
         // 4. Wipe Data (Local)
         const wipeData = (key, userField) => {
-            let data = JSON.parse(localStorage.getItem(key) || '[]');
+            let data = readAdminUsersJson(key, []);
             if(Array.isArray(data)) {
                 const originalLen = data.length;
                 // Case insensitive check just to be sure
@@ -529,7 +688,8 @@ async function deleteAgentFromSystem(agentName, groupKey) {
         
         // Object based data
         const wipeObjectData = (key) => {
-            let data = JSON.parse(localStorage.getItem(key) || '{}');
+            let data = readAdminUsersJson(key, {});
+            if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
             Object.keys(data || {}).forEach(objKey => {
                 if (getUserIdentityToken(objKey) === targetToken) delete data[objKey];
             });
@@ -557,7 +717,11 @@ async function deleteAgentFromSystem(agentName, groupKey) {
                 hardDeleteByQuery('access_logs', 'user_id', agentName)
             ];
             
-            await Promise.all(promises);
+            const results = await Promise.allSettled(promises);
+            const failed = results.filter(result => result.status === 'rejected');
+            if (failed.length) {
+                console.warn(`Delete Agent: ${failed.length} cloud row delete operation(s) failed and were left in the pending delete queue.`, failed.map(result => result.reason));
+            }
         }
 
         // 5. Force Sync (Update Blobs)
@@ -1002,23 +1166,48 @@ async function confirmMoveUser() {
         archives.push(archiveData);
         localStorage.setItem('retrain_archives', JSON.stringify(archives));
 
+        // Persist the archive snapshot before clearing live rows. This avoids a half-migration
+        // where deletes succeed but the retrain archive does not reach the server.
+        if(typeof saveToServer === 'function') {
+            await saveToServer(['retrain_archives'], true, true);
+        }
+
+        const deleteSummary = await executeRetrainArchiveServerDeletes(archiveData);
+        archiveData.serverCleanup = {
+            directDeletes: deleteSummary.deleted,
+            queuedDeletes: deleteSummary.queued,
+            skippedRowsWithoutId: deleteSummary.skipped,
+            failedTables: deleteSummary.failed,
+            cleanedAt: new Date().toISOString()
+        };
+        archives = readRetrainArchives();
+        const archiveIndex = archives.findIndex(entry => entry && entry.id === archiveData.id);
+        if (archiveIndex > -1) {
+            archives[archiveIndex] = archiveData;
+            localStorage.setItem('retrain_archives', JSON.stringify(archives));
+        }
+
         // 2. WIPE ACTIVE DATA (Clean Slate)
-        const wipe = (key, field) => {
+        const wipe = (key, fields) => {
+            const fieldList = Array.isArray(fields) ? fields : [fields];
             let data = JSON.parse(localStorage.getItem(key) || '[]');
-            const newData = data.filter(item => getUserIdentityToken((item && item[field]) || '') !== normalizedUserToMove);
+            const newData = data.filter(item => {
+                if (!item) return true;
+                return !fieldList.some(field => getUserIdentityToken(item[field] || '') === normalizedUserToMove);
+            });
             if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
         };
         
         wipe('records', 'trainee');
         wipe('submissions', 'trainee');
         wipe('attendance_records', 'user');
-        wipe('savedReports', 'trainee');
-        wipe('insightReviews', 'trainee');
-        wipe('exemptions', 'trainee');
-        wipe('liveBookings', 'trainee');
-        wipe('linkRequests', 'trainee');
-        wipe('monitor_history', 'user');
-        wipe('tl_task_submissions', 'user');
+        wipe('savedReports', ['trainee', 'user']);
+        wipe('insightReviews', ['trainee', 'user']);
+        wipe('exemptions', ['trainee', 'user']);
+        wipe('liveBookings', ['trainee', 'user']);
+        wipe('linkRequests', ['trainee', 'user']);
+        wipe('monitor_history', ['user', 'user_id']);
+        wipe('tl_task_submissions', ['user', 'trainee']);
         
         let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
         const noteKey = Object.keys(notes).find(k => getUserIdentityToken(k) === normalizedUserToMove);
@@ -1043,8 +1232,22 @@ async function confirmMoveUser() {
             await saveToServer([
                 'rosters', 'retrain_archives', 'records', 'submissions', 'attendance_records',
                 'savedReports', 'insightReviews', 'agentNotes', 'exemptions', 'liveBookings',
-                'linkRequests', 'monitor_history', 'tl_task_submissions'
+                'linkRequests', 'monitor_history', 'tl_task_submissions', 'system_tombstones'
             ], true);
+        }
+
+        const cleanupCheck = await verifyRetrainArchiveServerCleanup(userToMove);
+        const leftoverRows = Number(cleanupCheck.records || 0) + Number(cleanupCheck.submissions || 0);
+        if (leftoverRows > 0) {
+            alert([
+                `${userToMove} was moved to ${targetGid}, but server cleanup still sees old live rows.`,
+                '',
+                `Remaining records: ${cleanupCheck.records || 0}`,
+                `Remaining submissions: ${cleanupCheck.submissions || 0}`,
+                '',
+                'The archive snapshot was saved. Please refresh Data Studio and run Archive + Reset again for this user before they retake assessments.'
+            ].join('\n'));
+            return;
         }
 
         alert(`${userToMove} moved to ${targetGid}. Previous data archived.`);
@@ -1822,7 +2025,7 @@ async function graduateTrainee(username) {
         alert(`${username} has been graduated and archived.`);
         
         // Refresh UI if on Insight page
-        if(typeof renderInsightDashboard === 'function') renderInsightDashboard();
+        if(typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh();
 
     } catch(e) {
         console.error("Graduation Error:", e);

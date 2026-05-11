@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, shell, webFrame } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 // Expose secure, restricted APIs to the frontend
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
     },
     shell: {
-        openExternal: (url) => shell.openExternal(url)
+        openExternal: (url) => ipcRenderer.invoke('open-external-url', url)
     },
     notifications: {
         show: (title, body) => ipcRenderer.send('show-notification', { title, body })

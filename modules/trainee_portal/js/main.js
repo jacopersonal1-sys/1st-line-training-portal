@@ -11,6 +11,7 @@ const TraineePortalApp = {
         { id: 'live_bookings', col: 4, row: 2 },
         { id: 'badges', col: 4, row: 2 },
         { id: 'attendance', col: 3, row: 1 },
+        { id: 'training_rules', col: 3, row: 1 },
         { id: 'available_now', col: 3, row: 1 },
         { id: 'notes_clarity', col: 3, row: 1 },
         { id: 'recent_results', col: 6, row: 2 },
@@ -510,6 +511,16 @@ const TraineePortalApp = {
                             : '<div class="portal-muted">Attendance status captured for today.</div>'}
                 `
             },
+            training_rules: {
+                title: 'Training Rules',
+                icon: 'fa-scale-balanced',
+                hint: 'Open the current training rules.',
+                className: 'widget-training_rules',
+                body: `
+                    <div class="portal-muted">Review the rules and expectations for your current training flow.</div>
+                    <button class="portal-btn primary" style="width:auto; margin-top:8px;" data-action="training-rules"><i class="fas fa-book"></i> Open Rules</button>
+                `
+            },
             available_now: {
                 title: 'Available Now',
                 icon: 'fa-unlock',
@@ -625,6 +636,7 @@ const TraineePortalApp = {
                     const action = String(btn.dataset.action || '');
                     if (action === 'clock-in') this.openClockInModal();
                     if (action === 'clock-out') this.submitClockOut();
+                    if (action === 'training-rules') this.openTrainingRules();
                 });
             });
 
@@ -706,6 +718,7 @@ const TraineePortalApp = {
                         </div>
                         <div class="portal-actions">
                             <button class="portal-btn portal-action-btn" id="tp-refresh-btn"><i class="fas fa-rotate-right"></i> Refresh</button>
+                            <button class="portal-btn portal-action-btn" id="tp-rules-btn"><i class="fas fa-scale-balanced"></i> Training Rules</button>
                             <button class="portal-btn portal-action-btn" id="tp-notes-btn"><i class="fas fa-book-open"></i> Study Notes</button>
                             <button class="portal-btn portal-action-btn" id="tp-network-btn"><i class="fas fa-network-wired"></i> Network Test</button>
                             <button class="portal-btn portal-action-btn ${this.editMode ? 'success' : ''}" id="tp-edit-toggle-btn">
@@ -723,12 +736,14 @@ const TraineePortalApp = {
         `;
 
         const refreshBtn = document.getElementById('tp-refresh-btn');
+        const rulesBtn = document.getElementById('tp-rules-btn');
         const notesBtn = document.getElementById('tp-notes-btn');
         const networkBtn = document.getElementById('tp-network-btn');
         const editToggleBtn = document.getElementById('tp-edit-toggle-btn');
         const resetLayoutBtn = document.getElementById('tp-layout-reset-btn');
 
         if (refreshBtn) refreshBtn.onclick = () => this.refresh({ forcePull: true });
+        if (rulesBtn) rulesBtn.onclick = () => this.openTrainingRules();
         if (notesBtn) notesBtn.onclick = () => this.navigate('study-notes');
         if (networkBtn) networkBtn.onclick = () => this.openNetworkTest();
         if (editToggleBtn) editToggleBtn.onclick = () => this.toggleEditMode();
@@ -744,6 +759,15 @@ const TraineePortalApp = {
             return;
         }
         this.notify('Network diagnostics is not available right now.', 'warning');
+    },
+
+    openTrainingRules() {
+        const host = this.getHost();
+        if (host && typeof host.openTrainingRulesModal === 'function') {
+            host.openTrainingRulesModal();
+            return;
+        }
+        this.notify('Training rules are not available right now.', 'warning');
     },
 
     openClockInModal() {

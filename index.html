@@ -235,7 +235,7 @@
                 <div id="attAdminRefreshState" class="attendance-admin-refresh-state">Live updates paused while this window is open.</div>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
-                <button class="btn-secondary btn-sm" onclick="renderAttendanceRegister({ force: true })" title="Refresh attendance data"><i class="fas fa-sync"></i> Refresh</button>
+                <button class="btn-secondary btn-sm" onclick="refreshAttendanceRegister({ force: true })" title="Refresh attendance data"><i class="fas fa-sync"></i> Refresh</button>
                 <button class="btn-secondary btn-sm" onclick="document.getElementById('attendanceAdminModal').classList.add('hidden')"><i class="fas fa-times"></i></button>
             </div>
         </div>
@@ -295,6 +295,8 @@
         <input type="text" id="questEmail" placeholder="name@example.com">
         <label for="questPhone"><strong>Phone Number</strong></label>
         <input type="text" id="questPhone" placeholder="082 123 4567">
+        <label for="questOffice"><strong>Office</strong></label>
+        <select id="questOffice"></select>
         <label for="questKnowledge"><strong>Knowledge Present Before Training</strong></label>
         <textarea id="questKnowledge" placeholder="Briefly describe your prior experience..." style="height:80px;"></textarea>
         <button class="btn-primary" onclick="saveQuestionnaire()">Save & Continue</button>
@@ -453,9 +455,6 @@
             <i class="fas fa-home"></i><span class="nav-text">Home</span>
         </button>
 
-        <button class="nav-item admin-only" onclick="showTab('insights')" title="Training Insight">
-            <i class="fas fa-brain"></i><span class="nav-text">Training Insight</span>
-        </button>
         <button class="nav-item admin-only" onclick="showTab('insight-studio')" title="Insight">
             <i class="fas fa-magnifying-glass-chart"></i><span class="nav-text">Insight</span>
         </button>
@@ -532,7 +531,9 @@
   <main class="content-wrapper">
       
       <header class="top-header">
-        <div class="nav-brand"><i class="fas fa-layer-group"></i> 1st Line<span>Training</span></div>
+        <div id="arcade-logo-trigger" class="nav-brand" data-arcade-inline="1" onclick="return handleEasterArcadeLogoClick(event)" title="1st Line Training">
+            <i class="fas fa-layer-group"></i> 1st Line<span>Training</span>
+        </div>
         <div style="display:flex; align-items:center; gap:20px;">
             
             <div class="notif-wrapper" style="position:relative;">
@@ -567,20 +568,6 @@
                 <h2>Trainee Portal</h2>
             </div>
             <div id="trainee-portal-content"></div>
-        </section>
-
-        <section id="insights" class="admin-only-section">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h2>Training Insight Dashboard</h2>
-                <div>
-                    <select id="insightGroupFilter" onchange="renderInsightDashboard()" style="width:200px; margin:0;" aria-label="Filter Insight Group">
-                        <option value="">Loading Groups...</option>
-                    </select>
-                </div>
-            </div>
-            <div id="insightGrid" class="insight-grid">
-                <p style="color:var(--text-muted);">Select a group to view insights.</p>
-            </div>
         </section>
 
         <section id="insight-studio" class="admin-only-section">
@@ -748,6 +735,7 @@
             <div class="admin-sub-nav">
                 <button class="sub-tab-btn active" onclick="showTestEngineSub('overview', this)">Overview & Manage</button>
                 <button class="sub-tab-btn" onclick="showTestEngineSub('history', this)">Completed Assessments (History)</button>
+                <button class="sub-tab-btn" onclick="showTestEngineSub('integrity', this)">Integrity Review</button>
                 <button class="sub-tab-btn" onclick="showTestEngineSub('nps', this)">NPS Feedback Config</button>
             </div>
 
@@ -791,6 +779,10 @@
                         <div id="completedHistoryList"></div>
                     </div>
                 </div>
+            </div>
+
+            <div id="engine-view-integrity" class="hidden">
+                <div id="testIntegrityReview"></div>
             </div>
 
             <div id="engine-view-nps" class="hidden">
@@ -977,10 +969,18 @@
                     <input type="text" id="liveBookingSearch" placeholder="Trainee or assessment..." onkeyup="renderLiveTable()">
                 </div>
                 <div id="liveBookingStats" class="workspace-stat-grid"></div>
-        <div class="workspace-rule-box">
-            <h3 style="margin-top:0; color:#F37021;">Rules of Booking</h3>
-            <ul style="margin:0; padding-left:20px; color:var(--text-main);"><li>Trainee is only allowed to book 1 session per hour.</li><li>Do not skip an assessment; rebooking will be difficult.</li><li>Booking times can change depending on the facilitator.</li><li><strong>Cancellation Policy:</strong> Trainees can only cancel 1 session. Further cancellations require Admin approval.</li></ul>
-        </div>
+                <div class="workspace-rule-box live-booking-rules-panel">
+                    <div class="workspace-rule-header">
+                        <div>
+                            <span>Booking Guide</span>
+                            <h3>Rules of Booking</h3>
+                        </div>
+                        <i class="fas fa-clipboard-check"></i>
+                    </div>
+                    <div id="liveBookingRulesDisplay" class="live-rules-display">
+                        <ul><li>Trainees may book only one live assessment session per hour.</li><li>Book assessments in the correct training sequence where possible.</li><li>Booking times may change depending on facilitator availability.</li><li><strong>Cancellation Policy:</strong> trainees can cancel one session; further cancellations require admin approval.</li></ul>
+                    </div>
+                </div>
             </aside>
             <main class="admin-data-main">
         <div class="admin-only hidden live-admin-config">
@@ -1002,7 +1002,7 @@
                 </div>
                 <button class="btn-secondary btn-sm" onclick="forceLiveSync(this)"><i class="fas fa-sync"></i> Refresh Bookings</button>
             </div>
-            <div class="table-responsive"><table class="booking-table responsive-row-card-table"><thead><tr><th style="width:20%;">Date</th><th style="width:20%;">1:00 PM</th><th style="width:20%;">2:00 PM</th><th style="width:20%;">3:00 PM</th><th style="width:20%;">4:00 PM</th></tr></thead><tbody id="liveBookingBody"></tbody></table></div>
+            <div class="table-responsive"><table class="booking-table responsive-row-card-table"><thead><tr><th style="min-width:150px;">Date</th><th style="min-width:150px;">Loading Hours...</th></tr></thead><tbody id="liveBookingBody"></tbody></table></div>
         </div>
             </main>
         </div>
@@ -1169,7 +1169,7 @@
                 <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
                     <h4 style="margin:0 0 10px 0;">Agent Progress Builder Insight</h4>
                     <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
-                        Build the Agent Progress checklist from configured topics/tests. `Onboard Report` and `Insight Review` are auto-included.
+                        Build the Agent Progress checklist from configured topics/tests. `Onboard Report` and `Insight Review` are auto-included. Tick the report columns to include each item in the Onboard Report score sections.
                     </p>
                     <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:10px;">
                         <div style="min-width:300px; flex:1;">
@@ -1184,15 +1184,87 @@
                                 <tr>
                                     <th style="width:60px;">#</th>
                                     <th>Checklist Item</th>
-                                    <th style="width:140px;">Type</th>
-                                    <th style="width:140px;">Source</th>
+                                    <th style="width:150px;">Checklist Type</th>
+                                    <th style="width:90px;">Training Goal</th>
+                                    <th style="width:95px;">Assessment Scores</th>
+                                    <th style="width:90px;">Vetting Test 1</th>
+                                    <th style="width:95px;">Final Vetting</th>
                                     <th style="width:110px;">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="insightProgressTableBody">
-                                <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Loading progress requirements...</td></tr>
+                                <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Loading progress requirements...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
+                    <h4 style="margin:0 0 10px 0;">Training Rules</h4>
+                    <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
+                        These rules are shown to trainees on first login, and can optionally be shown again on every login for all trainees, selected users, or selected groups.
+                    </p>
+                    <div class="grid-2" style="margin-bottom:10px;">
+                        <label style="display:flex; align-items:center; gap:8px; margin:0;">
+                            <input type="checkbox" id="trainingRulesFirstLogin" checked style="width:auto;"> Show on first trainee login
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; margin:0;">
+                            <input type="checkbox" id="trainingRulesEveryLogin" style="width:auto;"> Show again on every login for matching trainees
+                        </label>
+                    </div>
+                    <div class="grid-3" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:10px;">
+                        <div>
+                            <label for="trainingRulesTargetMode">Display Target</label>
+                            <select id="trainingRulesTargetMode" onchange="updateTrainingRulesTargetMode()" style="margin:0;">
+                                <option value="all">All trainees</option>
+                                <option value="users">Specific user(s)</option>
+                                <option value="groups">Specific group(s)</option>
+                            </select>
+                        </div>
+                        <div id="trainingRulesUserTargetBlock" style="display:none;">
+                            <label for="trainingRulesTargetUsers">Target Users</label>
+                            <select id="trainingRulesTargetUsers" multiple size="4" style="margin:0;"></select>
+                        </div>
+                        <div id="trainingRulesGroupTargetBlock" style="display:none;">
+                            <label for="trainingRulesTargetGroups">Target Groups</label>
+                            <select id="trainingRulesTargetGroups" multiple size="4" style="margin:0;"></select>
+                        </div>
+                    </div>
+                    <label for="trainingOfficeOptions">Office Dropdown Options</label>
+                    <textarea id="trainingOfficeOptions" placeholder="One office per line, e.g. Head Office" style="min-height:72px; margin-bottom:10px;"></textarea>
+                    <div class="rich-toolbar" style="margin-bottom:0;">
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatTrainingRulesDoc('bold')" title="Bold"><i class="fas fa-bold"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatTrainingRulesDoc('italic')" title="Italic"><i class="fas fa-italic"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatTrainingRulesDoc('insertUnorderedList')" title="Bullet List"><i class="fas fa-list-ul"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatTrainingRulesDoc('fontSize', '2')" title="Small text">S</button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatTrainingRulesDoc('fontSize', '3')" title="Normal text">M</button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatTrainingRulesDoc('fontSize', '4')" title="Large text">L</button>
+                    </div>
+                    <div id="trainingRulesInput" class="rich-editor live-rules-editor" contenteditable="true" oninput="markTrainingRulesDirty()" data-placeholder="Add training rules, bullets, bold/italic text, and sizing here."></div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+                        <button class="btn-secondary btn-sm" onclick="resetTrainingRulesDraft()" style="width:auto;">Reset Rules</button>
+                        <button class="btn-secondary btn-sm" onclick="openTrainingRulesModal()" style="width:auto;">Preview</button>
+                        <button class="btn-primary btn-sm" onclick="saveTrainingRulesConfig()" style="width:auto;">Save Training Rules</button>
+                    </div>
+                </div>
+
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
+                    <h4 style="margin:0 0 10px 0;">Live Booking Rules</h4>
+                    <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
+                        These rules are shown in the Live Assessment Booking sidebar.
+                    </p>
+                    <div class="rich-toolbar" style="margin-bottom:0;">
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatLiveBookingRulesDoc('bold')" title="Bold"><i class="fas fa-bold"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatLiveBookingRulesDoc('italic')" title="Italic"><i class="fas fa-italic"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatLiveBookingRulesDoc('insertUnorderedList')" title="Bullet List"><i class="fas fa-list-ul"></i></button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatLiveBookingRulesDoc('fontSize', '2')" title="Small text">S</button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatLiveBookingRulesDoc('fontSize', '3')" title="Normal text">M</button>
+                        <button class="btn-tool" onmousedown="event.preventDefault(); formatLiveBookingRulesDoc('fontSize', '4')" title="Large text">L</button>
+                    </div>
+                    <div id="liveBookingRulesInput" class="rich-editor live-rules-editor" contenteditable="true" oninput="markLiveBookingRulesDirty()" data-placeholder="Add booking-page rules, bullets, bold/italic text, and sizing here."></div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+                        <button class="btn-secondary btn-sm" onclick="resetLiveBookingRulesDraft()" style="width:auto;">Reset Rules</button>
+                        <button class="btn-primary btn-sm" onclick="saveLiveBookingRulesConfig()" style="width:auto;">Save Booking Rules</button>
                     </div>
                 </div>
 
@@ -1645,7 +1717,6 @@
 <script src="js/admin_grading.js"></script> <script src="js/schedule.js"></script>
 <script src="js/reporting.js"></script>
 <script src="js/forms.js"></script> 
-<script src="js/insight.js"></script>
 <script src="js/assessment_core.js"></script>
 <script src="js/assessment_quiz_flow.js"></script>
 <script src="js/assessment_admin.js"></script>
@@ -1657,6 +1728,7 @@
 <script src="js/content_studio_loader.js"></script>
 <script src="js/insight_studio_loader.js"></script>
 <script src="js/admin_history.js"></script>
+<script src="js/test_integrity_review.js"></script>
 <script src="js/attendance.js"></script>
 <script src="js/study_monitor.js"></script>
 <script src="js/analyticsDashboard.js"></script>

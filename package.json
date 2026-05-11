@@ -1,6 +1,6 @@
 {
   "name": "1st-line-training-portal",
-  "version": "2.6.49",
+  "version": "2.6.70",
   "description": "Training Portal Cloud Edition",
   "main": "electron-main.js",
   "scripts": {
@@ -37,6 +37,7 @@
       }
     ],
     "win": {
+      "icon": "ico.ico",
       "target": [
         "nsis"
       ]

@@ -753,6 +753,33 @@ function loadAdminTheme() {
         }
     }
 
+    if (colorInput && !document.getElementById('themeNavigationContainer')) {
+        const container = document.createElement('div');
+        container.id = 'themeNavigationContainer';
+        container.style.marginTop = '20px';
+        container.style.paddingTop = '15px';
+        container.style.borderTop = '1px dashed var(--border-color)';
+        container.innerHTML = `
+            <label for="themeNavigationView" style="display:block; margin-bottom:10px; font-weight:bold;">Admin View Arrangement</label>
+            <select id="themeNavigationView" onchange="setAdminNavigationView(this.value)" style="width:100%; margin-bottom:6px;">
+                <option value="classic">Classic Sidebar</option>
+                <option value="advanced-minimal">Advanced Minimal Groups</option>
+            </select>
+            <div style="font-size:0.7rem; color:var(--text-muted);">Changes the sidebar grouping for Admin, Super Admin, and Team Leader sessions on this PC.</div>
+        `;
+        const densityContainer = document.getElementById('themeDensityContainer');
+        const zoomContainer = document.getElementById('themeZoomContainer');
+        if (densityContainer && densityContainer.parentNode) {
+            densityContainer.parentNode.insertBefore(container, densityContainer.nextSibling);
+        } else if (zoomContainer && zoomContainer.parentNode) {
+            zoomContainer.parentNode.insertBefore(container, zoomContainer.nextSibling);
+        } else if (wallInput && wallInput.parentNode) {
+            wallInput.parentNode.insertBefore(container, wallInput.nextSibling);
+        } else if (colorInput.parentNode) {
+            colorInput.parentNode.insertBefore(container, colorInput.nextSibling);
+        }
+    }
+
     if (colorInput) colorInput.value = localTheme.primaryColor || '#F37021';
     if (wallInput) wallInput.value = localTheme.wallpaper || '';
     
@@ -763,6 +790,12 @@ function loadAdminTheme() {
     const densityInput = document.getElementById('themeDensity');
     if (densityInput) {
         densityInput.value = (typeof getCurrentUIDensity === 'function') ? getCurrentUIDensity() : (localTheme.density || 'comfortable');
+    }
+
+    const navigationInput = document.getElementById('themeNavigationView');
+    if (navigationInput) {
+        const storedNavigation = localStorage.getItem('admin_nav_view') || localTheme.navigationView || 'classic';
+        navigationInput.value = storedNavigation === 'advanced-minimal' ? 'advanced-minimal' : 'classic';
     }
     
     const zoomInput = document.getElementById('themeZoom');
@@ -825,22 +858,27 @@ async function saveThemeSettings() {
     const bgColor = document.getElementById('themeBgColor') ? document.getElementById('themeBgColor').value : '#1A1410';
     const zoom = document.getElementById('themeZoom') ? parseFloat(document.getElementById('themeZoom').value) : 1.0;
     const density = document.getElementById('themeDensity') ? document.getElementById('themeDensity').value : (localStorage.getItem('ui_density') || 'comfortable');
+    const navigationView = document.getElementById('themeNavigationView') ? document.getElementById('themeNavigationView').value : (localStorage.getItem('admin_nav_view') || 'classic');
     
     const themeConfig = {
         primaryColor: color,
         backgroundColor: bgColor,
         wallpaper: wallpaper,
         zoomLevel: zoom,
-        density: density
+        density: density,
+        navigationView: navigationView
     };
     
     // Save locally only
     localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));
     localStorage.setItem('ui_density', density);
+    localStorage.setItem('admin_nav_view', navigationView === 'advanced-minimal' ? 'advanced-minimal' : 'classic');
     
     if (typeof applyUserTheme === 'function') applyUserTheme();
+    if (typeof applyConfiguredNavigationView === 'function') applyConfiguredNavigationView();
+    if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
     
-    alert("Theme & Zoom Saved (Local PC Only)!");
+    alert("Theme, Zoom & View Saved (Local PC Only)!");
 }
 
 // --- SECTION 6: SYSTEM HEALTH & RESET ---
@@ -1011,6 +1049,22 @@ function openSuperAdminConfig() {
         };
     }
     const getR = (env, role, def) => (envRates[env] && envRates[env][role]) ? envRates[env][role] / 1000 : def;
+    const rawFallbackRates = config.realtime_fallback_rates || {};
+    let fallbackEnvRates = rawFallbackRates;
+    if (typeof rawFallbackRates.admin !== 'undefined') {
+        fallbackEnvRates = {
+            cloud: { admin: rawFallbackRates.admin, teamleader: rawFallbackRates.teamleader, trainee: rawFallbackRates.trainee },
+            local: { admin: rawFallbackRates.admin, teamleader: rawFallbackRates.teamleader, trainee: rawFallbackRates.trainee },
+            staging: { admin: rawFallbackRates.admin, teamleader: rawFallbackRates.teamleader, trainee: rawFallbackRates.trainee }
+        };
+    } else if (!fallbackEnvRates.cloud) {
+        fallbackEnvRates = {
+            cloud: { admin: 30000, teamleader: 60000, trainee: 60000 },
+            local: { admin: 15000, teamleader: 30000, trainee: 30000 },
+            staging: { admin: 30000, teamleader: 60000, trainee: 60000 }
+        };
+    }
+    const getFallbackR = (env, role, def) => (fallbackEnvRates[env] && fallbackEnvRates[env][role]) ? fallbackEnvRates[env][role] / 1000 : def;
     const att = config.attendance || { work_start: "08:00", work_end: "17:00", reminder_start: "16:45", late_cutoff: "08:15" };
     const sec = config.security || { maintenance_mode: false, min_version: "0.0.0", banned_clients: [] };
     const feat = config.features || {};
@@ -1150,6 +1204,35 @@ function openSuperAdminConfig() {
                                             <td><input type="number" id="sa_sync_staging_admin" value="${getR('staging','admin',4)}" style="width:80px; margin:0;"></td>
                                             <td><input type="number" id="sa_sync_staging_tl" value="${getR('staging','teamleader',60)}" style="width:80px; margin:0;"></td>
                                             <td><input type="number" id="sa_sync_staging_trainee" value="${getR('staging','trainee',15)}" style="width:80px; margin:0;"></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card" style="margin-bottom: 15px; border-left:4px solid #3498db;">
+                            <h4><i class="fas fa-wifi"></i> Realtime Tunnel Failure Fallback Polling (Seconds)</h4>
+                            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0;">Used only while realtime is unhealthy. Keep this conservative to protect Supabase query load.</p>
+                            <div class="table-responsive">
+                                <table class="admin-table compressed-table" style="margin:0;">
+                                    <thead><tr><th>Server</th><th>Admin</th><th>Team Leader</th><th>Trainee</th></tr></thead>
+                                    <tbody>
+                                        <tr>
+                                            <td><i class="fas fa-cloud" style="color:#3498db;"></i> Cloud</td>
+                                            <td><input type="number" min="5" id="sa_rt_cloud_admin" value="${getFallbackR('cloud','admin',30)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" min="5" id="sa_rt_cloud_tl" value="${getFallbackR('cloud','teamleader',60)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" min="5" id="sa_rt_cloud_trainee" value="${getFallbackR('cloud','trainee',60)}" style="width:80px; margin:0;"></td>
+                                        </tr>
+                                        <tr>
+                                            <td><i class="fas fa-server" style="color:#9b59b6;"></i> Local</td>
+                                            <td><input type="number" min="5" id="sa_rt_local_admin" value="${getFallbackR('local','admin',15)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" min="5" id="sa_rt_local_tl" value="${getFallbackR('local','teamleader',30)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" min="5" id="sa_rt_local_trainee" value="${getFallbackR('local','trainee',30)}" style="width:80px; margin:0;"></td>
+                                        </tr>
+                                        <tr>
+                                            <td><i class="fas fa-flask" style="color:#f1c40f;"></i> Staging</td>
+                                            <td><input type="number" min="5" id="sa_rt_staging_admin" value="${getFallbackR('staging','admin',30)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" min="5" id="sa_rt_staging_tl" value="${getFallbackR('staging','teamleader',60)}" style="width:80px; margin:0;"></td>
+                                            <td><input type="number" min="5" id="sa_rt_staging_trainee" value="${getFallbackR('staging','trainee',60)}" style="width:80px; margin:0;"></td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -1951,6 +2034,24 @@ async function saveSuperAdminConfig() {
             admin: parseInt(getVal('sa_sync_staging_admin', '4')) * 1000,
             teamleader: parseInt(getVal('sa_sync_staging_tl', '60')) * 1000,
             trainee: parseInt(getVal('sa_sync_staging_trainee', '15')) * 1000
+        }
+    };
+    const fallbackSeconds = (id, def) => Math.max(5, parseInt(getVal(id, String(def))) || def) * 1000;
+    config.realtime_fallback_rates = {
+        cloud: {
+            admin: fallbackSeconds('sa_rt_cloud_admin', 30),
+            teamleader: fallbackSeconds('sa_rt_cloud_tl', 60),
+            trainee: fallbackSeconds('sa_rt_cloud_trainee', 60)
+        },
+        local: {
+            admin: fallbackSeconds('sa_rt_local_admin', 15),
+            teamleader: fallbackSeconds('sa_rt_local_tl', 30),
+            trainee: fallbackSeconds('sa_rt_local_trainee', 30)
+        },
+        staging: {
+            admin: fallbackSeconds('sa_rt_staging_admin', 30),
+            teamleader: fallbackSeconds('sa_rt_staging_tl', 60),
+            trainee: fallbackSeconds('sa_rt_staging_trainee', 60)
         }
     };
     

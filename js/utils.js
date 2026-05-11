@@ -377,6 +377,80 @@ function getCurrentProfileGroups(username) {
     return labels;
 }
 
+function getCurrentRosterGroupIdsForUser(username) {
+    const groups = [];
+    try {
+        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const target = getProfileIdentityToken(username);
+        Object.entries(rosters || {}).forEach(([gid, members]) => {
+            if (!Array.isArray(members)) return;
+            if (members.some(m => getProfileIdentityToken(m) === target)) groups.push(String(gid));
+        });
+    } catch (e) {}
+    return groups;
+}
+
+function getLatestRetrainMoveTimestamp(username) {
+    const target = getProfileIdentityToken(username);
+    if (!target) return 0;
+    let archives = [];
+    try {
+        archives = JSON.parse(localStorage.getItem('retrain_archives') || '[]') || [];
+        const legacyMoved = JSON.parse(localStorage.getItem('graduated_agents') || '[]') || [];
+        archives = archives.concat(legacyMoved.filter(entry => String((entry && entry.reason) || '').trim().toLowerCase().startsWith('moved to ')));
+    } catch (e) {
+        archives = [];
+    }
+
+    const times = archives
+        .filter(entry => getProfileIdentityToken(entry && (entry.user || entry.username || entry.trainee)) === target)
+        .map(entry => Date.parse(entry && (entry.movedDate || entry.graduatedDate || entry.date || 0)))
+        .filter(ts => Number.isFinite(ts) && ts > 0);
+    return times.length ? Math.max(...times) : 0;
+}
+
+function getLifecycleRowTimestamp(row) {
+    const raw = row && (row.lastEditedDate || row.lastModified || row.updatedAt || row.createdAt || row.submittedAt || row.date);
+    const ts = Date.parse(raw || 0);
+    return Number.isFinite(ts) ? ts : 0;
+}
+
+function isRowInCurrentTraineeLifecycle(row, options = {}) {
+    if (!row) return false;
+    if (!options.includeArchived && row.archived === true) return false;
+    if (!options.includeRetakeAllowed && String(row.status || '').toLowerCase() === 'retake_allowed') return false;
+    const trainee = row.trainee || row.user || row.user_id || row.username;
+    const target = getProfileIdentityToken(trainee);
+    if (!target) return true;
+
+    const currentGroups = options.currentGroups || getCurrentRosterGroupIdsForUser(trainee);
+    const latestMoveTs = options.latestMoveTs !== undefined ? Number(options.latestMoveTs) : getLatestRetrainMoveTimestamp(trainee);
+    if (!currentGroups.length || !latestMoveTs) return true;
+
+    const groupID = String(row.groupID || row.groupId || row.group || '').trim();
+    if (groupID && currentGroups.includes(groupID)) return true;
+    if (groupID && !currentGroups.includes(groupID)) return false;
+
+    const rowTs = getLifecycleRowTimestamp(row);
+    return !(rowTs && rowTs <= latestMoveTs);
+}
+
+function filterRowsToCurrentTraineeLifecycle(rows, options = {}) {
+    const cache = new Map();
+    return (Array.isArray(rows) ? rows : []).filter(row => {
+        const trainee = row && (row.trainee || row.user || row.user_id || row.username);
+        const key = getProfileIdentityToken(trainee);
+        if (!key) return isRowInCurrentTraineeLifecycle(row, options);
+        if (!cache.has(key)) {
+            cache.set(key, {
+                currentGroups: getCurrentRosterGroupIdsForUser(trainee),
+                latestMoveTs: getLatestRetrainMoveTimestamp(trainee)
+            });
+        }
+        return isRowInCurrentTraineeLifecycle(row, { ...options, ...cache.get(key) });
+    });
+}
+
 function isPasswordHashValue(pass) {
     return !!pass && String(pass).length === 64 && /^[0-9a-fA-F]+$/.test(String(pass));
 }
@@ -389,7 +463,10 @@ function getProfileCompletionMeta(user) {
         !!String(data.phone || '').trim(),
         !!String(data.contactPreference || '').trim()
     ];
-    if (isTrainee) checks.push(!!String(data.knowledge || '').trim());
+    if (isTrainee) {
+        checks.push(!!String(data.office || '').trim());
+        checks.push(!!String(data.knowledge || '').trim());
+    }
     const completed = checks.filter(Boolean).length;
     const total = checks.length;
     const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -470,6 +547,7 @@ window.openUnifiedProfileSettings = function() {
     const profileData = (profileUser.traineeData && typeof profileUser.traineeData === 'object') ? profileUser.traineeData : {};
     const profileEmail = String(profileData.email || '').trim();
     const profilePhone = String(profileData.phone || '').trim();
+    const profileOffice = String(profileData.office || '').trim();
     const profileContactPreference = String(profileData.contactPreference || '').trim().toLowerCase();
     const defaultContactPreference = profileContactPreference || (profileEmail ? 'email' : (profilePhone ? 'phone' : 'email'));
     const roleSpecificLabel = isTrainee ? 'Training Background' : 'Role Notes';
@@ -490,6 +568,12 @@ window.openUnifiedProfileSettings = function() {
         : (isTeamLeader
             ? 'Keep this profile current so admin and operations teams can coordinate escalation and communication quickly.'
             : 'Maintain your profile details for secure access and support.');
+    const officeOptions = (typeof getTrainingOfficeOptions === 'function')
+        ? getTrainingOfficeOptions()
+        : ['Head Office', 'Regional Office', 'Remote'];
+    const officeOptionsHtml = Array.from(new Set((officeOptions || []).map(v => String(v || '').trim()).filter(Boolean)))
+        .map(office => `<option value="${safeAttr(office)}" ${profileOffice.toLowerCase() === office.toLowerCase() ? 'selected' : ''}>${safeAttr(office)}</option>`)
+        .join('');
     
     const modalHtml = `
         <div id="profileSettingsModal" class="modal-overlay" style="z-index:10005;">
@@ -541,10 +625,15 @@ window.openUnifiedProfileSettings = function() {
                             </select>
                         </div>
                         <div>
-                            <label style="font-size:0.8rem;">Assigned Group(s)</label>
-                            <input type="text" value="${safeAttr(myGroup)}" disabled>
+                            <label style="font-size:0.8rem;">Office</label>
+                            <select id="profOffice">
+                                <option value="">-- Select Office --</option>
+                                ${officeOptionsHtml}
+                            </select>
                         </div>
                     </div>
+                    <label style="font-size:0.8rem;">Assigned Group(s)</label>
+                    <input type="text" value="${safeAttr(myGroup)}" disabled style="margin-bottom:8px;">
                     <label style="font-size:0.8rem;">${roleSpecificLabel}</label>
                     <textarea id="profKnowledge" placeholder="${safeAttr(roleSpecificPlaceholder)}" style="min-height:90px;">${safeAttr(roleSpecificValue)}</textarea>
                 </div>
@@ -847,14 +936,17 @@ window.saveProfileSettings = async function() {
             if (!users[profileSnapshot.idx].traineeData || typeof users[profileSnapshot.idx].traineeData !== 'object') {
                 users[profileSnapshot.idx].traineeData = {};
             }
+            const role = String(users[profileSnapshot.idx].role || CURRENT_USER?.role || '').toLowerCase().trim();
 
             const email = String(getVal('profEmail') || '').trim();
             const phone = String(getVal('profPhone') || '').trim();
+            const office = String(getVal('profOffice') || '').trim();
             const contactPref = String(getVal('profContactPreference') || 'email').trim().toLowerCase();
             const knowledge = String(getVal('profKnowledge') || '').trim();
 
             users[profileSnapshot.idx].traineeData.email = email;
             users[profileSnapshot.idx].traineeData.phone = phone;
+            users[profileSnapshot.idx].traineeData.office = office;
             users[profileSnapshot.idx].traineeData.contactPreference = contactPref;
             users[profileSnapshot.idx].traineeData.contact = [email, phone].filter(Boolean).join(' | ');
             users[profileSnapshot.idx].traineeData.knowledge = knowledge;
@@ -862,9 +954,8 @@ window.saveProfileSettings = async function() {
             users[profileSnapshot.idx].lastModified = new Date().toISOString();
             users[profileSnapshot.idx].modifiedBy = (CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'self';
 
-            const role = String(users[profileSnapshot.idx].role || '').toLowerCase().trim();
             if (role === 'trainee') {
-                const complete = !!email && !!phone && !!knowledge;
+                const complete = !!email && !!phone && !!office && !!knowledge;
                 users[profileSnapshot.idx].hasFilledQuestionnaire = complete;
             }
 

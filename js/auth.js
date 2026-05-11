@@ -820,8 +820,39 @@ async function autoLogin() {
 }
 
 function checkFirstTimeLogin() {
-    if (CURRENT_USER.role === 'trainee' && !CURRENT_USER.hasFilledQuestionnaire) {
+    if (CURRENT_USER.role !== 'trainee') return;
+    let isFirstLogin = !CURRENT_USER.hasFilledQuestionnaire;
+
+    if (typeof getCurrentQuestionnaireUser === 'function' && typeof isTraineeQuestionnaireComplete === 'function') {
+        try {
+            const { users, idx, user } = getCurrentQuestionnaireUser();
+            if (user && isTraineeQuestionnaireComplete(user)) {
+                isFirstLogin = false;
+                if (idx > -1 && users[idx].hasFilledQuestionnaire !== true) {
+                    users[idx].hasFilledQuestionnaire = true;
+                    localStorage.setItem('users', JSON.stringify(users));
+                    if (typeof secureFormSave === 'function') secureFormSave();
+                }
+                if (typeof syncCurrentQuestionnaireSession === 'function') {
+                    syncCurrentQuestionnaireSession(users[idx] || user);
+                } else {
+                    CURRENT_USER.hasFilledQuestionnaire = true;
+                    CURRENT_USER.traineeData = (users[idx] || user).traineeData || CURRENT_USER.traineeData || {};
+                    sessionStorage.setItem('currentUser', JSON.stringify(CURRENT_USER));
+                    if (typeof persistAppSession === 'function') persistAppSession(CURRENT_USER);
+                }
+            }
+        } catch (error) {
+            console.warn('First-time questionnaire state check failed:', error);
+        }
+    }
+
+    if (isFirstLogin) {
+        if (typeof populateQuestionnaireOfficeOptions === 'function') populateQuestionnaireOfficeOptions();
         document.getElementById('questionnaireModal').classList.remove('hidden');
+    }
+    if (typeof maybeShowTrainingRulesOnLogin === 'function') {
+        maybeShowTrainingRulesOnLogin(isFirstLogin);
     }
 }
 
@@ -891,7 +922,7 @@ function applyRolePermissions() {
       adminPanelBtn.style.overflow = '';
 
       // Visibility Logic: Only for Admins
-      if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
+      if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
           adminPanelBtn.classList.remove('hidden');
       } else {
           adminPanelBtn.classList.add('hidden');

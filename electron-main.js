@@ -163,6 +163,60 @@ function isTrustedStudyUrl(rawUrl = '') {
     }
 }
 
+function isCpanelCompatibilityUrl(rawUrl = '') {
+    try {
+        const parsed = new URL(rawUrl);
+        const host = parsed.hostname.toLowerCase();
+        const port = String(parsed.port || '').trim();
+        const pathName = String(parsed.pathname || '').toLowerCase();
+        return (
+            host === 'cp1.herotel.com' ||
+            host === 'cp2.herotel.com' ||
+            (host.endsWith('.herotel.com') && (
+                pathName.includes('/cpsess') ||
+                pathName.includes('/cpanel') ||
+                pathName.includes('/webmail') ||
+                pathName.includes('/xfercpanel') ||
+                ['2082', '2083', '2086', '2087', '2095', '2096'].includes(port)
+            ))
+        );
+    } catch (error) {
+        return false;
+    }
+}
+
+function isCpanelTransferUrl(rawUrl = '') {
+    try {
+        const parsed = new URL(rawUrl);
+        return parsed.pathname.toLowerCase().includes('/xfercpanel');
+    } catch (error) {
+        return false;
+    }
+}
+
+function getStudyChildWindowOptions(parentWindow) {
+    return {
+        width: 1380,
+        height: 900,
+        minWidth: 900,
+        minHeight: 560,
+        parent: parentWindow || undefined,
+        modal: false,
+        show: true,
+        title: 'Study Browser',
+        icon: path.join(__dirname, 'ico.ico'),
+        backgroundColor: '#ffffff',
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition: STUDY_SESSION_PARTITION,
+            backgroundThrottling: false,
+            webviewTag: false,
+            devTools: !app.isPackaged
+        }
+    };
+}
+
 function configureStudySession() {
     if (studySessionConfigured) return;
 
@@ -564,6 +618,25 @@ function buildStudyPopoutHtml({ url, title, kind }) {
     const urlLabel = document.getElementById('url-label');
     const back = document.getElementById('back');
     const forward = document.getElementById('forward');
+    const isCpanelUrl = (url) => {
+      try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.toLowerCase();
+        const port = String(parsed.port || '').trim();
+        const pathName = String(parsed.pathname || '').toLowerCase();
+        return host === 'cp1.herotel.com' ||
+          host === 'cp2.herotel.com' ||
+          (host.endsWith('.herotel.com') && (
+            pathName.includes('/cpsess') ||
+            pathName.includes('/cpanel') ||
+            pathName.includes('/webmail') ||
+            pathName.includes('/xfercpanel') ||
+            ['2082', '2083', '2086', '2087', '2095', '2096'].includes(port)
+          ));
+      } catch (error) {
+        return false;
+      }
+    };
     const updateNav = () => {
       try {
         back.disabled = !webview.canGoBack();
@@ -622,6 +695,12 @@ function openStudyPopoutWindow(payload = {}) {
 
     popout.setMenuBarVisibility(false);
     popout.webContents.setWindowOpenHandler(({ url }) => {
+        if (isCpanelTransferUrl(url)) {
+            return {
+                action: 'allow',
+                overrideBrowserWindowOptions: getStudyChildWindowOptions(popout)
+            };
+        }
         if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
             shell.openExternal(url);
             return { action: 'deny' };
@@ -643,6 +722,12 @@ app.on('web-contents-created', (event, contents) => {
     if (contents.getType() === 'webview') {
         contents.setWindowOpenHandler(({ url }) => {
             const ownerWindow = BrowserWindow.fromWebContents(contents.hostWebContents || contents);
+            if (isCpanelTransferUrl(url)) {
+                return {
+                    action: 'allow',
+                    overrideBrowserWindowOptions: getStudyChildWindowOptions(ownerWindow || mainWindow)
+                };
+            }
             if (ownerWindow && studyPopoutWindows.has(ownerWindow)) {
                 if (url) shell.openExternal(url);
                 return { action: 'deny' };
@@ -652,11 +737,34 @@ app.on('web-contents-created', (event, contents) => {
             }
             return { action: 'deny' }; // Prevent the external Electron window from opening
         });
+        contents.on('did-create-window', (childWindow, details) => {
+            if (!childWindow || !isCpanelTransferUrl(details?.url || '')) return;
+            childWindow.setMenuBarVisibility(false);
+            childWindow.webContents.setWindowOpenHandler(({ url }) => {
+                if (isCpanelTransferUrl(url)) {
+                    return {
+                        action: 'allow',
+                        overrideBrowserWindowOptions: getStudyChildWindowOptions(childWindow)
+                    };
+                }
+                if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+                    shell.openExternal(url);
+                }
+                return { action: 'deny' };
+            });
+        });
     }
 });
 
 ipcMain.handle('open-study-popout', async (event, payload) => {
     openStudyPopoutWindow(payload);
+    return true;
+});
+
+ipcMain.handle('open-external-url', async (event, rawUrl) => {
+    const url = String(rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(url)) return false;
+    await shell.openExternal(url);
     return true;
 });
 
@@ -1057,6 +1165,10 @@ ipcMain.on('start-activity-monitor', (event) => {
     activityMonitorInterval = setInterval(() => {
         if (!mainWindow) return;
         const osIdleSeconds = powerMonitor.getSystemIdleTime();
+        if (mainWindow.isFocused()) {
+            mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow: '1st Line Training Portal [electron]' });
+            return;
+        }
         
         if (process.platform === 'win32') {
             const cmd = `powershell -NoProfile -Command "try { $code = '[DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\")] public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);'; $type = Add-Type -MemberDefinition $code -Name Win32 -Namespace Win32 -PassThru; $hwnd = $type::GetForegroundWindow(); $pidOut = 0; $type::GetWindowThreadProcessId($hwnd, [ref]$pidOut) | Out-Null; $p = Get-Process -Id $pidOut; if ($p.MainWindowTitle) { $p.MainWindowTitle + ' [' + $p.ProcessName + ']' } else { $p.ProcessName } } catch { 'Unknown External App' }"`;
@@ -1177,6 +1289,10 @@ ipcMain.handle('clear-study-browser-cache', async () => {
 // --- ACTIVE WINDOW TRACKING (Activity Monitor) ---
 ipcMain.handle('get-active-window', async () => {
     return new Promise((resolve) => {
+        if (mainWindow && mainWindow.isFocused()) {
+            resolve('1st Line Training Portal [electron]');
+            return;
+        }
         if (process.platform === 'win32') {
             // PowerShell script to get Foreground Window Title and Process Name
             const cmd = `powershell -NoProfile -Command "try { $code = '[DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\")] public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);'; $type = Add-Type -MemberDefinition $code -Name Win32 -Namespace Win32 -PassThru; $hwnd = $type::GetForegroundWindow(); $pidOut = 0; $type::GetWindowThreadProcessId($hwnd, [ref]$pidOut) | Out-Null; $p = Get-Process -Id $pidOut; if ($p.MainWindowTitle) { $p.MainWindowTitle + ' [' + $p.ProcessName + ']' } else { $p.ProcessName } } catch { 'Unknown External App' }"`;

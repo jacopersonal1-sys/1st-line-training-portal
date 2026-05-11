@@ -31,6 +31,133 @@ function normalizeBuilderQuestion(question, fallbackReviewSubject = '') {
     };
 }
 
+function normalizeAssessmentTitle(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function renameInsightConfigTitle(oldTitle, newTitle) {
+    const oldKey = normalizeAssessmentTitle(oldTitle);
+    const nextTitle = String(newTitle || '').trim();
+    if (!oldKey || !nextTitle) return false;
+
+    let changed = false;
+    const renameConfigArrayItem = (item) => {
+        if (!item || typeof item !== 'object') return item;
+        if (normalizeAssessmentTitle(item.name) !== oldKey) return item;
+        changed = true;
+        return { ...item, name: nextTitle };
+    };
+
+    try {
+        const ruleConfig = JSON.parse(localStorage.getItem('insight_rule_config') || '{}');
+        if (ruleConfig && typeof ruleConfig === 'object') {
+            ['triggerPresets', 'severityRules', 'topicOverrides'].forEach(key => {
+                if (Array.isArray(ruleConfig[key])) ruleConfig[key] = ruleConfig[key].map(renameConfigArrayItem);
+            });
+            ['criticalAssessments', 'semiCriticalAssessments'].forEach(key => {
+                if (Array.isArray(ruleConfig[key])) {
+                    ruleConfig[key] = ruleConfig[key].map(name => {
+                        if (normalizeAssessmentTitle(name) !== oldKey) return name;
+                        changed = true;
+                        return nextTitle;
+                    });
+                }
+            });
+            localStorage.setItem('insight_rule_config', JSON.stringify(ruleConfig));
+        }
+    } catch (error) {
+        console.warn('Insight rule rename skipped:', error);
+    }
+
+    try {
+        const progressConfig = JSON.parse(localStorage.getItem('insight_progress_config') || '{}');
+        if (progressConfig && typeof progressConfig === 'object' && Array.isArray(progressConfig.requiredItems)) {
+            progressConfig.requiredItems = progressConfig.requiredItems.map(item => {
+                if (typeof item === 'string') {
+                    if (normalizeAssessmentTitle(item) !== oldKey) return item;
+                    changed = true;
+                    return nextTitle;
+                }
+                return renameConfigArrayItem(item);
+            });
+            localStorage.setItem('insight_progress_config', JSON.stringify(progressConfig));
+        }
+    } catch (error) {
+        console.warn('Insight progress rename skipped:', error);
+    }
+
+    return changed;
+}
+
+window.renameAssessmentEverywhere = async function(oldTitle, newTitle, testId = null) {
+    const cleanOld = String(oldTitle || '').trim();
+    const cleanNew = String(newTitle || '').trim();
+    if (!cleanOld || !cleanNew || normalizeAssessmentTitle(cleanOld) === normalizeAssessmentTitle(cleanNew)) {
+        return { changed: false, keys: [] };
+    }
+
+    const oldKey = normalizeAssessmentTitle(cleanOld);
+    const keys = new Set();
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const targetTestId = testId !== null && testId !== undefined ? String(testId) : null;
+    const affectedSubmissionIds = new Set();
+
+    tests.forEach(test => {
+        if (!test) return;
+        const idMatch = targetTestId && String(test.id) === targetTestId;
+        const titleMatch = normalizeAssessmentTitle(test.title || test.name) === oldKey;
+        if (!idMatch && !titleMatch) return;
+        test.title = cleanNew;
+        test.name = test.name && !test.title ? cleanNew : test.name;
+        test.lastModified = new Date().toISOString();
+        test.modifiedBy = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        keys.add('tests');
+    });
+
+    submissions.forEach(sub => {
+        if (!sub) return;
+        const idMatch = targetTestId && String(sub.testId) === targetTestId;
+        const titleMatch = normalizeAssessmentTitle(sub.testTitle) === oldKey;
+        if (!idMatch && !titleMatch) return;
+        if (sub.id) affectedSubmissionIds.add(String(sub.id));
+        sub.testTitle = cleanNew;
+        if (sub.testSnapshot && typeof sub.testSnapshot === 'object') sub.testSnapshot.title = cleanNew;
+        sub.lastModified = new Date().toISOString();
+        keys.add('submissions');
+    });
+
+    records.forEach(record => {
+        if (!record) return;
+        const linkedSubmission = record.submissionId && affectedSubmissionIds.has(String(record.submissionId));
+        const assessmentMatch = normalizeAssessmentTitle(record.assessment || record.testTitle || record.title) === oldKey;
+        if (!linkedSubmission && !assessmentMatch) return;
+        if (record.assessment !== undefined) record.assessment = cleanNew;
+        if (record.testTitle !== undefined) record.testTitle = cleanNew;
+        if (record.title !== undefined && assessmentMatch) record.title = cleanNew;
+        record.lastModified = new Date().toISOString();
+        keys.add('records');
+    });
+
+    if (renameInsightConfigTitle(cleanOld, cleanNew)) {
+        keys.add('insight_rule_config');
+        keys.add('insight_progress_config');
+    }
+
+    if (keys.has('tests')) localStorage.setItem('tests', JSON.stringify(tests));
+    if (keys.has('submissions')) localStorage.setItem('submissions', JSON.stringify(submissions));
+    if (keys.has('records')) localStorage.setItem('records', JSON.stringify(records));
+
+    const saveKeys = Array.from(keys);
+    if (saveKeys.length && typeof saveToServer === 'function') {
+        await saveToServer(saveKeys, true);
+    }
+
+    if (typeof refreshAllDropdowns === 'function') refreshAllDropdowns();
+    return { changed: saveKeys.length > 0, keys: saveKeys };
+};
+
 function loadTestBuilder(existingId = null, targetQIdx = null) {
     BUILDER_QUESTIONS = [];
     document.getElementById('questionContainer').innerHTML = '';
@@ -846,6 +973,7 @@ function loadManageTests() {
                 <td style="text-align:right;">
                     ${(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? `
                     <button class="btn-secondary btn-sm" onclick="copyTest('${t.id}')" title="Duplicate"><i class="fas fa-copy"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="renameTest('${t.id}')" title="Rename assessment and linked history"><i class="fas fa-signature"></i></button>
                     <button class="btn-secondary btn-sm" onclick="editTest('${t.id}')" title="Edit"><i class="fas fa-edit"></i></button>
                     <button class="btn-danger btn-sm" onclick="deleteTest('${t.id}')" title="Delete"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text-muted); font-size:0.8rem;">View Only</span>'}
                 </td>
@@ -858,6 +986,38 @@ function loadManageTests() {
         
     // Initialize Search UI if available
     if (typeof initUniversalSearch === 'function') initUniversalSearch();
+}
+
+async function renameTest(id) {
+    if (!CURRENT_USER || !['admin', 'super_admin'].includes(CURRENT_USER.role)) {
+        if (typeof showToast === 'function') showToast("Only Admins can rename assessments.", "error");
+        return;
+    }
+
+    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const test = tests.find(t => t && t.id == id);
+    if (!test) {
+        if (typeof showToast === 'function') showToast("Assessment not found.", "error");
+        return;
+    }
+
+    const oldTitle = String(test.title || test.name || '').trim();
+    const newTitle = await customPrompt("Rename Assessment", "Enter the new assessment name. Linked history and Insight progress rows will be updated.", oldTitle);
+    const cleanNew = String(newTitle || '').trim();
+    if (!cleanNew || normalizeAssessmentTitle(cleanNew) === normalizeAssessmentTitle(oldTitle)) return;
+
+    const duplicate = tests.some(t => t && t.id != id && normalizeAssessmentTitle(t.title || t.name) === normalizeAssessmentTitle(cleanNew));
+    if (duplicate) {
+        if (typeof showToast === 'function') showToast("Another active assessment already uses that name.", "warning");
+        return;
+    }
+
+    const result = await window.renameAssessmentEverywhere(oldTitle, cleanNew, id);
+    loadManageTests();
+    if (typeof populateHistoryFilters === 'function') populateHistoryFilters();
+    if (typeof loadCompletedHistory === 'function') loadCompletedHistory();
+    if (typeof loadAdminInsightRules === 'function') loadAdminInsightRules();
+    if (result.changed && typeof showToast === 'function') showToast("Assessment renamed and linked history updated.", "success");
 }
 
 async function deleteTest(id) {

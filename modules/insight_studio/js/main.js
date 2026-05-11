@@ -4,6 +4,10 @@ const InsightApp = {
     state: {
         loading: true,
         viewMode: 'triggers',
+        knowledgeMode: 'assessment',
+        compareMode: 'person',
+        compareAttemptScope: 'live',
+        compareSelected: [],
         groupFilter: 'all',
         search: '',
         selectedAgent: '',
@@ -123,12 +127,56 @@ const InsightApp = {
         const normalized = String(mode || '').trim().toLowerCase();
         if (normalized === 'progress') this.state.viewMode = 'progress';
         else if (normalized === 'department' || normalized === 'dept') this.state.viewMode = 'department';
+        else if (normalized === 'knowledge' || normalized === 'knowledge-gaps') this.state.viewMode = 'knowledge';
+        else if (normalized === 'compare' || normalized === 'comparison') this.state.viewMode = 'compare';
         else this.state.viewMode = 'triggers';
         this.state.drawerOpen = false;
         this.state.selectedAgent = '';
         this.state.detail = null;
         this.state.progressDetail = null;
         this.state.drawerMode = this.state.viewMode;
+        this.render();
+    },
+
+    setKnowledgeMode: function(mode) {
+        const normalized = String(mode || '').trim().toLowerCase();
+        this.state.knowledgeMode = ['individual', 'group'].includes(normalized) ? normalized : 'assessment';
+        this.render();
+    },
+
+    setCompareMode: function(mode) {
+        const normalized = String(mode || '').trim().toLowerCase();
+        this.state.compareMode = normalized === 'group' && this.state.compareMode !== 'group' ? 'group' : 'person';
+        this.state.compareSelected = [];
+        this.render();
+    },
+
+    setCompareAttemptScope: function(scope) {
+        const normalized = String(scope || '').trim().toLowerCase();
+        this.state.compareAttemptScope = ['attempt_1', 'attempt_2', 'attempt_1_vs_live'].includes(normalized) ? normalized : 'live';
+        this.state.compareSelected = [];
+        this.render();
+    },
+
+    toggleCompareSelection: function(encodedKey) {
+        const key = decodeURIComponent(String(encodedKey || ''));
+        if (!key) return;
+        const current = Array.isArray(this.state.compareSelected) ? this.state.compareSelected : [];
+        this.state.compareSelected = current.includes(key)
+            ? current.filter(item => item !== key)
+            : [...current, key];
+        this.render();
+    },
+
+    clearCompareSelection: function() {
+        this.state.compareSelected = [];
+        this.render();
+    },
+
+    selectVisibleCompareRows: function() {
+        this.state.compareSelected = this.isAttemptVsLiveCompareScope()
+            ? this.getComparePickerRows().map(row => row.key)
+            : this.getComparisonRows({ ignoreSelection: true }).map(row => row.key);
         this.render();
     },
 
@@ -521,7 +569,7 @@ const InsightApp = {
                                 <div class="ins-mini"><strong>${detail.activity.violationCount}</strong><span class="ins-subtle">Violations</span></div>
                                 <div class="ins-mini"><strong>${detail.activity.idleMinutes}m</strong><span class="ins-subtle">Idle Time</span></div>
                                 <div class="ins-mini"><strong>${detail.activity.externalMinutes}m</strong><span class="ins-subtle">External Time</span></div>
-                                <div class="ins-mini"><strong>${detail.activity.focusScore}%</strong><span class="ins-subtle">Focus Score</span></div>
+                                <div class="ins-mini"><strong>${detail.activity.hasData && detail.activity.daysTracked > 0 ? `${detail.activity.focusScore}%` : 'No data'}</strong><span class="ins-subtle">Focus Score</span></div>
                             </div>
                             <div class="ins-list" style="margin-top:10px; max-height:220px;">
                                 ${(detail.activity.history || []).slice(0, 20).map(item => `
@@ -642,6 +690,1002 @@ const InsightApp = {
         `;
     },
 
+    renderKnowledgeGaps: function() {
+        const esc = this.escapeHtml;
+        const mode = this.state.knowledgeMode || 'assessment';
+        const data = InsightDataService.buildKnowledgeGaps({
+            mode: mode === 'individual' ? 'individual' : 'all',
+            groupFilter: this.state.groupFilter,
+            search: this.state.search
+        });
+        const stats = data.stats || {};
+        const byAssessment = Array.isArray(data.byAssessment) ? data.byAssessment : [];
+        const byIndividual = Array.isArray(data.byIndividual) ? data.byIndividual : [];
+        const byGroup = Array.isArray(data.byGroup) ? data.byGroup : [];
+
+        const assessmentHtml = byAssessment.length ? byAssessment.map(row => `
+            <div class="ins-card full">
+                <div class="ins-item-top">
+                    <h3 style="margin:0;">${esc(row.assessment)}</h3>
+                    <span class="ins-status improvement">${row.failedCount} failed question${row.failedCount === 1 ? '' : 's'} | ${row.agentCount} agent${row.agentCount === 1 ? '' : 's'}</span>
+                </div>
+                <div class="table-responsive" style="max-height:260px; overflow-y:auto; margin-top:10px;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>Question</th><th>Fails</th><th>Agents</th><th>Lowest</th></tr></thead>
+                        <tbody>
+                            ${(row.questions || []).slice(0, 25).map(question => `
+                                <tr>
+                                    <td>${esc(question.question)}</td>
+                                    <td class="ins-metric">${question.failCount}</td>
+                                    <td class="ins-metric">${question.agentCount}</td>
+                                    <td class="ins-metric">${question.lowestScore}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `).join('') : '<div class="ins-card full">No failed question detail found for this scope. This usually means assessments have no question-level marks saved yet.</div>';
+
+        const individualHtml = byIndividual.length ? `
+            <div class="ins-card full">
+                <h3>Individual Knowledge Gaps</h3>
+                <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>Agent</th><th>Group</th><th>Failed Questions</th><th>Assessments</th></tr></thead>
+                        <tbody>
+                            ${byIndividual.map(row => `
+                                <tr>
+                                    <td>${esc(row.agent)}</td>
+                                    <td>${esc(row.group || 'Ungrouped')}</td>
+                                    <td class="ins-metric">${row.failedCount}</td>
+                                    <td>${(row.assessments || []).slice(0, 5).map(item => `${esc(item.assessment)} (${item.failCount})`).join('<br>')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        ` : '<div class="ins-card full">No individual failed question detail found for this scope.</div>';
+
+        const groupHtml = byGroup.length ? `
+            <div class="ins-card full">
+                <h3>All Groups Knowledge Gaps</h3>
+                <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>Group</th><th>Agents</th><th>Failed Questions</th><th>Top Assessments</th></tr></thead>
+                        <tbody>
+                            ${byGroup.map(row => `
+                                <tr>
+                                    <td>${esc(row.group || 'Ungrouped')}</td>
+                                    <td class="ins-metric">${row.agentCount}</td>
+                                    <td class="ins-metric">${row.failedCount}</td>
+                                    <td>${(row.assessments || []).slice(0, 6).map(item => `${esc(item.assessment)} (${item.failCount})`).join('<br>')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        ` : '<div class="ins-card full">No group failed question detail found for this scope.</div>';
+
+        return `
+            <div class="ins-dept-grid">
+                <div class="ins-card full">
+                    <h3>Knowledge Gaps</h3>
+                    <p class="ins-subtle" style="margin-bottom:10px;">Any question below full marks is counted as failed, including partial scores such as 1/2.</p>
+                    <div class="ins-mini-grid ins-dept-kpi-grid">
+                        <div class="ins-mini"><strong>${stats.failedQuestionCount || 0}</strong><span class="ins-subtle">Failed Questions</span></div>
+                        <div class="ins-mini"><strong>${stats.assessmentCount || 0}</strong><span class="ins-subtle">Assessments</span></div>
+                        <div class="ins-mini"><strong>${stats.individualCount || 0}</strong><span class="ins-subtle">Individuals</span></div>
+                        <div class="ins-mini"><strong>${stats.groupCount || 0}</strong><span class="ins-subtle">Groups</span></div>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                        <button class="sub-tab-btn ${mode === 'assessment' ? 'active' : ''}" onclick="InsightApp.setKnowledgeMode('assessment')">Per Assessment</button>
+                        <button class="sub-tab-btn ${mode === 'individual' ? 'active' : ''}" onclick="InsightApp.setKnowledgeMode('individual')">Individual</button>
+                        <button class="sub-tab-btn ${mode === 'group' ? 'active' : ''}" onclick="InsightApp.setKnowledgeMode('group')">All Groups</button>
+                    </div>
+                </div>
+                ${mode === 'individual' ? individualHtml : (mode === 'group' ? groupHtml : assessmentHtml)}
+            </div>
+        `;
+    },
+
+    clampPercent: function(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return null;
+        return Math.max(0, Math.min(100, Math.round(number)));
+    },
+
+    averagePercent: function(values) {
+        const clean = (values || []).map(value => this.clampPercent(value)).filter(value => value !== null);
+        if (!clean.length) return null;
+        return Math.round(clean.reduce((sum, value) => sum + value, 0) / clean.length);
+    },
+
+    isVettingAssessmentName: function(value) {
+        return String(value || '').toLowerCase().includes('vetting');
+    },
+
+    isLiveAssessmentRecord: function(row) {
+        const text = [
+            row && row.assessment,
+            row && row.phase,
+            row && row.source,
+            row && row.type,
+            row && row.sessionId,
+            row && row.liveSessionId
+        ].map(value => String(value || '').toLowerCase()).join(' ');
+        return text.includes('live assessment') || text.includes('live-assessment') || text.includes('live session') || text.includes('live-session');
+    },
+
+    isCurrentLiveRecord: function(row, agentName, groupID) {
+        if (!row || typeof row !== 'object') return false;
+        if (row.archived === true) return false;
+        const status = String(row.status || '').trim().toLowerCase();
+        if (['archived', 'deleted', 'invalid', 'retake_allowed'].includes(status)) return false;
+        if (this.normalizeLookup(row.trainee) !== this.normalizeLookup(agentName)) return false;
+        const rowGroup = String(row.groupID || '').trim();
+        const currentGroup = String(groupID || '').trim();
+        if (!currentGroup || currentGroup === 'Ungrouped') return false;
+        if (!rowGroup || rowGroup !== currentGroup) return false;
+        const score = this.getComparisonScore(row);
+        if (score === null) return false;
+        const dateValue = String(row.date || '').trim();
+        return !!dateValue && !Number.isNaN(Date.parse(dateValue));
+    },
+
+    isCurrentLiveSubmission: function(row, agentName, groupID) {
+        if (!row || typeof row !== 'object') return false;
+        if (this.normalizeLookup(row.trainee) !== this.normalizeLookup(agentName)) return false;
+        const status = String(row.status || '').toLowerCase();
+        if (!['completed', 'submitted', 'done', 'passed', 'pass'].includes(status)) return false;
+        const rowGroup = String(row.groupID || '').trim();
+        const currentGroup = String(groupID || '').trim();
+        if (!currentGroup || currentGroup === 'Ungrouped') return false;
+        if (!rowGroup || rowGroup !== currentGroup) return false;
+        return this.getComparisonScore(row) !== null;
+    },
+
+    getCompareAttemptNumber: function() {
+        const match = String(this.state.compareAttemptScope || 'live').match(/^attempt_(\d+)$/);
+        if (!match) return null;
+        const attempt = Number(match[1]);
+        return attempt === 1 || attempt === 2 ? attempt : null;
+    },
+
+    isAttemptVsLiveCompareScope: function() {
+        return String(this.state.compareAttemptScope || 'live') === 'attempt_1_vs_live';
+    },
+
+    isArchivedCompareScope: function() {
+        return this.getCompareAttemptNumber() !== null;
+    },
+
+    getArchiveUserName: function(entry) {
+        const user = entry && entry.user;
+        if (user && typeof user === 'object') {
+            return String(user.user || user.username || user.name || user.email || '').trim();
+        }
+        return String(user || entry && (entry.trainee || entry.agent || entry.username || entry.name) || '').trim();
+    },
+
+    getArchiveTimestamp: function(entry) {
+        const value = entry && (entry.movedDate || entry.archivedAt || entry.graduatedDate || entry.createdAt || entry.date);
+        const ts = Date.parse(value || '');
+        return Number.isFinite(ts) ? ts : 0;
+    },
+
+    getRetrainArchivesForAgent: function(agentName) {
+        const target = this.normalizeLookup(agentName).replace(/\s+/g, '');
+        const archives = Array.isArray(InsightDataService.state.retrainArchives)
+            ? InsightDataService.state.retrainArchives
+            : [];
+        return archives
+            .filter((entry) => {
+                if (!entry || typeof entry !== 'object') return false;
+                const archiveUser = this.normalizeLookup(this.getArchiveUserName(entry)).replace(/\s+/g, '');
+                if (!archiveUser || archiveUser !== target) return false;
+                const archiveType = String(entry.archiveType || '').trim().toLowerCase();
+                const reason = String(entry.reason || '').trim().toLowerCase();
+                return archiveType === 'retrain' || reason.startsWith('moved to') || reason.includes('retrain');
+            })
+            .sort((a, b) => {
+                const dateDiff = this.getArchiveTimestamp(a) - this.getArchiveTimestamp(b);
+                if (dateDiff !== 0) return dateDiff;
+                return Number(a.attemptNumber || 999) - Number(b.attemptNumber || 999);
+            })
+            .map((entry, index) => ({
+                ...entry,
+                _safeAttemptNumber: index + 1
+            }))
+            .filter(entry => entry._safeAttemptNumber <= 2);
+    },
+
+    getRetrainArchiveAttempt: function(agentName, attemptNumber) {
+        return this.getRetrainArchivesForAgent(agentName)
+            .find(entry => Number(entry._safeAttemptNumber || 0) === Number(attemptNumber || 0)) || null;
+    },
+
+    isArchiveAttemptRecord: function(row, agentName) {
+        if (!row || typeof row !== 'object') return false;
+        const status = String(row.status || '').trim().toLowerCase();
+        if (['deleted', 'invalid', 'retake_allowed'].includes(status)) return false;
+        if (this.normalizeLookup(row.trainee) !== this.normalizeLookup(agentName)) return false;
+        if (this.getComparisonScore(row) === null) return false;
+        const dateValue = String(row.date || '').trim();
+        return !dateValue || !Number.isNaN(Date.parse(dateValue));
+    },
+
+    isArchiveAttemptSubmission: function(row, agentName) {
+        if (!row || typeof row !== 'object') return false;
+        if (this.normalizeLookup(row.trainee) !== this.normalizeLookup(agentName)) return false;
+        const status = String(row.status || '').toLowerCase();
+        if (status && !['completed', 'submitted', 'done', 'passed', 'pass'].includes(status)) return false;
+        return this.getComparisonScore(row) !== null;
+    },
+
+    buildActivityBreakdownFromRows: function(monitorRows, violationRows, agentName) {
+        const history = InsightDataService.normalizeMonitorHistory(monitorRows || [])
+            .filter(row => this.normalizeLookup(row.user) === this.normalizeLookup(agentName));
+        const violations = Array.isArray(violationRows) ? violationRows : [];
+        let idleMs = 0;
+        let externalMs = 0;
+        let studyMs = 0;
+        let totalMs = 0;
+        const toMs = (value) => {
+            const num = Number(value || 0);
+            if (!Number.isFinite(num) || num <= 0) return 0;
+            return num < 100000 ? num * 1000 : num;
+        };
+
+        history.forEach((entry) => {
+            const summary = entry.summary || {};
+            const breakdown = summary.breakdown || summary.activityBreakdown || {};
+            const idle = toMs(summary.idle || summary.idleMs || summary.idleSeconds || breakdown.idle);
+            const external = toMs(summary.external || summary.externalMs || summary.externalSeconds || breakdown.external);
+            const study = toMs(summary.study || summary.studyMs || summary.studySeconds || summary.focused || breakdown.study || breakdown.focus);
+            let total = toMs(summary.total || summary.totalMs || summary.totalSeconds || summary.activeMs);
+            if (total <= 0) total = idle + external + study;
+            idleMs += idle;
+            externalMs += external;
+            studyMs += study;
+            totalMs += total;
+        });
+
+        return {
+            hasData: history.length > 0 || violations.length > 0,
+            dataStatus: history.length ? 'ok' : (violations.length ? 'violations_only' : 'no_data'),
+            daysTracked: history.length,
+            idleMinutes: Math.round(idleMs / 60000),
+            externalMinutes: Math.round(externalMs / 60000),
+            violationCount: violations.length,
+            focusScore: totalMs > 0 ? Math.round((studyMs / totalMs) * 100) : 0,
+            history: history.sort((a, b) => Date.parse(b.date || '') - Date.parse(a.date || ''))
+        };
+    },
+
+    buildComparisonRowFromData: function(agent, source) {
+        const records = Array.isArray(source.records) ? source.records : [];
+        const submissions = Array.isArray(source.submissions) ? source.submissions : [];
+        const attendance = Array.isArray(source.attendance) ? source.attendance : [];
+        const activity = source.activity || { hasData: false, daysTracked: 0, violationCount: 0, focusScore: 0, dataStatus: 'no_data' };
+        const engagement = source.engagement || { totals: { totalQuizAttempts: 0, totalWatchSeconds: 0 } };
+        const progressScore = this.clampPercent(source.progressScore);
+        const regularRecords = records.filter(row => !this.isVettingAssessmentName(row.assessment) && !this.isLiveAssessmentRecord(row));
+        const vettingRecords = records.filter(row => this.isVettingAssessmentName(row.assessment));
+        const liveRecords = records.filter(row => this.isLiveAssessmentRecord(row));
+        const lateCount = attendance.filter(row => row.isLate).length;
+        const attendanceDays = attendance.length;
+        const attendanceScore = attendanceDays > 0
+            ? this.clampPercent(((attendanceDays - lateCount) / attendanceDays) * 100)
+            : null;
+        const recordMetricKeys = new Set(records
+            .map(row => this.getComparisonMetricIdentity(row.assessment))
+            .filter(Boolean));
+        const standaloneSubmissions = submissions.filter(row => !recordMetricKeys.has(this.getComparisonMetricIdentity(row.testTitle)));
+        const assessmentScore = this.averagePercent(regularRecords.map(row => this.getComparisonScore(row)));
+        const vettingScore = this.averagePercent(vettingRecords.map(row => this.getComparisonScore(row)));
+        const liveScore = this.averagePercent(liveRecords.map(row => this.getComparisonScore(row)));
+        const testScore = this.averagePercent(standaloneSubmissions.map(row => this.getComparisonScore(row)));
+        const focusScore = activity.hasData && activity.daysTracked > 0 ? this.clampPercent(activity.focusScore) : null;
+        const metricValueMap = {};
+
+        regularRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Assessment: ${row.assessment}`, this.getComparisonScore(row)));
+        vettingRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Vetting: ${row.assessment}`, this.getComparisonScore(row)));
+        liveRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Live: ${row.assessment}`, this.getComparisonScore(row)));
+        standaloneSubmissions.forEach(row => this.addComparisonMetricValue(metricValueMap, `Test: ${row.testTitle || 'Submission'}`, this.getComparisonScore(row)));
+        this.addComparisonMetricValue(metricValueMap, 'Attendance', attendanceScore);
+        this.addComparisonMetricValue(metricValueMap, 'Focus Level', focusScore);
+        this.addDailyAttendanceMetricValues(metricValueMap, attendance);
+        this.addDailyFocusMetricValues(metricValueMap, activity.history || []);
+
+        const overallScore = this.averagePercent([
+            assessmentScore,
+            vettingScore,
+            liveScore,
+            testScore,
+            attendanceScore,
+            focusScore,
+            progressScore
+        ]);
+
+        return {
+            key: source.key || agent.name,
+            personKey: source.personKey || agent.name,
+            label: agent.name,
+            group: source.group || agent.group || 'Ungrouped',
+            type: 'person',
+            attemptLabel: source.attemptLabel || 'Current Live Attempt',
+            assessmentScore,
+            vettingScore,
+            liveScore,
+            testScore,
+            attendanceScore,
+            focusScore,
+            progressScore,
+            overallScore,
+            metricMap: this.finalizeComparisonMetricMap(metricValueMap),
+            recordCount: records.length,
+            testCount: submissions.length,
+            attendanceDays,
+            lateCount,
+            violationCount: Number(activity.violationCount || 0),
+            quizAttempts: Number(engagement.totals && engagement.totals.totalQuizAttempts || 0),
+            watchSeconds: Number(engagement.totals && engagement.totals.totalWatchSeconds || 0),
+            dataStatus: activity.dataStatus || 'no_data'
+        };
+    },
+
+    buildArchiveComparisonRow: function(agent, attemptNumber, currentGroup) {
+        const archive = this.getRetrainArchiveAttempt(agent.name, attemptNumber);
+        if (!archive) return null;
+        const archiveRecords = InsightDataService.normalizeRecords(Array.isArray(archive.records) ? archive.records : [])
+            .filter(row => this.isArchiveAttemptRecord(row, agent.name));
+        const archiveSubmissions = InsightDataService.normalizeSubmissions(Array.isArray(archive.submissions) ? archive.submissions : [])
+            .filter(row => this.isArchiveAttemptSubmission(row, agent.name));
+        const archiveAttendance = InsightDataService.normalizeAttendance(Array.isArray(archive.attendance) ? archive.attendance : []);
+        const archiveActivity = this.buildActivityBreakdownFromRows(
+            Array.isArray(archive.monitorHistory) ? archive.monitorHistory : (Array.isArray(archive.monitor_history) ? archive.monitor_history : []),
+            Array.isArray(archive.violationReports) ? archive.violationReports : (Array.isArray(archive.violation_reports) ? archive.violation_reports : []),
+            agent.name
+        );
+        return this.buildComparisonRowFromData(agent, {
+            key: `${agent.name}::attempt_${attemptNumber}`,
+            personKey: agent.name,
+            group: archive.fromGroup || archive.group || currentGroup,
+            attemptLabel: `Training Attempt ${attemptNumber}`,
+            records: archiveRecords,
+            submissions: archiveSubmissions,
+            attendance: archiveAttendance,
+            activity: archiveActivity,
+            progressScore: null,
+            engagement: { totals: { totalQuizAttempts: 0, totalWatchSeconds: 0 } }
+        });
+    },
+
+    buildCurrentLiveComparisonRow: function(agent, currentGroup, options = {}) {
+        const records = InsightDataService.getAgentRecords(agent.name)
+            .filter(row => this.isCurrentLiveRecord(row, agent.name, currentGroup));
+        const submissions = (InsightDataService.state.submissions || [])
+            .filter(row => this.isCurrentLiveSubmission(row, agent.name, currentGroup));
+        const attendance = InsightDataService.getAgentAttendance(agent.name);
+        const activity = InsightDataService.getAgentActivityBreakdown(agent.name);
+        const engagement = InsightDataService.getAgentContentEngagement(agent.name);
+        const progress = InsightDataService.getAgentProgress(agent.name, agent.group || '');
+        return this.buildComparisonRowFromData(agent, {
+            key: options.key || agent.name,
+            personKey: agent.name,
+            group: currentGroup,
+            attemptLabel: options.attemptLabel || 'Current Live Attempt',
+            records,
+            submissions,
+            attendance,
+            activity,
+            engagement,
+            progressScore: progress.progress
+        });
+    },
+
+    shortenMetricLabel: function(value, maxLength) {
+        const clean = String(value || '').replace(/\s+/g, ' ').trim();
+        const limit = Math.max(12, Number(maxLength || 28));
+        if (clean.length <= limit) return clean;
+        return `${clean.slice(0, limit - 1)}...`;
+    },
+
+    getComparisonMetricIdentity: function(value) {
+        return String(value || '')
+            .replace(/^(Assessment|Vetting|Live|Test):\s*/i, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    },
+
+    getComparisonScore: function(row) {
+        if (!row || typeof row !== 'object') return null;
+        const raw = row.raw && typeof row.raw === 'object' ? row.raw : row;
+        const candidates = [];
+        if (Object.prototype.hasOwnProperty.call(raw, 'score')) candidates.push(raw.score);
+        if (Object.prototype.hasOwnProperty.call(raw, 'percentage')) candidates.push(raw.percentage);
+        if (Object.prototype.hasOwnProperty.call(raw, 'percent')) candidates.push(raw.percent);
+        if (raw.quizMeta && typeof raw.quizMeta === 'object') {
+            if (Object.prototype.hasOwnProperty.call(raw.quizMeta, 'percent')) candidates.push(raw.quizMeta.percent);
+            if (Object.prototype.hasOwnProperty.call(raw.quizMeta, 'percentage')) candidates.push(raw.quizMeta.percentage);
+        }
+        if (!row.raw && Object.prototype.hasOwnProperty.call(row, 'score')) candidates.push(row.score);
+
+        for (const candidate of candidates) {
+            if (candidate === null || candidate === undefined || String(candidate).trim() === '') continue;
+            const score = this.clampPercent(candidate);
+            if (score !== null) return score;
+        }
+        return null;
+    },
+
+    getComparisonDateKey: function(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        const ts = Date.parse(raw);
+        if (!Number.isFinite(ts)) return raw.slice(0, 10);
+        return new Date(ts).toISOString().slice(0, 10);
+    },
+
+    getActivityEntryFocusScore: function(entry) {
+        if (!entry || typeof entry !== 'object') return null;
+        const summary = entry.summary || {};
+        const raw = entry.raw || {};
+        const breakdown = summary.breakdown || summary.activityBreakdown || raw.activityBreakdown || raw.breakdown || {};
+        const toMs = (value) => {
+            const num = Number(value || 0);
+            if (!Number.isFinite(num) || num <= 0) return 0;
+            return num < 100000 ? num * 1000 : num;
+        };
+        const idle = toMs(summary.idle || summary.idleMs || summary.idleSeconds || breakdown.idle);
+        const external = toMs(summary.external || summary.externalMs || summary.externalSeconds || breakdown.external);
+        const study = toMs(summary.study || summary.studyMs || summary.studySeconds || summary.focused || breakdown.study || breakdown.focus);
+        let total = toMs(summary.total || summary.totalMs || summary.totalSeconds || summary.activeMs);
+
+        if (Array.isArray(entry.details)) {
+            let detailTotal = 0;
+            entry.details.forEach((detail) => {
+                detailTotal += toMs(detail && (detail.duration || detail.durationMs || detail.effectiveDuration || detail.ms || detail.seconds));
+            });
+            if (total <= 0) total = detailTotal;
+        }
+
+        if (total <= 0) total = idle + external + study;
+        if (total <= 0) return null;
+        return this.clampPercent((study / total) * 100);
+    },
+
+    addDailyAttendanceMetricValues: function(map, attendanceRows) {
+        (attendanceRows || []).forEach((row) => {
+            if (!row || row.isIgnored) return;
+            const dateKey = this.getComparisonDateKey(row.date);
+            if (!dateKey) return;
+            this.addComparisonMetricValue(map, `Attendance: ${dateKey}`, row.isLate ? 0 : 100);
+        });
+    },
+
+    addDailyFocusMetricValues: function(map, historyRows) {
+        (historyRows || []).forEach((row) => {
+            const dateKey = this.getComparisonDateKey(row && row.date);
+            if (!dateKey) return;
+            const score = this.getActivityEntryFocusScore(row);
+            if (score === null) return;
+            this.addComparisonMetricValue(map, `Focus: ${dateKey}`, score);
+        });
+    },
+
+    addComparisonMetricValue: function(map, label, value) {
+        const cleanLabel = String(label || '').replace(/\s+/g, ' ').trim();
+        const score = this.clampPercent(value);
+        if (!cleanLabel || score === null) return;
+        if (!map[cleanLabel]) map[cleanLabel] = [];
+        map[cleanLabel].push(score);
+    },
+
+    finalizeComparisonMetricMap: function(map) {
+        const out = {};
+        Object.keys(map || {}).forEach((label) => {
+            out[label] = this.averagePercent(map[label]);
+        });
+        return out;
+    },
+
+    getComparisonAgentRows: function() {
+        const selectedGroup = String(this.state.groupFilter || 'all');
+        const search = String(this.state.search || '').trim().toLowerCase();
+        const agents = InsightDataService.getAllAgents().filter((agent) => {
+            if (!this.isTraineeRole(agent.role)) return false;
+            if (agent.blocked) return false;
+            if (!agent.group || agent.group === 'Ungrouped') return false;
+            if (selectedGroup !== 'all' && String(agent.group || '') !== selectedGroup) return false;
+            if (search && !String(agent.name || '').toLowerCase().includes(search)) return false;
+            return true;
+        });
+
+        return agents.map((agent) => {
+            const currentGroup = String(agent.group || '').trim();
+            const attemptNumber = this.getCompareAttemptNumber();
+            if (this.isAttemptVsLiveCompareScope()) {
+                const archiveRow = this.buildArchiveComparisonRow(agent, 1, currentGroup);
+                const currentRow = this.buildCurrentLiveComparisonRow(agent, currentGroup, {
+                    key: `${agent.name}::current_live`,
+                    attemptLabel: 'Current Live Attempt'
+                });
+                if (!archiveRow || !currentRow) return null;
+                archiveRow.label = `${agent.name} - Attempt 1`;
+                currentRow.label = `${agent.name} - Current`;
+                return [archiveRow, currentRow];
+            }
+            if (attemptNumber) {
+                return this.buildArchiveComparisonRow(agent, attemptNumber, currentGroup);
+            }
+
+            return this.buildCurrentLiveComparisonRow(agent, currentGroup);
+        }).flat().filter(Boolean);
+    },
+
+    getComparisonRows: function(options = {}) {
+        const selectedGroup = String(this.state.groupFilter || 'all');
+        const personRows = this.getComparisonAgentRows();
+        const applySelection = (rows) => {
+            if (options.ignoreSelection) return rows;
+            const selected = Array.isArray(this.state.compareSelected) ? this.state.compareSelected : [];
+            if (!selected.length) return rows;
+            const selectedSet = new Set(selected);
+            if (this.isAttemptVsLiveCompareScope()) return rows.filter(row => selectedSet.has(row.personKey || row.key));
+            return rows.filter(row => selectedSet.has(row.key));
+        };
+        if (this.isAttemptVsLiveCompareScope() || this.state.compareMode !== 'group' || selectedGroup !== 'all') {
+            return applySelection(personRows.sort((a, b) => {
+                const scoreDiff = Number(b.overallScore || 0) - Number(a.overallScore || 0);
+                if (scoreDiff !== 0) return scoreDiff;
+                return String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
+            }));
+        }
+
+        const groups = {};
+        personRows.forEach((row) => {
+            const group = row.group || 'Ungrouped';
+            if (!groups[group]) {
+                groups[group] = {
+                    key: group,
+                    label: group,
+                    group,
+                    type: 'group',
+                    members: [],
+                    recordCount: 0,
+                    testCount: 0,
+                    attendanceDays: 0,
+                    lateCount: 0,
+                    violationCount: 0,
+                    quizAttempts: 0,
+                    watchSeconds: 0
+                };
+            }
+            groups[group].members.push(row);
+            groups[group].recordCount += Number(row.recordCount || 0);
+            groups[group].testCount += Number(row.testCount || 0);
+            groups[group].attendanceDays += Number(row.attendanceDays || 0);
+            groups[group].lateCount += Number(row.lateCount || 0);
+            groups[group].violationCount += Number(row.violationCount || 0);
+            groups[group].quizAttempts += Number(row.quizAttempts || 0);
+            groups[group].watchSeconds += Number(row.watchSeconds || 0);
+        });
+
+        const groupRows = Object.values(groups).map((group) => ({
+            ...group,
+            memberCount: group.members.length,
+            assessmentScore: this.averagePercent(group.members.map(row => row.assessmentScore)),
+            vettingScore: this.averagePercent(group.members.map(row => row.vettingScore)),
+            liveScore: this.averagePercent(group.members.map(row => row.liveScore)),
+            testScore: this.averagePercent(group.members.map(row => row.testScore)),
+            attendanceScore: this.averagePercent(group.members.map(row => row.attendanceScore)),
+            focusScore: this.averagePercent(group.members.map(row => row.focusScore)),
+            progressScore: this.averagePercent(group.members.map(row => row.progressScore)),
+            overallScore: this.averagePercent(group.members.map(row => row.overallScore)),
+            metricMap: this.buildGroupComparisonMetricMap(group.members)
+        })).sort((a, b) => {
+            const scoreDiff = Number(b.overallScore || 0) - Number(a.overallScore || 0);
+            if (scoreDiff !== 0) return scoreDiff;
+            return String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
+        });
+        return applySelection(groupRows);
+    },
+
+    getComparePickerRows: function() {
+        const rows = this.getComparisonRows({ ignoreSelection: true });
+        if (!this.isAttemptVsLiveCompareScope()) return rows;
+        const people = new Map();
+        rows.forEach((row) => {
+            const key = row.personKey || row.key;
+            if (!key || people.has(key)) return;
+            const pairRows = rows.filter(item => (item.personKey || item.key) === key);
+            people.set(key, {
+                key,
+                label: String(key),
+                group: row.group || 'Ungrouped',
+                attemptLabel: pairRows.map(item => item.attemptLabel).join(' vs '),
+                pairCount: pairRows.length
+            });
+        });
+        return Array.from(people.values()).sort((a, b) => String(a.label).localeCompare(String(b.label), undefined, { sensitivity: 'base' }));
+    },
+
+    buildGroupComparisonMetricMap: function(members) {
+        const bucket = {};
+        (members || []).forEach((member) => {
+            Object.entries(member.metricMap || {}).forEach(([label, value]) => {
+                const score = this.clampPercent(value);
+                if (score === null) return;
+                if (!bucket[label]) bucket[label] = [];
+                bucket[label].push(score);
+            });
+        });
+        return this.finalizeComparisonMetricMap(bucket);
+    },
+
+    getBreakdownMetricLabels: function(rows, category) {
+        const counts = {};
+        (rows || []).forEach((row) => {
+            Object.keys(row.metricMap || {}).forEach((label) => {
+                const clean = String(label || '').toLowerCase();
+                if (category === 'performance' && (clean === 'attendance' || clean === 'focus level' || clean.startsWith('attendance:') || clean.startsWith('focus:'))) return;
+                if (category === 'attendance' && clean !== 'attendance' && !clean.startsWith('attendance:')) return;
+                if (category === 'focus' && clean !== 'focus level' && !clean.startsWith('focus:')) return;
+                counts[label] = (counts[label] || 0) + 1;
+            });
+        });
+        if (category === 'attendance' || category === 'focus') {
+            const prefix = category === 'attendance' ? 'attendance:' : 'focus:';
+            const dated = Object.keys(counts)
+                .filter(label => String(label || '').toLowerCase().startsWith(prefix))
+                .sort((a, b) => {
+                    const aDate = this.getComparisonDateKey(String(a).replace(/^[^:]+:\s*/, ''));
+                    const bDate = this.getComparisonDateKey(String(b).replace(/^[^:]+:\s*/, ''));
+                    return String(aDate).localeCompare(String(bDate), undefined, { numeric: true, sensitivity: 'base' });
+                });
+            if (dated.length) return dated;
+        }
+        const priority = (label) => {
+            const clean = String(label || '').toLowerCase();
+            if (clean === 'attendance') return 9000;
+            if (clean === 'focus level') return 8999;
+            if (clean.startsWith('live:')) return 7000;
+            if (clean.startsWith('vetting:')) return 6000;
+            if (clean.startsWith('test:')) return 5000;
+            if (clean.startsWith('assessment:')) return 4000;
+            return 1000;
+        };
+        return Object.keys(counts)
+            .sort((a, b) => {
+                const countDiff = counts[b] - counts[a];
+                if (countDiff !== 0) return countDiff;
+                const priorityDiff = priority(b) - priority(a);
+                if (priorityDiff !== 0) return priorityDiff;
+                return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+            })
+            .slice(0, category === 'performance' ? 22 : 1);
+    },
+
+    renderMetricBar: function(label, value, tone) {
+        const esc = this.escapeHtml;
+        const score = this.clampPercent(value);
+        const width = score === null ? 0 : score;
+        return `
+            <div class="ins-compare-metric">
+                <div class="ins-item-top"><span>${esc(label)}</span><strong>${score === null ? 'No data' : `${score}%`}</strong></div>
+                <div class="ins-compare-track"><div class="ins-compare-fill ${tone || ''}" style="width:${width}%;"></div></div>
+            </div>
+        `;
+    },
+
+    renderComparisonRadar: function(rows) {
+        const esc = this.escapeHtml;
+        const metrics = [
+            ['assessmentScore', 'Assessment'],
+            ['vettingScore', 'Vetting'],
+            ['liveScore', 'Live'],
+            ['testScore', 'Tests'],
+            ['attendanceScore', 'Attendance'],
+            ['focusScore', 'Focus'],
+            ['progressScore', 'Progress']
+        ];
+        const avg = {};
+        metrics.forEach(([key]) => {
+            avg[key] = this.averagePercent((rows || []).map(row => row[key])) || 0;
+        });
+
+        const cx = 160;
+        const cy = 120;
+        const radius = 86;
+        const points = metrics.map(([key], idx) => {
+            const angle = (-Math.PI / 2) + (idx * Math.PI * 2 / metrics.length);
+            const valueRadius = radius * (avg[key] / 100);
+            return {
+                key,
+                label: metrics[idx][1],
+                axisX: cx + Math.cos(angle) * radius,
+                axisY: cy + Math.sin(angle) * radius,
+                x: cx + Math.cos(angle) * valueRadius,
+                y: cy + Math.sin(angle) * valueRadius,
+                textX: cx + Math.cos(angle) * (radius + 22),
+                textY: cy + Math.sin(angle) * (radius + 22),
+                value: avg[key]
+            };
+        });
+        const polygon = points.map(point => `${point.x},${point.y}`).join(' ');
+
+        return `
+            <svg class="ins-radar" viewBox="0 0 320 240" role="img" aria-label="Comparison metric radar">
+                <polygon points="${points.map(point => `${point.axisX},${point.axisY}`).join(' ')}" class="ins-radar-grid"></polygon>
+                ${points.map(point => `<line x1="${cx}" y1="${cy}" x2="${point.axisX}" y2="${point.axisY}" class="ins-radar-axis"></line>`).join('')}
+                <polygon points="${polygon}" class="ins-radar-area"></polygon>
+                ${points.map(point => `<circle cx="${point.x}" cy="${point.y}" r="3" class="ins-radar-point"></circle>`).join('')}
+                ${points.map(point => `<text x="${point.textX}" y="${point.textY}" text-anchor="middle" class="ins-radar-label">${esc(point.label)} ${point.value}%</text>`).join('')}
+            </svg>
+        `;
+    },
+
+    getComparisonLineColor: function(index) {
+        const idx = Math.max(0, Number(index) || 0);
+        const hue = Math.round((idx * 137.508) % 360);
+        const saturation = 68 + ((idx % 3) * 8);
+        const lightness = 38 + ((idx % 4) * 8);
+        return `hsl(${hue}, ${Math.min(saturation, 86)}%, ${Math.min(lightness, 58)}%)`;
+    },
+
+    renderComparisonTrend: function(rows, category, title) {
+        const chartRows = Array.isArray(rows) ? rows : [];
+        const metricLabels = this.getBreakdownMetricLabels(chartRows, category || 'performance');
+        const width = 720;
+        const height = category === 'performance' ? 300 : 220;
+        const pad = 44;
+        const xFor = (idx) => metricLabels.length <= 1 ? pad : pad + (idx * (width - pad * 2) / (metricLabels.length - 1));
+        const yFor = (value) => height - pad - ((this.clampPercent(value) || 0) * (height - pad * 2) / 100);
+
+        if (!chartRows.length || !metricLabels.length) {
+            return `<div class="ins-item">No ${this.escapeHtml(title || 'comparison')} percentages are available for this graph yet.</div>`;
+        }
+
+        if (category === 'attendance' || category === 'focus') {
+            const datedLabels = metricLabels.filter(label => String(label || '').includes(':'));
+            if (datedLabels.length > 1) return this.renderDailyMetricGrid(chartRows, datedLabels, category);
+        }
+
+        return `
+            <svg class="ins-line-chart ins-breakdown-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Agent breakdown percentage comparison">
+                <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" class="ins-chart-axis"></line>
+                <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="ins-chart-axis"></line>
+                ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${width - pad}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="6" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
+                ${chartRows.map((row, rowIdx) => {
+                    const color = this.getComparisonLineColor(rowIdx);
+                    const available = metricLabels
+                        .map((label, idx) => ({ idx, value: row.metricMap && row.metricMap[label] }))
+                        .filter(point => this.clampPercent(point.value) !== null);
+                    const points = available.map(point => `${xFor(point.idx)},${yFor(point.value)}`).join(' ');
+                    return points ? `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></polyline>${available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.value)}" r="2.4" fill="${color}"></circle>`).join('')}` : '';
+                }).join('')}
+                ${metricLabels.map((label, idx) => `<text x="${xFor(idx)}" y="${height - 14}" text-anchor="middle" class="ins-chart-label">${idx + 1}</text>`).join('')}
+            </svg>
+            <div class="ins-chart-legend">
+                ${chartRows.map((row, idx) => `<span><i style="background:${this.getComparisonLineColor(idx)};"></i>${this.escapeHtml(row.label)}</span>`).join('')}
+            </div>
+            <div class="ins-axis-key">
+                ${metricLabels.map((label, idx) => `<span><strong>${idx + 1}</strong> ${this.escapeHtml(label.replace(/^(Assessment|Vetting|Live|Test|Attendance|Focus):\s*/i, ''))}</span>`).join('')}
+            </div>
+        `;
+    },
+
+    getDailyMetricColor: function(value, category) {
+        const score = this.clampPercent(value);
+        if (score === null) return 'rgba(148, 163, 184, 0.12)';
+        if (category === 'attendance') {
+            if (score >= 95) return 'rgba(34, 197, 94, 0.85)';
+            if (score > 0) return 'rgba(245, 158, 11, 0.82)';
+            return 'rgba(239, 68, 68, 0.88)';
+        }
+        if (score >= 80) return 'rgba(34, 197, 94, 0.85)';
+        if (score >= 50) return 'rgba(245, 158, 11, 0.82)';
+        return 'rgba(239, 68, 68, 0.88)';
+    },
+
+    renderDailyMetricGrid: function(rows, metricLabels, category) {
+        const esc = this.escapeHtml;
+        const labels = Array.isArray(metricLabels) ? metricLabels : [];
+        const averageFor = (row) => this.averagePercent(labels.map(label => row.metricMap && row.metricMap[label]));
+        const dateText = (label) => String(label || '').replace(/^[^:]+:\s*/, '');
+
+        return `
+            <div style="overflow:auto; max-width:100%;">
+                <table class="ins-table ins-table-compact" style="min-width:${Math.max(520, 150 + labels.length * 42)}px;">
+                    <thead>
+                        <tr>
+                            <th style="position:sticky; left:0; z-index:2; background:var(--bg-card); min-width:150px;">${category === 'attendance' ? 'Attendance' : 'Focus'}</th>
+                            ${labels.map(label => `<th title="${esc(dateText(label))}" style="text-align:center; min-width:38px;">${esc(dateText(label).slice(5))}</th>`).join('')}
+                            <th style="text-align:center; min-width:56px;">Avg</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((row) => {
+                            const avg = averageFor(row);
+                            return `
+                                <tr>
+                                    <td style="position:sticky; left:0; z-index:1; background:var(--bg-card); max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${esc(row.label)}">${esc(row.label)}</td>
+                                    ${labels.map((label) => {
+                                        const score = this.clampPercent(row.metricMap && row.metricMap[label]);
+                                        const valueText = score === null ? '-' : `${score}%`;
+                                        return `<td title="${esc(row.label)} | ${esc(dateText(label))} | ${valueText}" style="text-align:center; padding:4px;">
+                                            <span style="display:block; height:20px; border-radius:4px; background:${this.getDailyMetricColor(score, category)}; color:#fff; font-size:0.62rem; line-height:20px; min-width:30px;">${score === null ? '' : score}</span>
+                                        </td>`;
+                                    }).join('')}
+                                    <td class="ins-metric">${avg === null ? '-' : `${avg}%`}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div class="ins-chart-legend">
+                <span><i style="background:rgba(34, 197, 94, 0.85);"></i>${category === 'attendance' ? 'On time' : '80-100%'}</span>
+                <span><i style="background:rgba(245, 158, 11, 0.82);"></i>${category === 'attendance' ? 'Mixed' : '50-79%'}</span>
+                <span><i style="background:rgba(239, 68, 68, 0.88);"></i>${category === 'attendance' ? 'Late' : '0-49%'}</span>
+            </div>
+        `;
+    },
+
+    renderComparisonViewer: function() {
+        const esc = this.escapeHtml;
+        const mode = this.state.compareMode || 'person';
+        const attemptScope = this.state.compareAttemptScope || 'live';
+        const attemptNumber = this.getCompareAttemptNumber();
+        const pairMode = this.isAttemptVsLiveCompareScope();
+        const scopeLabel = pairMode ? 'Attempt 1 vs Current Live' : (attemptNumber ? `Training Attempt ${attemptNumber} Archive` : 'Current Live Attempt');
+        const rows = this.getComparisonRows();
+        const selectableRows = this.getComparePickerRows();
+        const groupAggregateMode = !pairMode && mode === 'group' && String(this.state.groupFilter || 'all') === 'all';
+        const selected = Array.isArray(this.state.compareSelected) ? this.state.compareSelected : [];
+        const selectedSet = new Set(selected);
+        const topRows = rows.slice(0, 10);
+        const metricAvg = {
+            overall: this.averagePercent(rows.map(row => row.overallScore)) || 0,
+            assessment: this.averagePercent(rows.map(row => row.assessmentScore)) || 0,
+            attendance: this.averagePercent(rows.map(row => row.attendanceScore)) || 0,
+            focus: this.averagePercent(rows.map(row => row.focusScore)) || 0
+        };
+
+        return `
+            <div class="ins-dept-grid">
+                <div class="ins-card full">
+                    <div class="ins-item-top" style="align-items:flex-start;">
+                        <div>
+                            <h3 style="margin:0 0 4px 0;">Compare Viewer</h3>
+                            <p class="ins-subtle">${pairMode ? 'Pick specific trainees to compare their Training Attempt 1 archive against their current live attempt on the same graphs.' : (attemptNumber ? `Compare selected trainees or groups using retrain archive snapshot ${attemptNumber}. Only archive attempts 1 and 2 are surfaced until retain attempt data is cleaned.` : 'Compare selected trainees or groups using current live roster data only. Archived, deleted, invalid, blocked, ungrouped, and previous-group rows are excluded.')}</p>
+                        </div>
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <select onchange="InsightApp.setCompareAttemptScope(this.value)" style="margin:0; min-width:210px;">
+                                <option value="live" ${attemptScope === 'live' ? 'selected' : ''}>Current Live Attempt</option>
+                                <option value="attempt_1" ${attemptScope === 'attempt_1' ? 'selected' : ''}>Training Attempt 1 Archive</option>
+                                <option value="attempt_2" ${attemptScope === 'attempt_2' ? 'selected' : ''}>Training Attempt 2 Archive</option>
+                                <option value="attempt_1_vs_live" ${attemptScope === 'attempt_1_vs_live' ? 'selected' : ''}>Attempt 1 vs Current Live</option>
+                            </select>
+                            ${pairMode ? '' : `<button class="sub-tab-btn ${mode === 'group' ? 'active' : ''}" onclick="InsightApp.setCompareMode('group')">Per Group</button>`}
+                        </div>
+                    </div>
+                    <div class="ins-mini-grid ins-dept-kpi-grid" style="margin-top:12px;">
+                        <div class="ins-mini"><strong>${rows.length}</strong><span class="ins-subtle">${groupAggregateMode ? 'Groups' : 'People'} Compared</span></div>
+                        <div class="ins-mini"><strong>${metricAvg.overall}%</strong><span class="ins-subtle">Avg Overall</span></div>
+                        <div class="ins-mini"><strong>${metricAvg.assessment}%</strong><span class="ins-subtle">Avg Assessment</span></div>
+                        <div class="ins-mini"><strong>${metricAvg.attendance}%</strong><span class="ins-subtle">Avg Attendance</span></div>
+                        <div class="ins-mini"><strong>${metricAvg.focus}%</strong><span class="ins-subtle">Avg Focus</span></div>
+                        <div class="ins-mini"><strong>${rows.reduce((sum, row) => sum + Number(row.violationCount || 0), 0)}</strong><span class="ins-subtle">Violations</span></div>
+                        <div class="ins-mini"><strong>${esc(scopeLabel)}</strong><span class="ins-subtle">Attempt Scope</span></div>
+                    </div>
+                </div>
+
+                <div class="ins-card full">
+                    <div class="ins-item-top" style="align-items:flex-start;">
+                        <div>
+                            <h3 style="margin:0 0 4px 0;">Filter Result Set</h3>
+                            <p class="ins-subtle">${pairMode ? 'Pick one or more trainees. Each selected trainee adds two lines: Attempt 1 and Current Live.' : (groupAggregateMode ? 'Pick one or more groups to compare. Selecting a specific group above switches the result set to people inside that group.' : 'Pick one, two, three, or more trainees. Selecting a group above limits this list to people in that group.')}</p>
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn-secondary btn-sm" onclick="InsightApp.selectVisibleCompareRows()">Select Visible</button>
+                            <button class="btn-secondary btn-sm" onclick="InsightApp.clearCompareSelection()">Clear</button>
+                        </div>
+                    </div>
+                    <div class="ins-compare-picker">
+                        ${selectableRows.length ? selectableRows.map(row => `
+                            <label class="ins-compare-pick ${selectedSet.has(row.key) ? 'active' : ''}">
+                                <input type="checkbox" ${selectedSet.has(row.key) ? 'checked' : ''} onchange="InsightApp.toggleCompareSelection('${encodeURIComponent(row.key)}')">
+                                <span>${esc(row.label)}</span>
+                                <small>${pairMode ? `${esc(row.group || 'Ungrouped')} | Attempt 1 vs Current` : `${groupAggregateMode ? `${row.memberCount || 0} members` : esc(row.group || 'Ungrouped')}${attemptNumber && row.attemptLabel ? ` | ${esc(row.attemptLabel)}` : ''}`}</small>
+                            </label>
+                        `).join('') : '<div class="ins-item">No available comparison rows for this filter.</div>'}
+                    </div>
+                </div>
+
+                <div class="ins-card">
+                    <h3>Ranked Overall</h3>
+                    <div class="ins-compare-bars">
+                        ${topRows.length ? topRows.map(row => `
+                            <div class="ins-compare-row">
+                                <div class="ins-item-top"><strong>${esc(row.label)}</strong><span>${row.overallScore === null ? 'No data' : `${row.overallScore}%`}</span></div>
+                                <div class="ins-compare-track"><div class="ins-compare-fill" style="width:${row.overallScore || 0}%;"></div></div>
+                                <div class="ins-subtle">${groupAggregateMode ? `${row.memberCount || 0} members` : esc(row.group || 'Ungrouped')} | ${esc(row.attemptLabel || scopeLabel)} | Late ${row.lateCount || 0} | Violations ${row.violationCount || 0}</div>
+                            </div>
+                        `).join('') : '<div class="ins-item">No comparison rows found for this filter.</div>'}
+                    </div>
+                </div>
+
+                <div class="ins-card full">
+                    <h3>Assessment / Test Breakdown Graph</h3>
+                    <p class="ins-subtle" style="margin-bottom:8px;">Each thin line is one ${groupAggregateMode ? 'group average' : 'agent'} across actual assessment, vetting, live assessment, and test percentage items.</p>
+                    ${rows.length ? this.renderComparisonTrend(rows, 'performance', 'assessment/test') : '<div class="ins-item">No data available for graphing.</div>'}
+                </div>
+
+                <div class="ins-card">
+                    <h3>Attendance Graph</h3>
+                    <p class="ins-subtle" style="margin-bottom:8px;">Attendance percentage is calculated from captured attendance days minus late-coming days.</p>
+                    ${rows.length ? this.renderComparisonTrend(rows, 'attendance', 'attendance') : '<div class="ins-item">No attendance data available for graphing.</div>'}
+                </div>
+
+                <div class="ins-card">
+                    <h3>Focus Level Graph</h3>
+                    <p class="ins-subtle" style="margin-bottom:8px;">Focus percentage uses captured activity monitor study time versus total tracked time.</p>
+                    ${rows.length ? this.renderComparisonTrend(rows, 'focus', 'focus level') : '<div class="ins-item">No focus data available for graphing.</div>'}
+                </div>
+
+                <div class="ins-card full">
+                    <h3>Detailed Comparison Matrix</h3>
+                    <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead>
+                                <tr>
+                                    <th>${groupAggregateMode ? 'Group' : 'Person'}</th>
+                                    <th>Group</th>
+                                    <th>Overall</th>
+                                    <th>Assessment</th>
+                                    <th>Vetting</th>
+                                    <th>Live</th>
+                                    <th>Tests</th>
+                                    <th>Attendance</th>
+                                    <th>Focus</th>
+                                    <th>Progress</th>
+                                    <th>Late</th>
+                                    <th>Violations</th>
+                                    <th>Records</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rows.length ? rows.map(row => `
+                                    <tr>
+                                        <td><strong>${esc(row.label)}</strong></td>
+                                        <td>${groupAggregateMode ? `${row.memberCount || 0} members` : esc(row.group || 'Ungrouped')}</td>
+                                        <td>${this.renderMetricBar('Overall', row.overallScore)}</td>
+                                        <td>${row.assessmentScore === null ? '-' : `${row.assessmentScore}%`}</td>
+                                        <td>${row.vettingScore === null ? '-' : `${row.vettingScore}%`}</td>
+                                        <td>${row.liveScore === null ? '-' : `${row.liveScore}%`}</td>
+                                        <td>${row.testScore === null ? '-' : `${row.testScore}%`}</td>
+                                        <td>${row.attendanceScore === null ? '-' : `${row.attendanceScore}%`}</td>
+                                        <td>${row.focusScore === null ? 'No data' : `${row.focusScore}%`}</td>
+                                        <td>${row.progressScore === null ? '-' : `${row.progressScore}%`}</td>
+                                        <td class="ins-metric">${row.lateCount || 0}/${row.attendanceDays || 0}</td>
+                                        <td class="ins-metric">${row.violationCount || 0}</td>
+                                        <td class="ins-metric">${row.recordCount || 0}</td>
+                                    </tr>
+                                `).join('') : '<tr><td colspan="13" style="text-align:center; color:var(--text-muted);">No comparison data found for this filter.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
     renderDepartmentOverview: function() {
         const esc = this.escapeHtml;
         const summary = InsightDataService.getDepartmentOverview(this.state.groupFilter, this.state.search);
@@ -700,7 +1744,7 @@ const InsightApp = {
                                     ? effortRows.map((row) => `
                                         <tr>
                                             <td>${esc(row.agent)}</td>
-                                            <td class="ins-metric">${row.focusScore}%</td>
+                                            <td class="ins-metric">${esc(row.focusLabel || `${row.focusScore}%`)}</td>
                                             <td class="ins-metric">${row.avgScore}%</td>
                                             <td><span class="ins-status ${esc(row.tone || 'pending')}">${esc(row.status || 'Pending')}</span></td>
                                         </tr>
@@ -766,7 +1810,7 @@ const InsightApp = {
                                             <td class="ins-metric">${row.violationCount}</td>
                                             <td class="ins-metric">${row.idleMinutes}m</td>
                                             <td class="ins-metric">${row.externalMinutes}m</td>
-                                            <td class="ins-metric">${row.focusScore}%</td>
+                                            <td class="ins-metric">${row.dataStatus === 'no_data' ? 'No data' : `${row.focusScore}%`}</td>
                                         </tr>
                                     `).join('')
                                     : '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No activity monitor data found.</td></tr>'}
@@ -915,6 +1959,8 @@ const InsightApp = {
         const groups = InsightDataService.getGroups();
         const isProgressView = this.state.viewMode === 'progress';
         const isDepartmentView = this.state.viewMode === 'department';
+        const isKnowledgeView = this.state.viewMode === 'knowledge';
+        const isCompareView = this.state.viewMode === 'compare';
 
         const rowsHtml = isProgressView
             ? this.getProgressAgents().map((row, idx) => {
@@ -988,16 +2034,22 @@ const InsightApp = {
             <div class="ins-shell">
                 <div class="ins-toolbar">
                     <div class="ins-toolbar-left">
-                        <strong>${isDepartmentView ? 'Department Overview' : (isProgressView ? 'Agent Progress' : 'Agent Triggers')}</strong>
-                        <span class="ins-subtle">${isDepartmentView
+                        <strong>${isCompareView ? 'Compare Viewer' : (isKnowledgeView ? 'Knowledge Gaps' : (isDepartmentView ? 'Department Overview' : (isProgressView ? 'Agent Progress' : 'Agent Triggers')))}</strong>
+                        <span class="ins-subtle">${isCompareView
+                            ? 'Side-by-side graph comparison by person or group across scores, attendance, focus, and progress.'
+                            : (isKnowledgeView
+                            ? 'Question-level gap analysis grouped by assessment, individual, or all groups.'
+                            : (isDepartmentView
                             ? 'High-level operational overview powered by trigger, engagement, feedback, and timeline signals.'
                             : (isProgressView
                                 ? 'Checklist progress with configurable requirements, N/A control, and graduation readiness.'
-                                : 'Program-level trainee insight with adjustable action triggers.')}</span>
+                                : 'Program-level trainee insight with adjustable action triggers.')))}</span>
                         <div style="display:flex; gap:8px; margin-left:6px;">
                             <button class="sub-tab-btn ${this.state.viewMode === 'triggers' ? 'active' : ''}" onclick="InsightApp.setViewMode('triggers')">Agent Triggers</button>
                             <button class="sub-tab-btn ${this.state.viewMode === 'progress' ? 'active' : ''}" onclick="InsightApp.setViewMode('progress')">Agent Progress</button>
                             <button class="sub-tab-btn ${this.state.viewMode === 'department' ? 'active' : ''}" onclick="InsightApp.setViewMode('department')">Department Overview</button>
+                            <button class="sub-tab-btn ${this.state.viewMode === 'compare' ? 'active' : ''}" onclick="InsightApp.setViewMode('compare')">Compare Viewer</button>
+                            <button class="sub-tab-btn ${this.state.viewMode === 'knowledge' ? 'active' : ''}" onclick="InsightApp.setViewMode('knowledge')">Knowledge Gaps</button>
                         </div>
                     </div>
                     <div class="ins-toolbar-right">
@@ -1010,7 +2062,11 @@ const InsightApp = {
                     </div>
                 </div>
 
-                ${isDepartmentView
+                ${isCompareView
+                    ? this.renderComparisonViewer()
+                    : (isKnowledgeView
+                    ? this.renderKnowledgeGaps()
+                    : (isDepartmentView
                     ? this.renderDepartmentOverview()
                     : `<div class="ins-table-wrap">
                         <table class="ins-table">
@@ -1040,12 +2096,18 @@ const InsightApp = {
                                 ${rowsHtml || `<tr><td colspan="${isProgressView ? '6' : '9'}" style="text-align:center; color:var(--text-muted);">${isProgressView ? 'No trainee agents found for this filter.' : 'No trainee agents currently in Improvement or Critical status for this filter.'}</td></tr>`}
                             </tbody>
                         </table>
-                    </div>`}
+                    </div>`))}
             </div>
-            ${isDepartmentView ? '' : this.renderDetailDrawer()}
+            ${isDepartmentView || isKnowledgeView || isCompareView ? '' : this.renderDetailDrawer()}
         `;
     }
 };
 
-window.InsightApp = InsightApp;
-window.onload = () => InsightApp.init();
+if (typeof window !== 'undefined') {
+    window.InsightApp = InsightApp;
+    window.onload = () => InsightApp.init();
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = InsightApp;
+}

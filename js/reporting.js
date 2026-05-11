@@ -29,6 +29,154 @@ async function secureRequestSave() {
     }
 }
 
+function normalizeReportingIdentity(value) {
+    try {
+        if (typeof normalizeIdentityValue === 'function') {
+            const normalized = normalizeIdentityValue(value);
+            if (normalized) return normalized;
+        }
+    } catch (e) {}
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function readReportingJson(key, fallback) {
+    try {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        const parsed = JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+        return parsed === null || typeof parsed === 'undefined' ? fallback : parsed;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function getLiveRosterMembershipSnapshot() {
+    const rosters = readReportingJson('rosters', {}) || {};
+    const groupIds = new Set();
+    const memberGroups = new Map();
+    Object.entries(rosters).forEach(([gid, members]) => {
+        if (!Array.isArray(members)) return;
+        groupIds.add(String(gid || '').trim());
+        members.forEach(member => {
+            const token = normalizeReportingIdentity(member);
+            if (!token) return;
+            if (!memberGroups.has(token)) memberGroups.set(token, new Set());
+            memberGroups.get(token).add(String(gid || '').trim());
+        });
+    });
+    return { rosters, groupIds, memberGroups };
+}
+
+function getAssessmentRecordIntegrity(row, rosterSnapshot) {
+    if (!row || typeof row !== 'object') return { valid: false, reason: 'not_object' };
+    if (row.archived === true) return { valid: false, reason: 'archived' };
+    const status = String(row.status || '').trim().toLowerCase();
+    if (['archived', 'deleted', 'invalid', 'retake_allowed'].includes(status)) return { valid: false, reason: status || 'inactive_status' };
+
+    const trainee = String(row.trainee || row.user || row.user_id || '').trim();
+    if (!trainee) return { valid: false, reason: 'missing_trainee' };
+    const traineeToken = normalizeReportingIdentity(trainee);
+    const memberGroups = rosterSnapshot.memberGroups.get(traineeToken);
+    if (!memberGroups || memberGroups.size === 0) return { valid: false, reason: 'not_in_live_roster' };
+
+    const groupID = String(row.groupID || row.groupId || row.group || '').trim();
+    if (!groupID) return { valid: false, reason: 'missing_group' };
+    if (!rosterSnapshot.groupIds.has(groupID)) return { valid: false, reason: 'stale_group' };
+    if (!memberGroups.has(groupID)) return { valid: false, reason: 'trainee_not_in_record_group' };
+
+    const assessment = String(row.assessment || row.testTitle || '').trim();
+    if (!assessment) return { valid: false, reason: 'missing_assessment' };
+
+    const score = Number(row.score);
+    if (!Number.isFinite(score) || score < 0 || score > 100) return { valid: false, reason: 'invalid_score' };
+
+    const dateValue = String(row.date || '').trim();
+    if (!dateValue || Number.isNaN(Date.parse(dateValue))) return { valid: false, reason: 'invalid_date' };
+
+    return { valid: true, reason: 'live' };
+}
+
+function getCurrentLiveAssessmentRecordRows(recordsInput, options = {}) {
+    const allRecords = Array.isArray(recordsInput) ? recordsInput : readReportingJson('records', []);
+    const lifecycleRows = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
+        ? filterRowsToCurrentTraineeLifecycle(allRecords)
+        : allRecords;
+    const lifecycleSet = new Set(lifecycleRows);
+    const rosterSnapshot = getLiveRosterMembershipSnapshot();
+    const diagnostics = { total: allRecords.length, lifecycleExcluded: 0, invalid: 0, archived: 0, reasons: {} };
+
+    const rows = allRecords
+        .map((record, sourceIndex) => ({ record, sourceIndex }))
+        .filter(({ record }) => {
+            if (!lifecycleSet.has(record)) {
+                diagnostics.lifecycleExcluded++;
+                return false;
+            }
+            const integrity = getAssessmentRecordIntegrity(record, rosterSnapshot);
+            if (!integrity.valid) {
+                if (integrity.reason === 'archived') diagnostics.archived++;
+                else diagnostics.invalid++;
+                diagnostics.reasons[integrity.reason] = (diagnostics.reasons[integrity.reason] || 0) + 1;
+                return options.includeInvalid === true;
+            }
+            return true;
+        });
+
+    rows.diagnostics = diagnostics;
+    return rows;
+}
+
+function getCurrentLiveAssessmentRecords(recordsInput, options = {}) {
+    const rows = getCurrentLiveAssessmentRecordRows(recordsInput, options);
+    const records = rows.map(row => row.record);
+    records.diagnostics = rows.diagnostics;
+    return records;
+}
+
+function updateAssessmentRecordIntegritySummary(diagnostics, visibleCount) {
+    const panel = document.querySelector('.records-results-panel .app-panel-subtitle');
+    if (!panel || !diagnostics) return;
+    const excluded = Number(diagnostics.lifecycleExcluded || 0) + Number(diagnostics.archived || 0) + Number(diagnostics.invalid || 0);
+    const parts = [`Showing ${visibleCount} live valid record${visibleCount === 1 ? '' : 's'}`];
+    if (excluded > 0) parts.push(`${excluded} old/archived/invalid row${excluded === 1 ? '' : 's'} excluded`);
+    panel.textContent = parts.join(' | ');
+}
+
+async function submitInsightReview() {
+    const modal = document.getElementById('insightReviewModal');
+    const targetName = String(document.getElementById('reviewTargetName')?.textContent || '').trim();
+    const status = String(document.getElementById('reviewStatus')?.value || '').trim();
+    const comment = String(document.getElementById('reviewComment')?.value || '').trim();
+
+    if (!targetName) return alert("No trainee selected for review.");
+    if (!status) return alert("Please select a final status.");
+
+    const decisions = JSON.parse(localStorage.getItem('adminDecisions') || '{}');
+    decisions[targetName] = {
+        status,
+        comment,
+        reviewedAt: new Date().toISOString(),
+        reviewedBy: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'admin'
+    };
+    localStorage.setItem('adminDecisions', JSON.stringify(decisions));
+
+    if (typeof saveToServer === 'function') {
+        try {
+            await saveToServer(['adminDecisions'], false);
+        } catch (error) {
+            console.warn('Legacy insight review decision sync failed:', error);
+        }
+    }
+
+    if (modal) modal.classList.add('hidden');
+    if (typeof showToast === 'function') showToast('Review decision saved.', 'success');
+    if (typeof loadReportTab === 'function') loadReportTab();
+}
+
 function loadAllDataViews() { 
     populateMonthlyFilters(); 
     // Force sync to ensure trainee sees latest scores immediately
@@ -40,8 +188,10 @@ function loadAllDataViews() {
 }
 
 function populateMonthlyFilters() {
-    const recs = JSON.parse(localStorage.getItem('records') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
+    const allRecords = readReportingJson('records', []);
+    const liveRows = getCurrentLiveAssessmentRecordRows(allRecords);
+    const recs = liveRows.map(row => row.record);
+    const rosters = readReportingJson('rosters', {});
     const groupSel = document.getElementById('filterMonth');
     const assessSel = document.getElementById('filterAssessment');
     const phaseSel = document.getElementById('filterPhase');
@@ -87,19 +237,23 @@ function populateMonthlyFilters() {
 }
 
 function renderMonthly() {
-  const recs = JSON.parse(localStorage.getItem('records')||'[]');
-  const requests = JSON.parse(localStorage.getItem('linkRequests')||'[]');
+  const allRecords = readReportingJson('records', []);
+  const liveRows = getCurrentLiveAssessmentRecordRows(allRecords);
   const fMonth = document.getElementById('filterMonth').value;
   const fAssess = document.getElementById('filterAssessment').value;
   const fPhase = document.getElementById('filterPhase').value;
   const fTrainee = document.getElementById('filterTrainee').value.toLowerCase();
   
-  // Filter records to only show 'Assessment' phase, not vetting tests.
-  const filteredRecs = recs.filter(r => {
-      // Keep records where phase is 'Assessment' or if phase is not defined (legacy/default)
-      const phase = r.phase || 'assessment';
-      return phase.toLowerCase() === 'assessment';
+  const filteredRows = liveRows.filter(({ record: r }) => {
+      if (!r || !r.trainee) return false;
+      if(CURRENT_USER.role === 'trainee' && normalizeReportingIdentity(r.trainee) !== normalizeReportingIdentity(CURRENT_USER.user)) return false;
+      if(fMonth !== '' && r.groupID !== fMonth) return false;
+      if(fAssess !== '' && r.assessment !== fAssess) return false;
+      if(fPhase !== '' && String(r.phase || '').trim() !== fPhase) return false;
+      if(fTrainee !== '' && !String(r.trainee || '').toLowerCase().includes(fTrainee)) return false;
+      return true;
   });
+  updateAssessmentRecordIntegritySummary(liveRows.diagnostics, filteredRows.length);
 
   const tbody = document.querySelector('#monthlyTableMain tbody');
   const theadRow = document.querySelector('#monthlyTableMain thead tr');
@@ -141,15 +295,9 @@ function renderMonthly() {
   }
     
   let html = '';
-  filteredRecs.forEach((r, originalIndex) => {
+  filteredRows.forEach(({ record: r, sourceIndex }) => {
     // SAFETY CHECK: Skip corrupted records without trainee names
     if (!r.trainee) return;
-
-    if(CURRENT_USER.role === 'trainee' && r.trainee.toLowerCase() !== CURRENT_USER.user.toLowerCase()) return;
-    if(fMonth !== '' && r.groupID !== fMonth) return;
-    if(fAssess !== '' && r.assessment !== fAssess) return;
-    if(fPhase !== '' && r.phase !== fPhase) return;
-    if(fTrainee !== '' && !r.trainee.toLowerCase().includes(fTrainee)) return;
     
     let s = 'fail'; let t = 'Fail';
     const PASS_SCORE = (typeof PASS !== 'undefined') ? PASS : 90;
@@ -158,8 +306,8 @@ function renderMonthly() {
     if(r.score >= PASS_SCORE) { s = 'pass'; t = 'Pass'; }
     else if(r.score >= IMPROVE_SCORE) { s = 'improve'; t = 'Improve'; }
     
-    let checkHtml = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') 
-      ? `<td class="admin-only" style="text-align:center;"><input type="checkbox" class="del-check" value="${originalIndex}" aria-label="Select Record for Deletion"></td>` 
+    let checkHtml = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin')
+      ? `<td class="admin-only" style="text-align:center;"><input type="checkbox" class="del-check" value="${sourceIndex}" aria-label="Select Record for Deletion"></td>`
       : '';
     
     // --- ACTION COLUMN LOGIC ---
@@ -173,8 +321,8 @@ function renderMonthly() {
                 ? (r.submissionId ? `onclick="viewCompletedTest('${r.submissionId}', null, 'view')"` : `disabled title="Missing submission ID"`)
                 : `onclick="alert('Assessment viewer not loaded.')"`;
              const editAction = (typeof window.viewCompletedTest === 'function' || typeof viewCompletedTest === 'function')
-                ? (r.submissionId ? `onclick="viewCompletedTest('${r.submissionId}', null, 'edit')"` : `onclick="updateRecordScore(${originalIndex})" title="No submission file found; edit permanent record score only"`)
-                : `onclick="updateRecordScore(${originalIndex})"`;
+                ? (r.submissionId ? `onclick="viewCompletedTest('${r.submissionId}', null, 'edit')"` : `onclick="updateRecordScore(${sourceIndex})" title="No submission file found; edit permanent record score only"`)
+                : `onclick="updateRecordScore(${sourceIndex})"`;
              
              actionHtml += `<button class="btn-secondary" style="padding:2px 8px; font-size:0.8rem;" ${clickAction} aria-label="View Digital Assessment"><i class="fas fa-eye"></i> View</button>`;
              if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
@@ -198,10 +346,10 @@ function renderMonthly() {
             
             // Admin Edit Button (Only if link exists)
             if ((CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') && r.link) {
-                actionHtml += ` <button class="btn-secondary btn-sm" onclick="updateRecordLink(${originalIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
+                actionHtml += ` <button class="btn-secondary btn-sm" onclick="updateRecordLink(${sourceIndex})" title="Edit Link"><i class="fas fa-pen"></i></button>`;
             }
             if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
-                actionHtml += ` <button class="btn-primary btn-sm" onclick="updateRecordScore(${originalIndex})" title="Edit Score"><i class="fas fa-star"></i></button>`;
+                actionHtml += ` <button class="btn-primary btn-sm" onclick="updateRecordScore(${sourceIndex})" title="Edit Score"><i class="fas fa-star"></i></button>`;
             }
         }
         actionHtml += '</td>';
@@ -319,6 +467,73 @@ function installReportAutoGrow() {
     });
 }
 
+function normalizeReportText(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function escapeReportHtml(value) {
+    return String(value === undefined || value === null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getConfiguredOnboardReportItems(sectionKey) {
+    const readProgressItems = () => {
+        if (typeof getInsightProgressRequiredItems === 'function') {
+            return getInsightProgressRequiredItems();
+        }
+        try {
+            const cfg = JSON.parse(localStorage.getItem('insight_progress_config') || '{}');
+            return Array.isArray(cfg.requiredItems) ? cfg.requiredItems : [];
+        } catch (error) {
+            return [];
+        }
+    };
+
+    return readProgressItems()
+        .filter(item => item && item.source !== 'auto' && item.reportSections && item.reportSections[sectionKey] === true)
+        .map(item => ({
+            name: String(item.name || '').trim(),
+            type: String(item.type || '').trim().toLowerCase() || 'assessment'
+        }))
+        .filter(item => item.name);
+}
+
+function findReportScore(itemName, records, submissions, options = {}) {
+    const target = normalizeReportText(itemName);
+    const phaseKey = normalizeReportText(options.phaseKey || '');
+    const vettingCore = target
+        .replace(/^1st vetting\s*-\s*/i, '')
+        .replace(/^final vetting\s*-\s*/i, '')
+        .trim();
+
+    const record = records.find(r => {
+        const assessment = normalizeReportText(r && r.assessment);
+        if (!assessment) return false;
+        if (phaseKey && !assessment.includes(phaseKey)) return false;
+        if (phaseKey && phaseKey.includes('1st') && assessment.includes('final')) return false;
+        if (phaseKey && phaseKey.includes('final') && assessment.includes('1st')) return false;
+        return assessment === target || assessment.includes(target) || (vettingCore && assessment.includes(vettingCore));
+    });
+
+    const submission = submissions.find(s => {
+        const title = normalizeReportText(s && s.testTitle);
+        if (!title) return false;
+        if (phaseKey && !title.includes(phaseKey)) return false;
+        if (phaseKey && phaseKey.includes('1st') && title.includes('final')) return false;
+        if (phaseKey && phaseKey.includes('final') && title.includes('1st')) return false;
+        return title === target || title.includes(target) || (vettingCore && title.includes(vettingCore));
+    });
+
+    const scores = [record ? Number(record.score) : -1, submission ? Number(submission.score) : -1]
+        .filter(score => Number.isFinite(score));
+    const best = scores.length ? Math.max(...scores) : -1;
+    return best >= 0 ? best : null;
+}
+
 function createReportSnapshotHtml() {
     const container = document.getElementById('reportContainer');
     if (!container) return '';
@@ -421,48 +636,46 @@ function generateReport() {
       const myRecs = allRecs.filter(r => r.trainee && r.trainee.toLowerCase() === name.toLowerCase());
       const mySubs = submissions.filter(s => s.trainee && s.trainee.toLowerCase() === name.toLowerCase() && s.status === 'completed');
 
-      // 1. STANDARD ASSESSMENTS (Dynamic)
+      // 1. STANDARD ASSESSMENTS (Configured from Agent Progress Builder Insight)
       const assessList = JSON.parse(localStorage.getItem('assessments') || '[]');
-      // Filter out Vetting Tests (Include Live Assessments in main report)
-      const standardAssessments = assessList.filter(a => 
-          !a.name.toLowerCase().includes('vetting test')
-      );
+      const configuredGoalItems = getConfiguredOnboardReportItems('trainingGoal');
+      const configuredScoreItems = getConfiguredOnboardReportItems('assessmentScores');
+      const fallbackAssessments = assessList
+          .filter(a => a && a.name && !a.name.toLowerCase().includes('vetting test'))
+          .map(a => ({ name: a.name, type: 'assessment' }));
+      const goalItems = configuredGoalItems.length ? configuredGoalItems : fallbackAssessments;
+      const scoreItems = configuredScoreItems.length ? configuredScoreItems : fallbackAssessments;
       
-      let goalHtml = ''; let scoreHtml = '';
-      standardAssessments.forEach(a => {
-          // Find matching score from either source (Robust Fuzzy Match)
-          const rec = myRecs.find(r => {
-              // Exact match
-              if (r.assessment === a.name) return true;
-              // Fuzzy match (ignore case/trim)
-              if (r.assessment.trim().toLowerCase() === a.name.trim().toLowerCase()) return true;
-              return false;
-          });
-
-          // UPDATED: Fuzzy match for submissions to ensure scores populate even if casing differs
-          const sub = mySubs.find(s => {
-              if (s.testTitle === a.name) return true;
-              return (s.testTitle && s.testTitle.trim().toLowerCase() === a.name.trim().toLowerCase());
-          });
-
-          const score = Math.max(rec ? rec.score : -1, sub ? sub.score : -1);
-
+      let goalHtml = '';
+      goalItems.forEach(item => {
+          const score = findReportScore(item.name, myRecs, mySubs);
           let g1='', g2='', g3='', s1='', s2='', s3='';
-          if(score !== -1) {
+          if(score !== null) {
               if(score >= 90) { g1 = '&#8226;'; s3 = '&#8226;'; }
               else if(score >= 60) { g2 = '&#8226;'; s2 = '&#8226;'; }
               else { g3 = '&#8226;'; s1 = '&#8226;'; }
           }
-          goalHtml += `<tr><td>${a.name}</td><td class="center report-check">${g1}</td><td class="center report-check">${g2}</td><td class="center report-check">${g3}</td></tr>`;
-          scoreHtml += `<tr><td>${a.name}</td><td class="center report-check">${s1}</td><td class="center report-check">${s2}</td><td class="center report-check">${s3}</td></tr>`;
+          goalHtml += `<tr><td>${escapeReportHtml(item.name)}</td><td class="center report-check">${g1}</td><td class="center report-check">${g2}</td><td class="center report-check">${g3}</td></tr>`;
+      });
+
+      let scoreHtml = '';
+      scoreItems.forEach(item => {
+          const score = findReportScore(item.name, myRecs, mySubs);
+          let s1='', s2='', s3='';
+          if(score !== null) {
+              if(score >= 90) s3 = '&#8226;';
+              else if(score >= 60) s2 = '&#8226;';
+              else s1 = '&#8226;';
+          }
+          scoreHtml += `<tr><td>${escapeReportHtml(item.name)}</td><td class="center report-check">${s1}</td><td class="center report-check">${s2}</td><td class="center report-check">${s3}</td></tr>`;
       });
       
       document.getElementById('repGoalBody').innerHTML = goalHtml;
       document.getElementById('repScoreBody').innerHTML = scoreHtml;
       
       // 2. VETTING TABLES (Strict Separation)
-      renderVettingTable('1st Vetting', myRecs, mySubs, 'repVetting1Body');
-      renderVettingTable('Final Vetting', myRecs, mySubs, 'repVetting2Body');
+      renderVettingTable('1st Vetting', myRecs, mySubs, 'repVetting1Body', getConfiguredOnboardReportItems('vettingTest1'));
+      renderVettingTable('Final Vetting', myRecs, mySubs, 'repVetting2Body', getConfiguredOnboardReportItems('vettingFinal'));
 
       // PRE-FILL ADMIN DECISIONS (If any)
       const decisions = JSON.parse(localStorage.getItem('adminDecisions') || '{}');
@@ -478,11 +691,14 @@ function generateReport() {
   }, 200);
 }
 
-function renderVettingTable(phaseKey, records, submissions, tableId) {
+function renderVettingTable(phaseKey, records, submissions, tableId, configuredItems = []) {
     const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
+    const reportTopics = Array.isArray(configuredItems) && configuredItems.length
+        ? configuredItems.map(item => String(item.name || '').trim()).filter(Boolean)
+        : topics;
     let html = '';
 
-    topics.forEach(topic => {
+    reportTopics.forEach(topic => {
         // FILTER: Ensure topic belongs in this table
         // If topic has "Final Vetting" in name, skip it for "1st Vetting" table
         if (phaseKey === '1st Vetting' && topic.toLowerCase().includes('final vetting')) return;
@@ -493,34 +709,13 @@ function renderVettingTable(phaseKey, records, submissions, tableId) {
         // This ensures we search for the core subject name + the specific phase key
         const searchTopic = topic.replace(/1st Vetting - /gi, '').replace(/Final Vetting - /gi, '').trim();
 
-        // Find best score for this Topic + Phase combination
-        let score = -1;
-
-        // Check Manual Records
-        const rec = records.find(r => {
-            if (!r.assessment) return false;
-            const name = r.assessment.toLowerCase();
-            // STRICT CHECK: Must contain Phase Key AND Topic Name
-            return name.includes(phaseKey.toLowerCase()) && name.includes(searchTopic.toLowerCase()) && !name.includes(phaseKey === '1st Vetting' ? 'final' : '1st');
-        });
-        if (rec) score = Math.max(score, rec.score);
-
-        // Check Digital Submissions
-        const sub = submissions.find(s => {
-            if (!s.testTitle) return false;
-            const name = s.testTitle.toLowerCase();
-            // STRICT CHECK: Must contain Phase Key AND Topic Name
-            return name.includes(phaseKey.toLowerCase()) && name.includes(searchTopic.toLowerCase()) && !name.includes(phaseKey === '1st Vetting' ? 'final' : '1st');
-        });
-        if (sub) score = Math.max(score, sub.score);
-
-        if (score === -1) score = null; // No record found
+        const score = findReportScore(`${phaseKey} - ${searchTopic}`, records, submissions, { phaseKey });
 
         let v1='', v2='', v3='', v4='';
         if(score !== null) {
             if(score === 100) v4 = '&#8226;'; else if(score >= 80) v3 = '&#8226;'; else if(score >= 60) v2 = '&#8226;'; else v1 = '&#8226;';
         }
-        html += `<tr><td>${topic}</td><td class="center report-check">${v1}</td><td class="center report-check">${v2}</td><td class="center report-check">${v3}</td><td class="center report-check">${v4}</td></tr>`;
+        html += `<tr><td>${escapeReportHtml(topic)}</td><td class="center report-check">${v1}</td><td class="center report-check">${v2}</td><td class="center report-check">${v3}</td><td class="center report-check">${v4}</td></tr>`;
     });
     const target = document.getElementById(tableId);
     if(target) target.innerHTML = html;

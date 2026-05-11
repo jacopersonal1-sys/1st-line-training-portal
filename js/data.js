@@ -12,6 +12,14 @@ const DB_SCHEMA = {
     monitor_whitelist: [], // Custom whitelist for work-related apps
     monitor_reviewed: [], // Apps confirmed as External/Idle (Dismissed from queue)
     violation_reports: [], // Mandatory trainee explanations for security/activity violations
+    insight_rule_config: { defaultScoreThreshold: 60, triggerPresets: [], severityRules: [], scoreThreshold: 60, updatedAt: null, updatedBy: null },
+    insight_progress_config: { requiredItems: [], updatedAt: null, updatedBy: null },
+    live_assessment_rules_config: { rules: [], rulesHtml: '', updatedAt: null, updatedBy: null },
+    live_booking_rules_config: { rules: [], rulesHtml: '', updatedAt: null, updatedBy: null },
+    training_rules_config: { rules: [], rulesHtml: '', showOnFirstLogin: true, showOnLogin: false, targetMode: 'all', targetUsers: [], targetGroups: [], officeOptions: [], updatedAt: null, updatedBy: null },
+    test_integrity_overrides: { entries: {}, updatedAt: null, updatedBy: null },
+    system_tombstones: [],
+    adminDecisions: {}, // Legacy report-card review overrides
     dailyTips: [], // Admin controlled daily tips
     calendarEvents: [], // Custom Admin Events
     error_reports: [] // Centralized error logging for Super Admin
@@ -103,7 +111,13 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'schedules',
     'liveSchedules',
     'rosters',
-    'assessments'
+    'assessments',
+    'insight_rule_config',
+    'insight_progress_config',
+    'live_assessment_rules_config',
+    'live_booking_rules_config',
+    'training_rules_config',
+    'test_integrity_overrides'
 ]);
 
 // --- TRAINEE RUNTIME OPTIMIZATION ---
@@ -126,6 +140,8 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'monitor_whitelist',
     'monitor_reviewed',
     'violation_reports',
+    'training_rules_config',
+    'live_booking_rules_config',
     'liveScheduleSettings',
     'cancellationCounts'
 ]);
@@ -700,6 +716,7 @@ async function loadFromServer(silent = false) {
                             }
                             return item;
                         });
+                    serverItems = dedupeArrayByIdentity(localKey, serverItems, 'server_wins');
                     if (isTrainee) {
                         serverItems = serverItems.filter(item => isRowOwnedByCurrentTrainee(localKey, item));
                     }
@@ -1740,6 +1757,13 @@ function getTimestampPreferenceValue(item) {
 }
 
 function resolveDuplicateArrayItem(key, existingItem, incomingItem, strategy = 'server_wins') {
+    if (key === 'users') {
+        const existingId = String(existingItem && existingItem.id || '');
+        const incomingId = String(incomingItem && incomingItem.id || '');
+        if (incomingId.startsWith('user_') && !existingId.startsWith('user_')) return incomingItem;
+        if (existingId.startsWith('user_') && !incomingId.startsWith('user_')) return existingItem;
+    }
+
     const existingTs = getTimestampPreferenceValue(existingItem);
     const incomingTs = getTimestampPreferenceValue(incomingItem);
 
@@ -1914,7 +1938,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             const hasExplicitSaveRequest = EXPLICIT_SAVE_KEYS.has(key);
             const isCriticalExplicitSave = hasExplicitSaveRequest && CRITICAL_EXPLICIT_SAVE_KEYS.has(key);
             const keyForce = force || (isStrictServerKey && hasExplicitSaveRequest);
-            const localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
+            let localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
+            if (key === 'users' && Array.isArray(localContent)) {
+                const dedupedUsers = dedupeArrayByIdentity(key, localContent, 'server_wins');
+                if (dedupedUsers.length !== localContent.length) {
+                    localContent = dedupedUsers;
+                    localStorage.setItem(key, JSON.stringify(localContent));
+                }
+            }
             const keyBytes = estimateSyncPayloadSize(localContent);
             pushBytesTotal += keyBytes;
             updateSyncDiagnostics({
@@ -2006,18 +2037,26 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                         try {
                             const { data: indexRows, error: idxErr } = await window.supabaseClient
                                 .from(tableName)
-                                .select('id, data->>user as username')
+                                .select('id, data')
                                 .limit(10000);
                             if (!idxErr && Array.isArray(indexRows)) {
                                 const serverMap = {};
+                                const preferUserRowId = (currentId, candidateId) => {
+                                    const current = String(currentId || '');
+                                    const candidate = String(candidateId || '');
+                                    if (!current) return candidate;
+                                    if (candidate.startsWith('user_') && !current.startsWith('user_')) return candidate;
+                                    if (current.startsWith('user_') && !candidate.startsWith('user_')) return current;
+                                    return candidate.localeCompare(current) < 0 ? candidate : current;
+                                };
                                 indexRows.forEach(r => {
-                                    const uname = (r.username || (r.data && (r.data.user || r.data.username)) || '').toString().trim().toLowerCase();
-                                    if (uname) serverMap[uname] = r.id;
+                                    const uname = normalizeIdentityValue((r.data && (r.data.user || r.data.username)) || '');
+                                    if (uname) serverMap[uname] = preferUserRowId(serverMap[uname], r.id);
                                 });
 
                                 itemsToUpload.forEach(entry => {
                                     const it = entry.item;
-                                    const uname = String(it.user || it.username || '').trim().toLowerCase();
+                                    const uname = normalizeIdentityValue(it.user || it.username || '');
                                     if (uname && serverMap[uname]) it.id = serverMap[uname];
                                 });
                             }
@@ -3163,27 +3202,37 @@ function startRealtimeSync() {
     } else {
         rates = { admin: 4000, teamleader: 60000, trainee: 15000 };
     }
+    const rawFallbackRates = config.realtime_fallback_rates || {};
+    const fallbackDefaults = {
+        cloud: { admin: 30000, teamleader: 60000, trainee: 60000 },
+        local: { admin: 15000, teamleader: 30000, trainee: 30000 },
+        staging: { admin: 30000, teamleader: 60000, trainee: 60000 }
+    };
+    const fallbackRates = rawFallbackRates[activeTarget]
+        ? rawFallbackRates[activeTarget]
+        : (typeof rawFallbackRates.admin !== 'undefined' ? rawFallbackRates : (fallbackDefaults[activeTarget] || fallbackDefaults.cloud));
     const beats = config.heartbeat_rates || { admin: 5000, default: 60000 };
 
     // Default Rates (Trainee/Guest)
     let syncRate = rates.trainee; 
+    let failoverRate = fallbackRates.trainee || fallbackDefaults.cloud.trainee;
     let beatRate = beats.default;
 
     // Role-Based Adjustment
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
         if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
             syncRate = rates.admin; 
+            failoverRate = fallbackRates.admin || failoverRate;
             beatRate = beats.admin; 
         } else if (CURRENT_USER.role === 'teamleader') {
             syncRate = rates.teamleader;
+            failoverRate = fallbackRates.teamleader || failoverRate;
         }
     }
 
     window.NORMAL_FALLBACK_RATE = 0;
-    const isFastFailoverRole = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER)
-        && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin');
-    window.REALTIME_FAILURE_RATE = isFastFailoverRole ? 1000 : Math.max(1000, syncRate);
-    window.BASE_REALTIME_FAILURE_RATE = Math.max(1000, syncRate);
+    window.REALTIME_FAILURE_RATE = Math.max(5000, Number(failoverRate || syncRate || 30000));
+    window.BASE_REALTIME_FAILURE_RATE = window.REALTIME_FAILURE_RATE;
     window.REALTIME_FAILURE_STREAK = 0;
     window.REALTIME_LAST_STATUS = null;
     window.REALTIME_RETRY_DELAY = 15000;

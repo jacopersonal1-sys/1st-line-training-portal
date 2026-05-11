@@ -30,6 +30,11 @@
                         <button class="btn-secondary btn-sm" data-game="snake" onclick="easterArcadeShow('snake')">Snake</button>
                         <button class="btn-secondary btn-sm" data-game="space" onclick="easterArcadeShow('space')">Space Impact</button>
                         <button class="btn-secondary btn-sm" data-game="hangman" onclick="easterArcadeShow('hangman')">Hangman</button>
+                        <button class="btn-secondary btn-sm" data-game="pong" onclick="easterArcadeShow('pong')">Pong</button>
+                        <button class="btn-secondary btn-sm" data-game="memory" onclick="easterArcadeShow('memory')">Memory Match</button>
+                        <button class="btn-secondary btn-sm" data-game="simon" onclick="easterArcadeShow('simon')">Simon Says</button>
+                        <button class="btn-secondary btn-sm" data-game="typing" onclick="easterArcadeShow('typing')">Typing Speed</button>
+                        <button class="btn-secondary btn-sm" data-game="tictactoe" onclick="easterArcadeShow('tictactoe')">Tic-Tac-Toe</button>
                     </div>
 
                     <div id="easterGame-tetris" class="easter-game-panel">
@@ -104,6 +109,77 @@
                         </div>
                         <div id="ea_h_keys" style="display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px;"></div>
                     </div>
+
+                    <div id="easterGame-pong" class="easter-game-panel hidden">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <strong>Pong</strong>
+                            <span id="ea_pg_status" style="font-size:0.78rem; color:var(--text-muted);">Paused</span>
+                        </div>
+                        <canvas id="ea_pg_canvas" width="420" height="250" style="display:block; margin:0 auto 8px; border:1px solid #1f1f1f; background:#050505;"></canvas>
+                        <div style="display:flex; justify-content:space-between; font-size:0.82rem; margin-bottom:8px;">
+                            <span>You: <strong id="ea_pg_player">0</strong></span>
+                            <span>CPU: <strong id="ea_pg_cpu">0</strong></span>
+                        </div>
+                        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px;">
+                            <button class="btn-secondary btn-sm" onclick="eaPongMove(-1)"><i class="fas fa-arrow-up"></i></button>
+                            <button class="btn-secondary btn-sm" onclick="eaPongMove(1)"><i class="fas fa-arrow-down"></i></button>
+                            <button class="btn-primary btn-sm" onclick="eaPongToggle()">Start / Pause</button>
+                            <button class="btn-warning btn-sm" onclick="eaPongReset()">Reset</button>
+                        </div>
+                        <div style="margin-top:8px; font-size:0.75rem; color:var(--text-muted);">Controls: W/S or Arrow Up/Down.</div>
+                    </div>
+
+                    <div id="easterGame-memory" class="easter-game-panel hidden">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <strong>Memory Match</strong>
+                            <button class="btn-warning btn-sm" onclick="eaMemoryNew()">New Board</button>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:8px;">
+                            <span>Moves: <strong id="ea_m_moves">0</strong></span>
+                            <span id="ea_m_status" style="color:var(--text-muted);">Find the pairs</span>
+                        </div>
+                        <div id="ea_m_grid" style="display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; max-width:360px; margin:0 auto;"></div>
+                    </div>
+
+                    <div id="easterGame-simon" class="easter-game-panel hidden">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <strong>Simon Says</strong>
+                            <button class="btn-primary btn-sm" onclick="eaSimonStart()">Start</button>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:8px;">
+                            <span>Level: <strong id="ea_si_level">0</strong></span>
+                            <span id="ea_si_status" style="color:var(--text-muted);">Press Start</span>
+                        </div>
+                        <div id="ea_si_grid" style="display:grid; grid-template-columns:repeat(2,120px); gap:10px; justify-content:center;">
+                            <button class="btn-secondary" style="height:82px; background:#27ae60;" onclick="eaSimonPress(0)">Green</button>
+                            <button class="btn-secondary" style="height:82px; background:#c0392b;" onclick="eaSimonPress(1)">Red</button>
+                            <button class="btn-secondary" style="height:82px; background:#2980b9;" onclick="eaSimonPress(2)">Blue</button>
+                            <button class="btn-secondary" style="height:82px; background:#d35400;" onclick="eaSimonPress(3)">Orange</button>
+                        </div>
+                    </div>
+
+                    <div id="easterGame-typing" class="easter-game-panel hidden">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <strong>Typing Speed Challenge</strong>
+                            <button class="btn-warning btn-sm" onclick="eaTypingNew()">New Prompt</button>
+                        </div>
+                        <div id="ea_ty_prompt" style="background:var(--bg-input); border:1px solid var(--border-color); padding:12px; border-radius:8px; line-height:1.5; margin-bottom:10px;"></div>
+                        <textarea id="ea_ty_input" oninput="eaTypingUpdate()" placeholder="Type the prompt here..." style="width:100%; min-height:120px;"></textarea>
+                        <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-top:8px;">
+                            <span>WPM: <strong id="ea_ty_wpm">0</strong></span>
+                            <span>Accuracy: <strong id="ea_ty_accuracy">100%</strong></span>
+                            <span id="ea_ty_status" style="color:var(--text-muted);">Start typing</span>
+                        </div>
+                    </div>
+
+                    <div id="easterGame-tictactoe" class="easter-game-panel hidden">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <strong>Tic-Tac-Toe</strong>
+                            <button class="btn-warning btn-sm" onclick="eaTicNew()">New Game</button>
+                        </div>
+                        <div id="ea_x_status" style="text-align:center; margin-bottom:8px; color:var(--text-muted);">You are X</div>
+                        <div id="ea_x_grid" style="display:grid; grid-template-columns:repeat(3,86px); gap:8px; justify-content:center;"></div>
+                    </div>
                 </div>
             </div>
         `;
@@ -119,7 +195,7 @@
     function setActiveGame(game) {
         const state = ensureState();
         state.activeGame = game;
-        ['tetris', 'snake', 'space', 'hangman'].forEach((key) => {
+        ['tetris', 'snake', 'space', 'hangman', 'pong', 'memory', 'simon', 'typing', 'tictactoe'].forEach((key) => {
             const panel = document.getElementById(`easterGame-${key}`);
             const btn = document.querySelector(`#easterArcadeTabs button[data-game="${key}"]`);
             if (panel) panel.classList.toggle('hidden', key !== game);
@@ -138,12 +214,43 @@
             tetris: {},
             snake: {},
             space: {},
-            hangman: {}
+            hangman: {},
+            pong: {},
+            memory: {},
+            simon: {},
+            typing: {},
+            tictactoe: {}
         };
         return window.EASTER_ARCADE_STATE;
     }
 
     window.easterArcadeShow = setActiveGame;
+
+    function registerLogoClick() {
+        const tracker = window.EASTER_ARCADE_CLICK_TRACKER;
+        const now = Date.now();
+        if ((now - tracker.lastTs) > CLICK_WINDOW_MS) tracker.count = 0;
+        tracker.count += 1;
+        tracker.lastTs = now;
+        if (tracker.count >= REQUIRED_CLICKS) {
+            tracker.count = 0;
+            tracker.unlocked = true;
+            if (typeof showToast === 'function') showToast("Arcade Vault unlocked.", "success");
+            openEasterArcadeVault(true);
+            return;
+        }
+        if (tracker.count === REQUIRED_CLICKS - 2 && typeof showToast === 'function') {
+            showToast("Two more clicks...", "info");
+        }
+    }
+
+    window.handleEasterArcadeLogoClick = function (event) {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        if (event && typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        registerLogoClick();
+        return false;
+    };
 
     window.openEasterArcadeVault = function (force) {
         const tracker = window.EASTER_ARCADE_CLICK_TRACKER;
@@ -165,22 +272,9 @@
         if (!target || target.dataset.arcadeBound === '1') return;
         target.dataset.arcadeBound = '1';
         target.style.cursor = 'pointer';
+        if (target.dataset.arcadeInline === '1') return;
         target.addEventListener('click', () => {
-            const tracker = window.EASTER_ARCADE_CLICK_TRACKER;
-            const now = Date.now();
-            if ((now - tracker.lastTs) > CLICK_WINDOW_MS) tracker.count = 0;
-            tracker.count += 1;
-            tracker.lastTs = now;
-            if (tracker.count >= REQUIRED_CLICKS) {
-                tracker.count = 0;
-                tracker.unlocked = true;
-                if (typeof showToast === 'function') showToast("Arcade Vault unlocked.", "success");
-                openEasterArcadeVault(true);
-                return;
-            }
-            if (tracker.count === REQUIRED_CLICKS - 2 && typeof showToast === 'function') {
-                showToast("Two more clicks...", "info");
-            }
+            registerLogoClick();
         });
     }
 
@@ -199,7 +293,7 @@
     const HANGMAN_WORDS = ['ROUTER', 'FIBER', 'NETWORK', 'TRAINING', 'ASSESSMENT', 'SCHEDULE', 'DASHBOARD', 'SUPABASE', 'VETTING'];
 
     function getState() {
-        window.EASTER_ARCADE_STATE = window.EASTER_ARCADE_STATE || { tetris: {}, snake: {}, space: {}, hangman: {}, activeGame: 'tetris', keybound: false };
+        window.EASTER_ARCADE_STATE = window.EASTER_ARCADE_STATE || { tetris: {}, snake: {}, space: {}, hangman: {}, pong: {}, memory: {}, simon: {}, typing: {}, tictactoe: {}, activeGame: 'tetris', keybound: false };
         return window.EASTER_ARCADE_STATE;
     }
 
@@ -422,21 +516,97 @@
     window.eaHangmanNew = function () { initHangman(); const h = getState().hangman; h.word = HANGMAN_WORDS[Math.floor(Math.random() * HANGMAN_WORDS.length)] || 'TRAINING'; h.guessed = new Set(); h.wrong = new Set(); h.gameOver = false; hRender(); };
     window.eaHangmanGuess = function (letter) { const h = getState().hangman; if (h.gameOver) return; const l = String(letter || '').toUpperCase(); if (!l || h.guessed.has(l) || h.wrong.has(l)) return; if (h.word.includes(l)) h.guessed.add(l); else h.wrong.add(l); hRender(); };
 
+    function initPong() {
+        const p = getState().pong;
+        if (p.ready) return;
+        p.w = 420; p.h = 250; p.player = 0; p.cpu = 0; p.py = 95; p.cy = 95; p.paddleH = 58; p.ball = { x: 210, y: 125, vx: 3.4, vy: 2.2 }; p.paused = true; p.raf = null; p.last = 0; p.ready = true;
+    }
+    function pongDraw() {
+        const p = getState().pong, canvas = document.getElementById('ea_pg_canvas'), ctx = canvas && canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, p.w, p.h);
+        ctx.strokeStyle = '#333'; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(p.w / 2, 0); ctx.lineTo(p.w / 2, p.h); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = '#f37021'; ctx.fillRect(12, p.py, 8, p.paddleH);
+        ctx.fillStyle = '#5db2ff'; ctx.fillRect(p.w - 20, p.cy, 8, p.paddleH);
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.ball.x, p.ball.y, 6, 0, Math.PI * 2); ctx.fill();
+        const ps = document.getElementById('ea_pg_player'), cs = document.getElementById('ea_pg_cpu'), st = document.getElementById('ea_pg_status');
+        if (ps) ps.textContent = p.player; if (cs) cs.textContent = p.cpu; if (st) st.textContent = p.paused ? 'Paused' : 'Playing';
+    }
+    function pongResetBall(dir) {
+        const p = getState().pong; p.ball = { x: p.w / 2, y: p.h / 2, vx: 3.4 * dir, vy: (Math.random() > 0.5 ? 2.2 : -2.2) };
+    }
+    function pongLoop() {
+        const p = getState().pong;
+        if (p.paused) { p.raf = null; pongDraw(); return; }
+        p.ball.x += p.ball.vx; p.ball.y += p.ball.vy;
+        if (p.ball.y < 7 || p.ball.y > p.h - 7) p.ball.vy *= -1;
+        p.cy += Math.sign(p.ball.y - (p.cy + p.paddleH / 2)) * 2.6; p.cy = Math.max(0, Math.min(p.h - p.paddleH, p.cy));
+        if (p.ball.x < 24 && p.ball.y >= p.py && p.ball.y <= p.py + p.paddleH) { p.ball.vx = Math.abs(p.ball.vx) + 0.12; }
+        if (p.ball.x > p.w - 24 && p.ball.y >= p.cy && p.ball.y <= p.cy + p.paddleH) { p.ball.vx = -Math.abs(p.ball.vx) - 0.12; }
+        if (p.ball.x < 0) { p.cpu += 1; pongResetBall(1); }
+        if (p.ball.x > p.w) { p.player += 1; pongResetBall(-1); }
+        pongDraw(); p.raf = requestAnimationFrame(pongLoop);
+    }
+    window.eaPongReset = function () { initPong(); const p = getState().pong; p.player = 0; p.cpu = 0; p.py = 95; p.cy = 95; p.paused = true; if (p.raf) cancelAnimationFrame(p.raf); p.raf = null; pongResetBall(Math.random() > 0.5 ? 1 : -1); pongDraw(); };
+    window.eaPongToggle = function () { initPong(); const p = getState().pong; p.paused = !p.paused; if (!p.paused && !p.raf) p.raf = requestAnimationFrame(pongLoop); pongDraw(); };
+    window.eaPongMove = function (dir) { const p = getState().pong; p.py += dir * 18; p.py = Math.max(0, Math.min(p.h - p.paddleH, p.py)); pongDraw(); };
+
+    const MEMORY_ICONS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    function initMemory() { const m = getState().memory; if (!m.ready) { m.ready = true; window.eaMemoryNew(); } }
+    function memoryRender() {
+        const m = getState().memory, grid = document.getElementById('ea_m_grid'), moves = document.getElementById('ea_m_moves'), status = document.getElementById('ea_m_status');
+        if (!grid) return;
+        grid.innerHTML = (m.cards || []).map((card, idx) => {
+            const open = card.matched || m.open.includes(idx);
+            return `<button class="btn-secondary" style="height:64px; font-size:1.2rem; font-weight:bold;" onclick="eaMemoryPick(${idx})">${open ? card.value : '?'}</button>`;
+        }).join('');
+        if (moves) moves.textContent = m.moves || 0;
+        if (status) status.textContent = (m.cards || []).every(c => c.matched) ? 'Cleared' : 'Find the pairs';
+    }
+    window.eaMemoryNew = function () { const m = getState().memory; const cards = MEMORY_ICONS.concat(MEMORY_ICONS).sort(() => Math.random() - 0.5); m.cards = cards.map(value => ({ value, matched: false })); m.open = []; m.moves = 0; m.locked = false; m.ready = true; memoryRender(); };
+    window.eaMemoryPick = function (idx) { const m = getState().memory; if (m.locked || !m.cards || !m.cards[idx] || m.cards[idx].matched || m.open.includes(idx)) return; m.open.push(idx); if (m.open.length === 2) { m.moves += 1; const [a, b] = m.open; if (m.cards[a].value === m.cards[b].value) { m.cards[a].matched = true; m.cards[b].matched = true; m.open = []; } else { m.locked = true; setTimeout(() => { m.open = []; m.locked = false; memoryRender(); }, 650); } } memoryRender(); };
+
+    function initSimon() { const s = getState().simon; if (!s.ready) { s.sequence = []; s.index = 0; s.level = 0; s.playing = false; s.ready = true; simonRender('Press Start'); } }
+    function simonRender(text) { const s = getState().simon, level = document.getElementById('ea_si_level'), status = document.getElementById('ea_si_status'); if (level) level.textContent = s.level || 0; if (status) status.textContent = text || 'Repeat the pattern'; }
+    function simonFlash(color) { const btn = document.querySelectorAll('#ea_si_grid button')[color]; if (!btn) return; const old = btn.style.filter; btn.style.filter = 'brightness(1.9)'; setTimeout(() => { btn.style.filter = old; }, 280); }
+    function simonPlay() { const s = getState().simon; s.playing = true; simonRender('Watch'); s.sequence.forEach((color, i) => setTimeout(() => simonFlash(color), 420 * i)); setTimeout(() => { s.index = 0; s.playing = false; simonRender('Your turn'); }, 420 * s.sequence.length + 120); }
+    window.eaSimonStart = function () { initSimon(); const s = getState().simon; s.sequence = [Math.floor(Math.random() * 4)]; s.level = 1; s.index = 0; simonPlay(); };
+    window.eaSimonPress = function (color) { const s = getState().simon; if (s.playing || !s.sequence.length) return; simonFlash(color); if (s.sequence[s.index] !== color) { simonRender('Missed. Press Start.'); s.sequence = []; s.level = 0; return; } s.index += 1; if (s.index >= s.sequence.length) { s.level += 1; s.sequence.push(Math.floor(Math.random() * 4)); setTimeout(simonPlay, 650); } else simonRender('Keep going'); };
+
+    const TYPING_PROMPTS = [
+        'Configure the router, verify connectivity, and document the customer reference clearly.',
+        'A stable training system depends on accurate records, careful feedback, and consistent follow up.',
+        'Check the fiber light levels, confirm the account details, and update the ticket notes.'
+    ];
+    function initTyping() { const t = getState().typing; if (!t.ready) { t.ready = true; window.eaTypingNew(); } }
+    window.eaTypingNew = function () { const t = getState().typing; t.prompt = TYPING_PROMPTS[Math.floor(Math.random() * TYPING_PROMPTS.length)]; t.startedAt = 0; const p = document.getElementById('ea_ty_prompt'), input = document.getElementById('ea_ty_input'); if (p) p.textContent = t.prompt; if (input) input.value = ''; window.eaTypingUpdate(); };
+    window.eaTypingUpdate = function () { const t = getState().typing, input = document.getElementById('ea_ty_input'), wpm = document.getElementById('ea_ty_wpm'), acc = document.getElementById('ea_ty_accuracy'), status = document.getElementById('ea_ty_status'); const typed = input ? input.value : ''; if (typed && !t.startedAt) t.startedAt = Date.now(); const elapsed = t.startedAt ? Math.max(1, (Date.now() - t.startedAt) / 60000) : 1; let good = 0; for (let i = 0; i < typed.length; i += 1) if (typed[i] === t.prompt[i]) good += 1; const accuracy = typed.length ? Math.round((good / typed.length) * 100) : 100; if (wpm) wpm.textContent = Math.round((typed.trim().split(/\s+/).filter(Boolean).length) / elapsed); if (acc) acc.textContent = `${accuracy}%`; if (status) status.textContent = typed === t.prompt ? 'Complete' : 'Typing'; };
+
+    function initTic() { const x = getState().tictactoe; if (!x.ready) { x.ready = true; window.eaTicNew(); } }
+    function ticWinner(board) { const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]; for (const w of wins) if (board[w[0]] && board[w[0]] === board[w[1]] && board[w[1]] === board[w[2]]) return board[w[0]]; return board.every(Boolean) ? 'Draw' : ''; }
+    function ticRender() { const x = getState().tictactoe, grid = document.getElementById('ea_x_grid'), status = document.getElementById('ea_x_status'); if (!grid) return; grid.innerHTML = x.board.map((v, i) => `<button class="btn-secondary" style="height:86px; font-size:2rem; font-weight:bold;" onclick="eaTicPick(${i})">${v || ''}</button>`).join(''); const winner = ticWinner(x.board); if (status) status.textContent = winner ? (winner === 'Draw' ? 'Draw' : `${winner} wins`) : 'You are X'; }
+    window.eaTicNew = function () { const x = getState().tictactoe; x.board = Array(9).fill(''); x.ready = true; ticRender(); };
+    window.eaTicPick = function (idx) { const x = getState().tictactoe; if (x.board[idx] || ticWinner(x.board)) return; x.board[idx] = 'X'; if (!ticWinner(x.board)) { const empty = x.board.map((v, i) => v ? -1 : i).filter(i => i >= 0); const choice = empty.includes(4) ? 4 : empty[Math.floor(Math.random() * empty.length)]; if (choice !== undefined) x.board[choice] = 'O'; } ticRender(); };
+
     window.eaPauseAll = function () {
         const st = getState();
         if (st.tetris && st.tetris.raf) cancelAnimationFrame(st.tetris.raf);
         if (st.snake && st.snake.timer) clearInterval(st.snake.timer);
         if (st.space && st.space.raf) cancelAnimationFrame(st.space.raf);
+        if (st.pong && st.pong.raf) cancelAnimationFrame(st.pong.raf);
         if (st.tetris) { st.tetris.raf = null; st.tetris.active = false; st.tetris.paused = true; }
         if (st.snake) { st.snake.timer = null; st.snake.active = false; st.snake.paused = true; }
         if (st.space) { st.space.raf = null; st.space.active = false; st.space.paused = true; }
+        if (st.pong) { st.pong.raf = null; st.pong.paused = true; }
     };
 
     window.eaInitAllGames = function () {
-        initTetris(); initSnake(); initSpace(); initHangman();
+        initTetris(); initSnake(); initSpace(); initHangman(); initPong(); initMemory(); initSimon(); initTyping(); initTic();
         if (!getState().tetris.current) window.eaTetrisReset(); else tDraw();
         snakeDraw(); spaceDraw();
         if (!getState().hangman.word) window.eaHangmanNew(); else hRender();
+        if (!getState().pong.ball) window.eaPongReset(); else pongDraw();
+        memoryRender(); simonRender(); window.eaTypingUpdate(); ticRender();
 
         const state = getState();
         if (!state.keybound) {
@@ -462,6 +632,10 @@
                     if (key === 'arrowup' || key === 'w') { event.preventDefault(); window.eaSpaceMove(-1); return; }
                     if (key === 'arrowdown' || key === 's') { event.preventDefault(); window.eaSpaceMove(1); return; }
                     if (key === ' ') { event.preventDefault(); window.eaSpaceShoot(); return; }
+                }
+                if (state.activeGame === 'pong') {
+                    if (key === 'arrowup' || key === 'w') { event.preventDefault(); window.eaPongMove(-1); return; }
+                    if (key === 'arrowdown' || key === 's') { event.preventDefault(); window.eaPongMove(1); return; }
                 }
             });
             state.keybound = true;

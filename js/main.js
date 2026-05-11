@@ -1875,7 +1875,6 @@ function updateViewSyncIndicators() {
         'dashboard-view',
         'monthly',
         'admin-panel',
-        'insights',
         'insight-studio',
         'assessment-schedule',
         'live-assessment',
@@ -2308,6 +2307,147 @@ function applyExperimentalTheme(themeName) {
     syncThemeToEmbeddedPrograms();
 }
 
+const ADMIN_NAV_VIEW_KEY = 'admin_nav_view';
+const ADMIN_NAV_ADVANCED = 'advanced-minimal';
+
+const ADVANCED_ADMIN_NAV_GROUPS = [
+    {
+        label: 'Home',
+        items: [
+            { id: 'dashboard-view', title: 'Home / Overview', text: 'Home', icon: 'fas fa-home' },
+            { id: 'network-test', buttonId: 'btn-sidebar-net-test', title: 'Run Network Diagnostics', text: 'Network Test', icon: 'fas fa-wifi', action: 'network' }
+        ]
+    },
+    {
+        label: 'Admin Workflow',
+        items: [
+            { id: 'insight-studio', title: 'Insight', text: 'Insight', icon: 'fas fa-magnifying-glass-chart', classes: 'admin-only' },
+            { id: 'report-card', title: 'Onboard Report', text: 'Onboard Report', icon: 'fas fa-file-invoice', classes: 'admin-only tl-access' },
+            { id: 'opl-hub', title: 'OPL Hub', text: 'OPL Hub', icon: 'fas fa-book-open', classes: 'admin-only' }
+        ]
+    },
+    {
+        label: 'Training Content',
+        items: [
+            { id: 'content-studio', title: 'Content Creator', text: 'Content Creator', icon: 'fas fa-photo-film' },
+            { id: 'assessment-schedule', title: 'Schedule', text: 'Schedule', icon: 'fas fa-list-alt' },
+            { id: 'test-manage', title: 'Test Engine', text: 'Test Engine', icon: 'fas fa-clipboard-check', classes: 'admin-only' }
+        ]
+    },
+    {
+        label: 'Arenas',
+        items: [
+            { id: 'live-assessment', buttonId: 'nav-live-assessment', title: 'Live Assessment Booking', text: 'Live Assessment Booking', icon: 'fas fa-calendar-check' },
+            { id: 'live-execution', buttonId: 'btn-live-exec', title: 'Live Session Arena', text: 'Live Session Arena', icon: 'fas fa-satellite-dish' },
+            { id: 'vetting-arena', title: 'Vetting Test Arena', text: 'Vetting Test Arena', icon: 'fas fa-shield-halved', classes: 'admin-only' }
+        ]
+    },
+    {
+        label: 'Management Tools',
+        items: [
+            { id: 'manage', title: 'Add Group', text: 'Add Group', icon: 'fas fa-user-plus', classes: 'admin-only' },
+            { id: 'capture', title: 'Capture Scores', text: 'Capture Scores', icon: 'fas fa-edit', classes: 'admin-only' }
+        ]
+    },
+    {
+        label: 'Reports',
+        items: [
+            { id: 'monthly', title: 'Assessment Records', text: 'Assessment Records', icon: 'fas fa-table' },
+            { id: 'test-records', title: 'Test Records', text: 'Test Records', icon: 'fas fa-tasks', classes: 'admin-only' },
+            { id: 'agent-search', title: 'Agent Search', text: 'Agent Search', icon: 'fas fa-search', classes: 'admin-only tl-access' },
+            { id: 'my-tests', buttonId: 'nav-my-tests', title: 'My Assessments', text: 'My Assessments', icon: 'fas fa-pen-fancy' }
+        ]
+    },
+    {
+        label: 'Extras',
+        items: [
+            { id: 'tl-hub', title: 'Teamleader Hub', text: 'Teamleader Hub', icon: 'fas fa-users-cog' },
+            { id: 'superadmin-studio', title: 'Super Admin Data Studio', text: 'Data Studio', icon: 'fas fa-satellite-dish', classes: 'admin-only' }
+        ]
+    }
+];
+
+function canUseAdminNavigationView() {
+    return !!(CURRENT_USER && ['admin', 'super_admin', 'teamleader'].includes(CURRENT_USER.role));
+}
+
+function getStoredAdminNavigationView() {
+    const raw = String(localStorage.getItem(ADMIN_NAV_VIEW_KEY) || '').trim();
+    return raw === ADMIN_NAV_ADVANCED ? ADMIN_NAV_ADVANCED : 'classic';
+}
+
+function escapeNavAttr(value) {
+    return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function buildAdvancedNavButton(item) {
+    const classes = ['nav-item'].concat(String(item.classes || '').split(/\s+/).filter(Boolean)).join(' ');
+    const idAttr = item.buttonId ? ` id="${escapeNavAttr(item.buttonId)}"` : '';
+    const onclick = item.action === 'network'
+        ? ` onclick="if(window.NetworkDiag&&typeof NetworkDiag.openModal==='function') NetworkDiag.openModal()"`
+        : ` onclick="showTab('${escapeNavAttr(item.id)}')"`;
+    return `<button${idAttr} class="${escapeNavAttr(classes)}"${onclick} title="${escapeNavAttr(item.title)}" data-nav-target="${escapeNavAttr(item.id)}">
+            <i class="${escapeNavAttr(item.icon)}"></i><span class="nav-text">${escapeNavAttr(item.text)}</span>
+        </button>`;
+}
+
+function renderAdvancedAdminNavigation(menu) {
+    menu.innerHTML = ADVANCED_ADMIN_NAV_GROUPS.map(group => `
+        <div class="nav-group">
+            <div class="nav-group-label">${escapeNavAttr(group.label)}</div>
+            ${group.items.map(buildAdvancedNavButton).join('')}
+        </div>
+    `).join('');
+    document.body.classList.add('admin-nav-advanced');
+}
+
+function applyConfiguredNavigationView() {
+    const menu = document.querySelector('.sidebar-menu');
+    if (!menu) return;
+
+    if (!window.__classicSidebarMenuHtml) {
+        window.__classicSidebarMenuHtml = menu.innerHTML;
+    }
+
+    const selectedView = getStoredAdminNavigationView();
+    const useAdvanced = selectedView === ADMIN_NAV_ADVANCED && canUseAdminNavigationView();
+
+    if (useAdvanced) {
+        if (menu.dataset.navView !== ADMIN_NAV_ADVANCED) {
+            renderAdvancedAdminNavigation(menu);
+            menu.dataset.navView = ADMIN_NAV_ADVANCED;
+        }
+    } else if (menu.dataset.navView === ADMIN_NAV_ADVANCED) {
+        menu.innerHTML = window.__classicSidebarMenuHtml;
+        menu.dataset.navView = 'classic';
+        document.body.classList.remove('admin-nav-advanced');
+        const netBtn = document.getElementById('btn-sidebar-net-test');
+        if (netBtn) {
+            netBtn.onclick = () => {
+                if (window.NetworkDiag && typeof NetworkDiag.openModal === 'function') NetworkDiag.openModal();
+            };
+        }
+    } else {
+        menu.dataset.navView = 'classic';
+        document.body.classList.remove('admin-nav-advanced');
+    }
+}
+
+window.setAdminNavigationView = function(view) {
+    const nextView = view === ADMIN_NAV_ADVANCED ? ADMIN_NAV_ADVANCED : 'classic';
+    localStorage.setItem(ADMIN_NAV_VIEW_KEY, nextView);
+    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    localTheme.navigationView = nextView;
+    localStorage.setItem('local_theme_config', JSON.stringify(localTheme));
+    applyConfiguredNavigationView();
+    updateSidebarVisibility();
+    const active = document.querySelector('section.active');
+    if (active) {
+        const activeBtn = document.querySelector(`button.nav-item[onclick="showTab('${active.id}')"]`);
+        if (activeBtn) activeBtn.classList.add('active');
+    }
+};
+
 // --- SIDEBAR VISIBILITY LOGIC ---
 function updateSidebarVisibility() {
     if (!CURRENT_USER) {
@@ -2318,6 +2458,7 @@ function updateSidebarVisibility() {
     const role = CURRENT_USER.role;
     const isTraineeRuntimeSession = role === 'trainee';
     document.body.classList.toggle('trainee-runtime', isTraineeRuntimeSession);
+    applyConfiguredNavigationView();
     
     // --- DYNAMIC LABEL UPDATE ---
     // Rename the hardcoded button based on role
@@ -2450,7 +2591,7 @@ function updateSidebarVisibility() {
             return;
         }
 
-        if ((targetTab === 'insight-studio' || targetTab === 'insights') && !['admin', 'super_admin'].includes(role)) {
+        if (targetTab === 'insight-studio' && !['admin', 'super_admin'].includes(role)) {
             btn.classList.add('hidden');
             return;
         }
@@ -2471,7 +2612,7 @@ function updateSidebarVisibility() {
         if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'study-notes', 'live-assessment', 'live-execution', 'insights', 'insight-studio', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio', 'trainee-portal'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'study-notes', 'live-assessment', 'live-execution', 'insight-studio', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio', 'trainee-portal'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -2648,7 +2789,6 @@ const VIEW_SYNC_LAST_RUN = {};
 const HIGH_PRIORITY_SYNC_VIEWS = new Set([
     'assessment-schedule',
     'trainee-portal',
-    'insights',
     'insight-studio',
     'test-manage',
     'test-records',
@@ -2799,7 +2939,7 @@ function applyRealtimeFailoverProfile(id) {
     window.__HIGH_PRIORITY_VIEW_SYNC = highPriority;
 
     const baseRate = Number(window.BASE_REALTIME_FAILURE_RATE || window.REALTIME_FAILURE_RATE || 15000);
-    const targetRate = highPriority ? 1000 : Math.max(1000, baseRate);
+    const targetRate = Math.max(5000, baseRate);
     if (window.REALTIME_FAILURE_RATE !== targetRate) {
         window.REALTIME_FAILURE_RATE = targetRate;
     }
@@ -2868,10 +3008,6 @@ function renderViewById(id, options = {}) {
             StudyNotesWorkspace.refresh(false);
             return;
         }
-        if (id === 'insights' && typeof renderInsightDashboard === 'function') {
-            renderInsightDashboard();
-            return;
-        }
         if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
             InsightStudioLoader.refresh();
             return;
@@ -2906,7 +3042,6 @@ function renderViewById(id, options = {}) {
         if (id === 'study-notes' && typeof StudyNotesWorkspace !== 'undefined' && typeof StudyNotesWorkspace.refresh === 'function') StudyNotesWorkspace.refresh(false);
         if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
         if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
-        if (id === 'insights' && typeof renderInsightDashboard === 'function') renderInsightDashboard();
         if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh();
         if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
         if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
@@ -2927,24 +3062,6 @@ function renderViewById(id, options = {}) {
         if (typeof renderDashboard === 'function') setTimeout(renderDashboard, 0);
         if (typeof CalendarModule !== 'undefined' && typeof CalendarModule.renderWidget === 'function') {
             setTimeout(() => CalendarModule.renderWidget(), 200);
-        }
-        return;
-    }
-
-    if (id === 'insights') {
-        if (typeof renderInsightDashboard === 'function') {
-            try {
-                renderInsightDashboard();
-            } catch (e) {
-                console.error('Dashboard Render Failed:', e);
-            }
-        }
-        if (typeof populateInsightGroupFilter === 'function') {
-            try {
-                populateInsightGroupFilter();
-            } catch (e) {
-                console.error('populateInsightGroupFilter failed:', e);
-            }
         }
         return;
     }
@@ -3157,7 +3274,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insights', 'insight-studio', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
+      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -3206,7 +3323,7 @@ function showTab(id, btn) {
       return;
   }
 
-  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && (id === 'insight-studio' || id === 'insights')) {
+  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'insight-studio') {
       if (typeof showToast === 'function') {
           showToast("Access denied: Insight is restricted to Admin and Super Admin.", "error");
       }
@@ -3534,7 +3651,10 @@ function updateNotifications() {
     if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
         // --- PROGRESS LOGIC ---
         const records = JSON.parse(localStorage.getItem('records') || '[]');
-        const myRecords = records.filter(r => r.trainee === CURRENT_USER.user);
+        const currentRecords = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
+            ? filterRowsToCurrentTraineeLifecycle(records)
+            : records;
+        const myRecords = currentRecords.filter(r => r.trainee === CURRENT_USER.user);
         
         let progress = 0;
         if (typeof calculateAgentStats === 'function') {
@@ -3897,6 +4017,96 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.70": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Live Assessment Booking has a cleaner schedule workspace and editable booking rules in Admin Tools &gt; System Config.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Live trainee stats now count completed live submissions and records even if a completed booking row is missing.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Study Notes pop-out now opens with the trainee's existing notes instead of an empty isolated store.</li>
+            </ul>`,
+        "2.6.69": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight Compare Viewer breakdown graphs now draw every selected trainee or group instead of only the first 8.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Compare graph line colors now use a generated color sequence so larger selections are easier to tell apart.</li>
+            </ul>`,
+        "2.6.68": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Insight Compare Viewer now has an Attempt 1 vs Current Live scope to compare selected trainees' first archived attempt against their current live attempt on the same graphs.</li>
+            </ul>`,
+        "2.6.67": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Test Engine Integrity Review now includes retrain archive snapshots with counts, duplicate/mixed-data flags, and a detail viewer for records, submissions, and attendance.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Admins can filter specifically to Retrain Archives, inspect archive records/submissions/attendance, mark an archive Valid/Review/Invalid, classify it as A1/A2, clear the decision, or delete a confirmed invalid archive snapshot.</li>
+            </ul>`,
+        "2.6.66": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Moving a trainee to a new group now archives the old attempt and queues exact server deletes for the archived live rows so the new group starts with a clean slate.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Agent Search labels retrain archive attempts by their real attempt number and still shows the current live attempt separately.</li>
+            </ul>`,
+        "2.6.65": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Test Engine Integrity Review now reviews each assessment attempt as a whole entry instead of presenting it as per-question cleanup.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Admins can mark entries Valid, Review, or Invalid and classify them as Attempt 1 or Attempt 2 with synced overrides.</li>
+            </ul>`,
+        "2.6.64": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Test Engine now includes an Integrity Review view for assessments, live assessments, and vetting tests.</li>
+                <li style="margin-bottom: 8px;"><strong>Safety:</strong> The review identifies suspicious or invalid entries first and only deletes a selected entry after admin confirmation.</li>
+            </ul>`,
+        "2.6.63": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Compare Viewer now has an attempt selector for current live data and retrain archive attempts 1 and 2.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Archived comparison stats are capped to valid training attempts 1 and 2 so bad retain-attempt counts do not skew release graphs.</li>
+            </ul>`,
+        "2.6.62": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight Compare Viewer now uses current live roster data only and excludes archived, invalid, blocked, ungrouped, and previous-group rows from comparison graphs.</li>
+            </ul>`,
+        "2.6.61": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Compare Viewer now has selectable comparison filters, clearer graph labels, thinner lines, direct group-member comparisons, and separate assessment/test, attendance, and focus graphs.</li>
+            </ul>`,
+        "2.6.60": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Compare Viewer now graphs straight per-agent/per-group lines across the actual breakdown items: assessments, vetting, live assessments, tests, attendance, and focus level.</li>
+            </ul>`,
+        "2.6.59": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Insight now includes a Compare Viewer for per-person and per-group graph comparisons across assessments, vetting, live assessments, tests, attendance, focus, progress, and activity risk.</li>
+            </ul>`,
+        "2.6.58": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> External program links now use the native app bridge more reliably, fixing cPanel/Webmail browser launch failures.</li>
+            </ul>`,
+        "2.6.57": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> cPanel/Webmail program links now open in the normal browser to avoid the embedded app view causing cPanel server errors.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Activity monitoring now recognises cPanel/Webmail as permitted work activity when opened externally.</li>
+            </ul>`,
+        "2.6.56": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Training Rules now support first-login display, optional every-login display, specific trainee/group targeting, admin rich-text editing, and quick trainee portal access.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> First-time trainee setup now includes an admin-configured Office dropdown.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Deleting users from groups is hardened against bad local JSON values and partial cloud cleanup failures.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Admin marking, legacy Insight review decisions, and Live Booking date updates now keep their legacy buttons connected to the current workflows.</li>
+                <li style="margin-bottom: 8px;"><strong>Release:</strong> The Windows package now uses the correct application icon.</li>
+            </ul>`,
+        "2.6.55": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Agent Progress Builder now offers only active Test Engine assessments and flags configured items that no longer exist in the active test list.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Test Engine and History now support assessment title correction with linked history, records, and Insight progress mappings updated together.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> MS Teams and idle activity now allow an 8-minute grace window before a training-scope violation is captured.</li>
+            </ul>`,
+        "2.6.54": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> The top-left 1st Line logo now unlocks the Arcade Vault after five clicks without triggering app window minimize or maximize behavior.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Main release build scripts now include the default dist alias plus main and beta channel commands.</li>
+            </ul>`,
+        "2.6.50": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Agent Progress Builder checklist items can now be classified as Assessment, Vetting Test, or Test.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Checklist items now include report placement ticks for Training Goal Feedback, Assessment Scores, Vetting Test 1, and Final Vetting sections.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Onboard Reports now build those score sections from the configured checklist instead of relying only on static assessment and vetting lists.</li>
+            </ul>`,
         "2.6.49": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Study Browser tabs can now pop out into frameless app windows with built-in minimize, maximize, close, navigation, and reload controls.</li>

@@ -8,9 +8,11 @@ build/
 *.log
 .DS_Store
 .env
+.codex-ssh/
 
 # Local recovery/backup artifacts
 recovery_cache/
+ops/reports/
 *_Backup_*.json
 recovered_*.json
 rework_comparison_report.json

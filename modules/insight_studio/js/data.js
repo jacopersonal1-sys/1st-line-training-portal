@@ -32,9 +32,41 @@ function insMatch(a, b) {
     return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
 }
 
+function insPickIdentity(row) {
+    if (!row || typeof row !== 'object') return '';
+    const base = row.data && typeof row.data === 'object' ? row.data : row;
+    return String(
+        base.trainee ||
+        base.user ||
+        base.username ||
+        base.agent ||
+        base.name ||
+        base.user_id ||
+        base.email ||
+        ''
+    ).trim();
+}
+
+function insMatchesAgent(row, agentName) {
+    const target = String(agentName || '').trim();
+    if (!target) return false;
+    const direct = insPickIdentity(row);
+    if (direct && insMatch(direct, target)) return true;
+    if (!row || typeof row !== 'object') return false;
+    const base = row.data && typeof row.data === 'object' ? row.data : row;
+    return ['trainee', 'user', 'username', 'agent', 'name', 'user_id', 'email']
+        .some(field => insMatch(base[field], target));
+}
+
 function insToNumber(value, fallback = 0) {
     const num = Number(value);
     return Number.isFinite(num) ? num : fallback;
+}
+
+function insDurationMs(value, fallback = 0) {
+    const num = insToNumber(value, fallback);
+    if (!Number.isFinite(num) || num <= 0) return 0;
+    return num < 100000 ? num * 1000 : num;
 }
 
 function insToTs(value) {
@@ -106,6 +138,39 @@ function insInferProgressType(name, explicitType) {
     return 'assessment';
 }
 
+function insIsVettingOneName(name) {
+    const normalized = insNormalize(name);
+    return normalized.includes('1st vetting') || normalized.includes('test 1');
+}
+
+function insIsFinalVettingName(name) {
+    const normalized = insNormalize(name);
+    return normalized.includes('final vetting') || normalized.includes('test 2') || normalized.includes('final');
+}
+
+function insNormalizeReportSections(rawSections, itemName, itemType) {
+    const source = rawSections && typeof rawSections === 'object' ? rawSections : {};
+    const type = insInferProgressType(itemName, itemType);
+    const hasExplicit = ['trainingGoal', 'assessmentScores', 'vettingTest1', 'vettingFinal']
+        .some(key => Object.prototype.hasOwnProperty.call(source, key));
+
+    if (hasExplicit) {
+        return {
+            trainingGoal: source.trainingGoal === true,
+            assessmentScores: source.assessmentScores === true,
+            vettingTest1: source.vettingTest1 === true,
+            vettingFinal: source.vettingFinal === true
+        };
+    }
+
+    return {
+        trainingGoal: type === 'assessment' || type === 'test',
+        assessmentScores: type === 'assessment' || type === 'test',
+        vettingTest1: type === 'vetting' && !insIsFinalVettingName(itemName),
+        vettingFinal: type === 'vetting' && !insIsVettingOneName(itemName)
+    };
+}
+
 const InsightDataService = {
     state: {
         users: [],
@@ -117,11 +182,13 @@ const InsightDataService = {
         exemptions: [],
         attendance: [],
         monitorHistory: [],
+        violationReports: [],
         tlFeedback: [],
         contentStore: { entries: [], analytics: [], annotations: [] },
         assessments: [],
         vettingTopics: [],
         tests: [],
+        retrainArchives: [],
         ruleConfig: null,
         progressConfig: null,
         subjectReviews: []
@@ -237,10 +304,17 @@ const InsightDataService = {
                 assessment: String(base.assessment || '').trim(),
                 score: insToNumber(base.score, 0),
                 date: String(base.date || base.createdAt || row.updated_at || '').trim(),
-                groupID: String(base.groupID || '').trim(),
+                groupID: String(base.groupID || base.groupId || base.group || '').trim(),
                 phase: String(base.phase || '').trim(),
                 link: String(base.link || '').trim(),
-                submissionId: String(base.submissionId || '').trim()
+                submissionId: String(base.submissionId || '').trim(),
+                status: String(base.status || '').trim().toLowerCase(),
+                archived: base.archived === true,
+                source: String(base.source || base.origin || '').trim(),
+                type: String(base.type || base.recordType || '').trim(),
+                sessionId: String(base.sessionId || '').trim(),
+                liveSessionId: String(base.liveSessionId || base.live_session_id || '').trim(),
+                raw: base
             };
         }).filter(r => !!r.trainee && !!r.assessment);
     },
@@ -261,8 +335,11 @@ const InsightDataService = {
                 date: String(base.date || base.createdAt || row.updated_at || '').trim(),
                 createdAt: String(base.createdAt || '').trim(),
                 lastModified: String(base.lastModified || row.updated_at || '').trim(),
+                groupID: String(base.groupID || base.group || '').trim(),
+                subjectId: String(base.subjectId || base.subject_id || (context && context.subjectId) || '').trim(),
                 contentStudioContext: context || null,
-                quizMeta: base.quizMeta && typeof base.quizMeta === 'object' ? base.quizMeta : null
+                quizMeta: base.quizMeta && typeof base.quizMeta === 'object' ? base.quizMeta : null,
+                raw: base
             };
         }).filter(s => !!s.trainee);
     },
@@ -330,9 +407,31 @@ const InsightDataService = {
                 user: String(base.user || row.user_id || '').trim(),
                 date: String(base.date || '').trim(),
                 summary: base.summary && typeof base.summary === 'object' ? base.summary : {},
-                details: Array.isArray(base.details) ? base.details : []
+                details: Array.isArray(base.details) ? base.details : [],
+                raw: base
             };
         }).filter(entry => !!entry.user && !!entry.date);
+    },
+
+    normalizeViolationReports: function(rows) {
+        const list = Array.isArray(rows)
+            ? rows
+            : (rows && typeof rows === 'object' && Array.isArray(rows.reports) ? rows.reports : []);
+        return list.map((row) => {
+            const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
+            return {
+                id: String(row.id || base.id || '').trim(),
+                user: String(base.user || base.trainee || base.username || row.user_id || '').trim(),
+                trigger: String(base.trigger || base.violationType || base.type || base.reasonTrigger || '').trim(),
+                reason: String(base.reason || base.explanation || '').trim(),
+                informed: String(base.informed || base.informedPerson || base.personInformed || '').trim(),
+                status: String(base.status || 'pending_review').trim(),
+                reviewed: !!base.reviewed,
+                createdAt: String(base.createdAt || base.created_at || base.date || row.updated_at || '').trim(),
+                date: String(base.date || base.createdAt || base.created_at || row.updated_at || '').trim(),
+                raw: base
+            };
+        }).filter(row => !!row.user);
     },
 
     normalizeRuleConfig: function(raw) {
@@ -396,22 +495,24 @@ const InsightDataService = {
         const cfg = raw && typeof raw === 'object' ? raw : {};
         const map = new Map();
 
-        const pushItem = (name, type) => {
+        const pushItem = (name, type, reportSections) => {
             const cleanName = String(name || '').trim();
             if (!cleanName) return;
             if (INSIGHT_AUTO_PROGRESS_ITEMS.some(item => insNormalize(item.name) === insNormalize(cleanName))) return;
+            const cleanType = insInferProgressType(cleanName, type);
             map.set(insNormalize(cleanName), {
                 name: cleanName,
-                type: insInferProgressType(cleanName, type),
-                source: 'manual'
+                type: cleanType,
+                source: 'manual',
+                reportSections: insNormalizeReportSections(reportSections, cleanName, cleanType)
             });
         };
 
         if (Array.isArray(cfg.requiredItems)) {
             cfg.requiredItems.forEach((item) => {
                 if (!item) return;
-                if (typeof item === 'string') pushItem(item, null);
-                else if (typeof item === 'object') pushItem(item.name, item.type);
+                if (typeof item === 'string') pushItem(item, null, null);
+                else if (typeof item === 'object') pushItem(item.name, item.type, item.reportSections);
             });
         }
 
@@ -512,12 +613,14 @@ const InsightDataService = {
                 this.fetchAllRows('exemptions'),
                 this.fetchAllRows('attendance'),
                 this.fetchAllRows('monitor_history'),
+                this.fetchDocument('violation_reports'),
                 this.fetchDocument('rosters'),
                 this.fetchDocument('tl_agent_feedback'),
                 this.fetchDocument('content_studio_data'),
                 this.fetchDocument('assessments'),
                 this.fetchDocument('vettingTopics'),
                 this.fetchDocument('tests'),
+                this.fetchDocument('retrain_archives'),
                 this.fetchDocument('insight_rule_config'),
                 this.fetchDocument(INSIGHT_PROGRESS_CONFIG_KEY),
                 this.fetchDocument(INSIGHT_SUBJECT_REVIEW_KEY)
@@ -540,12 +643,14 @@ const InsightDataService = {
             exemptionRows,
             attendanceRows,
             monitorRows,
+            violationRows,
             rostersDoc,
             feedbackDoc,
             contentDoc,
             assessmentsDoc,
             topicsDoc,
             testsDoc,
+            retrainArchivesDoc,
             ruleConfigDoc,
             progressConfigDoc,
             subjectReviewsDoc
@@ -570,6 +675,10 @@ const InsightDataService = {
         const localMonitorHistory = insParseJson('monitor_history', []);
         this.state.monitorHistory = this.normalizeMonitorHistory(
             (Array.isArray(monitorRows) && monitorRows.length) ? monitorRows : localMonitorHistory
+        );
+        const localViolationReports = insParseJson('violation_reports', []);
+        this.state.violationReports = this.normalizeViolationReports(
+            violationRows ? violationRows : localViolationReports
         );
 
         const localRosters = insParseJson('rosters', {});
@@ -600,6 +709,10 @@ const InsightDataService = {
         this.state.assessments = Array.isArray(assessmentsDoc) ? assessmentsDoc : (Array.isArray(localAssessments) ? localAssessments : []);
         this.state.vettingTopics = Array.isArray(topicsDoc) ? topicsDoc : (Array.isArray(localTopics) ? localTopics : []);
         this.state.tests = Array.isArray(testsDoc) ? testsDoc : (Array.isArray(localTests) ? localTests : []);
+        const localRetrainArchives = insParseJson('retrain_archives', []);
+        this.state.retrainArchives = Array.isArray(retrainArchivesDoc)
+            ? retrainArchivesDoc
+            : (Array.isArray(localRetrainArchives) ? localRetrainArchives : []);
 
         const localRuleConfig = insParseJson('insight_rule_config', null);
         const resolvedRuleConfig = (ruleConfigDoc && typeof ruleConfigDoc === 'object')
@@ -624,6 +737,8 @@ const InsightDataService = {
         localStorage.setItem('savedReports', JSON.stringify(this.state.savedReports));
         localStorage.setItem('insightReviews', JSON.stringify(this.state.insightReviews));
         localStorage.setItem('exemptions', JSON.stringify(this.state.exemptions));
+        localStorage.setItem('violation_reports', JSON.stringify(this.state.violationReports));
+        localStorage.setItem('retrain_archives', JSON.stringify(this.state.retrainArchives));
         localStorage.setItem(INSIGHT_SUBJECT_REVIEW_KEY, JSON.stringify(this.state.subjectReviews));
 
         this.saveCache();
@@ -664,10 +779,12 @@ const InsightDataService = {
 
         this.state.records.forEach(row => candidates.push(row.trainee));
         this.state.attendance.forEach(row => candidates.push(row.user));
+        this.state.monitorHistory.forEach(row => candidates.push(row.user));
+        this.state.violationReports.forEach(row => candidates.push(row.user));
         this.state.submissions.forEach(row => candidates.push(row.trainee));
         this.state.savedReports.forEach(row => candidates.push(row.trainee));
         this.state.insightReviews.forEach(row => candidates.push(row.trainee));
-        (this.state.tlFeedback || []).forEach(row => candidates.push(row.trainee));
+        (this.state.tlFeedback || []).forEach(row => candidates.push(insPickIdentity(row)));
 
         const seen = new Set();
         const list = [];
@@ -712,7 +829,8 @@ const InsightDataService = {
             map.set(insNormalize(cleanName), {
                 name: cleanName,
                 type: insInferProgressType(cleanName, item.type),
-                source: 'manual'
+                source: 'manual',
+                reportSections: insNormalizeReportSections(item.reportSections, cleanName, item.type)
             });
         });
         const out = Array.from(map.values());
@@ -897,36 +1015,43 @@ const InsightDataService = {
     },
 
     getAgentActivityBreakdown: function(agentName) {
-        const history = this.state.monitorHistory.filter(row => insMatch(row.user, agentName));
+        const history = this.state.monitorHistory.filter(row => insMatchesAgent(row, agentName));
+        const violationReports = (this.state.violationReports || []).filter(row => insMatchesAgent(row, agentName));
         let idleMs = 0;
         let externalMs = 0;
         let studyMs = 0;
         let totalMs = 0;
-        let violationCount = 0;
+        let violationCount = violationReports.length;
 
         history.forEach((entry) => {
             const summary = entry.summary || {};
-            const summaryIdle = insToNumber(summary.idle, insToNumber(summary.idleMs, 0));
-            const summaryExternal = insToNumber(summary.external, insToNumber(summary.externalMs, 0));
-            const summaryStudy = insToNumber(summary.study, insToNumber(summary.studyMs, 0));
-            const summaryTotal = insToNumber(
+            const raw = entry.raw || {};
+            const breakdown = summary.breakdown || summary.activityBreakdown || raw.activityBreakdown || raw.breakdown || {};
+            const summaryIdle = insDurationMs(summary.idle, insDurationMs(summary.idleMs, insDurationMs(summary.idleSeconds, insDurationMs(breakdown.idle, 0))));
+            const summaryExternal = insDurationMs(summary.external, insDurationMs(summary.externalMs, insDurationMs(summary.externalSeconds, insDurationMs(breakdown.external, 0))));
+            const summaryStudy = insDurationMs(summary.study, insDurationMs(summary.studyMs, insDurationMs(summary.studySeconds, insDurationMs(summary.focused, insDurationMs(breakdown.study, insDurationMs(breakdown.focus, 0))))));
+            let summaryTotal = insDurationMs(
                 summary.total,
-                insToNumber(summary.totalMs, (summaryIdle + summaryExternal + summaryStudy))
+                insDurationMs(summary.totalMs, insDurationMs(summary.totalSeconds, insDurationMs(summary.activeMs, (summaryIdle + summaryExternal + summaryStudy))))
             );
-            const summaryViolationCount = insToNumber(summary.violations, insToNumber(summary.violationCount, 0));
+            const summaryViolationCount = insToNumber(
+                summary.violations,
+                insToNumber(summary.violationCount, insToNumber(summary.activityViolations, 0))
+            );
 
             idleMs += summaryIdle;
             externalMs += summaryExternal;
             studyMs += summaryStudy;
+            if (summaryTotal <= 0) summaryTotal = summaryIdle + summaryExternal + summaryStudy;
             totalMs += summaryTotal;
             violationCount += summaryViolationCount;
 
             if (Array.isArray(entry.details)) {
                 entry.details.forEach((detail) => {
                     const activity = String(detail.activity || '').toLowerCase();
-                    const detailDuration = insToNumber(
+                    const detailDuration = insDurationMs(
                         detail.duration,
-                        insToNumber(detail.durationMs, insToNumber(detail.effectiveDuration, insToNumber(detail.ms, 0)))
+                        insDurationMs(detail.durationMs, insDurationMs(detail.effectiveDuration, insDurationMs(detail.ms, insDurationMs(detail.seconds, 0))))
                     );
                     if (detailDuration > 0 && summaryTotal <= 0) {
                         totalMs += detailDuration;
@@ -941,23 +1066,90 @@ const InsightDataService = {
 
         const focusScore = totalMs > 0 ? Math.round((studyMs / totalMs) * 100) : 0;
         return {
+            hasData: history.length > 0 || violationReports.length > 0,
+            dataStatus: history.length > 0 ? 'ok' : (violationReports.length ? 'violations_only' : 'no_data'),
             daysTracked: history.length,
             idleMinutes: Math.round(idleMs / 60000),
             externalMinutes: Math.round(externalMs / 60000),
             violationCount,
             focusScore,
-            history: history.sort((a, b) => insToTs(b.date) - insToTs(a.date))
+            history: history.sort((a, b) => insToTs(b.date) - insToTs(a.date)),
+            violationReports: violationReports.sort((a, b) => insToTs(b.date || b.createdAt) - insToTs(a.date || a.createdAt))
         };
     },
 
     getAgentFeedback: function(agentName) {
         return (this.state.tlFeedback || [])
-            .filter(item => insMatch(item.trainee, agentName))
+            .filter(item => insMatchesAgent(item, agentName))
+            .map(item => ({
+                ...item,
+                trainee: insPickIdentity(item) || item.trainee || '',
+                tl: item.tl || item.teamleader || item.teamLeader || item.createdBy || '',
+                date: item.date || item.createdAt || item.created_at || item.updatedAt || '',
+                selectedMedium: item.selectedMedium || item.medium || item.channel || item.category || 'Unspecified',
+                problemStatement: item.problemStatement || item.problem || item.issue || item.feedback || item.comment || '',
+                ticketNumber: item.ticketNumber || item.ticket || item.reference || ''
+            }))
             .sort((a, b) => insToTs(b.date || b.createdAt) - insToTs(a.date || a.createdAt));
     },
 
+    extractQuestionRows: function(source) {
+        const base = source && source.raw && typeof source.raw === 'object' ? source.raw : (source || {});
+        const candidates = [
+            base.questionResults,
+            base.questions,
+            base.answers,
+            base.markedAnswers,
+            base.results,
+            base.quizResults,
+            base.quizMeta && base.quizMeta.questions,
+            base.quizMeta && base.quizMeta.answers,
+            base.quizMeta && base.quizMeta.failedQuestions
+        ].filter(Array.isArray);
+
+        return candidates.flat().map((question, idx) => {
+            if (typeof question === 'string') {
+                return { text: question, earned: 0, max: 1, index: idx + 1 };
+            }
+            const row = question && typeof question === 'object' ? question : {};
+            const text = String(
+                row.question ||
+                row.questionText ||
+                row.prompt ||
+                row.text ||
+                row.title ||
+                row.label ||
+                `Question ${idx + 1}`
+            ).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+            const max = insToNumber(
+                row.maxScore,
+                insToNumber(row.maxMarks, insToNumber(row.max, insToNumber(row.total, insToNumber(row.outOf, insToNumber(row.points, 1)))))
+            );
+            let earned = insToNumber(
+                row.score,
+                insToNumber(row.awarded, insToNumber(row.marksAwarded, insToNumber(row.pointsAwarded, insToNumber(row.obtained, insToNumber(row.mark, 0)))))
+            );
+            if (row.correct === true && earned <= 0) earned = max;
+            if (row.correct === false && earned >= max) earned = 0;
+            return {
+                text,
+                earned,
+                max: Math.max(1, max),
+                index: idx + 1
+            };
+        }).filter(row => !!row.text);
+    },
+
+    countFailedQuestions: function(source) {
+        const explicit = source && source.quizMeta && Array.isArray(source.quizMeta.failedQuestions)
+            ? source.quizMeta.failedQuestions.length
+            : null;
+        const rows = this.extractQuestionRows(source);
+        const computed = rows.filter(row => insToNumber(row.earned, 0) < insToNumber(row.max, 1)).length;
+        return Math.max(insToNumber(explicit, 0), computed);
+    },
+
     getAgentContentEngagement: function(agentName) {
-        const target = insNormalize(agentName);
         const contentStore = this.state.contentStore || { entries: [], analytics: [], annotations: [] };
         const subjectMap = {};
 
@@ -974,8 +1166,8 @@ const InsightDataService = {
 
         const bySubject = {};
         (contentStore.analytics || []).forEach((row) => {
-            if (!insMatch(row.username, target)) return;
-            const subjectId = String(row.subjectId || '').trim();
+            if (!insMatchesAgent(row, agentName)) return;
+            const subjectId = String(row.subjectId || row.subject_id || row.contentSubjectId || '').trim();
             if (!subjectId) return;
             if (!bySubject[subjectId]) {
                 bySubject[subjectId] = {
@@ -988,15 +1180,18 @@ const InsightDataService = {
                     failedQuestions: 0
                 };
             }
-            bySubject[subjectId].plays += insToNumber(row.plays, 0);
-            bySubject[subjectId].watchSeconds += insToNumber(row.watchSeconds, 0);
+            bySubject[subjectId].plays += insToNumber(row.plays, insToNumber(row.playCount, 0));
+            bySubject[subjectId].watchSeconds += insToNumber(
+                row.watchSeconds,
+                insToNumber(row.watchedSeconds, insToNumber(row.seconds, insToNumber(row.timeSpent, insToNumber(row.durationSeconds, 0))))
+            );
             bySubject[subjectId].skips += insToNumber(row.skips, 0);
         });
 
         this.state.submissions.forEach((submission) => {
-            if (!insMatch(submission.trainee, target)) return;
+            if (!insMatchesAgent(submission, agentName)) return;
             const context = submission.contentStudioContext || {};
-            const subjectId = String(context.subjectId || '').trim();
+            const subjectId = String(context.subjectId || context.subject_id || submission.subjectId || '').trim();
             if (!subjectId) return;
             if (!bySubject[subjectId]) {
                 bySubject[subjectId] = {
@@ -1015,10 +1210,7 @@ const InsightDataService = {
             if (bySubject[subjectId].quizBestScore === null || score > bySubject[subjectId].quizBestScore) {
                 bySubject[subjectId].quizBestScore = score;
             }
-            const failedQuestions = submission.quizMeta && Array.isArray(submission.quizMeta.failedQuestions)
-                ? submission.quizMeta.failedQuestions.length
-                : 0;
-            bySubject[subjectId].failedQuestions += failedQuestions;
+            bySubject[subjectId].failedQuestions += this.countFailedQuestions(submission);
         });
 
         const subjects = Object.values(bySubject).map((item) => {
@@ -1218,7 +1410,8 @@ const InsightDataService = {
                 violationCount: insToNumber(activity.violationCount, 0),
                 idleMinutes: insToNumber(activity.idleMinutes, 0),
                 externalMinutes: insToNumber(activity.externalMinutes, 0),
-                focusScore: insToNumber(activity.focusScore, 0)
+                focusScore: insToNumber(activity.focusScore, 0),
+                dataStatus: activity.dataStatus || 'no_data'
             });
 
             const engagement = this.getAgentContentEngagement(agent.name);
@@ -1303,6 +1496,9 @@ const InsightDataService = {
             if (!scopedRecords.length) {
                 effortStatus = 'No Score Yet';
                 effortTone = 'pending';
+            } else if (!activity.hasData || activity.daysTracked <= 0) {
+                effortStatus = 'No Activity Data';
+                effortTone = 'pending';
             } else if (avgScore < 80 && focusScore >= 70) {
                 effortStatus = 'Struggling (High Effort)';
                 effortTone = 'semi';
@@ -1315,6 +1511,7 @@ const InsightDataService = {
                 agent: agent.name,
                 avgScore,
                 focusScore,
+                focusLabel: activity.hasData && activity.daysTracked > 0 ? `${focusScore}%` : 'No data',
                 status: effortStatus,
                 tone: effortTone
             });
@@ -1426,6 +1623,140 @@ const InsightDataService = {
             feedbackMediumRows: feedbackMediumRows.slice(0, 8),
             feedbackRecent: feedbackRows.slice(0, 20),
             timelineRows: limitedTimeline
+        };
+    },
+
+    getSubmissionGroup: function(submission) {
+        const explicit = String((submission && submission.groupID) || (submission && submission.raw && submission.raw.groupID) || '').trim();
+        if (explicit) return explicit;
+        return this.getAgentGroup(submission && submission.trainee);
+    },
+
+    buildKnowledgeGaps: function(scope = {}) {
+        const mode = String(scope.mode || 'all').toLowerCase();
+        const groupFilter = String(scope.groupFilter || 'all').trim();
+        const searchText = insNormalize(scope.search || '');
+        const agentFilter = String(scope.agent || '').trim();
+        const assessmentMap = {};
+        const individualMap = {};
+        const groupMap = {};
+
+        (this.state.submissions || []).forEach((submission) => {
+            const agent = String(submission.trainee || '').trim();
+            const group = this.getSubmissionGroup(submission) || 'Ungrouped';
+            const assessment = String(submission.testTitle || (submission.raw && (submission.raw.assessment || submission.raw.title)) || 'Untitled Assessment').trim();
+            if (!agent || !assessment) return;
+            if (groupFilter !== 'all' && group !== groupFilter) return;
+            if (mode === 'individual' && agentFilter && !insMatch(agent, agentFilter)) return;
+            if (searchText && !insNormalize(`${agent} ${group} ${assessment}`).includes(searchText)) return;
+
+            const failed = this.extractQuestionRows(submission)
+                .filter(row => insToNumber(row.earned, 0) < insToNumber(row.max, 1));
+            if (!failed.length) return;
+
+            const assessmentKey = insNormalize(assessment);
+            if (!assessmentMap[assessmentKey]) {
+                assessmentMap[assessmentKey] = { assessment, failedCount: 0, attempts: 0, agents: new Set(), questions: {} };
+            }
+            assessmentMap[assessmentKey].attempts += 1;
+
+            const groupKey = insNormalize(group);
+            if (!groupMap[groupKey]) {
+                groupMap[groupKey] = { group, failedCount: 0, agents: new Set(), assessments: {} };
+            }
+
+            const agentKey = insNormalize(agent);
+            if (!individualMap[agentKey]) {
+                individualMap[agentKey] = { agent, group, failedCount: 0, assessments: {} };
+            }
+
+            failed.forEach((question) => {
+                const questionText = question.text || `Question ${question.index || '-'}`;
+                const questionKey = insNormalize(questionText);
+                const earned = insToNumber(question.earned, 0);
+                const max = insToNumber(question.max, 1);
+
+                assessmentMap[assessmentKey].failedCount += 1;
+                assessmentMap[assessmentKey].agents.add(agent);
+                assessmentMap[assessmentKey].questions[questionKey] = assessmentMap[assessmentKey].questions[questionKey] || {
+                    question: questionText,
+                    failCount: 0,
+                    agents: new Set(),
+                    lowestScore: max
+                };
+                assessmentMap[assessmentKey].questions[questionKey].failCount += 1;
+                assessmentMap[assessmentKey].questions[questionKey].agents.add(agent);
+                assessmentMap[assessmentKey].questions[questionKey].lowestScore = Math.min(
+                    assessmentMap[assessmentKey].questions[questionKey].lowestScore,
+                    earned
+                );
+
+                groupMap[groupKey].failedCount += 1;
+                groupMap[groupKey].agents.add(agent);
+                groupMap[groupKey].assessments[assessmentKey] = groupMap[groupKey].assessments[assessmentKey] || { assessment, failCount: 0 };
+                groupMap[groupKey].assessments[assessmentKey].failCount += 1;
+
+                individualMap[agentKey].failedCount += 1;
+                individualMap[agentKey].assessments[assessmentKey] = individualMap[agentKey].assessments[assessmentKey] || {
+                    assessment,
+                    failCount: 0,
+                    questions: []
+                };
+                individualMap[agentKey].assessments[assessmentKey].failCount += 1;
+                individualMap[agentKey].assessments[assessmentKey].questions.push({
+                    question: questionText,
+                    scoreLabel: `${earned}/${max}`
+                });
+            });
+        });
+
+        const normalizeQuestionRows = (questions) => Object.values(questions || {})
+            .map(row => ({ ...row, agentCount: row.agents ? row.agents.size : 0 }))
+            .sort((a, b) => {
+                const diff = insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0);
+                if (diff !== 0) return diff;
+                return String(a.question || '').localeCompare(String(b.question || ''), undefined, { numeric: true, sensitivity: 'base' });
+            });
+
+        const byAssessment = Object.values(assessmentMap)
+            .map(row => ({
+                assessment: row.assessment,
+                failedCount: row.failedCount,
+                attempts: row.attempts,
+                agentCount: row.agents.size,
+                questions: normalizeQuestionRows(row.questions)
+            }))
+            .sort((a, b) => insToNumber(b.failedCount, 0) - insToNumber(a.failedCount, 0));
+
+        const byIndividual = Object.values(individualMap)
+            .map(row => ({
+                agent: row.agent,
+                group: row.group,
+                failedCount: row.failedCount,
+                assessments: Object.values(row.assessments || {}).sort((a, b) => insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0))
+            }))
+            .sort((a, b) => insToNumber(b.failedCount, 0) - insToNumber(a.failedCount, 0));
+
+        const byGroup = Object.values(groupMap)
+            .map(row => ({
+                group: row.group,
+                failedCount: row.failedCount,
+                agentCount: row.agents.size,
+                assessments: Object.values(row.assessments || {}).sort((a, b) => insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0))
+            }))
+            .sort((a, b) => insToNumber(b.failedCount, 0) - insToNumber(a.failedCount, 0));
+
+        return {
+            scope: { mode, groupFilter, searchText, agentFilter },
+            stats: {
+                failedQuestionCount: byAssessment.reduce((acc, row) => acc + insToNumber(row.failedCount, 0), 0),
+                assessmentCount: byAssessment.length,
+                individualCount: byIndividual.length,
+                groupCount: byGroup.length
+            },
+            byAssessment,
+            byIndividual,
+            byGroup
         };
     },
 

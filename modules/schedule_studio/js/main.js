@@ -720,12 +720,38 @@ const App = {
         const entered = prompt('Enter new timeline start date (YYYY-MM-DD):', suggestion);
         if (entered === null) return;
 
-        const templateLike = {
-            id: `temp_${Date.now()}`,
-            name: 'Temporary Recalculate Template',
-            items: ScheduleData.buildTemplateItemsFromScheduleItems(schedule.items)
-        };
-        await this.applyTemplateToScheduleById(this.state.activeScheduleId, templateLike, entered, { confirmReplace: false });
+        const normalizedStart = ScheduleData.toDateDash(ScheduleData.parseStrictDate(entered));
+        if (!normalizedStart) {
+            alert('Invalid start date. Use YYYY-MM-DD.');
+            return;
+        }
+
+        if (!confirm(`Recalculate Schedule ${this.state.activeScheduleId} from ${normalizedStart}? This keeps each step and duration, but updates all timeline dates.`)) {
+            return;
+        }
+
+        let recalculatedItems = [];
+        try {
+            recalculatedItems = ScheduleData.recalculateScheduleItems(schedule.items, normalizedStart) || [];
+        } catch (error) {
+            console.error('[Schedule Studio] Recalculate failed:', error);
+            alert('Could not recalculate this timeline. Please check the step durations and dates.');
+            return;
+        }
+
+        schedule.items = recalculatedItems;
+        this.stampSchedule(this.state.activeScheduleId, { touchGroup: true, touchAllItems: true });
+        const saved = await this.persist();
+        if (!saved) return;
+
+        const actualStart = recalculatedItems[0] ? ScheduleData.parseRange(recalculatedItems[0]).start : normalizedStart;
+        const shifted = actualStart && actualStart !== normalizedStart.replace(/-/g, '/');
+        this.notify(
+            shifted
+                ? `Schedule ${this.state.activeScheduleId} recalculated. Start shifted to next business day: ${actualStart}.`
+                : `Schedule ${this.state.activeScheduleId} dates recalculated.`,
+            shifted ? 'warning' : 'success'
+        );
     },
 
     openTemplateManager(options = {}) {

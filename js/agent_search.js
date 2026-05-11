@@ -7,6 +7,14 @@ window.saveAgentNote = saveAgentNote;
 window.printAgentProfile = printAgentProfile;
 window.copyAgentLink = copyAgentLink;
 
+function normalizeAgentSearchIdentity(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, '');
+}
+
 function readGraduatedArchive() {
     const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
     return (graduates || []).filter(g => {
@@ -34,11 +42,11 @@ function readRetrainArchive() {
 }
 
 function getArchivedAgentAttempts(agentName) {
-    const target = String(agentName || '').toLowerCase();
+    const target = normalizeAgentSearchIdentity(agentName);
     const attempts = [];
 
     readGraduatedArchive().forEach((entry, index) => {
-        if (String(entry.user || '').toLowerCase() !== target) return;
+        if (normalizeAgentSearchIdentity(entry.user) !== target) return;
         attempts.push({
             key: `archive-graduated-${index}`,
             type: 'graduated',
@@ -47,7 +55,7 @@ function getArchivedAgentAttempts(agentName) {
     });
 
     readRetrainArchive().forEach((entry, index) => {
-        if (String(entry.user || '').toLowerCase() !== target) return;
+        if (normalizeAgentSearchIdentity(entry.user) !== target) return;
         attempts.push({
             key: `archive-retrain-${index}`,
             type: 'retrain',
@@ -56,9 +64,12 @@ function getArchivedAgentAttempts(agentName) {
     });
 
     attempts.sort((a, b) => {
+        const aAttempt = Number(a.entry.attemptNumber || 0);
+        const bAttempt = Number(b.entry.attemptNumber || 0);
+        if (aAttempt || bAttempt) return aAttempt - bAttempt;
         const aTime = Date.parse(a.entry.movedDate || a.entry.graduatedDate || 0) || 0;
         const bTime = Date.parse(b.entry.movedDate || b.entry.graduatedDate || 0) || 0;
-        return bTime - aTime;
+        return aTime - bTime;
     });
 
     return attempts;
@@ -212,14 +223,17 @@ function renderAgentDashboard(agentName, attemptKey = '') {
         const isRetrain = attempt.type === 'retrain';
         const dateValue = archivedData.movedDate || archivedData.graduatedDate || '';
         const dateLabel = dateValue ? new Date(dateValue).toLocaleDateString() : 'Unknown date';
+        const attemptLabel = isRetrain
+            ? (archivedData.attemptLabel || (archivedData.attemptNumber ? `Training Attempt ${archivedData.attemptNumber}` : 'Retrain Attempt'))
+            : (archivedData.attemptLabel || 'Graduated Attempt');
         const group = isRetrain
-            ? (archivedData.targetGroup ? `Retrain -> ${archivedData.targetGroup}` : "Retrain Archive")
+            ? `${archivedData.fromGroup || 'Previous Group'}${archivedData.targetGroup ? ` -> ${archivedData.targetGroup}` : ''}`
             : ((archivedData.records && archivedData.records[0] && archivedData.records[0].groupID) || "Graduated / Archived");
         return {
             key: attempt.key,
             type: attempt.type,
             isArchived: true,
-            label: isRetrain ? "Retrain Attempt" : "Graduated Attempt",
+            label: attemptLabel,
             dateValue,
             dateLabel,
             group,
@@ -328,8 +342,9 @@ function renderAgentDashboard(agentName, attemptKey = '') {
                     const active = attempt.key === selectedAttempt.key;
                     const tone = attempt.type === 'retrain' ? 'status-improve' : (attempt.type === 'graduated' ? 'status-pass' : '');
                     const suffix = attempt.type === 'active' ? 'Live' : attempt.dateLabel;
+                    const label = attempt.type === 'active' ? 'Current Attempt' : attempt.label;
                     return `<button class="btn-secondary btn-sm ${tone}" onclick="performAgentSearch('${safeName}', '${attempt.key}')" style="${active ? 'border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset;' : ''}">
-                        Attempt ${idx + 1}: ${attempt.label} (${suffix})
+                        ${label} (${suffix})
                     </button>`;
                 }).join('')}
             </div>

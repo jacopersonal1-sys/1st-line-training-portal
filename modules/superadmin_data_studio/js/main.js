@@ -1290,6 +1290,11 @@ const App = {
 
         const { error } = await AppContext.supabase.from(source.table).delete().in(source.keyField, ids);
         if (error) throw new Error(error.message || `Failed to clear ${source.label}`);
+
+        const verify = await AppContext.supabase.from(source.table).select(source.keyField).in(source.keyField, ids);
+        if (!verify.error && Array.isArray(verify.data) && verify.data.length > 0) {
+            throw new Error(`${source.label} cleanup incomplete: ${verify.data.length} row(s) remained live after delete.`);
+        }
         return ids.length;
     },
 

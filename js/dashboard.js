@@ -91,6 +91,7 @@ const DEFAULT_LAYOUT_ADMIN = [
 
 const DEFAULT_LAYOUT_TRAINEE = [
     { id: 'up_next', col: 2, row: 1 },
+    { id: 'training_rules', col: 1, row: 1 },
     { id: 'live_upcoming', col: 1, row: 1 },
     { id: 'recent_results', col: 1, row: 2 },
     { id: 'available_tests', col: 1, row: 2 },
@@ -678,7 +679,7 @@ function buildAdminCommandCenter(stats) {
             </div>
             <div class="dash-command-grid">
                 ${item('fa-highlighter', 'Pending marking', stats.pendingMarking, markingTone, "showTab('test-manage')", stats.pendingMarking ? 'Needs marking' : 'Queue clear')}
-                ${item('fa-search', 'Insight actions', stats.actionRequiredCount, insightTone, "showTab('insights')", stats.actionRequiredCount ? 'Review trainees' : 'No urgent insight')}
+                ${item('fa-search', 'Insight actions', stats.actionRequiredCount, insightTone, "showTab('insight-studio')", stats.actionRequiredCount ? 'Review trainees' : 'No urgent insight')}
                 ${item('fa-calendar-check', 'Live today', stats.todaysLiveBookings, reviewTone, "showTab('live-assessment')", stats.bookingIssues ? `${stats.bookingIssues} booking issue${stats.bookingIssues === 1 ? '' : 's'}` : `${stats.newBookingsCount} upcoming`)}
                 ${item('fa-clock', 'Attendance review', stats.unconfirmedLates, lateTone, "openAttendanceRegister()", stats.openClockOuts ? `${stats.openClockOuts} open clock-out${stats.openClockOuts === 1 ? '' : 's'}` : 'No open clock-outs')}
             </div>
@@ -863,7 +864,7 @@ function buildAdminWidgets(container) {
                 <div class="dash-details">${pendingDetailsHtml}</div>
             </div>`),
         'insight': wrapWidget('insight', `
-            <div onclick="showTab('insights')" style="cursor:pointer; width:100%;">
+            <div onclick="showTab('insight-studio')" style="cursor:pointer; width:100%;">
                 ${badgeInsight}
                 <div class="dash-primary-content">
                     <div class="dash-icon"><i class="fas fa-search"></i></div>
@@ -1704,6 +1705,16 @@ function buildTraineeWidgets(container) {
     let availableHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-unlock"></i></div><h3 style="margin:0;">Available Now</h3></div>`;
     availableHtml += `<div style="text-align:center; padding:10px;"><button class="btn-primary" onclick="showTab('my-tests')">View All Assessments</button></div>`;
 
+    const trainingRulesHtml = `
+        <div style="display:flex; flex-direction:column; height:100%; justify-content:center; align-items:center; text-align:center;">
+            <div class="dash-icon" style="background:rgba(243, 112, 33, 0.1); color:var(--primary); margin-bottom:10px;">
+                <i class="fas fa-scale-balanced"></i>
+            </div>
+            <h3 style="margin:0 0 5px 0;">Training Rules</h3>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin:0 0 10px 0;">Review the current training expectations.</p>
+            <button class="btn-secondary btn-sm" onclick="typeof openTrainingRulesModal === 'function' ? openTrainingRulesModal() : alert('Training rules are not available yet.')">Open Rules</button>
+        </div>`;
+
     // 5. Notepad (Now Notes & Bookmarks)
     
     // Legacy Cloud Migration
@@ -1824,6 +1835,7 @@ function buildTraineeWidgets(container) {
     // WIDGET MAP
     const widgets = {
         'up_next': wrapWidget('up_next', upNextHtml, 1, 1, 'hero-widget'),
+        'training_rules': wrapWidget('training_rules', trainingRulesHtml),
         'live_upcoming': wrapWidget('live_upcoming', liveHtml),
         'recent_results': wrapWidget('recent_results', resultsHtml),
         'available_tests': wrapWidget('available_tests', availableHtml),

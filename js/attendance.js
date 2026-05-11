@@ -8,7 +8,18 @@ let attendanceAdminPendingRefresh = false;
 let attendanceAdminLastRenderKey = '';
 
 function normalizeAttendanceUser(value) {
-    return String(value || '').trim().toLowerCase();
+    try {
+        if (typeof normalizeIdentityValue === 'function') {
+            const normalized = normalizeIdentityValue(value);
+            if (normalized) return normalized;
+        }
+    } catch (e) {}
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function getLocalISODate(date = new Date()) {
@@ -61,13 +72,55 @@ function dedupeAttendanceRecords(records) {
 }
 
 function readAttendanceRecords() {
-    return dedupeAttendanceRecords(JSON.parse(localStorage.getItem('attendance_records') || '[]'));
+    const rows = (typeof safeLocalParse === 'function')
+        ? safeLocalParse('attendance_records', [])
+        : JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    return dedupeAttendanceRecords(Array.isArray(rows) ? rows : []);
 }
 
 function writeAttendanceRecords(records) {
     const clean = dedupeAttendanceRecords(records);
     localStorage.setItem('attendance_records', JSON.stringify(clean));
     return clean;
+}
+
+function normalizeAttendanceServerRow(row) {
+    if (!row) return null;
+    const data = row.data && typeof row.data === 'object' ? { ...row.data } : {};
+    const normalized = normalizeAttendanceRecord({
+        ...data,
+        id: data.id || row.id,
+        user: data.user || row.user_id,
+        updatedAt: data.updatedAt || row.updated_at
+    });
+    if (!normalized) return null;
+    if (row.updated_at) normalized.updatedAt = row.updated_at;
+    return normalized;
+}
+
+async function pullAttendanceRegisterFromServer() {
+    if (!window.supabaseClient) return { pulled: 0, merged: readAttendanceRecords().length, skipped: true };
+    const { data, error } = await window.supabaseClient
+        .from('attendance')
+        .select('id,user_id,data,updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(5000);
+
+    if (error) throw error;
+
+    const serverRecords = (Array.isArray(data) ? data : [])
+        .map(normalizeAttendanceServerRow)
+        .filter(Boolean);
+
+    const merged = writeAttendanceRecords([...readAttendanceRecords(), ...serverRecords]);
+    const latestServerTs = (Array.isArray(data) ? data : [])
+        .map(row => row && row.updated_at)
+        .filter(Boolean)
+        .sort()
+        .pop();
+    if (latestServerTs) localStorage.setItem('row_sync_ts_attendance_records', latestServerTs);
+    if (typeof emitDataChange === 'function') emitDataChange('attendance_records', 'attendance_register_refresh');
+    return { pulled: serverRecords.length, merged: merged.length, skipped: false };
 }
 
 function findAttendanceRecord(records, user, dateIso) {
@@ -432,9 +485,24 @@ function openAttendanceRegister() {
     if(modal) {
         modal.classList.remove('hidden');
         populateAttendanceGroupSelect();
-        renderAttendanceRegister();
+        refreshAttendanceRegister({ force: true });
     }
 }
+
+window.refreshAttendanceRegister = async function(options = {}) {
+    setAttendanceRefreshState('Refreshing attendance from server...', true);
+    try {
+        const result = await pullAttendanceRegisterFromServer();
+        const pulledText = result.skipped
+            ? 'Server unavailable. Showing local attendance cache.'
+            : `Pulled ${result.pulled} server row(s), ${result.merged} local record(s) ready.`;
+        setAttendanceRefreshState(pulledText, false);
+    } catch (error) {
+        console.warn('Attendance register server refresh failed:', error);
+        setAttendanceRefreshState('Server refresh failed. Showing local attendance cache.', true);
+    }
+    renderAttendanceRegister({ ...options, force: true });
+};
 
 // --- NEW: REALTIME HOOK ---
 // Called by data.js handleAttendanceRealtime
@@ -450,6 +518,7 @@ window.updateAttendanceUI = function() {
 function populateAttendanceGroupSelect() {
     const sel = document.getElementById('attAdminGroupSelect');
     if(!sel) return;
+    const previousValue = sel.value;
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
     sel.innerHTML = '';
@@ -466,6 +535,11 @@ function populateAttendanceGroupSelect() {
     if(activeGroups.size > 0) {
         const opt = new Option("--- Active Schedules ---", "active_schedules");
         sel.add(opt, 0); // Add to top
+    }
+    if (previousValue && Array.from(sel.options).some(opt => opt.value === previousValue)) {
+        sel.value = previousValue;
+    } else if (activeGroups.size > 0) {
+        sel.value = 'active_schedules';
     }
 }
 
@@ -522,6 +596,12 @@ function renderAttendanceRegister(options = {}) {
         <table class="admin-table">
             <thead><tr><th>Agent</th><th>Today</th><th>Total Days</th><th>Lates</th><th>Unconfirmed</th><th>Action</th></tr></thead><tbody>
     `;
+
+    if (members.length === 0) {
+        html += `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:18px;">No roster members found for this attendance filter.</td></tr>`;
+    } else if (visibleRecords.length === 0 && records.length > 0) {
+        html += `<tr><td colspan="6" style="text-align:center; color:#f1c40f; padding:14px;">Attendance records exist locally, but none match the selected roster filter. Try Active Schedules or verify roster names.</td></tr>`;
+    }
 
     members.forEach(m => {
         const myRecs = records.filter(r => normalizeAttendanceUser(r.user) === normalizeAttendanceUser(m));

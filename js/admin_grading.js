@@ -309,8 +309,21 @@ function dedupeVettingRows(items) {
 }
 
 function loadTestRecords() {
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const allSubs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
+        ? filterRowsToCurrentTraineeLifecycle(allRecords)
+        : allRecords;
+    const recordsBySubmissionId = new Map();
+    records.forEach(r => {
+        if (r && r.submissionId) recordsBySubmissionId.set(String(r.submissionId), r);
+    });
+    const subs = allSubs.filter(s => {
+        const linkedRecord = recordsBySubmissionId.get(String(s && s.id));
+        if (linkedRecord) return true;
+        if (typeof isRowInCurrentTraineeLifecycle !== 'function') return true;
+        return isRowInCurrentTraineeLifecycle(s);
+    });
     const tests = JSON.parse(localStorage.getItem('tests') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     const tbody = document.querySelector('#testRecordsTable tbody');
@@ -362,6 +375,7 @@ function loadTestRecords() {
                 testKey: getSubmissionDisplayKey(canonicalTitle || s.testTitle),
                 score: Number.isFinite(normalizedScore) ? normalizedScore : (Number.isFinite(linkedScore) ? linkedScore : 0),
                 status: s.status,
+                groupID: linkedRecord ? linkedRecord.groupID : (s.groupID || ''),
                 createdAt: s.createdAt,
                 lastModified: s.lastModified,
                 source: 'digital'
@@ -382,6 +396,7 @@ function loadTestRecords() {
                 testKey: getSubmissionDisplayKey(canonicalTitle || r.assessment),
                 score: r.score,
                 status: 'completed', // Manual records are always completed
+                groupID: r.groupID || '',
                 createdAt: r.createdAt,
                 lastModified: r.lastModified,
                 source: 'manual'
@@ -433,8 +448,11 @@ function loadTestRecords() {
             
             // Group Filter
             if (groupFilter) {
-                const members = rosters[groupFilter] || [];
-                if (!members.some(m => m.toLowerCase() === s.trainee.toLowerCase())) return false;
+                if (s.groupID && String(s.groupID) !== String(groupFilter)) return false;
+                if (!s.groupID) {
+                    const members = rosters[groupFilter] || [];
+                    if (!members.some(m => m.toLowerCase() === s.trainee.toLowerCase())) return false;
+                }
             }
             
             return true;
@@ -453,10 +471,14 @@ function loadTestRecords() {
             filtered.forEach(s => {
                 // Find Group
                 let groupID = "Unknown";
-                for (const [gid, members] of Object.entries(rosters)) {
-                    if (members.some(m => m.toLowerCase() === s.trainee.toLowerCase())) { 
-                        groupID = gid; 
-                        break; 
+                if (s.groupID) {
+                    groupID = s.groupID;
+                } else {
+                    for (const [gid, members] of Object.entries(rosters)) {
+                        if (members.some(m => m.toLowerCase() === s.trainee.toLowerCase())) {
+                        groupID = gid;
+                        break;
+                        }
                     }
                 }
                 
