@@ -190,6 +190,8 @@ function renderAgentDashboard(agentName, attemptKey = '') {
     const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
     const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
     const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const exemptions = JSON.parse(localStorage.getItem('exemptions') || '[]');
     const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
     const notesMap = JSON.parse(localStorage.getItem('agentNotes') || '{}');
 
@@ -242,6 +244,8 @@ function renderAgentDashboard(agentName, attemptKey = '') {
             submissions: archivedData.submissions || [],
             reports: archivedData.reports || [],
             reviews: archivedData.reviews || [],
+            liveBookings: archivedData.liveBookings || [],
+            exemptions: archivedData.exemptions || [],
             attendance: archivedData.attendance || [],
             notes: archivedData.notes || []
         };
@@ -262,6 +266,8 @@ function renderAgentDashboard(agentName, attemptKey = '') {
             submissions: agentSubsActive,
             reports: agentReportActive ? [agentReportActive] : [],
             reviews: agentReviewActive ? [agentReviewActive] : [],
+            liveBookings: liveBookings.filter(b => identityMatch(b.trainee || b.user || b.user_id)),
+            exemptions: exemptions.filter(e => identityMatch(e.trainee || e.user || e.user_id)),
             attendance: agentAttActive,
             notes: agentNotesActive
         });
@@ -290,6 +296,19 @@ function renderAgentDashboard(agentName, attemptKey = '') {
     const agentReview = selectedAttempt.reviews[0] || null;
 
     let group = selectedAttempt.group || "Unknown Group";
+    const officialProgress = (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function')
+        ? window.ProgressCatalog.getTraineeProgress(agentName, group, {
+            includeAuto: true,
+            data: {
+                records: selectedAttempt.records || [],
+                submissions: selectedAttempt.submissions || [],
+                savedReports: selectedAttempt.reports || [],
+                insightReviews: selectedAttempt.reviews || [],
+                liveBookings: selectedAttempt.liveBookings || [],
+                exemptions: selectedAttempt.exemptions || []
+            }
+        })
+        : null;
     let gradDateHtml = "";
     if (isArchived && archivedData) {
         if (archiveType === 'retrain') {
@@ -307,6 +326,9 @@ function renderAgentDashboard(agentName, attemptKey = '') {
     if(typeof calculateAgentStats === 'function') {
         const stats = calculateAgentStats(agentName, agentRecords);
         progress = stats.progress;
+    }
+    if (officialProgress && officialProgress.totalRequired > 0) {
+        progress = officialProgress.progress;
     }
     
     let statusObj = { status: 'Pass', failedItems: [] };
@@ -396,8 +418,13 @@ function renderAgentDashboard(agentName, attemptKey = '') {
     `;
     
     // --- METRICS CALCULATION ---
+    const officialScores = officialProgress
+        ? officialProgress.items.map(item => Number(item.score)).filter(score => Number.isFinite(score))
+        : [];
     const totalScore = assessments.reduce((acc, r) => acc + r.score, 0);
-    const avgScore = assessments.length > 0 ? Math.round(totalScore / assessments.length) : 0;
+    const avgScore = officialScores.length > 0
+        ? Math.round(officialScores.reduce((sum, score) => sum + score, 0) / officialScores.length)
+        : (assessments.length > 0 ? Math.round(totalScore / assessments.length) : 0);
     
     const attTotal = agentAtt.length;
     const attLate = agentAtt.filter(r => r.isLate).length;
@@ -435,6 +462,31 @@ function renderAgentDashboard(agentName, attemptKey = '') {
             </div>
         </div>
     `;
+
+    const progressChecklistHtml = officialProgress ? `
+        <div class="card">
+            <h3><i class="fas fa-list-check" style="color:var(--primary); margin-right:10px;"></i>Official Progress Checklist</h3>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+                <span class="status-badge status-pass">${officialProgress.completedCount}/${officialProgress.totalRequired} complete</span>
+                <span class="status-badge ${officialProgress.missingCount ? 'status-improve' : 'status-pass'}">${officialProgress.missingCount || 0} remaining</span>
+                <span class="status-badge">${isArchived ? 'Archived attempt' : 'Live attempt'}</span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px;">
+                ${officialProgress.items.map(item => {
+                    const done = item.status === 'completed' || item.status === 'exempt';
+                    const tone = done ? 'status-pass' : 'status-fail';
+                    const score = Number.isFinite(Number(item.score)) ? ` · ${Math.round(Number(item.score))}%` : '';
+                    return `<div style="background:var(--bg-input); border:1px solid var(--border-color); border-radius:6px; padding:8px;">
+                        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+                            <strong style="font-size:0.9rem;">${item.name}</strong>
+                            <span class="status-badge ${tone}">${item.status}</span>
+                        </div>
+                        <div style="color:var(--text-muted); font-size:0.78rem; margin-top:4px;">${item.type || 'assessment'} · ${item.evidenceSource || item.source || 'catalog'}${score}</div>
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>
+    ` : '';
 
     let reviewHtml = `
         <div class="card">
@@ -651,7 +703,7 @@ function renderAgentDashboard(agentName, attemptKey = '') {
         ${headerHtml}
         ${metricsHtml}
         <div class="grid-2" style="align-items:start;">
-            <div style="display:flex; flex-direction:column; gap:20px;">${recordsHtml}${notesHtml}</div>
+            <div style="display:flex; flex-direction:column; gap:20px;">${progressChecklistHtml}${recordsHtml}${notesHtml}</div>
             <div style="display:flex; flex-direction:column; gap:20px;">${reviewHtml}${reportHtml}${attHtml}${activityHtml}</div>
         </div>
         <div id="agent-analytics-profile"></div>

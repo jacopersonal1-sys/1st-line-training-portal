@@ -79,13 +79,14 @@
     function inferProgressType(name, explicitType) {
         const raw = String(name || '').trim();
         const normalizedType = normalizeText(explicitType);
-        if (['assessment', 'vetting', 'test', 'report', 'review'].includes(normalizedType)) {
+        if (['assessment', 'vetting', 'test', 'live', 'report', 'review'].includes(normalizedType)) {
             return normalizedType;
         }
         const normalizedName = normalizeText(raw);
         if (!normalizedName) return 'assessment';
         if (normalizedName === 'onboard report') return 'report';
         if (normalizedName === 'insight review') return 'review';
+        if (normalizedName.includes('live assessment') || normalizedName.includes('live session')) return 'live';
         if (normalizedName.startsWith('1st vetting -') || normalizedName.startsWith('final vetting -')) return 'vetting';
         return 'assessment';
     }
@@ -117,7 +118,7 @@
 
         return {
             trainingGoal: type === 'assessment' || type === 'test',
-            assessmentScores: type === 'assessment' || type === 'test',
+            assessmentScores: type === 'assessment' || type === 'test' || type === 'live',
             vettingTest1: type === 'vetting' && !isFinalVettingName(itemName),
             vettingFinal: type === 'vetting' && !isVettingOneName(itemName)
         };
@@ -133,6 +134,12 @@
     }
 
     function getAssessmentCatalog() {
+        if (window.ProgressCatalog && typeof window.ProgressCatalog.getCandidateItems === 'function') {
+            return window.ProgressCatalog.getCandidateItems({ includeConfigured: true, includeAuto: false })
+                .map(item => ({ name: item.name, type: item.type, source: item.source || (item.sources || []).join(', ') || 'catalog' }))
+                .filter(item => item.name);
+        }
+
         const tests = parseArrayFromLocalStorage('tests');
         const names = [];
 
@@ -143,11 +150,13 @@
             });
         }
 
-        return uniqueStrings(names).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+        return uniqueStrings(names)
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+            .map(name => ({ name, type: inferProgressType(name, null), source: 'test-engine' }));
     }
 
     function getAssessmentCatalogNameSet() {
-        return new Set(getAssessmentCatalog().map(name => normalizeText(name)));
+        return new Set(getAssessmentCatalog().map(item => normalizeText(item.name || item)));
     }
 
     function getDefaultThreshold() {
@@ -731,8 +740,11 @@
         const progressSelect = document.getElementById('insightProgressItemSelect');
         const catalog = getAssessmentCatalog();
         const optionsHtml = catalog.length
-            ? catalog.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')
-            : '<option value="">No active Test Engine assessments</option>';
+            ? catalog.map(item => {
+                const label = `${item.name}${item.source ? ` (${item.source})` : ''}`;
+                return `<option value="${escapeHtml(item.name)}" data-type="${escapeHtml(item.type || inferProgressType(item.name, null))}">${escapeHtml(label)}</option>`;
+            }).join('')
+            : '<option value="">No progress catalog items found</option>';
 
         if (select) select.innerHTML = optionsHtml;
         if (progressSelect) progressSelect.innerHTML = optionsHtml;
@@ -814,12 +826,17 @@
         const cleanName = String(name || '').trim();
         if (!cleanName) return false;
         if (AUTO_PROGRESS_ITEMS.some(item => normalizeText(item.name) === normalizeText(cleanName))) return false;
+        const select = document.getElementById('insightProgressItemSelect');
+        const selectedType = select && select.selectedOptions && select.selectedOptions[0]
+            ? select.selectedOptions[0].dataset.type
+            : null;
+        const type = inferProgressType(cleanName, selectedType);
 
         const next = {
             name: cleanName,
-            type: inferProgressType(cleanName, null),
+            type,
             source: 'manual',
-            reportSections: sanitizeReportSections(null, cleanName, inferProgressType(cleanName, null))
+            reportSections: sanitizeReportSections(null, cleanName, type)
         };
 
         const required = Array.isArray(config.requiredItems) ? config.requiredItems.slice() : [];
@@ -932,6 +949,7 @@
                 : `<select style="margin:0; width:100%;" onchange="changeInsightProgressType('${encodedName}', this.value)">
                     <option value="assessment" ${item.type === 'assessment' ? 'selected' : ''}>Assessment</option>
                     <option value="vetting" ${item.type === 'vetting' ? 'selected' : ''}>Vetting Test</option>
+                    <option value="live" ${item.type === 'live' ? 'selected' : ''}>Live Assessment</option>
                     <option value="test" ${item.type === 'test' ? 'selected' : ''}>Test</option>
                 </select>`;
             const nameHtml = missingFromTestEngine

@@ -1161,6 +1161,19 @@ async function confirmMoveUser() {
                 return key ? allNotes[key] : null;
             })()
         };
+        if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
+            archiveData.officialProgress = window.ProgressCatalog.getTraineeProgress(userToMove, previousGroup, {
+                includeAuto: true,
+                data: {
+                    records: archiveData.records,
+                    submissions: archiveData.submissions,
+                    savedReports: archiveData.reports,
+                    insightReviews: archiveData.reviews,
+                    liveBookings: archiveData.liveBookings,
+                    exemptions: archiveData.exemptions
+                }
+            });
+        }
 
         let archives = readRetrainArchives();
         archives.push(archiveData);
@@ -1955,6 +1968,20 @@ async function graduateTrainee(username) {
                 return key ? allNotes[key] : null;
             })()
         };
+        if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
+            const archiveGroup = archiveData.records && archiveData.records[0] ? archiveData.records[0].groupID : '';
+            archiveData.officialProgress = window.ProgressCatalog.getTraineeProgress(username, archiveGroup, {
+                includeAuto: true,
+                data: {
+                    records: archiveData.records,
+                    submissions: archiveData.submissions,
+                    savedReports: archiveData.reports,
+                    insightReviews: archiveData.reviews,
+                    liveBookings: archiveData.liveBookings,
+                    exemptions: archiveData.exemptions
+                }
+            });
+        }
 
         let archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
         archives.push(archiveData);

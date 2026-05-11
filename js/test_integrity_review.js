@@ -313,6 +313,8 @@ function buildTestIntegrityRows() {
     const tests = testIntegrityParse('tests', []);
     const submissions = testIntegrityParse('submissions', []);
     const records = testIntegrityParse('records', []);
+    const users = testIntegrityParse('users', []);
+    const rosters = testIntegrityParse('rosters', {});
     const testsById = {};
     (Array.isArray(tests) ? tests : []).forEach(test => {
         if (test && test.id !== undefined) testsById[String(test.id)] = testIntegrityNormalize(test.type || 'standard') || 'standard';
@@ -466,6 +468,68 @@ function buildTestIntegrityRows() {
         });
     });
 
+    if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
+        const groupFor = (name) => {
+            const token = window.ProgressCatalog.identity(name);
+            for (const [gid, members] of Object.entries(rosters || {})) {
+                if (!Array.isArray(members)) continue;
+                if (members.some(member => window.ProgressCatalog.identity(member) === token)) return gid;
+            }
+            return '';
+        };
+        const traineeNames = new Set();
+        (Array.isArray(users) ? users : []).forEach(user => {
+            if (String(user && user.role || '').toLowerCase() === 'trainee') traineeNames.add(String(user.user || user.username || '').trim());
+        });
+        (Array.isArray(records) ? records : []).forEach(row => traineeNames.add(String(row && row.trainee || '').trim()));
+        (Array.isArray(submissions) ? submissions : []).forEach(row => traineeNames.add(String(row && row.trainee || '').trim()));
+
+        Array.from(traineeNames).filter(Boolean).forEach((trainee) => {
+            const groupID = groupFor(trainee);
+            const progress = window.ProgressCatalog.getTraineeProgress(trainee, groupID, {
+                includeAuto: false,
+                data: {
+                    records,
+                    submissions,
+                    liveBookings: testIntegrityParse('liveBookings', []),
+                    exemptions: testIntegrityParse('exemptions', [])
+                }
+            });
+            (progress.items || []).forEach((item) => {
+                if (item.status !== 'missing') return;
+                const type = item.type === 'vetting' ? 'vetting' : (item.type === 'live' ? 'live' : 'standard');
+                rows.push({
+                    source: 'progress_catalog',
+                    id: `missing_${window.ProgressCatalog.identity(trainee)}_${window.ProgressCatalog.identity(item.name)}`,
+                    recordId: '',
+                    type,
+                    trainee,
+                    title: item.name,
+                    date: '',
+                    submittedAt: '',
+                    groupID,
+                    status: 'missing_required_progress',
+                    archived: false,
+                    score: null,
+                    recordScore: null,
+                    questionCount: 0,
+                    answeredCount: 0,
+                    coverage: 0,
+                    manualCount: 0,
+                    manualGradedCount: 0,
+                    reviewedBy: '',
+                    auditCount: 0,
+                    verdict: 'review',
+                    reasons: ['Official progress catalog expects this item, but no completed submission, record, live booking, or exemption was found.'],
+                    warnings: [],
+                    completenessLabel: 'Missing official progress item',
+                    reviewLabel: 'Needs admin confirmation',
+                    evidenceLabel: `Official catalog type: ${item.type || 'assessment'}`
+                });
+            });
+        });
+    }
+
     const archiveRows = buildRetrainArchiveIntegrityRows();
     testIntegrityBuildAttemptMap(rows);
     rows.push(...archiveRows);
@@ -557,7 +621,13 @@ function renderTestIntegrityReview() {
                             const canDelete = row.source === 'submission' ? row.id : (row.source === 'retrain_archive' ? '' : row.recordId);
                             const overrideBadge = row.override ? '<div class="ins-subtle">Manual override saved</div>' : '';
                             const attemptSource = row.attemptSource === 'manual' ? 'manual' : (row.daysSincePrevious ? `${row.daysSincePrevious}d gap` : 'first seen');
-                            const actionHtml = row.source === 'retrain_archive'
+                            const actionHtml = row.source === 'progress_catalog'
+                                ? `
+                                    <button class="btn-success btn-sm" onclick="setIntegrityVerdictOverride(decodeURIComponent('${encodeURIComponent(row.entryKey)}'), 'valid')" title="Mark this catalog check valid">Valid</button>
+                                    <button class="btn-warning btn-sm" onclick="setIntegrityVerdictOverride(decodeURIComponent('${encodeURIComponent(row.entryKey)}'), 'review')" title="Keep catalog check for review">Review</button>
+                                    <button class="btn-secondary btn-sm" onclick="clearIntegrityOverride(decodeURIComponent('${encodeURIComponent(row.entryKey)}'))" title="Clear manual override"><i class="fas fa-undo"></i></button>
+                                `
+                                : row.source === 'retrain_archive'
                                 ? `
                                     <button class="btn-secondary btn-sm" onclick="openRetrainArchiveIntegrityModal(decodeURIComponent('${encodeURIComponent(row.id)}'))" title="View archive contents"><i class="fas fa-eye"></i></button>
                                     <button class="btn-success btn-sm" onclick="setRetrainArchiveStatus(decodeURIComponent('${encodeURIComponent(row.id)}'), 'valid')" title="Mark archive valid">Valid</button>

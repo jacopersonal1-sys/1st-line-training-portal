@@ -127,13 +127,14 @@ function insRecordMatchesGroup(record, groupID) {
 
 function insInferProgressType(name, explicitType) {
     const normalizedType = insNormalize(explicitType);
-    if (['assessment', 'vetting', 'test', 'report', 'review'].includes(normalizedType)) {
+    if (['assessment', 'vetting', 'test', 'live', 'report', 'review'].includes(normalizedType)) {
         return normalizedType;
     }
     const normalizedName = insNormalize(name);
     if (!normalizedName) return 'assessment';
     if (normalizedName === 'onboard report') return 'report';
     if (normalizedName === 'insight review') return 'review';
+    if (normalizedName.includes('live assessment') || normalizedName.includes('live session')) return 'live';
     if (normalizedName.startsWith('1st vetting -') || normalizedName.startsWith('final vetting -')) return 'vetting';
     return 'assessment';
 }
@@ -165,7 +166,7 @@ function insNormalizeReportSections(rawSections, itemName, itemType) {
 
     return {
         trainingGoal: type === 'assessment' || type === 'test',
-        assessmentScores: type === 'assessment' || type === 'test',
+        assessmentScores: type === 'assessment' || type === 'test' || type === 'live',
         vettingTest1: type === 'vetting' && !insIsFinalVettingName(itemName),
         vettingFinal: type === 'vetting' && !insIsVettingOneName(itemName)
     };
@@ -180,6 +181,7 @@ const InsightDataService = {
         savedReports: [],
         insightReviews: [],
         exemptions: [],
+        liveBookings: [],
         attendance: [],
         monitorHistory: [],
         violationReports: [],
@@ -188,6 +190,7 @@ const InsightDataService = {
         assessments: [],
         vettingTopics: [],
         tests: [],
+        schedules: {},
         retrainArchives: [],
         ruleConfig: null,
         progressConfig: null,
@@ -381,6 +384,21 @@ const InsightDataService = {
         }).filter(item => !!item.trainee && !!item.item);
     },
 
+    normalizeLiveBookings: function(rows) {
+        return (rows || []).map((row) => {
+            const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
+            return {
+                id: String(base.id || row.id || '').trim(),
+                trainee: String(base.trainee || base.user || row.user_id || '').trim(),
+                assessment: String(base.assessment || base.title || base.testTitle || '').trim(),
+                status: String(base.status || '').trim(),
+                score: insToNumber(base.score, null),
+                date: String(base.date || base.createdAt || row.updated_at || '').trim(),
+                groupID: String(base.groupID || base.group || '').trim()
+            };
+        }).filter(item => !!item.trainee && !!item.assessment);
+    },
+
     normalizeAttendance: function(rows) {
         return (rows || []).map((row) => {
             const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
@@ -517,7 +535,7 @@ const InsightDataService = {
         }
 
         const requiredItems = Array.from(map.values()).sort((a, b) => {
-            const rank = { assessment: 1, vetting: 2, test: 3, report: 4, review: 5 };
+            const rank = { assessment: 1, vetting: 2, live: 3, test: 4, report: 5, review: 6 };
             const rankDiff = (rank[a.type] || 9) - (rank[b.type] || 9);
             if (rankDiff !== 0) return rankDiff;
             return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
@@ -555,6 +573,12 @@ const InsightDataService = {
             const name = typeof item === 'string' ? item : (item && (item.title || item.name));
             const clean = String(name || '').trim();
             if (clean) names.push(clean);
+        });
+        Object.values(this.state.schedules || {}).forEach((schedule) => {
+            (Array.isArray(schedule && schedule.items) ? schedule.items : []).forEach((item) => {
+                const clean = String(item && (item.courseName || item.title || item.name) || '').trim();
+                if (clean) names.push(clean);
+            });
         });
 
         const presets = [];
@@ -611,6 +635,7 @@ const InsightDataService = {
                 this.fetchAllRows('saved_reports'),
                 this.fetchAllRows('insight_reviews'),
                 this.fetchAllRows('exemptions'),
+                this.fetchAllRows('live_bookings'),
                 this.fetchAllRows('attendance'),
                 this.fetchAllRows('monitor_history'),
                 this.fetchDocument('violation_reports'),
@@ -620,6 +645,7 @@ const InsightDataService = {
                 this.fetchDocument('assessments'),
                 this.fetchDocument('vettingTopics'),
                 this.fetchDocument('tests'),
+                this.fetchDocument('schedules'),
                 this.fetchDocument('retrain_archives'),
                 this.fetchDocument('insight_rule_config'),
                 this.fetchDocument(INSIGHT_PROGRESS_CONFIG_KEY),
@@ -641,6 +667,7 @@ const InsightDataService = {
             savedReportsRows,
             insightReviewRows,
             exemptionRows,
+            liveBookingRows,
             attendanceRows,
             monitorRows,
             violationRows,
@@ -650,6 +677,7 @@ const InsightDataService = {
             assessmentsDoc,
             topicsDoc,
             testsDoc,
+            schedulesDoc,
             retrainArchivesDoc,
             ruleConfigDoc,
             progressConfigDoc,
@@ -670,6 +698,10 @@ const InsightDataService = {
         );
         this.state.exemptions = this.normalizeExemptions(
             (Array.isArray(exemptionRows) && exemptionRows.length) ? exemptionRows : localExemptions
+        );
+        const localLiveBookings = insParseJson('liveBookings', []);
+        this.state.liveBookings = this.normalizeLiveBookings(
+            (Array.isArray(liveBookingRows) && liveBookingRows.length) ? liveBookingRows : localLiveBookings
         );
         this.state.attendance = this.normalizeAttendance(attendanceRows);
         const localMonitorHistory = insParseJson('monitor_history', []);
@@ -706,9 +738,13 @@ const InsightDataService = {
         const localAssessments = insParseJson('assessments', []);
         const localTopics = insParseJson('vettingTopics', []);
         const localTests = insParseJson('tests', []);
+        const localSchedules = insParseJson('schedules', {});
         this.state.assessments = Array.isArray(assessmentsDoc) ? assessmentsDoc : (Array.isArray(localAssessments) ? localAssessments : []);
         this.state.vettingTopics = Array.isArray(topicsDoc) ? topicsDoc : (Array.isArray(localTopics) ? localTopics : []);
         this.state.tests = Array.isArray(testsDoc) ? testsDoc : (Array.isArray(localTests) ? localTests : []);
+        this.state.schedules = (schedulesDoc && typeof schedulesDoc === 'object')
+            ? schedulesDoc
+            : (localSchedules && typeof localSchedules === 'object' ? localSchedules : {});
         const localRetrainArchives = insParseJson('retrain_archives', []);
         this.state.retrainArchives = Array.isArray(retrainArchivesDoc)
             ? retrainArchivesDoc
@@ -737,6 +773,7 @@ const InsightDataService = {
         localStorage.setItem('savedReports', JSON.stringify(this.state.savedReports));
         localStorage.setItem('insightReviews', JSON.stringify(this.state.insightReviews));
         localStorage.setItem('exemptions', JSON.stringify(this.state.exemptions));
+        localStorage.setItem('liveBookings', JSON.stringify(this.state.liveBookings));
         localStorage.setItem('violation_reports', JSON.stringify(this.state.violationReports));
         localStorage.setItem('retrain_archives', JSON.stringify(this.state.retrainArchives));
         localStorage.setItem(INSIGHT_SUBJECT_REVIEW_KEY, JSON.stringify(this.state.subjectReviews));
@@ -817,6 +854,22 @@ const InsightDataService = {
     },
 
     getProgressRequiredItems: function() {
+        if (window.ProgressCatalog && typeof window.ProgressCatalog.getOfficialItems === 'function') {
+            const snapshotKeys = ['assessments', 'vettingTopics', 'tests', 'schedules'];
+            const previous = {};
+            snapshotKeys.forEach((key) => previous[key] = localStorage.getItem(key));
+            localStorage.setItem('assessments', JSON.stringify(this.state.assessments || []));
+            localStorage.setItem('vettingTopics', JSON.stringify(this.state.vettingTopics || []));
+            localStorage.setItem('tests', JSON.stringify(this.state.tests || []));
+            localStorage.setItem('schedules', JSON.stringify(this.state.schedules || {}));
+            localStorage.setItem(INSIGHT_PROGRESS_CONFIG_KEY, JSON.stringify(this.getProgressConfig()));
+            const items = window.ProgressCatalog.getOfficialItems({ includeAuto: true });
+            snapshotKeys.forEach((key) => {
+                if (previous[key] === null || previous[key] === undefined) localStorage.removeItem(key);
+                else localStorage.setItem(key, previous[key]);
+            });
+            return items;
+        }
         const progressCfg = this.getProgressConfig();
         const map = new Map();
         INSIGHT_AUTO_PROGRESS_ITEMS.forEach((item) => {
@@ -835,7 +888,7 @@ const InsightDataService = {
         });
         const out = Array.from(map.values());
         out.sort((a, b) => {
-            const rank = { assessment: 1, vetting: 2, test: 3, report: 4, review: 5 };
+            const rank = { assessment: 1, vetting: 2, live: 3, test: 4, report: 5, review: 6 };
             const rankDiff = (rank[a.type] || 9) - (rank[b.type] || 9);
             if (rankDiff !== 0) return rankDiff;
             return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
@@ -864,6 +917,15 @@ const InsightDataService = {
     },
 
     isProgressItemCompleted: function(agentName, item) {
+        if (window.ProgressCatalog && typeof window.ProgressCatalog.getItemEvidence === 'function') {
+            return window.ProgressCatalog.getItemEvidence(agentName, item, {
+                records: this.getAgentRecords(agentName),
+                submissions: (this.state.submissions || []).filter(row => insMatch(row.trainee, agentName)),
+                savedReports: this.state.savedReports || [],
+                insightReviews: this.state.insightReviews || [],
+                liveBookings: this.state.liveBookings || []
+            }).completed === true;
+        }
         const type = insInferProgressType(item && item.name, item && item.type);
         const itemName = String(item && item.name || '').trim();
         const normalizedName = insNormalize(itemName);
@@ -902,6 +964,20 @@ const InsightDataService = {
     },
 
     getAgentProgress: function(agentName, groupID) {
+        if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
+            return window.ProgressCatalog.getTraineeProgress(agentName, groupID, {
+                includeAuto: true,
+                items: this.getProgressRequiredItems(),
+                data: {
+                    records: this.getAgentRecords(agentName),
+                    submissions: (this.state.submissions || []).filter(row => insMatch(row.trainee, agentName)),
+                    savedReports: this.state.savedReports || [],
+                    insightReviews: this.state.insightReviews || [],
+                    liveBookings: this.state.liveBookings || [],
+                    exemptions: this.state.exemptions || []
+                }
+            });
+        }
         const required = this.getProgressRequiredItems();
         const checklist = required.map((item) => {
             const exempt = this.isProgressItemExempt(agentName, groupID, item.name);

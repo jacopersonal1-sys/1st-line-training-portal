@@ -49,6 +49,21 @@ const AnalyticsEngine = {
         return Array.isArray(records) ? records.filter(r => r && r.archived !== true) : [];
     },
 
+    getOfficialProgress: function(userId, groupId) {
+        if (!window.ProgressCatalog || typeof window.ProgressCatalog.getTraineeProgress !== 'function') return null;
+        return window.ProgressCatalog.getTraineeProgress(userId, groupId || '', {
+            includeAuto: false,
+            data: {
+                records: this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]')),
+                submissions: JSON.parse(localStorage.getItem('submissions') || '[]'),
+                liveBookings: JSON.parse(localStorage.getItem('liveBookings') || '[]'),
+                savedReports: JSON.parse(localStorage.getItem('savedReports') || '[]'),
+                insightReviews: JSON.parse(localStorage.getItem('insightReviews') || '[]'),
+                exemptions: JSON.parse(localStorage.getItem('exemptions') || '[]')
+            }
+        });
+    },
+
     // 1. Department Health (Critical vs On-Track)
     calculateDepartmentHealth: function(groupId) {
         const users = JSON.parse(localStorage.getItem('users') || '[]');
@@ -80,13 +95,17 @@ const AnalyticsEngine = {
                 else onTrackCount++;
             } else {
                 // Auto-calc based on records (Heuristic)
+                const officialProgress = this.getOfficialProgress(t.user, groupId);
                 const myRecords = this.filterRecordsForTrainees(records, [t.user], groupId, { assessmentOnly: true });
+                const progressScores = officialProgress ? officialProgress.items.filter(item => item.status === 'completed' && Number.isFinite(Number(item.score))) : [];
+                const scoreRows = progressScores.length ? progressScores : myRecords;
                 // Check for any failed assessments (< 80%)
-                const hasFailures = myRecords.some(r => r.score < 80);
-                const hasCriticalFailures = myRecords.some(r => r.score < 60);
+                const hasFailures = scoreRows.some(r => Number(r.score) < 80);
+                const hasCriticalFailures = scoreRows.some(r => Number(r.score) < 60);
+                const hasMissingRequired = officialProgress && officialProgress.progress < 100;
                 
                 if (hasCriticalFailures) criticalCount++;
-                else if (hasFailures) warningCount++;
+                else if (hasFailures || hasMissingRequired) warningCount++;
                 else onTrackCount++;
             }
         });
@@ -241,8 +260,11 @@ const AnalyticsEngine = {
             else if (review.status === 'Semi-Critical') riskScore += (weights.admin / 2);
         } else {
             // Fallback to record average if no review
+            const officialProgress = this.getOfficialProgress(userId, '');
             const records = this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]'));
-            const myRecords = records.filter(r => r.trainee === userId);
+            const progressScores = officialProgress ? officialProgress.items.filter(item => item.status === 'completed' && Number.isFinite(Number(item.score))) : [];
+            const myRecords = progressScores.length ? progressScores : records.filter(r => r.trainee === userId);
+            if (officialProgress && officialProgress.progress < 70) riskScore += (weights.admin / 2);
             if (myRecords.length > 0) {
                 let totalScore = 0;
                 myRecords.forEach(r => totalScore += r.score);
@@ -318,12 +340,15 @@ const AnalyticsEngine = {
             const avgFocus = days > 0 ? Math.round(totalFocus / days) : 0;
 
             // Get Performance
+            const officialProgress = this.getOfficialProgress(t.user, groupId);
+            const completedProgress = officialProgress ? officialProgress.items.filter(item => item.status === 'completed' && Number.isFinite(Number(item.score))) : [];
             const myRecs = groupAssessmentRecords.filter(r => this.normalizeKey(r.trainee) === this.normalizeKey(t.user));
+            const scoreRows = completedProgress.length ? completedProgress : myRecs;
             let myTotal = 0;
-            myRecs.forEach(r => myTotal += Number(r.score || 0));
-            const myAvg = myRecs.length > 0 ? Math.round(myTotal / myRecs.length) : 0;
+            scoreRows.forEach(r => myTotal += Number(r.score || 0));
+            const myAvg = scoreRows.length > 0 ? Math.round(myTotal / scoreRows.length) : 0;
 
-            return { user: t.user, focus: avgFocus, score: myAvg, count: myRecs.length };
+            return { user: t.user, focus: avgFocus, score: myAvg, count: scoreRows.length, progress: officialProgress ? officialProgress.progress : null };
         }).filter(d => d.count > 0); // Only show those with data
 
         // Sort by Score Ascending (Worst performers first)
@@ -346,7 +371,7 @@ const AnalyticsEngine = {
                 <div style="display:grid; grid-template-columns: 2fr 1fr 1fr 2fr; gap:10px; padding:8px; border-bottom:1px solid var(--border-color); font-size:0.85rem; align-items:center;">
                     <div style="font-weight:bold;">${d.user}</div>
                     <div>${d.focus}% Focus</div>
-                    <div style="font-weight:bold;">${d.score}% Avg</div>
+                    <div style="font-weight:bold;">${d.score}% Avg${d.progress !== null ? ` / ${d.progress}% Progress` : ''}</div>
                     <div style="color:${color}; font-weight:bold;">${status}</div>
                 </div>
             `;

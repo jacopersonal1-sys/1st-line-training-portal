@@ -92,6 +92,7 @@ const DEFAULT_LAYOUT_ADMIN = [
 const DEFAULT_LAYOUT_TRAINEE = [
     { id: 'up_next', col: 2, row: 1 },
     { id: 'training_rules', col: 1, row: 1 },
+    { id: 'official_progress', col: 1, row: 1 },
     { id: 'live_upcoming', col: 1, row: 1 },
     { id: 'recent_results', col: 1, row: 2 },
     { id: 'available_tests', col: 1, row: 2 },
@@ -1594,6 +1595,20 @@ function buildTraineeWidgets(container) {
     const myRecords = allRecords.filter(r => r.trainee && r.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase());
     // FIX: Force chronological sorting before slicing to ensure accuracy
     myRecords.sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
+    const traineeGroupForProgress = (typeof getTraineeGroup === 'function') ? getTraineeGroup(CURRENT_USER.user) : '';
+    const officialProgress = (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function')
+        ? window.ProgressCatalog.getTraineeProgress(CURRENT_USER.user, traineeGroupForProgress, {
+            includeAuto: true,
+            data: {
+                records: myRecords,
+                submissions: JSON.parse(localStorage.getItem('submissions') || '[]'),
+                savedReports: JSON.parse(localStorage.getItem('savedReports') || '[]'),
+                insightReviews: JSON.parse(localStorage.getItem('insightReviews') || '[]'),
+                liveBookings: JSON.parse(localStorage.getItem('liveBookings') || '[]'),
+                exemptions: JSON.parse(localStorage.getItem('exemptions') || '[]')
+            }
+        })
+        : null;
     
     // 3. Attendance Status
     const attRecords = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : JSON.parse(localStorage.getItem('attendance_records') || '[]');
@@ -1704,6 +1719,28 @@ function buildTraineeWidgets(container) {
     // For dashboard, we just show a quick list
     let availableHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-unlock"></i></div><h3 style="margin:0;">Available Now</h3></div>`;
     availableHtml += `<div style="text-align:center; padding:10px;"><button class="btn-primary" onclick="showTab('my-tests')">View All Assessments</button></div>`;
+
+    const progressHtml = officialProgress ? `
+        <div style="display:flex; flex-direction:column; height:100%;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <div class="dash-icon"><i class="fas fa-list-check"></i></div>
+                <h3 style="margin:0;">Training Progress</h3>
+            </div>
+            <div style="display:flex; align-items:end; justify-content:space-between; gap:10px; margin-bottom:8px;">
+                <div style="font-size:2rem; font-weight:800; color:${officialProgress.progress >= 100 ? '#2ecc71' : 'var(--primary)'};">${officialProgress.progress}%</div>
+                <div style="color:var(--text-muted); font-size:0.85rem;">${officialProgress.completedCount}/${officialProgress.totalRequired} complete</div>
+            </div>
+            <div class="progress-track" style="height:8px; background:var(--bg-input); margin-bottom:10px;"><div class="progress-fill" style="width:${officialProgress.progress}%;"></div></div>
+            <div style="overflow-y:auto; flex:1;">
+                ${(officialProgress.items || []).slice(0, 6).map(item => `
+                    <div style="display:flex; justify-content:space-between; gap:8px; font-size:0.85rem; padding:5px 0; border-bottom:1px solid var(--border-color);">
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.name}</span>
+                        <span style="color:${item.status === 'completed' || item.status === 'exempt' ? '#2ecc71' : 'var(--text-muted)'};">${item.status}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    ` : '';
 
     const trainingRulesHtml = `
         <div style="display:flex; flex-direction:column; height:100%; justify-content:center; align-items:center; text-align:center;">
@@ -1836,6 +1873,7 @@ function buildTraineeWidgets(container) {
     const widgets = {
         'up_next': wrapWidget('up_next', upNextHtml, 1, 1, 'hero-widget'),
         'training_rules': wrapWidget('training_rules', trainingRulesHtml),
+        ...(progressHtml ? { 'official_progress': wrapWidget('official_progress', progressHtml) } : {}),
         'live_upcoming': wrapWidget('live_upcoming', liveHtml),
         'recent_results': wrapWidget('recent_results', resultsHtml),
         'available_tests': wrapWidget('available_tests', availableHtml),

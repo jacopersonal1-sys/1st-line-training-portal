@@ -1528,7 +1528,13 @@ window.openLiveStatsModal = function() {
     const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const catalog = buildLiveAssessmentCatalog();
-    const liveAssessments = Array.from(catalog.byTitle.values()).sort((a, b) => a.title.localeCompare(b.title));
+    const configuredLiveItems = (window.ProgressCatalog && typeof window.ProgressCatalog.getOfficialItems === 'function')
+        ? window.ProgressCatalog.getOfficialItems({ includeAuto: false })
+            .filter(item => item.type === 'live')
+            .map(item => ({ id: item.testId || '', title: item.name, key: normalizeScheduleText(item.name), source: item.source || 'progress-catalog' }))
+        : [];
+    const liveAssessments = (configuredLiveItems.length ? configuredLiveItems : Array.from(catalog.byTitle.values()))
+        .sort((a, b) => a.title.localeCompare(b.title));
     const totalAvailable = liveAssessments.length;
 
     if (hydrateBookingAssessmentIds(bookings, catalog)) {
@@ -1613,7 +1619,13 @@ window.openLiveStatsModal = function() {
 window.viewTraineeLiveDetails = function(trainee) {
     // Get Definitions
     const catalog = buildLiveAssessmentCatalog();
-    const liveAssessments = Array.from(catalog.byTitle.values()).sort((a, b) => a.title.localeCompare(b.title));
+    const configuredLiveItems = (window.ProgressCatalog && typeof window.ProgressCatalog.getOfficialItems === 'function')
+        ? window.ProgressCatalog.getOfficialItems({ includeAuto: false })
+            .filter(item => item.type === 'live')
+            .map(item => ({ id: item.testId || '', title: item.name, key: normalizeScheduleText(item.name), source: item.source || 'progress-catalog' }))
+        : [];
+    const liveAssessments = (configuredLiveItems.length ? configuredLiveItems : Array.from(catalog.byTitle.values()))
+        .sort((a, b) => a.title.localeCompare(b.title));
     
     // Get Data
     const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');

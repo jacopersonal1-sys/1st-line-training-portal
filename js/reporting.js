@@ -481,6 +481,16 @@ function escapeReportHtml(value) {
 }
 
 function getConfiguredOnboardReportItems(sectionKey) {
+    if (window.ProgressCatalog && typeof window.ProgressCatalog.getOfficialItems === 'function') {
+        return window.ProgressCatalog.getOfficialItems({ includeAuto: false })
+            .filter(item => item && item.reportSections && item.reportSections[sectionKey] === true)
+            .map(item => ({
+                name: String(item.name || '').trim(),
+                type: String(item.type || '').trim().toLowerCase() || 'assessment'
+            }))
+            .filter(item => item.name);
+    }
+
     const readProgressItems = () => {
         if (typeof getInsightProgressRequiredItems === 'function') {
             return getInsightProgressRequiredItems();

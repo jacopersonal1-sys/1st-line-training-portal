@@ -990,11 +990,33 @@ const InsightApp = {
         const testScore = this.averagePercent(standaloneSubmissions.map(row => this.getComparisonScore(row)));
         const focusScore = activity.hasData && activity.daysTracked > 0 ? this.clampPercent(activity.focusScore) : null;
         const metricValueMap = {};
+        const officialProgress = (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function')
+            ? window.ProgressCatalog.getTraineeProgress(agent.name, source.group || agent.group || '', {
+                includeAuto: false,
+                data: {
+                    records,
+                    submissions,
+                    savedReports: source.savedReports || source.reports || [],
+                    insightReviews: source.insightReviews || source.reviews || [],
+                    liveBookings: source.liveBookings || [],
+                    exemptions: source.exemptions || []
+                }
+            })
+            : null;
+        const progressScoreFinal = progressScore !== null ? progressScore : (officialProgress ? officialProgress.progress : null);
 
         regularRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Assessment: ${row.assessment}`, this.getComparisonScore(row)));
         vettingRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Vetting: ${row.assessment}`, this.getComparisonScore(row)));
         liveRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Live: ${row.assessment}`, this.getComparisonScore(row)));
         standaloneSubmissions.forEach(row => this.addComparisonMetricValue(metricValueMap, `Test: ${row.testTitle || 'Submission'}`, this.getComparisonScore(row)));
+        if (officialProgress) {
+            (officialProgress.items || []).forEach((item) => {
+                const score = this.clampPercent(item.score);
+                if (score === null) return;
+                const typeLabel = item.type === 'live' ? 'Live' : (item.type === 'vetting' ? 'Vetting' : (item.type === 'test' ? 'Test' : 'Assessment'));
+                this.addComparisonMetricValue(metricValueMap, `${typeLabel}: ${item.name}`, score);
+            });
+        }
         this.addComparisonMetricValue(metricValueMap, 'Attendance', attendanceScore);
         this.addComparisonMetricValue(metricValueMap, 'Focus Level', focusScore);
         this.addDailyAttendanceMetricValues(metricValueMap, attendance);
@@ -1007,7 +1029,7 @@ const InsightApp = {
             testScore,
             attendanceScore,
             focusScore,
-            progressScore
+            progressScoreFinal
         ]);
 
         return {
@@ -1023,7 +1045,7 @@ const InsightApp = {
             testScore,
             attendanceScore,
             focusScore,
-            progressScore,
+            progressScore: progressScoreFinal,
             overallScore,
             metricMap: this.finalizeComparisonMetricMap(metricValueMap),
             recordCount: records.length,
@@ -1057,6 +1079,8 @@ const InsightApp = {
             attemptLabel: `Training Attempt ${attemptNumber}`,
             records: archiveRecords,
             submissions: archiveSubmissions,
+            liveBookings: Array.isArray(archive.liveBookings) ? archive.liveBookings : [],
+            exemptions: Array.isArray(archive.exemptions) ? archive.exemptions : [],
             attendance: archiveAttendance,
             activity: archiveActivity,
             progressScore: null,
@@ -1080,6 +1104,8 @@ const InsightApp = {
             attemptLabel: options.attemptLabel || 'Current Live Attempt',
             records,
             submissions,
+            liveBookings: InsightDataService.state.liveBookings || [],
+            exemptions: InsightDataService.state.exemptions || [],
             attendance,
             activity,
             engagement,
