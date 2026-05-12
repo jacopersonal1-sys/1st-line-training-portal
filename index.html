@@ -493,6 +493,10 @@
             <i class="fas fa-book-open"></i><span class="nav-text">OPL Hub</span>
         </button>
 
+        <button class="nav-item admin-only" onclick="showTab('qa-hub')" title="Q&A Hub">
+            <i class="fas fa-circle-question"></i><span class="nav-text">Q&A Hub</span>
+        </button>
+
         <button class="nav-item" onclick="showTab('content-studio')" title="Content Creator">
             <i class="fas fa-photo-film"></i><span class="nav-text">Content Creator</span>
         </button>
@@ -575,6 +579,10 @@
                 <h2>Insight</h2>
             </div>
             <div id="insight-studio-content"></div>
+        </section>
+
+        <section id="qa-hub" class="admin-only-section">
+            <div id="qa-hub-content"></div>
         </section>
 
         <section id="manage" class="admin-only-section">
@@ -1709,6 +1717,7 @@
 <script src="js/auth.js"></script>
 <script src="js/dashboard.js"></script> 
 <script src="js/study_notes.js"></script>
+<script src="js/qa_hub.js"></script>
 <script src="js/admin_updates.js"></script>
 
 <script src="js/admin_sys.js"></script>

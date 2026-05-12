@@ -1,6 +1,7 @@
 const TraineePortalApp = {
     refreshTimer: null,
     _boundHostDataListener: null,
+    qaComposerOpen: false,
     editMode: false,
     dragWidgetId: null,
     currentLayout: [],
@@ -12,6 +13,7 @@ const TraineePortalApp = {
         { id: 'badges', col: 4, row: 2 },
         { id: 'attendance', col: 3, row: 1 },
         { id: 'training_rules', col: 3, row: 1 },
+        { id: 'qa_help', col: 6, row: 2 },
         { id: 'available_now', col: 3, row: 1 },
         { id: 'notes_clarity', col: 3, row: 1 },
         { id: 'recent_results', col: 6, row: 2 },
@@ -342,6 +344,12 @@ const TraineePortalApp = {
         const attendancePromptNeeded = !attendanceToday;
         const badges = this.getTraineeBadges(records, attendance);
         const positiveBadgeCount = badges.filter(b => b.type !== 'shame').length;
+        const qaData = this.readObject('qa_data');
+        const qaQuestions = Array.isArray(qaData.questions)
+            ? qaData.questions
+                .filter(q => q && !['draft', 'deleted'].includes(String(q.status || 'published')))
+                .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))
+            : [];
 
         return {
             userName,
@@ -362,7 +370,8 @@ const TraineePortalApp = {
             onTimeCount,
             missedClockOuts,
             badges,
-            positiveBadgeCount
+            positiveBadgeCount,
+            qaQuestions
         };
     },
 
@@ -458,6 +467,9 @@ const TraineePortalApp = {
                     <small>Complete tests and keep attendance on track to unlock rewards.</small>
                 </div>
             `;
+        const qaRows = model.qaQuestions.length
+            ? model.qaQuestions.map(q => this.renderQaQuestionRow(q)).join('')
+            : '<div class="portal-muted">No Q&A questions have been published yet.</div>';
 
         return {
             up_next: {
@@ -521,6 +533,28 @@ const TraineePortalApp = {
                     <button class="portal-btn primary" style="width:auto; margin-top:8px;" data-action="training-rules"><i class="fas fa-book"></i> Open Rules</button>
                 `
             },
+            qa_help: {
+                title: 'Q&A Help',
+                icon: 'fa-circle-question',
+                hint: 'Search published questions or send a new one to the admin team.',
+                className: 'widget-qa_help',
+                body: `
+                    <div class="portal-search-row">
+                        <input id="tp-qa-search" type="search" placeholder="Search questions..." autocomplete="off">
+                        <button class="portal-link-btn" type="button" data-action="qa-compose-toggle">
+                            <i class="fas ${this.qaComposerOpen ? 'fa-xmark' : 'fa-pen-to-square'}"></i>
+                            ${this.qaComposerOpen ? 'Close' : 'Ask a question'}
+                        </button>
+                    </div>
+                    <div class="portal-qa-submit ${this.qaComposerOpen ? 'open' : ''}">
+                        <textarea id="tp-qa-question-input" rows="3" placeholder="Ask the admin team a question..."></textarea>
+                        <div class="portal-qa-submit-actions">
+                            <button class="portal-btn primary" type="button" data-action="qa-submit"><i class="fas fa-paper-plane"></i> Submit Question</button>
+                        </div>
+                    </div>
+                    <div class="portal-list portal-qa-list" id="tp-qa-list">${qaRows}</div>
+                `
+            },
             available_now: {
                 title: 'Available Now',
                 icon: 'fa-unlock',
@@ -564,6 +598,43 @@ const TraineePortalApp = {
                 body: `<div class="portal-tip">${this.esc(model.dailyTip || '')}</div>`
             }
         };
+    },
+
+    renderQaQuestionRow(question) {
+        const resources = Array.isArray(question.resources) ? question.resources : [];
+        const resourceLinks = resources.length
+            ? resources.map(resource => `
+                <button class="portal-resource-link" data-action="qa-resource" data-resource-id="${this.esc(resource.id || '')}">
+                    <i class="fas ${this.esc(this.iconForQaResource(resource.type))}"></i>
+                    ${this.esc(resource.label || resource.name || 'Open answer')}
+                </button>
+            `).join('')
+            : '';
+        const tags = Array.isArray(question.tags) ? question.tags.join(' ') : String(question.tags || '');
+        const searchable = `${question.question || ''} ${question.answer || ''} ${tags}`.toLowerCase();
+        return `
+            <article class="portal-qa-item" data-qa-id="${this.esc(question.id || '')}" data-qa-search="${this.esc(searchable)}">
+                <button class="portal-qa-question" data-action="qa-toggle">
+                    <span>${this.esc(question.question || 'Question')}</span>
+                    <i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="portal-qa-answer">
+                    ${question.answer ? `<p>${this.esc(question.answer)}</p>` : '<p class="portal-muted">Open the linked answer resource for details.</p>'}
+                    <div class="portal-resource-list">${resourceLinks || '<span class="portal-muted">No answer link has been attached yet.</span>'}</div>
+                </div>
+            </article>
+        `;
+    },
+
+    iconForQaResource(type) {
+        if (type === 'sharepoint_video' || type === 'sharepoint_link') return 'fa-cloud-arrow-up';
+        if (type === 'video') return 'fa-circle-play';
+        if (type === 'image') return 'fa-image';
+        if (type === 'pdf') return 'fa-file-pdf';
+        if (type === 'audio') return 'fa-file-audio';
+        if (type === 'office') return 'fa-file-word';
+        if (type === 'archive') return 'fa-file-zipper';
+        return 'fa-file-lines';
     },
 
     renderWidgetCard(layoutItem, def) {
@@ -637,6 +708,10 @@ const TraineePortalApp = {
                     if (action === 'clock-in') this.openClockInModal();
                     if (action === 'clock-out') this.submitClockOut();
                     if (action === 'training-rules') this.openTrainingRules();
+                    if (action === 'qa-compose-toggle') this.toggleQaComposer();
+                    if (action === 'qa-submit') this.submitQaQuestion();
+                    if (action === 'qa-toggle') this.toggleQaQuestion(btn);
+                    if (action === 'qa-resource') this.openQaResource(btn);
                 });
             });
 
@@ -679,6 +754,11 @@ const TraineePortalApp = {
                 this.moveWidgetBefore(sourceId, widgetId);
             });
         });
+
+        const qaSearch = document.getElementById('tp-qa-search');
+        if (qaSearch) {
+            qaSearch.addEventListener('input', () => this.filterQaQuestions(qaSearch.value));
+        }
     },
 
     render() {
@@ -770,6 +850,136 @@ const TraineePortalApp = {
         this.notify('Training rules are not available right now.', 'warning');
     },
 
+    getQaQuestionById(id) {
+        const qaData = this.readObject('qa_data');
+        const questions = Array.isArray(qaData.questions) ? qaData.questions : [];
+        return questions.find(q => String(q.id || '') === String(id || '')) || null;
+    },
+
+    toggleQaQuestion(button) {
+        const item = button.closest('.portal-qa-item');
+        if (!item) return;
+        item.classList.toggle('expanded');
+    },
+
+    filterQaQuestions(value) {
+        const term = String(value || '').trim().toLowerCase();
+        document.querySelectorAll('.portal-qa-item').forEach(item => {
+            const haystack = String(item.dataset.qaSearch || '').toLowerCase();
+            item.style.display = !term || haystack.includes(term) ? '' : 'none';
+        });
+    },
+
+    toggleQaComposer(open = null) {
+        this.qaComposerOpen = open === null ? !this.qaComposerOpen : Boolean(open);
+        this.render();
+        if (this.qaComposerOpen) {
+            setTimeout(() => document.getElementById('tp-qa-question-input')?.focus(), 20);
+        }
+    },
+
+    openQaResource(button) {
+        const item = button.closest('.portal-qa-item');
+        const question = this.getQaQuestionById(item ? item.dataset.qaId : '');
+        const resourceId = String(button.dataset.resourceId || '');
+        const resource = question && Array.isArray(question.resources)
+            ? question.resources.find(r => String(r.id || '') === resourceId)
+            : null;
+        if (!resource) {
+            this.notify('Answer resource was not found.', 'warning');
+            return;
+        }
+        const target = resource.dataUrl || resource.url || '';
+        if (!target) {
+            this.notify('Answer resource has no link attached.', 'warning');
+            return;
+        }
+        const host = this.getHost();
+        if (host && host.QAHub && typeof host.QAHub.openResource === 'function') {
+            host.QAHub.openResource(resource);
+            return;
+        }
+        if (host && typeof host.open === 'function') {
+            host.open(target, '_blank', 'noopener');
+            return;
+        }
+        window.open(target, '_blank', 'noopener');
+    },
+
+    async submitQaQuestion() {
+        const host = this.getHost();
+        const input = document.getElementById('tp-qa-question-input');
+        let question = String(input ? input.value : '').trim();
+        if (!question) {
+            if (host && typeof host.customPrompt === 'function') {
+                question = await host.customPrompt('Submit a Question', 'What would you like the admin team to answer?', '');
+            } else {
+                question = prompt('What would you like the admin team to answer?', '');
+            }
+        }
+        question = String(question || '').trim();
+        if (!question) return;
+        if (host && host.QAHub && typeof host.QAHub.submitTraineeQuestion === 'function') {
+            const ok = await host.QAHub.submitTraineeQuestion(question);
+            if (ok) {
+                if (input) input.value = '';
+                this.qaComposerOpen = false;
+                this.notify('Question sent to the admin team.', 'success');
+                this.refresh({ forcePull: false });
+            }
+            return;
+        }
+        const ok = await this.persistQaSubmission(question);
+        if (ok) {
+            if (input) input.value = '';
+            this.qaComposerOpen = false;
+            this.notify('Question sent to the admin team.', 'success');
+            this.refresh({ forcePull: false });
+            return;
+        }
+        this.notify('Q&A submission is unavailable right now.', 'error');
+    },
+
+    async persistQaSubmission(questionText) {
+        const text = String(questionText || '').trim();
+        if (!text) return false;
+        const host = this.getHost();
+        const storage = (host && host.localStorage) || localStorage;
+        const currentUser = this.getCurrentUser() || {};
+        let qaData = {};
+
+        try {
+            qaData = JSON.parse(storage.getItem('qa_data') || '{}') || {};
+        } catch (error) {
+            qaData = {};
+        }
+
+        if (!Array.isArray(qaData.questions)) qaData.questions = [];
+        if (!Array.isArray(qaData.submissions)) qaData.submissions = [];
+
+        qaData.submissions.unshift({
+            id: `ask_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            question: text,
+            trainee: currentUser.user || currentUser.username || 'Trainee',
+            status: 'new',
+            createdAt: new Date().toISOString()
+        });
+        qaData.updatedAt = new Date().toISOString();
+        qaData.updatedBy = currentUser.user || currentUser.username || 'Trainee';
+
+        try {
+            storage.setItem('qa_data', JSON.stringify(qaData));
+            if (host && typeof host.emitDataChange === 'function') host.emitDataChange('qa_data', 'qa_trainee_submit');
+            if (host && typeof host.saveToServer === 'function') {
+                return await host.saveToServer(['qa_data'], true, false);
+            }
+            return true;
+        } catch (error) {
+            console.warn('[Trainee Portal] Q&A fallback submit failed:', error);
+            return false;
+        }
+    },
+
     openClockInModal() {
         const host = this.getHost();
         if (host && typeof host.openClockInModal === 'function') {
@@ -858,6 +1068,7 @@ const TraineePortalApp = {
                 'trainee_notes',
                 'trainee_bookmarks',
                 'dailyTips',
+                'qa_data',
                 'attendance_records'
             ].includes(key)) return;
             this.refresh({ forcePull: false });

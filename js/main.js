@@ -2323,7 +2323,8 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
         items: [
             { id: 'insight-studio', title: 'Insight', text: 'Insight', icon: 'fas fa-magnifying-glass-chart', classes: 'admin-only' },
             { id: 'report-card', title: 'Onboard Report', text: 'Onboard Report', icon: 'fas fa-file-invoice', classes: 'admin-only tl-access' },
-            { id: 'opl-hub', title: 'OPL Hub', text: 'OPL Hub', icon: 'fas fa-book-open', classes: 'admin-only' }
+            { id: 'opl-hub', title: 'OPL Hub', text: 'OPL Hub', icon: 'fas fa-book-open', classes: 'admin-only' },
+            { id: 'qa-hub', title: 'Q&A Hub', text: 'Q&A Hub', icon: 'fas fa-circle-question', classes: 'admin-only' }
         ]
     },
     {
@@ -2790,6 +2791,7 @@ const HIGH_PRIORITY_SYNC_VIEWS = new Set([
     'assessment-schedule',
     'trainee-portal',
     'insight-studio',
+    'qa-hub',
     'test-manage',
     'test-records',
     'admin-panel',
@@ -3012,6 +3014,10 @@ function renderViewById(id, options = {}) {
             InsightStudioLoader.refresh();
             return;
         }
+        if (id === 'qa-hub' && window.QAHub && typeof window.QAHub.renderUI === 'function') {
+            window.QAHub.renderUI();
+            return;
+        }
         if (id === 'test-manage') {
             if (typeof loadManageTests === 'function') loadManageTests();
             if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
@@ -3043,6 +3049,7 @@ function renderViewById(id, options = {}) {
         if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
         if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
         if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh();
+        if (id === 'qa-hub' && window.QAHub && typeof window.QAHub.renderUI === 'function') window.QAHub.renderUI();
         if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
         if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
         if (id === 'admin-panel' && typeof loadAdminUsers === 'function') loadAdminUsers();
@@ -3126,6 +3133,15 @@ function renderViewById(id, options = {}) {
             ContentStudioLoader.renderUI();
         } else {
             console.error('ContentStudioLoader module not loaded. Check js/content_studio_loader.js');
+        }
+        return;
+    }
+
+    if (id === 'qa-hub') {
+        if (window.QAHub && typeof window.QAHub.renderUI === 'function') {
+            window.QAHub.renderUI();
+        } else {
+            console.error('QAHub module not loaded. Check js/qa_hub.js');
         }
         return;
     }
@@ -3274,7 +3290,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
+      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'qa-hub', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -3326,6 +3342,13 @@ function showTab(id, btn) {
   if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'insight-studio') {
       if (typeof showToast === 'function') {
           showToast("Access denied: Insight is restricted to Admin and Super Admin.", "error");
+      }
+      return;
+  }
+
+  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'qa-hub') {
+      if (typeof showToast === 'function') {
+          showToast("Access denied: Q&A Hub is restricted to Admin and Super Admin.", "error");
       }
       return;
   }
@@ -4017,6 +4040,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.71": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Q&amp;A Hub now has an admin workspace for FAQ entries, trainee question submissions, and attached resources.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Trainees now open question submission as an in-widget compose view.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Attached material previews now support image, video, document, audio, and SharePoint link resources more reliably inside the app.</li>
+            </ul>`,
         "2.6.70": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Live Assessment Booking has a cleaner schedule workspace and editable booking rules in Admin Tools &gt; System Config.</li>

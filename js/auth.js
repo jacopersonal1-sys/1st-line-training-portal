@@ -60,6 +60,31 @@ function normalizeLoginIdentity(value) {
     return v.replace(/\s+/g, '');
 }
 
+function applySuccessfulLoginSession(validUser, options = {}) {
+    CURRENT_USER = validUser;
+    window.CURRENT_USER = CURRENT_USER;
+    if (CURRENT_USER.role) CURRENT_USER.role = CURRENT_USER.role.toLowerCase().trim();
+    const sessionBootMode = CURRENT_USER.role === 'trainee' ? 'trainee' : 'admin';
+    window.APP_BOOT_MODE = sessionBootMode;
+    sessionStorage.setItem('boot_role_selection', sessionBootMode);
+
+    sessionStorage.setItem('currentUser', JSON.stringify(validUser));
+    persistAppSession(validUser);
+
+    if (options.remember) {
+        localStorage.setItem('rememberedUser', JSON.stringify({
+            user: validUser.user,
+            pass: options.rememberPass || validUser.pass || '',
+            role: CURRENT_USER.role,
+            bootMode: sessionBootMode
+        }));
+    } else if (options.clearRemember !== false) {
+        localStorage.removeItem('rememberedUser');
+    }
+
+    autoLogin();
+}
+
 function isUserRevokedLocally(username) {
     try {
         const token = normalizeLoginIdentity(username);
@@ -647,31 +672,6 @@ async function attemptLogin() {
         secureAuthSave();
     }
 
-    // Success
-    CURRENT_USER = validUser;
-    window.CURRENT_USER = CURRENT_USER;
-    // Normalize role for session consistency
-    if (CURRENT_USER.role) CURRENT_USER.role = CURRENT_USER.role.toLowerCase().trim();
-    const sessionBootMode = CURRENT_USER.role === 'trainee' ? 'trainee' : 'admin';
-    window.APP_BOOT_MODE = sessionBootMode;
-    sessionStorage.setItem('boot_role_selection', sessionBootMode);
-    
-    sessionStorage.setItem('currentUser', JSON.stringify(validUser));
-    persistAppSession(validUser);
-    
-    // --- REMEMBER ME LOGIC ---
-    const remember = document.getElementById('rememberMe').checked;
-    if (remember) {
-        localStorage.setItem('rememberedUser', JSON.stringify({
-            user: validUser.user,
-            pass: validUser.pass,
-            role: CURRENT_USER.role,
-            bootMode: sessionBootMode
-        }));
-    } else {
-        localStorage.removeItem('rememberedUser');
-    }
-
     // If the user was using an old plaintext password, upgrade them to hash automatically
     // FIX: Prevent re-hashing if password is already a hash (64 chars) - fixes Remember Me loop
     if (validUser.pass && validUser.pass === p && validUser.pass !== hashedPassword && validUser.pass.length !== 64) {
@@ -681,7 +681,10 @@ async function attemptLogin() {
         secureAuthSave(); // Sync the upgrade to cloud silently
     }
 
-    autoLogin();
+    applySuccessfulLoginSession(validUser, {
+        remember: !!document.getElementById('rememberMe')?.checked,
+        rememberPass: validUser.pass
+    });
   } else {
     document.getElementById('loginError').innerText = "Incorrect credentials.";
     // Visual Feedback: Shake

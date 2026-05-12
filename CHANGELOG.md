@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.6.71 - 2026-05-12
+
+- Feature: Added the Q&A Hub admin workspace with editable FAQ entries, trainee question submissions, resource attachments, and in-app resource viewing.
+- Improvement: Trainee Q&A now opens question submission as an in-widget compose view instead of occupying the default widget surface.
+- Fix: Trainee attached material previews now handle image, video, document, audio, and SharePoint link resources more consistently inside the app.
+- Maintenance: Reduced cognitive complexity in selected shared data helpers without changing user-facing behavior.
+- Verification: Syntax checks and Jest suite passed.
+
+> Release target: stable main channel.
+
 ## 2.6.70 - 2026-05-11
 
 - Improvement: Live Assessment Booking now has a cleaner schedule workspace with more professional booking cards, slot controls, and rule display.

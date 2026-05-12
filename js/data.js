@@ -18,6 +18,7 @@ const DB_SCHEMA = {
     live_booking_rules_config: { rules: [], rulesHtml: '', updatedAt: null, updatedBy: null },
     training_rules_config: { rules: [], rulesHtml: '', showOnFirstLogin: true, showOnLogin: false, targetMode: 'all', targetUsers: [], targetGroups: [], officeOptions: [], updatedAt: null, updatedBy: null },
     test_integrity_overrides: { entries: {}, updatedAt: null, updatedBy: null },
+    qa_data: { questions: [], submissions: [], updatedAt: null, updatedBy: null },
     system_tombstones: [],
     adminDecisions: {}, // Legacy report-card review overrides
     dailyTips: [], // Admin controlled daily tips
@@ -117,7 +118,8 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'live_assessment_rules_config',
     'live_booking_rules_config',
     'training_rules_config',
-    'test_integrity_overrides'
+    'test_integrity_overrides',
+    'qa_data'
 ]);
 
 // --- TRAINEE RUNTIME OPTIMIZATION ---
@@ -141,6 +143,7 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'monitor_reviewed',
     'violation_reports',
     'training_rules_config',
+    'qa_data',
     'live_booking_rules_config',
     'liveScheduleSettings',
     'cancellationCounts'
@@ -262,6 +265,11 @@ window.PRESENCE_RECONNECT_TIMER = null;
 window.PRESENCE_INTENTIONAL_REJOIN_UNTIL = 0;
 window.USE_SUPABASE_PRESENCE = false;
 window.__REALTIME_NET_LISTENERS_BOUND = false;
+window.REALTIME_SYNC_STARTED = false;
+window.REALTIME_SYNC_SIGNATURE = null;
+window.REALTIME_FALLBACK_POLL_IN_FLIGHT = false;
+window.LOAD_FROM_SERVER_IN_FLIGHT = false;
+window.LOAD_FROM_SERVER_LAST_RESULT = true;
 // --- GLOBAL INTERACTION TRACKER ---
 window.LAST_INTERACTION = Date.now();
 window.CURRENT_LATENCY = 0; // Track latency for health reporting
@@ -422,6 +430,11 @@ async function loadFromServer(silent = false) {
             if(!silent) console.warn("loadFromServer: Supabase client not initialized.");
             return false;
         }
+        if (window.LOAD_FROM_SERVER_IN_FLIGHT) {
+            if (!silent) console.log("loadFromServer: server pull already in progress; skipping duplicate request.");
+            return window.LOAD_FROM_SERVER_LAST_RESULT;
+        }
+        window.LOAD_FROM_SERVER_IN_FLIGHT = true;
 
         const pullStartedAt = Date.now();
         let pullProgressDone = 0;
@@ -986,9 +999,13 @@ async function loadFromServer(silent = false) {
         if (!IS_DEMO_MODE && window.electronAPI && window.electronAPI.disk) {
             window.electronAPI.disk.saveCache(JSON.stringify(localStorage)).catch(()=>{});
         }
+        window.LOAD_FROM_SERVER_LAST_RESULT = true;
+        window.LOAD_FROM_SERVER_IN_FLIGHT = false;
         return true; // Signal Success
 
     } catch (err) { 
+        window.LOAD_FROM_SERVER_LAST_RESULT = false;
+        window.LOAD_FROM_SERVER_IN_FLIGHT = false;
         updateSyncUI('error');
         updateSyncDiagnostics({
             status: 'error',
@@ -1106,61 +1123,74 @@ async function startServerLookout() {
 }
 
 // --- HOT RELOAD: APPLY SYSTEM CONFIG ---
-function applySystemConfig() {
-    const config = safeLocalParse('system_config', {}) || {};
-    
-    // 1. Global Announcement
+function applyAnnouncementConfig(config) {
     const bannerId = 'global-announcement-banner';
     let banner = document.getElementById(bannerId);
-    
-    if (config.announcement && config.announcement.active && config.announcement.message) {
-        if (!banner) {
-            banner = document.createElement('div');
-            banner.id = bannerId;
-            banner.style.cssText = "position:fixed; top:0; left:0; width:100%; padding:10px; text-align:center; z-index:99999; font-weight:bold; box-shadow:0 2px 5px rgba(0,0,0,0.2);";
-            document.body.prepend(banner);
-        }
-        
-        const typeColors = { info: '#3498db', warning: '#f1c40f', error: '#ff5252', success: '#2ecc71' };
-        banner.style.backgroundColor = typeColors[config.announcement.type] || '#3498db';
-        banner.style.color = '#fff';
-        banner.innerText = config.announcement.message;
-        banner.classList.remove('hidden');
-    } else if (banner) {
-        banner.classList.add('hidden');
-    }
-    
-    // 1.5 Broadcast Popup
-    if (config.broadcast && config.broadcast.message && config.broadcast.id) {
-        const lastId = localStorage.getItem('last_broadcast_id');
-        if (lastId != config.broadcast.id) {
-            localStorage.setItem('last_broadcast_id', config.broadcast.id);
-            // Show alert
-            alert("📢 SYSTEM BROADCAST:\n\n" + config.broadcast.message);
-            // Optional: Play sound
-            if (config.broadcast.sound) {
-                try {
-                    const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
-                    audio.play().catch(e=>{});
-                } catch(e){}
-            }
-        }
-    }
 
-    if (config.security && config.security.lockdown_mode && typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
-        alert("⚠️ EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
-        if (typeof logout === 'function') logout();
+    if (!config.announcement || !config.announcement.active || !config.announcement.message) {
+        if (banner) banner.classList.add('hidden');
         return;
     }
 
-    // 2. Restart Sync Engine if rates changed (and we are logged in)
-    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
-        // We simply restart the engine, it will read the new config values
-        if (typeof startRealtimeSync === 'function') startRealtimeSync();
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = bannerId;
+        banner.style.cssText = "position:fixed; top:0; left:0; width:100%; padding:10px; text-align:center; z-index:99999; font-weight:bold; box-shadow:0 2px 5px rgba(0,0,0,0.2);";
+        document.body.prepend(banner);
     }
 
-    // 3. Start Server Lookout
+    const typeColors = { info: '#3498db', warning: '#f1c40f', error: '#ff5252', success: '#2ecc71' };
+    banner.style.backgroundColor = typeColors[config.announcement.type] || '#3498db';
+    banner.style.color = '#fff';
+    banner.innerText = config.announcement.message;
+    banner.classList.remove('hidden');
+}
+
+function applyBroadcastConfig(config) {
+    if (!config.broadcast || !config.broadcast.message || !config.broadcast.id) return;
+
+    const lastId = localStorage.getItem('last_broadcast_id');
+    if (lastId == config.broadcast.id) return;
+
+    localStorage.setItem('last_broadcast_id', config.broadcast.id);
+    alert("SYSTEM BROADCAST:\n\n" + config.broadcast.message);
+
+    if (config.broadcast.sound) {
+        try {
+            const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+            audio.play().catch(e=>{});
+        } catch(e){}
+    }
+}
+
+function applyLockdownConfig(config) {
+    const isLocked = config.security && config.security.lockdown_mode;
+    const isNonSuperAdmin = typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role !== 'super_admin';
+    if (!isLocked || !isNonSuperAdmin) return false;
+
+    alert("EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
+    if (typeof logout === 'function') logout();
+    return true;
+}
+
+function restartRuntimeConfigServices() {
+    if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
+        if (typeof startRealtimeSync === 'function') startRealtimeSync();
+    }
     startServerLookout();
+}
+
+function applySystemConfig() {
+    const config = safeLocalParse('system_config', {}) || {};
+
+    applyAnnouncementConfig(config);
+    applyBroadcastConfig(config);
+
+    if (applyLockdownConfig(config)) {
+        return;
+    }
+
+    restartRuntimeConfigServices();
 }
 
 // --- ERROR REPORTING SYSTEM ---
@@ -1620,82 +1650,66 @@ function normalizeIdentityValue(value) {
     return String(value).trim().toLowerCase();
 }
 
+const STRING_IDENTITY_KEYS = new Set(['vettingTopics', 'monitor_whitelist', 'monitor_reviewed', 'system_tombstones']);
+
+function identityFromStringItem(key, item) {
+    if (!STRING_IDENTITY_KEYS.has(key) || typeof item !== 'string') return null;
+    const normalized = normalizeIdentityValue(item);
+    return normalized ? `${key}:${normalized}` : null;
+}
+
+function identityFromRecordItem(item) {
+    if (item.submissionId) return `record-submission:${normalizeIdentityValue(item.submissionId)}`;
+
+    const trainee = normalizeIdentityValue(item.trainee);
+    const assessment = normalizeIdentityValue(item.assessment);
+    const groupId = normalizeIdentityValue(item.groupID);
+    const phase = normalizeIdentityValue(item.phase);
+    return trainee && assessment ? `record:${trainee}|${assessment}|${groupId}|${phase}` : null;
+}
+
+function identityFromSubmissionItem(item) {
+    if (item.id !== undefined && item.id !== null) {
+        return `submission-id:${normalizeIdentityValue(item.id)}`;
+    }
+
+    const trainee = normalizeIdentityValue(item.trainee);
+    const testId = normalizeIdentityValue(item.testId);
+    const date = normalizeIdentityValue(item.date);
+    return trainee && testId && date ? `submission:${trainee}|${testId}|${date}` : null;
+}
+
+function identityFromRetrainArchiveItem(item) {
+    if (item.id !== undefined && item.id !== null) {
+        return `retrain-id:${normalizeIdentityValue(item.id)}`;
+    }
+    if (!item.user || !item.targetGroup || !item.movedDate) return null;
+    return `retrain:${normalizeIdentityValue(item.user)}|${normalizeIdentityValue(item.targetGroup)}|${normalizeIdentityValue(item.movedDate)}`;
+}
+
 function getArrayItemIdentity(key, item) {
     if (item === undefined || item === null) return null;
 
-    if ((key === 'vettingTopics' || key === 'monitor_whitelist' || key === 'monitor_reviewed' || key === 'system_tombstones') && typeof item === 'string') {
-        const normalized = normalizeIdentityValue(item);
-        return normalized ? `${key}:${normalized}` : null;
-    }
+    const stringIdentity = identityFromStringItem(key, item);
+    if (stringIdentity) return stringIdentity;
 
-    if (key === 'users' && item.user) {
-        return `user:${normalizeIdentityValue(item.user)}`;
-    }
+    const identityHandlers = {
+        users: (value) => value.user || value.username ? `user:${normalizeIdentityValue(value.user || value.username)}` : null,
+        assessments: (value) => value.name ? `assessment:${normalizeIdentityValue(value.name)}` : null,
+        records: identityFromRecordItem,
+        submissions: identityFromSubmissionItem,
+        liveSessions: (value) => value.sessionId ? `live-session:${normalizeIdentityValue(value.sessionId)}` : null,
+        graduated_agents: (value) => value.user ? `graduated:${normalizeIdentityValue(value.user)}` : null,
+        retrain_archives: identityFromRetrainArchiveItem,
+        linkRequests: (value) => value.recordId ? `link-request:${normalizeIdentityValue(value.recordId)}` : null,
+        monitor_history: (value) => value.user && value.date ? `monitor-history:${normalizeIdentityValue(value.user)}|${normalizeIdentityValue(value.date)}` : null
+    };
 
-    // Support alternative key shapes (some server rows use 'username')
-    if (key === 'users' && item.username) {
-        return `user:${normalizeIdentityValue(item.username)}`;
-    }
+    const handler = identityHandlers[key];
+    const keyIdentity = handler ? handler(item) : null;
+    if (keyIdentity) return keyIdentity;
 
-    if (key === 'assessments' && item.name) {
-        return `assessment:${normalizeIdentityValue(item.name)}`;
-    }
-
-    if (key === 'records') {
-        if (item.submissionId) return `record-submission:${normalizeIdentityValue(item.submissionId)}`;
-
-        const trainee = normalizeIdentityValue(item.trainee);
-        const assessment = normalizeIdentityValue(item.assessment);
-        const groupId = normalizeIdentityValue(item.groupID);
-        const phase = normalizeIdentityValue(item.phase);
-        if (trainee && assessment) {
-            return `record:${trainee}|${assessment}|${groupId}|${phase}`;
-        }
-    }
-
-    if (key === 'submissions') {
-        if (item.id !== undefined && item.id !== null) {
-            return `submission-id:${normalizeIdentityValue(item.id)}`;
-        }
-
-        const trainee = normalizeIdentityValue(item.trainee);
-        const testId = normalizeIdentityValue(item.testId);
-        const date = normalizeIdentityValue(item.date);
-        if (trainee && testId && date) {
-            return `submission:${trainee}|${testId}|${date}`;
-        }
-    }
-
-    if (key === 'liveSessions' && item.sessionId) {
-        return `live-session:${normalizeIdentityValue(item.sessionId)}`;
-    }
-
-    if (key === 'graduated_agents' && item.user) {
-        return `graduated:${normalizeIdentityValue(item.user)}`;
-    }
-
-    if (key === 'retrain_archives') {
-        if (item.id !== undefined && item.id !== null) {
-            return `retrain-id:${normalizeIdentityValue(item.id)}`;
-        }
-        if (item.user && item.targetGroup && item.movedDate) {
-            return `retrain:${normalizeIdentityValue(item.user)}|${normalizeIdentityValue(item.targetGroup)}|${normalizeIdentityValue(item.movedDate)}`;
-        }
-    }
-
-    if (key === 'linkRequests' && item.recordId) {
-        return `link-request:${normalizeIdentityValue(item.recordId)}`;
-    }
-
-    if (key === 'monitor_history' && item.user && item.date) {
-        return `monitor-history:${normalizeIdentityValue(item.user)}|${normalizeIdentityValue(item.date)}`;
-    }
-
-    if (item.id !== undefined && item.id !== null) {
-        return `id:${normalizeIdentityValue(item.id)}`;
-    }
-
-    return null;
+    return item.id !== undefined && item.id !== null ? `id:${normalizeIdentityValue(item.id)}` : null;
 }
 
 function dedupeArrayByIdentity(key, items, strategy = 'server_wins') {
@@ -2497,6 +2511,35 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 merged[key][user] = combined;
             });
         }
+        // Case 2d: Q&A Hub (merge FAQ library and trainee asks independently)
+        else if (key === 'qa_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
+            const pickLatest = (existing, incoming, dateFields) => {
+                if (!existing) return incoming;
+                const existingDate = dateFields.map(field => existing[field]).find(Boolean) || '';
+                const incomingDate = dateFields.map(field => incoming[field]).find(Boolean) || '';
+                return String(incomingDate) >= String(existingDate) ? incoming : existing;
+            };
+            const mergeById = (serverItems, localItems, dateFields) => {
+                const map = new Map();
+                (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (id) map.set(id, item);
+                });
+                (Array.isArray(localItems) ? localItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (id) map.set(id, pickLatest(map.get(id), item, dateFields));
+                });
+                return Array.from(map.values());
+            };
+            const questionSort = (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
+            const submissionSort = (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+            const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
+            base.questions = mergeById(sVal.questions, lVal.questions, ['updatedAt', 'createdAt']).sort(questionSort);
+            base.submissions = mergeById(sVal.submissions, lVal.submissions, ['reviewedAt', 'createdAt']).sort(submissionSort);
+            merged[key] = base;
+        }
         // Case 2: Objects (Rosters, Schedules)
         else if (typeof sVal === 'object' && sVal !== null && typeof lVal === 'object' && lVal !== null) {
             if (strategy === 'server_wins') {
@@ -2660,6 +2703,68 @@ async function fetchSystemStatus() {
 }
 
 // --- HELPER: RENDER SYSTEM HEALTH UI ---
+function renderLatencyMetric(latencyEl, latency) {
+    if (!latencyEl) return;
+    latencyEl.innerText = latency + " ms";
+    latencyEl.style.color = latency < 200 ? "#2ecc71" : (latency < 500 ? "orange" : "#ff5252");
+}
+
+function getConnectionLabel() {
+    if (!navigator.connection) return navigator.onLine ? "ONLINE" : "OFFLINE";
+
+    const type = navigator.connection.type;
+    if (type && type !== 'unknown') return type.toUpperCase();
+
+    const eff = navigator.connection.effectiveType;
+    return eff === '4g' ? "ONLINE" : eff.toUpperCase();
+}
+
+function renderConnectionMetric(connEl) {
+    if (!connEl) return;
+    connEl.innerText = getConnectionLabel();
+    connEl.style.color = navigator.onLine ? "#2ecc71" : "#ff5252";
+}
+
+function formatIdleDuration(idleTime) {
+    if (idleTime === undefined || idleTime === null) return '-';
+    return typeof formatDuration === 'function' ? formatDuration(idleTime) : (idleTime/1000).toFixed(0) + 's';
+}
+
+function renderActiveUserRow(u) {
+    const idleStr = formatIdleDuration(u.idleTime);
+    const verStr = u.version || '-';
+    const roleStr = u.role || '-';
+    const statusBadge = u.isIdle
+        ? '<span class="status-badge status-fail">Idle</span>'
+        : '<span class="status-badge status-pass">Active</span>';
+    const rowClass = u.isIdle ? 'user-idle' : '';
+    const uName = u.username || u.user || 'Unknown';
+
+    return `
+        <tr class="${rowClass}">
+            <td><strong>${uName}</strong></td>
+            <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
+            <td>${roleStr}</td>
+            <td>${statusBadge}</td>
+            <td>${idleStr}</td>
+            <td>
+                <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${uName}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
+                <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${uName}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
+                <button class="btn-primary btn-sm" onclick="sendRemoteCommand('${uName}', 'force_update')" title="Force Update Check"><i class="fas fa-cloud-download-alt"></i></button>
+            </td>
+        </tr>
+    `;
+}
+
+function renderActiveUsersTable(activeTable, activeUsers) {
+    if (!activeTable) return;
+    if (!activeUsers || activeUsers.length === 0) {
+        activeTable.innerHTML = '<tr><td colspan="6" class="text-center">No active users detected.</td></tr>';
+        return;
+    }
+    activeTable.innerHTML = activeUsers.map(renderActiveUserRow).join('');
+}
+
 function renderSystemHealthUI(metrics) {
     const storageEl = document.getElementById('statusStorage');
     const latencyEl = document.getElementById('statusLatency');
@@ -2669,79 +2774,11 @@ function renderSystemHealthUI(metrics) {
     const platformEl = document.getElementById('statusPlatform');
 
     if (storageEl && typeof formatBytes === 'function') storageEl.innerText = formatBytes(metrics.storageSize);
-
-    if (latencyEl) {
-        latencyEl.innerText = metrics.latency + " ms";
-        latencyEl.style.color = metrics.latency < 200 ? "#2ecc71" : (metrics.latency < 500 ? "orange" : "#ff5252");
-    }
-
-    if (memoryEl && metrics.memory && typeof formatBytes === 'function') {
-        memoryEl.innerText = formatBytes(metrics.memory);
-    }
-    
-    if (connEl) {
-        // Use browser API instead of pinging Google (Faster/Lighter)
-        if (navigator.connection) {
-            // Try to get specific interface type (Electron/Mobile)
-            const type = navigator.connection.type;
-            if (type && type !== 'unknown') {
-                connEl.innerText = type.toUpperCase();
-            } else {
-                // Fallback: effectiveType returns '4g' for fast connections. Display 'ONLINE' instead.
-                const eff = navigator.connection.effectiveType;
-                connEl.innerText = (eff === '4g') ? "ONLINE" : eff.toUpperCase();
-            }
-        } else {
-            connEl.innerText = navigator.onLine ? "ONLINE" : "OFFLINE";
-        }
-        connEl.style.color = navigator.onLine ? "#2ecc71" : "#ff5252";
-    }
-    
-    if (platformEl) {
-        const os = (navigator.userAgentData && navigator.userAgentData.platform) ? navigator.userAgentData.platform : navigator.platform;
-        platformEl.innerText = os;
-    }
-
-    if (activeTable) {
-        let html = '';
-        if(!metrics.activeUsers || metrics.activeUsers.length === 0) {
-                html = '<tr><td colspan="6" class="text-center">No active users detected.</td></tr>';
-        } else {
-            metrics.activeUsers.forEach(u => {
-                const idleStr = (u.idleTime !== undefined && u.idleTime !== null)
-                    ? (typeof formatDuration === 'function' ? formatDuration(u.idleTime) : (u.idleTime/1000).toFixed(0) + 's')
-                    : '-';
-                
-                const verStr = u.version || '-';
-                const roleStr = u.role || '-';
-                
-                const statusBadge = u.isIdle
-                    ? '<span class="status-badge status-fail">Idle</span>'
-                    : '<span class="status-badge status-pass">Active</span>';
-                
-                const rowClass = u.isIdle ? 'user-idle' : '';
-
-                // Handle both 'username' (New) and 'user' (Old) for compatibility
-                const uName = u.username || u.user || 'Unknown';
-
-                html += `
-                    <tr class="${rowClass}">
-                        <td><strong>${uName}</strong></td>
-                        <td style="font-size:0.8rem; color:var(--text-muted);">${verStr}</td>
-                        <td>${roleStr}</td>
-                        <td>${statusBadge}</td>
-                        <td>${idleStr}</td>
-                        <td>
-                            <button class="btn-danger btn-sm" onclick="sendRemoteCommand('${uName}', 'logout')" title="Force Sign Out"><i class="fas fa-sign-out-alt"></i></button>
-                            <button class="btn-warning btn-sm" onclick="sendRemoteCommand('${uName}', 'restart')" title="Remote Restart"><i class="fas fa-power-off"></i></button>
-                            <button class="btn-primary btn-sm" onclick="sendRemoteCommand('${uName}', 'force_update')" title="Force Update Check"><i class="fas fa-cloud-download-alt"></i></button>
-                        </td>
-                    </tr>
-                `;
-            });
-        }
-        activeTable.innerHTML = html;
-    }
+    renderLatencyMetric(latencyEl, metrics.latency);
+    if (memoryEl && metrics.memory && typeof formatBytes === 'function') memoryEl.innerText = formatBytes(metrics.memory);
+    renderConnectionMetric(connEl);
+    if (platformEl) platformEl.innerText = (navigator.userAgentData && navigator.userAgentData.platform) ? navigator.userAgentData.platform : navigator.platform;
+    renderActiveUsersTable(activeTable, metrics.activeUsers);
 }
 
 // --- ACCESS LOGGING (Login/Logout/Timeout) ---
@@ -3126,6 +3163,10 @@ const REALTIME_FULL_FALLBACK_INTERVAL_MS = 600000;
 
 async function runRealtimeFallbackPoll() {
     if (!window.supabaseClient) return;
+    if (window.REALTIME_FALLBACK_POLL_IN_FLIGHT) return;
+    if (!navigator.onLine) return;
+
+    window.REALTIME_FALLBACK_POLL_IN_FLIGHT = true;
 
     const fetchRows = async (table, limit = 250) => {
         try {
@@ -3137,7 +3178,7 @@ async function runRealtimeFallbackPoll() {
             return Array.isArray(data) ? data : [];
         } catch (error) {
             console.warn(`[Realtime Tunnel] Targeted fallback read skipped for ${table}:`, error.message || error);
-            return [];
+            return null;
         }
     };
 
@@ -3149,10 +3190,27 @@ async function runRealtimeFallbackPoll() {
             fetchRows('vetting_sessions_v2', 150)
         ]);
 
-        sessionRows.forEach(row => handleSessionRealtime({ eventType: 'UPDATE', table: 'sessions', new: row }));
-        liveSessionRows.forEach(row => handleLiveSessionRealtime({ eventType: 'UPDATE', table: 'live_sessions', new: row }));
-        vettingRows.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions', new: row }));
-        vettingRowsV2.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions_v2', new: row }));
+        const targetedResults = [sessionRows, liveSessionRows, vettingRows, vettingRowsV2];
+        const successfulReads = targetedResults.filter(Array.isArray).length;
+        const failedReads = targetedResults.length - successfulReads;
+
+        if (Array.isArray(sessionRows)) sessionRows.forEach(row => handleSessionRealtime({ eventType: 'UPDATE', table: 'sessions', new: row }));
+        if (Array.isArray(liveSessionRows)) liveSessionRows.forEach(row => handleLiveSessionRealtime({ eventType: 'UPDATE', table: 'live_sessions', new: row }));
+        if (Array.isArray(vettingRows)) vettingRows.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions', new: row }));
+        if (Array.isArray(vettingRowsV2)) vettingRowsV2.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions_v2', new: row }));
+
+        if (successfulReads === 0) {
+            const nextRate = Math.min(
+                window.REALTIME_MAX_RETRY_DELAY || 120000,
+                Math.max(window.REALTIME_FAILURE_RATE || 30000, Math.round((window.CURRENT_FALLBACK_RATE || 30000) * 1.6))
+            );
+            if (window.CURRENT_FALLBACK_RATE !== nextRate) setFallbackPollingRate(nextRate);
+            return;
+        }
+
+        if (failedReads === 0 && window.CURRENT_FALLBACK_RATE !== window.REALTIME_FAILURE_RATE) {
+            setFallbackPollingRate(window.REALTIME_FAILURE_RATE);
+        }
 
         const now = Date.now();
         if (now - (window.REALTIME_LAST_FULL_FALLBACK_AT || 0) > REALTIME_FULL_FALLBACK_INTERVAL_MS) {
@@ -3160,8 +3218,9 @@ async function runRealtimeFallbackPoll() {
             await loadFromServer(true);
         }
     } catch (error) {
-        console.warn('[Realtime Tunnel] Targeted fallback poll failed; running full sync fallback.', error);
-        await loadFromServer(true);
+        console.warn('[Realtime Tunnel] Targeted fallback poll failed.', error);
+    } finally {
+        window.REALTIME_FALLBACK_POLL_IN_FLIGHT = false;
     }
 }
 
@@ -3186,10 +3245,7 @@ function setFallbackPollingRate(ms) {
     console.log(`[Sync Engine] Fallback polling rate adjusted to ${rate / 1000}s`);
 }
 
-function startRealtimeSync() {
-    if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);
-    if (HEARTBEAT_INTERVAL_ID) clearInterval(HEARTBEAT_INTERVAL_ID);
-
+function startRealtimeSync(options = {}) {
     const config = safeLocalParse('system_config', {}) || {};
     const rawRates = config.sync_rates || {};
     const activeTarget = localStorage.getItem('active_server_target') || 'cloud';
@@ -3229,6 +3285,22 @@ function startRealtimeSync() {
             failoverRate = fallbackRates.teamleader || failoverRate;
         }
     }
+
+    const syncSignature = JSON.stringify({
+        target: activeTarget,
+        role: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role) ? CURRENT_USER.role : 'guest',
+        syncRate,
+        failoverRate,
+        beatRate
+    });
+    if (!options.force && window.REALTIME_SYNC_STARTED && window.REALTIME_SYNC_SIGNATURE === syncSignature) {
+        return;
+    }
+    window.REALTIME_SYNC_STARTED = true;
+    window.REALTIME_SYNC_SIGNATURE = syncSignature;
+
+    if (SYNC_INTERVAL) clearInterval(SYNC_INTERVAL);
+    if (HEARTBEAT_INTERVAL_ID) clearInterval(HEARTBEAT_INTERVAL_ID);
 
     window.NORMAL_FALLBACK_RATE = 0;
     window.REALTIME_FAILURE_RATE = Math.max(5000, Number(failoverRate || syncRate || 30000));
