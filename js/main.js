@@ -4119,6 +4119,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.89": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Course move-on request email body templates are now editable from System Config with course, user, and request-message placeholders.</li>
+            </ul>`,
         "2.6.88": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Course move-on request wording is now editable from System Config and reused for the trainee button and email body.</li>

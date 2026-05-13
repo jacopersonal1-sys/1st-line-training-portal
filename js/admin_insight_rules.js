@@ -27,6 +27,7 @@
     ];
     const DEFAULT_TRAINING_RULES_HTML = `<ul>${DEFAULT_TRAINING_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
     const DEFAULT_COURSE_REQUEST_MESSAGE = 'I fully understand this material and would like to move on to the next Course';
+    const DEFAULT_COURSE_REQUEST_EMAIL_BODY = 'Timeline Course name: {courseName}\nUser: {user}\n\n{requestMessage}';
     const DEFAULT_COURSE_REQUEST_ACK = 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material';
 
     const AUTO_PROGRESS_ITEMS = [
@@ -252,6 +253,7 @@
         return {
             recipients: [],
             requestMessage: DEFAULT_COURSE_REQUEST_MESSAGE,
+            emailBodyTemplate: DEFAULT_COURSE_REQUEST_EMAIL_BODY,
             acknowledgementMessage: DEFAULT_COURSE_REQUEST_ACK,
             smtp: {
                 host: '',
@@ -442,9 +444,11 @@
         const port = Number(smtpRaw.port);
         const acknowledgementMessage = String(raw.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage;
         const requestMessage = String(raw.requestMessage || '').trim() || defaults.requestMessage;
+        const emailBodyTemplate = String(raw.emailBodyTemplate || '').trim() || defaults.emailBodyTemplate;
         return {
             recipients: parseRecipientList(raw.recipients),
             requestMessage,
+            emailBodyTemplate,
             acknowledgementMessage,
             smtp: {
                 host: String(smtpRaw.host || '').trim(),
@@ -881,6 +885,7 @@
     function renderCourseRequestControls(config) {
         const recipients = document.getElementById('courseRequestRecipients');
         const requestMessage = document.getElementById('courseRequestMessage');
+        const emailBody = document.getElementById('courseRequestEmailBody');
         const ack = document.getElementById('courseRequestAckMessage');
         const smtpHost = document.getElementById('courseRequestSmtpHost');
         const smtpPort = document.getElementById('courseRequestSmtpPort');
@@ -897,6 +902,9 @@
         }
         if (requestMessage && document.activeElement !== requestMessage && !requestMessage.dataset.dirty) {
             requestMessage.value = config.requestMessage || DEFAULT_COURSE_REQUEST_MESSAGE;
+        }
+        if (emailBody && document.activeElement !== emailBody && !emailBody.dataset.dirty) {
+            emailBody.value = config.emailBodyTemplate || DEFAULT_COURSE_REQUEST_EMAIL_BODY;
         }
         if (smtpHost && document.activeElement !== smtpHost && !smtpHost.dataset.dirty) smtpHost.value = smtp.host || '';
         if (smtpPort && document.activeElement !== smtpPort && !smtpPort.dataset.dirty) smtpPort.value = String(smtp.port || 587);
@@ -1397,6 +1405,7 @@
     async function saveCourseProgressRequestConfig() {
         const recipientsInput = document.getElementById('courseRequestRecipients');
         const requestMessageInput = document.getElementById('courseRequestMessage');
+        const emailBodyInput = document.getElementById('courseRequestEmailBody');
         const ackInput = document.getElementById('courseRequestAckMessage');
         const recipients = parseRecipientList(recipientsInput ? recipientsInput.value : []);
 
@@ -1410,6 +1419,7 @@
         const clean = sanitizeCourseRequestConfig({
             recipients,
             requestMessage: requestMessageInput ? requestMessageInput.value : DEFAULT_COURSE_REQUEST_MESSAGE,
+            emailBodyTemplate: emailBodyInput ? emailBodyInput.value : DEFAULT_COURSE_REQUEST_EMAIL_BODY,
             acknowledgementMessage: ackInput ? ackInput.value : DEFAULT_COURSE_REQUEST_ACK,
             smtp: {
                 host: document.getElementById('courseRequestSmtpHost')?.value || '',
@@ -1436,6 +1446,10 @@
         if (requestMessageInput) {
             requestMessageInput.value = clean.requestMessage;
             delete requestMessageInput.dataset.dirty;
+        }
+        if (emailBodyInput) {
+            emailBodyInput.value = clean.emailBodyTemplate;
+            delete emailBodyInput.dataset.dirty;
         }
         ['courseRequestSmtpHost', 'courseRequestSmtpPort', 'courseRequestSmtpUser', 'courseRequestSmtpPass', 'courseRequestSmtpFrom'].forEach(id => {
             const input = document.getElementById(id);

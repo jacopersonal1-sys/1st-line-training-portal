@@ -1279,6 +1279,8 @@
                     <textarea id="courseRequestRecipients" oninput="markCourseRequestConfigDirty('courseRequestRecipients')" placeholder="One email per line" style="min-height:74px; margin-bottom:10px;"></textarea>
                     <label for="courseRequestMessage">Trainee Request Message / Button Text</label>
                     <textarea id="courseRequestMessage" oninput="markCourseRequestConfigDirty('courseRequestMessage')" style="min-height:70px; margin-bottom:10px;"></textarea>
+                    <label for="courseRequestEmailBody">Email Body Template</label>
+                    <textarea id="courseRequestEmailBody" oninput="markCourseRequestConfigDirty('courseRequestEmailBody')" style="min-height:96px; margin-bottom:10px;" placeholder="Use {courseName}, {user}, and {requestMessage}"></textarea>
                     <div class="grid-3" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:10px;">
                         <div>
                             <label for="courseRequestSmtpHost">SMTP Host</label>

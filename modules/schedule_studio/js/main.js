@@ -1442,6 +1442,7 @@ const App = {
         const defaults = {
             recipients: [],
             requestMessage: 'I fully understand this material and would like to move on to the next Course',
+            emailBodyTemplate: 'Timeline Course name: {courseName}\nUser: {user}\n\n{requestMessage}',
             acknowledgementMessage: 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material',
             smtp: { host: '', port: 587, secure: false, user: '', pass: '', from: '' }
         };
@@ -1453,6 +1454,7 @@ const App = {
             return {
                 recipients,
                 requestMessage: String(parsed?.requestMessage || '').trim() || defaults.requestMessage,
+                emailBodyTemplate: String(parsed?.emailBodyTemplate || '').trim() || defaults.emailBodyTemplate,
                 acknowledgementMessage: String(parsed?.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage,
                 smtp: {
                     host: String(smtp.host || '').trim(),
@@ -1477,16 +1479,18 @@ const App = {
     },
 
     buildCourseRequestEmailPayload(item, user) {
+        const config = this.getCourseRequestConfig();
         const courseName = String(item?.courseName || 'Timeline Course').trim();
         const traineeName = String(user?.user || user?.username || user?.name || 'Unknown trainee').trim();
+        const requestMessage = String(config.requestMessage || '').trim();
+        const bodyTemplate = String(config.emailBodyTemplate || '').trim() || 'Timeline Course name: {courseName}\nUser: {user}\n\n{requestMessage}';
+        const body = bodyTemplate
+            .replace(/\{courseName\}/g, courseName)
+            .replace(/\{user\}/g, traineeName)
+            .replace(/\{requestMessage\}/g, requestMessage);
         return {
             subject: `BuildZone course move request - ${courseName}`,
-            body: [
-                `Timeline Course name: ${courseName}`,
-                `User: ${traineeName}`,
-                '',
-                this.getCourseRequestConfig().requestMessage
-            ].join('\n')
+            body
         };
     },
 
