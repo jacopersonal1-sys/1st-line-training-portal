@@ -491,6 +491,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.77 (Insight Soft Refresh Performance, 2026-05-13):** Insight refreshes now use a debounced soft data sync instead of reloading the embedded webview during background pulls. After the first load, the host only pushes changed local-data keys into the isolated Insight partition before re-rendering, reducing UI stalls while keeping group filters, agent search, and stats current.
 - **v2.6.76 (Insight Webview Data Hydration, 2026-05-13):** Insight's host loader now waits for the embedded webview `dom-ready` event before reloading and injects the host app's local trainee data snapshot into the isolated Insight partition. Insight also preserves local `users`, `records`, `submissions`, and `attendance_records` fallbacks when the cloud bootstrap returns empty arrays so group filters, agent search, and stats populate consistently across submenus.
 - **v2.6.75 (Hidden First Line Troubleshooting Tool, 2026-05-13):** Added `modules/first_line_troubleshooting/` as an embedded copy of the First Line Troubleshooting Tool V3.4. The host app exposes it only through the hidden `first-line-troubleshooting` route, gated to Jaco's `super_admin` account by `js/first_line_troubleshooting_loader.js` and route/nav checks in `js/main.js`.
 - **v2.6.74 (Insight Immediate Local Render, 2026-05-13):** Insight renders locally hydrated users, rosters, records, submissions, and attendance immediately across all Insight submenus before the background Supabase pull completes.
@@ -552,6 +553,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.77 - 2026-05-13
+
+- Performance: Insight no longer reloads the full embedded webview during fresh sync pulls; refresh requests are debounced and handled as soft in-module data updates.
+- Performance: The Insight host loader tracks local data signatures and only pushes changed keys after the initial hydration, reducing large repeated localStorage transfers.
+- Fix: Soft refresh still re-renders Insight after changed data arrives, keeping group filters, agent search, and stats updated without the heavy reload freeze.
 
 ## v2.6.76 - 2026-05-13
 

@@ -4062,6 +4062,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.77": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight refreshes now use a debounced soft data sync instead of reloading the whole embedded webview during background pulls.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight now sends only changed host data keys after the first load, reducing heavy data injection stalls while keeping filters and stats current.</li>
+            </ul>`,
         "2.6.76": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight now waits for the embedded webview to be ready before refreshing, preventing the early reload freeze that blocked trainee filters and stats.</li>

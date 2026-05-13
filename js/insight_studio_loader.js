@@ -5,8 +5,22 @@ const InsightStudioLoader = {
     _windowMessageBound: false,
     _webviewReady: false,
     _pendingRefresh: false,
+    _refreshTimer: null,
+    _snapshotSignatures: {},
 
-    getLocalSnapshot: function() {
+    createValueSignature: function(value) {
+        if (typeof value !== 'string') return 'missing';
+        const length = value.length;
+        const step = Math.max(1, Math.floor(length / 24));
+        let checksum = 0;
+        for (let i = 0; i < length; i += step) {
+            checksum = ((checksum << 5) - checksum + value.charCodeAt(i)) | 0;
+        }
+        return `${length}:${checksum}:${value.slice(0, 32)}:${value.slice(-32)}`;
+    },
+
+    getLocalSnapshot: function(options = {}) {
+        const changedOnly = !!options.changedOnly;
         const keys = [
             'users',
             'rosters',
@@ -35,7 +49,11 @@ const InsightStudioLoader = {
         keys.forEach(key => {
             try {
                 const value = localStorage.getItem(key);
-                if (value !== null) snapshot[key] = value;
+                if (value === null) return;
+                const signature = this.createValueSignature(value);
+                if (changedOnly && this._snapshotSignatures[key] === signature) return;
+                this._snapshotSignatures[key] = signature;
+                snapshot[key] = value;
             } catch (error) {
                 console.warn(`[Insight Loader] Could not read local key "${key}"`, error);
             }
@@ -43,23 +61,32 @@ const InsightStudioLoader = {
         return snapshot;
     },
 
-    syncHostDataToWebview: function(webview) {
+    syncHostDataToWebview: function(webview, options = {}) {
         if (!webview || !webview.isConnected || typeof webview.executeJavaScript !== 'function') {
             return Promise.resolve(false);
         }
-        const snapshot = this.getLocalSnapshot();
+        const snapshot = this.getLocalSnapshot({ changedOnly: !!options.changedOnly });
+        if (!Object.keys(snapshot).length && !options.forceRender) {
+            return Promise.resolve(true);
+        }
         const script = `
             (() => {
                 const snapshot = ${JSON.stringify(snapshot)};
+                const shouldRender = ${options.forceRender ? 'true' : 'false'};
                 Object.entries(snapshot).forEach(([key, value]) => {
                     if (typeof value === 'string') localStorage.setItem(key, value);
                 });
                 if (window.InsightDataService && typeof window.InsightDataService.hydrateFromLocalStorage === 'function') {
-                    window.InsightDataService.hydrateFromLocalStorage();
+                    if (Object.keys(snapshot).length) {
+                        window.InsightDataService.hydrateFromLocalStorage();
+                    }
+                    if (typeof window.InsightDataService.resetIndexes === 'function') {
+                        window.InsightDataService.resetIndexes();
+                    }
                 }
                 if (window.InsightApp && window.InsightApp.state) {
                     window.InsightApp.state.loading = false;
-                    if (typeof window.InsightApp.render === 'function') window.InsightApp.render();
+                    if (shouldRender && typeof window.InsightApp.render === 'function') window.InsightApp.render();
                 }
                 true;
             })();
@@ -117,6 +144,11 @@ const InsightStudioLoader = {
             return;
         }
         this._webviewReady = false;
+        this._snapshotSignatures = {};
+        if (this._refreshTimer) {
+            clearTimeout(this._refreshTimer);
+            this._refreshTimer = null;
+        }
 
         if (!CURRENT_USER) {
             container.innerHTML = `
@@ -163,7 +195,7 @@ const InsightStudioLoader = {
             webview.addEventListener('dom-ready', () => {
                 this._webviewReady = true;
                 if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
-                this.syncHostDataToWebview(webview).finally(() => {
+                this.syncHostDataToWebview(webview, { changedOnly: false, forceRender: true }).finally(() => {
                     if (!this._pendingRefresh) return;
                     this._pendingRefresh = false;
                     this.refresh();
@@ -187,17 +219,16 @@ const InsightStudioLoader = {
 
     refresh: function() {
         const webview = document.getElementById('insight-studio-webview');
-        if (webview && webview.isConnected && typeof webview.reload === 'function') {
+        if (webview && webview.isConnected && typeof webview.executeJavaScript === 'function') {
             if (!this._webviewReady) {
                 this._pendingRefresh = true;
                 return;
             }
-            try {
-                webview.reload();
-            } catch (error) {
-                console.warn('[Insight Loader] Webview reload was not ready; rebuilding Insight.', error);
-                this.renderUI();
-            }
+            if (this._refreshTimer) clearTimeout(this._refreshTimer);
+            this._refreshTimer = setTimeout(() => {
+                this._refreshTimer = null;
+                this.syncHostDataToWebview(webview, { changedOnly: true, forceRender: true });
+            }, 350);
             return;
         }
         this.renderUI();
