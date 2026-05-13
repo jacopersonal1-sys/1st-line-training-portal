@@ -27,7 +27,7 @@
     ];
     const DEFAULT_TRAINING_RULES_HTML = `<ul>${DEFAULT_TRAINING_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
     const DEFAULT_COURSE_REQUEST_MESSAGE = 'I fully understand this material and would like to move on to the next Course';
-    const DEFAULT_COURSE_REQUEST_EMAIL_BODY = 'Timeline Course name: {courseName}\nUser: {user}\n\n{requestMessage}';
+    const DEFAULT_COURSE_REQUEST_EMAIL_BODY = DEFAULT_COURSE_REQUEST_MESSAGE;
     const DEFAULT_COURSE_REQUEST_ACK = 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material';
 
     const AUTO_PROGRESS_ITEMS = [

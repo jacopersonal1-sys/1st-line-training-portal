@@ -495,7 +495,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
-- **v2.6.89 (Editable Course Request Email Body, 2026-05-13):** Course move-on request emails now use `course_progress_request_config.emailBodyTemplate`, edited from Admin Tools > System Config. Supported placeholders are `{courseName}`, `{user}`, and `{requestMessage}`.
+- **v2.6.90 (Course Request Email Body Clarification, 2026-05-13):** Course move-on request emails now always prepend Timeline Course name and User automatically. `course_progress_request_config.emailBodyTemplate` stores only the editable request-message portion from Admin Tools > System Config.
+- **v2.6.89 (Editable Course Request Email Body, 2026-05-13):** Course move-on request emails now use `course_progress_request_config.emailBodyTemplate`, edited from Admin Tools > System Config.
 - **v2.6.88 (Editable Course Request Message, 2026-05-13):** The course move-on request sentence is now stored as `course_progress_request_config.requestMessage`, edited from Admin Tools > System Config, and reused for the trainee button label and default email body.
 - **v2.6.87 (SMTP Course Requests + Admin Notifications, 2026-05-13):** `course_progress_request_config` now includes SMTP host/port/security/user/password/from settings edited in Admin Tools > System Config and synced through Supabase app documents. Course move-on requests use Nodemailer SMTP first, then Outlook/`mailto:` fallback, and successful requests create `admin_notifications` entries for admin/super-admin notification bells.
 - **v2.6.86 (Schedule Course Move-On Requests, 2026-05-13):** Schedule Studio timeline items now support an optional trainee move-on request button. Admin Tools > System Config stores synced request recipients and the editable trainee acknowledgement message in `course_progress_request_config`; Electron attempts a Windows Outlook auto-send first, with `mailto:` prepared-email fallback. Timeline item edit also has assigned-group trainee availability exceptions that bypass the normal date gate for selected users.
@@ -570,10 +571,14 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
 
+## v2.6.90 - 2026-05-13
+
+- Improvement: Course move-on emails always include timeline course name and user automatically.
+- Improvement: System Config email message field now controls only the custom request message portion.
+
 ## v2.6.89 - 2026-05-13
 
 - Improvement: Course move-on request email body templates are editable in System Config.
-- Improvement: Email templates support `{courseName}`, `{user}`, and `{requestMessage}` placeholders.
 
 ## v2.6.88 - 2026-05-13
 

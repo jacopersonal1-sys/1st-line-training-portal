@@ -4119,6 +4119,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.90": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Course move-on emails now always add course and trainee details automatically while System Config controls only the request message text.</li>
+            </ul>`,
         "2.6.89": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Course move-on request email body templates are now editable from System Config with course, user, and request-message placeholders.</li>
