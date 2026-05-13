@@ -4068,6 +4068,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.84": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Access Change:</strong> Arcade Vault is now disabled for trainee sessions, including hidden logo unlocks and direct open attempts.</li>
+            </ul>`,
         "2.6.83": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Insight Compare Viewer now has Single Graph and Two Graphs modes for the Assessment/Test Breakdown graph, allowing dense selections to be split into two readable chart panels.</li>

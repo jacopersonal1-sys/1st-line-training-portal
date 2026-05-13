@@ -10,6 +10,11 @@
         unlocked: false
     };
 
+    function canUseArcadeVault() {
+        const role = String(window.CURRENT_USER && window.CURRENT_USER.role || '').trim().toLowerCase();
+        return role !== 'trainee';
+    }
+
     function isOpen() {
         const modal = document.getElementById(ARCADE_MODAL_ID);
         return !!modal && !modal.classList.contains('hidden');
@@ -24,7 +29,7 @@
                         <h3 style="margin:0;"><i class="fas fa-gamepad"></i> Arcade Vault</h3>
                         <button class="btn-secondary btn-sm" onclick="closeEasterArcadeVault()">&times;</button>
                     </div>
-                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Unlocked easter egg mode. Local-only games available to all users.</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Unlocked easter egg mode. Local-only games for non-trainee sessions.</div>
                     <div id="easterArcadeTabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
                         <button class="btn-primary btn-sm" data-game="tetris" onclick="easterArcadeShow('tetris')">Tetris</button>
                         <button class="btn-secondary btn-sm" data-game="snake" onclick="easterArcadeShow('snake')">Snake</button>
@@ -227,6 +232,7 @@
     window.easterArcadeShow = setActiveGame;
 
     function registerLogoClick() {
+        if (!canUseArcadeVault()) return;
         const tracker = window.EASTER_ARCADE_CLICK_TRACKER;
         const now = Date.now();
         if ((now - tracker.lastTs) > CLICK_WINDOW_MS) tracker.count = 0;
@@ -253,6 +259,12 @@
     };
 
     window.openEasterArcadeVault = function (force) {
+        if (!canUseArcadeVault()) {
+            const tracker = window.EASTER_ARCADE_CLICK_TRACKER;
+            tracker.count = 0;
+            tracker.unlocked = false;
+            return;
+        }
         const tracker = window.EASTER_ARCADE_CLICK_TRACKER;
         if (!force && !tracker.unlocked) return;
         ensureUI();
