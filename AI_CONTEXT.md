@@ -32,7 +32,7 @@
 | `live_assessment_rules_config` | Object | Blob | Editable Live Assessment Arena rule text/HTML shown before the first pushed question. |
 | `live_booking_rules_config` | Object | Blob (`app_documents`) | Editable Live Assessment Booking sidebar Rules of Booking text/HTML. |
 | `training_rules_config` | Object | Blob (`app_documents`) | Editable Training Rules shown to trainees on first login and/or every login, with all/user/group targeting plus admin-configured office dropdown options. |
-| `course_progress_request_config` | Object | Blob (`app_documents`) | Admin Tools > System Config recipients, SMTP settings, and editable trainee acknowledgement message for Schedule Studio move-on requests. |
+| `course_progress_request_config` | Object | Blob (`app_documents`) | Admin Tools > System Config recipients, SMTP settings, editable trainee request message/button text, and editable acknowledgement message for Schedule Studio move-on requests. |
 | `admin_notifications` | Array | Blob (`app_documents`) | Synced admin/super-admin notification-bell events such as trainee course move-on requests. |
 | `system_tombstones` | Array | Blob | Persistent blacklist of deleted item IDs used to prevent deleted items from being resurrected during sync. |
 | `records` | Array | Row (`records`) | Final assessment scores and grades. |
@@ -45,7 +45,7 @@
 | `insight_rule_config` | Object | Blob (`app_documents`) | Insight severity/threshold trigger mapping. |
 | `live_assessment_rules_config` | Object | Blob (`app_documents`) | Rich-text Live Assessment pre-question rules shown in the arena. |
 | `live_booking_rules_config` | Object | Blob (`app_documents`) | Rich-text Rules of Booking shown in the Live Assessment Booking sidebar and edited from Admin Tools > System Config. |
-| `course_progress_request_config` | Object | Blob (`app_documents`) | Synced recipient list, SMTP server credentials, and trainee-facing acknowledgement text for per-timeline course move-on requests. |
+| `course_progress_request_config` | Object | Blob (`app_documents`) | Synced recipient list, SMTP server credentials, trainee request message/button text, and trainee-facing acknowledgement text for per-timeline course move-on requests. |
 | `admin_notifications` | Array | Blob (`app_documents`) | Admin notification-bell event stream; course move-on requests write here after email send/fallback succeeds. |
 | `test_integrity_overrides` | Object | Blob (`app_documents`) | Admin overrides for Test Engine Integrity Review, keyed by whole assessment/live/vetting entry. Stores validity and attempt 1/2 classifications. |
 | `adminDecisions` | Object | Blob (`app_documents`) | Legacy Onboard Report manual review decisions keyed by trainee name; kept for report compatibility. |
@@ -495,6 +495,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.88 (Editable Course Request Message, 2026-05-13):** The course move-on request sentence is now stored as `course_progress_request_config.requestMessage`, edited from Admin Tools > System Config, and reused for both the trainee button label and email body.
 - **v2.6.87 (SMTP Course Requests + Admin Notifications, 2026-05-13):** `course_progress_request_config` now includes SMTP host/port/security/user/password/from settings edited in Admin Tools > System Config and synced through Supabase app documents. Course move-on requests use Nodemailer SMTP first, then Outlook/`mailto:` fallback, and successful requests create `admin_notifications` entries for admin/super-admin notification bells.
 - **v2.6.86 (Schedule Course Move-On Requests, 2026-05-13):** Schedule Studio timeline items now support an optional trainee move-on request button. Admin Tools > System Config stores synced request recipients and the editable trainee acknowledgement message in `course_progress_request_config`; Electron attempts a Windows Outlook auto-send first, with `mailto:` prepared-email fallback. Timeline item edit also has assigned-group trainee availability exceptions that bypass the normal date gate for selected users.
 - **v2.6.85 (Compare Viewer Group-vs-Group Split Graphs, 2026-05-13):** Insight Compare Viewer Two Graphs mode now exposes First/Second group selectors for the Assessment/Test Breakdown graph. Each panel renders the trainees from its selected group using the active attempt scope, enabling direct group-vs-group comparison instead of splitting one result list in half.
@@ -567,6 +568,11 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.88 - 2026-05-13
+
+- Improvement: Course move-on request wording is editable in System Config.
+- Improvement: The editable request wording is reused for the trainee timeline button and email body.
 
 ## v2.6.87 - 2026-05-13
 

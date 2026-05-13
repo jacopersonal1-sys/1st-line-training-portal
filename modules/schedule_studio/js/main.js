@@ -135,6 +135,7 @@ const App = {
                                 : TimelineUI.renderTimeline(active.items || [], {
                                     canEdit,
                                     canSubmitCourseRequest: this.canSubmitCourseRequest(),
+                                    courseRequestMessage: this.getCourseRequestConfig().requestMessage,
                                     totalItems: (active.items || []).length,
                                     getMaterialState: item => this.getMaterialState(item),
                                     getAssessmentState: item => this.getAssessmentState(item),
@@ -1440,6 +1441,7 @@ const App = {
     getCourseRequestConfig() {
         const defaults = {
             recipients: [],
+            requestMessage: 'I fully understand this material and would like to move on to the next Course',
             acknowledgementMessage: 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material',
             smtp: { host: '', port: 587, secure: false, user: '', pass: '', from: '' }
         };
@@ -1450,6 +1452,7 @@ const App = {
             const smtp = parsed?.smtp && typeof parsed.smtp === 'object' ? parsed.smtp : {};
             return {
                 recipients,
+                requestMessage: String(parsed?.requestMessage || '').trim() || defaults.requestMessage,
                 acknowledgementMessage: String(parsed?.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage,
                 smtp: {
                     host: String(smtp.host || '').trim(),
@@ -1482,7 +1485,7 @@ const App = {
                 `Timeline Course name: ${courseName}`,
                 `User: ${traineeName}`,
                 '',
-                'I fully understand this material and would like to move on to the next Course'
+                this.getCourseRequestConfig().requestMessage
             ].join('\n')
         };
     },

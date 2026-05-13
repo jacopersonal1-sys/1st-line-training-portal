@@ -4119,6 +4119,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.88": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Course move-on request wording is now editable from System Config and reused for the trainee button and email body.</li>
+            </ul>`,
         "2.6.87": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Course move-on requests now support synced SMTP settings and admin notification-bell alerts when a request is sent.</li>

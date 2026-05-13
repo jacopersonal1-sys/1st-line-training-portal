@@ -26,6 +26,7 @@
         'Use approved training systems and ask your trainer when anything is unclear.'
     ];
     const DEFAULT_TRAINING_RULES_HTML = `<ul>${DEFAULT_TRAINING_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
+    const DEFAULT_COURSE_REQUEST_MESSAGE = 'I fully understand this material and would like to move on to the next Course';
     const DEFAULT_COURSE_REQUEST_ACK = 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material';
 
     const AUTO_PROGRESS_ITEMS = [
@@ -250,6 +251,7 @@
     function getDefaultCourseRequestConfig() {
         return {
             recipients: [],
+            requestMessage: DEFAULT_COURSE_REQUEST_MESSAGE,
             acknowledgementMessage: DEFAULT_COURSE_REQUEST_ACK,
             smtp: {
                 host: '',
@@ -439,8 +441,10 @@
         const smtpRaw = raw.smtp && typeof raw.smtp === 'object' ? raw.smtp : {};
         const port = Number(smtpRaw.port);
         const acknowledgementMessage = String(raw.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage;
+        const requestMessage = String(raw.requestMessage || '').trim() || defaults.requestMessage;
         return {
             recipients: parseRecipientList(raw.recipients),
+            requestMessage,
             acknowledgementMessage,
             smtp: {
                 host: String(smtpRaw.host || '').trim(),
@@ -876,6 +880,7 @@
 
     function renderCourseRequestControls(config) {
         const recipients = document.getElementById('courseRequestRecipients');
+        const requestMessage = document.getElementById('courseRequestMessage');
         const ack = document.getElementById('courseRequestAckMessage');
         const smtpHost = document.getElementById('courseRequestSmtpHost');
         const smtpPort = document.getElementById('courseRequestSmtpPort');
@@ -889,6 +894,9 @@
         }
         if (ack && document.activeElement !== ack && !ack.dataset.dirty) {
             ack.value = config.acknowledgementMessage || DEFAULT_COURSE_REQUEST_ACK;
+        }
+        if (requestMessage && document.activeElement !== requestMessage && !requestMessage.dataset.dirty) {
+            requestMessage.value = config.requestMessage || DEFAULT_COURSE_REQUEST_MESSAGE;
         }
         if (smtpHost && document.activeElement !== smtpHost && !smtpHost.dataset.dirty) smtpHost.value = smtp.host || '';
         if (smtpPort && document.activeElement !== smtpPort && !smtpPort.dataset.dirty) smtpPort.value = String(smtp.port || 587);
@@ -1388,6 +1396,7 @@
 
     async function saveCourseProgressRequestConfig() {
         const recipientsInput = document.getElementById('courseRequestRecipients');
+        const requestMessageInput = document.getElementById('courseRequestMessage');
         const ackInput = document.getElementById('courseRequestAckMessage');
         const recipients = parseRecipientList(recipientsInput ? recipientsInput.value : []);
 
@@ -1400,6 +1409,7 @@
         const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
         const clean = sanitizeCourseRequestConfig({
             recipients,
+            requestMessage: requestMessageInput ? requestMessageInput.value : DEFAULT_COURSE_REQUEST_MESSAGE,
             acknowledgementMessage: ackInput ? ackInput.value : DEFAULT_COURSE_REQUEST_ACK,
             smtp: {
                 host: document.getElementById('courseRequestSmtpHost')?.value || '',
@@ -1422,6 +1432,10 @@
         if (ackInput) {
             ackInput.value = clean.acknowledgementMessage;
             delete ackInput.dataset.dirty;
+        }
+        if (requestMessageInput) {
+            requestMessageInput.value = clean.requestMessage;
+            delete requestMessageInput.dataset.dirty;
         }
         ['courseRequestSmtpHost', 'courseRequestSmtpPort', 'courseRequestSmtpUser', 'courseRequestSmtpPass', 'courseRequestSmtpFrom'].forEach(id => {
             const input = document.getElementById(id);

@@ -113,6 +113,7 @@ const TimelineUI = {
             Array.isArray(item.availabilityExceptionUsers) && item.availabilityExceptionUsers.length ? `${item.availabilityExceptionUsers.length} exception${item.availabilityExceptionUsers.length === 1 ? '' : 's'}` : ''
         ].filter(Boolean);
         const showCourseRequest = options.canSubmitCourseRequest && item.courseRequestEnabled;
+        const courseRequestMessage = String(options.courseRequestMessage || 'I fully understand this material and would like to move to the next Course').trim();
 
         return `
             <div class="studio-item">
@@ -158,7 +159,7 @@ const TimelineUI = {
                     ` : ''}
                     ${showCourseRequest ? `
                         <button class="studio-btn secondary studio-course-request-btn" onclick="App.submitCourseRequest(${index})">
-                            <i class="fas fa-arrow-right"></i> I fully understand the material and would like to move to the next Course
+                            <i class="fas fa-arrow-right"></i> ${this.escape(courseRequestMessage)}
                         </button>
                     ` : ''}
                 </div>
