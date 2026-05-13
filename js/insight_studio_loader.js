@@ -113,6 +113,9 @@ const InsightStudioLoader = {
                     }
                 }
                 if (window.InsightApp && window.InsightApp.state) {
+                    if (typeof window.InsightApp.resetCompareCache === 'function') {
+                        window.InsightApp.resetCompareCache();
+                    }
                     window.InsightApp.state.loading = false;
                     if (shouldRender && typeof window.InsightApp.render === 'function') window.InsightApp.render();
                 }

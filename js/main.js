@@ -4068,6 +4068,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.82": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight Compare Viewer now caches built comparison rows for the active session so changing selections, group filters, and compare scopes no longer rebuilds every trainee record from scratch.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Compare cache is automatically reset when Insight data is rehydrated or force-refreshed, keeping the faster filter response aligned with current records.</li>
+            </ul>`,
         "2.6.81": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight now shows an immediate loading screen saying “Fetching and building records” while the workspace snapshot and embedded module are prepared.</li>

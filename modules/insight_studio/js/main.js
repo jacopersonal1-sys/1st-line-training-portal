@@ -1,6 +1,11 @@
 /* ================= INSIGHT MODULE UI ================= */
 
 const InsightApp = {
+    _compareCache: {
+        personRows: {},
+        groupRows: {}
+    },
+
     state: {
         loading: true,
         viewMode: 'triggers',
@@ -15,6 +20,13 @@ const InsightApp = {
         progressDetail: null,
         drawerMode: 'triggers',
         drawerOpen: false
+    },
+
+    resetCompareCache: function() {
+        this._compareCache = {
+            personRows: {},
+            groupRows: {}
+        };
     },
 
     init: async function() {
@@ -45,6 +57,7 @@ const InsightApp = {
                 if (typeof InsightDataService.hydrateFromLocalStorage === 'function') {
                     InsightDataService.hydrateFromLocalStorage();
                 }
+                this.resetCompareCache();
                 this.state.loading = false;
                 this.render();
                 return;
@@ -60,11 +73,13 @@ const InsightApp = {
             await Promise.race([loadPromise, bootGuard]);
 
             this.state.loading = false;
+            this.resetCompareCache();
             this.render();
 
             Promise.resolve(loadPromise)
                 .then(() => {
                     this.state.loading = false;
+                    this.resetCompareCache();
                     if (this.state.drawerOpen && this.state.selectedAgent) {
                         this.state.detail = InsightDataService.getAgentDetail(this.state.selectedAgent);
                     }
@@ -310,6 +325,7 @@ const InsightApp = {
         this.render();
         await InsightDataService.refresh();
         this.state.loading = false;
+        this.resetCompareCache();
         if (this.state.drawerOpen && this.state.selectedAgent) {
             this.state.detail = InsightDataService.getAgentDetail(this.state.selectedAgent);
             this.state.progressDetail = InsightDataService.getAgentProgress(
@@ -1273,6 +1289,14 @@ const InsightApp = {
     getComparisonAgentRows: function() {
         const selectedGroup = String(this.state.groupFilter || 'all');
         const search = String(this.state.search || '').trim().toLowerCase();
+        const cacheKey = [
+            selectedGroup,
+            search,
+            String(this.state.compareAttemptScope || 'live')
+        ].join('::');
+        if (this._compareCache.personRows[cacheKey]) {
+            return this._compareCache.personRows[cacheKey].slice();
+        }
         const agents = InsightDataService.getAllAgents().filter((agent) => {
             if (!this.isTraineeRole(agent.role)) return false;
             if (agent.blocked) return false;
@@ -1282,7 +1306,7 @@ const InsightApp = {
             return true;
         });
 
-        return agents.map((agent) => {
+        const rows = agents.map((agent) => {
             const currentGroup = String(agent.group || '').trim();
             const attemptNumber = this.getCompareAttemptNumber();
             if (this.isAttemptVsLiveCompareScope()) {
@@ -1302,11 +1326,18 @@ const InsightApp = {
 
             return this.buildCurrentLiveComparisonRow(agent, currentGroup);
         }).flat().filter(Boolean);
+        this._compareCache.personRows[cacheKey] = rows;
+        return rows.slice();
     },
 
     getComparisonRows: function(options = {}) {
         const selectedGroup = String(this.state.groupFilter || 'all');
         const personRows = this.getComparisonAgentRows();
+        const baseCacheKey = [
+            selectedGroup,
+            String(this.state.search || '').trim().toLowerCase(),
+            String(this.state.compareAttemptScope || 'live')
+        ].join('::');
         const applySelection = (rows) => {
             if (options.ignoreSelection) return rows;
             const selected = Array.isArray(this.state.compareSelected) ? this.state.compareSelected : [];
@@ -1316,11 +1347,15 @@ const InsightApp = {
             return rows.filter(row => selectedSet.has(row.key));
         };
         if (this.isAttemptVsLiveCompareScope() || this.state.compareMode !== 'group' || selectedGroup !== 'all') {
-            return applySelection(personRows.sort((a, b) => {
+            return applySelection(personRows.slice().sort((a, b) => {
                 const scoreDiff = Number(b.overallScore || 0) - Number(a.overallScore || 0);
                 if (scoreDiff !== 0) return scoreDiff;
                 return String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
             }));
+        }
+
+        if (this._compareCache.groupRows[baseCacheKey]) {
+            return applySelection(this._compareCache.groupRows[baseCacheKey].slice());
         }
 
         const groups = {};
@@ -1369,6 +1404,7 @@ const InsightApp = {
             if (scoreDiff !== 0) return scoreDiff;
             return String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
         });
+        this._compareCache.groupRows[baseCacheKey] = groupRows;
         return applySelection(groupRows);
     },
 

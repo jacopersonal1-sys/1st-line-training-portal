@@ -491,6 +491,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.82 (Compare Viewer Interaction Cache, 2026-05-13):** Insight Compare Viewer now memoizes built comparison rows by active group/search/attempt scope for the current Insight session. Selection changes and repeated filter navigation reuse the prepared row data instead of rebuilding every trainee's records, submissions, attendance, progress, archive, and activity maps from scratch. The cache is reset whenever Insight data is rehydrated or force-refreshed.
 - **v2.6.81 (Insight Loading Screen, 2026-05-13):** Insight now shows an immediate "Fetching and building records" loading screen in the host container and inside the module while trainee, progress, attendance, and assessment records are hydrated. Webview attachment is deferred briefly so the loading state paints before session snapshot injection begins.
 - **v2.6.80 (Compare Viewer Responsive Graphs, 2026-05-13):** Insight Compare Viewer now renders the Assessment/Test Breakdown graph as a responsive in-card SVG instead of forcing a wide chart overflow. The Compare workspace also has cleaner graph headers, compact summaries, scroll-contained legends/axis keys, and modernized selection/ranking cards so the screen fits better inside the Insight webview.
 - **v2.6.79 (Progress Builder Test Engine Source, 2026-05-13):** Agent Progress Builder now presents Test Engine items as the visible progress checklist source instead of mixing `assessment-list`, `vetting-topics`, and `timeline` source buckets in the selector. Legacy assessment/vetting/timeline candidates are retained only as fallback/evidence matching so historical trainee submissions still satisfy the canonical Test Engine progress list.
@@ -557,6 +558,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.82 - 2026-05-13
+
+- Performance: Compare Viewer now caches built comparison rows by group/search/attempt scope during the active Insight session.
+- Performance: Changing compare selections now reuses prepared row data instead of recomputing every trainee's records, submissions, attendance, progress, and activity maps.
+- Fix: Compare row cache is cleared on Insight data hydration, background completion, refresh, and host snapshot injection.
 
 ## v2.6.81 - 2026-05-13
 
