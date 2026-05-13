@@ -427,12 +427,36 @@ body {
 }
 
 .ins-split-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
     color: var(--text-muted);
     font-size: 0.76rem;
     font-weight: 800;
     margin-bottom: 8px;
     text-transform: uppercase;
     letter-spacing: 0;
+}
+
+.ins-split-title span {
+    color: var(--primary);
+    text-transform: none;
+    white-space: nowrap;
+}
+
+.ins-split-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+.ins-split-select select {
+    margin: 0;
+    min-width: 170px;
+    max-width: 240px;
 }
 
 .ins-compare-row,

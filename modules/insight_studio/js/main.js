@@ -13,6 +13,8 @@ const InsightApp = {
         compareMode: 'person',
         compareAttemptScope: 'live',
         compareGraphLayout: 'single',
+        compareSplitLeftGroup: '',
+        compareSplitRightGroup: '',
         compareSelected: [],
         groupFilter: 'all',
         search: '',
@@ -207,6 +209,14 @@ const InsightApp = {
     setCompareGraphLayout: function(layout) {
         const normalized = String(layout || '').trim().toLowerCase();
         this.state.compareGraphLayout = normalized === 'split' ? 'split' : 'single';
+        this.render();
+    },
+
+    setCompareSplitGroup: function(side, value) {
+        const normalizedSide = String(side || '').trim().toLowerCase();
+        const group = String(value || '').trim();
+        if (normalizedSide === 'right') this.state.compareSplitRightGroup = group;
+        else this.state.compareSplitLeftGroup = group;
         this.render();
     },
 
@@ -1293,8 +1303,8 @@ const InsightApp = {
         return out;
     },
 
-    getComparisonAgentRows: function() {
-        const selectedGroup = String(this.state.groupFilter || 'all');
+    getComparisonAgentRows: function(options = {}) {
+        const selectedGroup = String(options.groupOverride || this.state.groupFilter || 'all');
         const search = String(this.state.search || '').trim().toLowerCase();
         const cacheKey = [
             selectedGroup,
@@ -1717,24 +1727,44 @@ const InsightApp = {
         `;
     },
 
-    renderSplitPerformanceGraphs: function(rows, groupAggregateMode) {
+    sortComparisonRows: function(rows) {
+        return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+            const scoreDiff = Number(b.overallScore || 0) - Number(a.overallScore || 0);
+            if (scoreDiff !== 0) return scoreDiff;
+            return String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
+        });
+    },
+
+    renderSplitPerformanceGraphs: function(rows, groupAggregateMode, options = {}) {
         const esc = this.escapeHtml;
-        const chartRows = Array.isArray(rows) ? rows : [];
-        if (chartRows.length <= 1) {
+        const leftGroup = String(options.leftGroup || '').trim();
+        const rightGroup = String(options.rightGroup || '').trim();
+        const hasGroupPair = leftGroup && rightGroup;
+        const chartRows = hasGroupPair
+            ? []
+            : (Array.isArray(rows) ? rows : []);
+        if (!hasGroupPair && chartRows.length <= 1) {
             return this.renderComparisonTrend(chartRows, 'performance', 'assessment/test');
         }
-        const midpoint = Math.ceil(chartRows.length / 2);
-        const groups = [
-            { title: `${groupAggregateMode ? 'Groups' : 'People'} 1-${midpoint}`, rows: chartRows.slice(0, midpoint) },
-            { title: `${groupAggregateMode ? 'Groups' : 'People'} ${midpoint + 1}-${chartRows.length}`, rows: chartRows.slice(midpoint) }
-        ].filter(group => group.rows.length);
+        const groups = hasGroupPair
+            ? [
+                { title: leftGroup, rows: this.sortComparisonRows(this.getComparisonAgentRows({ groupOverride: leftGroup })) },
+                { title: rightGroup, rows: this.sortComparisonRows(this.getComparisonAgentRows({ groupOverride: rightGroup })) }
+            ]
+            : (() => {
+                const midpoint = Math.ceil(chartRows.length / 2);
+                return [
+                    { title: `${groupAggregateMode ? 'Groups' : 'People'} 1-${midpoint}`, rows: chartRows.slice(0, midpoint) },
+                    { title: `${groupAggregateMode ? 'Groups' : 'People'} ${midpoint + 1}-${chartRows.length}`, rows: chartRows.slice(midpoint) }
+                ];
+            })();
 
         return `
             <div class="ins-split-graphs">
                 ${groups.map(group => `
                     <div class="ins-split-graph">
-                        <div class="ins-split-title">${esc(group.title)}</div>
-                        ${this.renderComparisonTrend(group.rows, 'performance', 'assessment/test')}
+                        <div class="ins-split-title">${esc(group.title)} <span>${group.rows.length} people</span></div>
+                        ${group.rows.length ? this.renderComparisonTrend(group.rows, 'performance', 'assessment/test') : '<div class="ins-item">No comparison data found for this group.</div>'}
                     </div>
                 `).join('')}
             </div>
@@ -1748,6 +1778,9 @@ const InsightApp = {
         const attemptNumber = this.getCompareAttemptNumber();
         const pairMode = this.isAttemptVsLiveCompareScope();
         const graphLayout = this.state.compareGraphLayout === 'split' ? 'split' : 'single';
+        const compareGroups = InsightDataService.getGroups().filter(group => group && group !== 'Ungrouped');
+        const splitLeftGroup = this.state.compareSplitLeftGroup || compareGroups[0] || '';
+        const splitRightGroup = this.state.compareSplitRightGroup || compareGroups.find(group => group !== splitLeftGroup) || splitLeftGroup || '';
         const scopeLabel = pairMode ? 'Attempt 1 vs Current Live' : (attemptNumber ? `Training Attempt ${attemptNumber} Archive` : 'Current Live Attempt');
         const rows = this.getComparisonRows();
         const selectableRows = this.getComparePickerRows();
@@ -1837,9 +1870,21 @@ const InsightApp = {
                     <div class="ins-chart-controls">
                         <button class="sub-tab-btn ${graphLayout === 'single' ? 'active' : ''}" onclick="InsightApp.setCompareGraphLayout('single')">Single Graph</button>
                         <button class="sub-tab-btn ${graphLayout === 'split' ? 'active' : ''}" onclick="InsightApp.setCompareGraphLayout('split')">Two Graphs</button>
+                        ${graphLayout === 'split' ? `
+                            <label class="ins-split-select">First
+                                <select onchange="InsightApp.setCompareSplitGroup('left', this.value)">
+                                    ${compareGroups.map(group => `<option value="${esc(group)}" ${group === splitLeftGroup ? 'selected' : ''}>${esc(group)}</option>`).join('')}
+                                </select>
+                            </label>
+                            <label class="ins-split-select">Second
+                                <select onchange="InsightApp.setCompareSplitGroup('right', this.value)">
+                                    ${compareGroups.map(group => `<option value="${esc(group)}" ${group === splitRightGroup ? 'selected' : ''}>${esc(group)}</option>`).join('')}
+                                </select>
+                            </label>
+                        ` : ''}
                     </div>
-                    ${rows.length
-                        ? (graphLayout === 'split' ? this.renderSplitPerformanceGraphs(rows, groupAggregateMode) : this.renderComparisonTrend(rows, 'performance', 'assessment/test'))
+                    ${(graphLayout === 'split' && splitLeftGroup && splitRightGroup) || rows.length
+                        ? (graphLayout === 'split' ? this.renderSplitPerformanceGraphs(rows, groupAggregateMode, { leftGroup: splitLeftGroup, rightGroup: splitRightGroup }) : this.renderComparisonTrend(rows, 'performance', 'assessment/test'))
                         : '<div class="ins-item">No data available for graphing.</div>'}
                 </div>
 
