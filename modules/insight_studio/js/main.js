@@ -22,9 +22,10 @@ const InsightApp = {
         if (!root) return;
 
         root.innerHTML = `
-            <div class="card" style="text-align:center; padding:46px;">
+            <div class="card ins-loading-card">
                 <i class="fas fa-circle-notch fa-spin fa-2x"></i>
-                <p style="margin-top:14px;">Loading Insight...</p>
+                <h3>Fetching and building records</h3>
+                <p class="ins-subtle">Preparing trainee progress, attendance, assessment, and comparison data.</p>
             </div>
         `;
 
@@ -2096,9 +2097,10 @@ const InsightApp = {
 
         if (this.state.loading) {
             root.innerHTML = `
-                <div class="card" style="text-align:center; padding:46px;">
+                <div class="card ins-loading-card">
                     <i class="fas fa-circle-notch fa-spin fa-2x"></i>
-                    <p style="margin-top:14px;">Refreshing Insight data...</p>
+                    <h3>Fetching and building records</h3>
+                    <p class="ins-subtle">Preparing trainee progress, attendance, assessment, and comparison data.</p>
                 </div>
             `;
             return;

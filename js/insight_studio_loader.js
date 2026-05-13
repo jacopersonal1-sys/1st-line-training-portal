@@ -8,6 +8,29 @@ const InsightStudioLoader = {
     _refreshTimer: null,
     _snapshotSignatures: {},
     _sessionSnapshot: null,
+    _renderTimer: null,
+
+    renderLoadingScreen: function(container) {
+        container.innerHTML = `
+            <div class="insight-loader-shell" style="min-height:calc(100vh - 210px); display:grid; place-items:center; padding:24px;">
+                <div class="card" style="width:min(620px, 100%); text-align:center; padding:34px; border-radius:10px; background:linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)), var(--bg-card);">
+                    <i class="fas fa-circle-notch fa-spin fa-2x" style="color:var(--primary);"></i>
+                    <h3 style="margin:16px 0 6px 0;">Fetching and building records</h3>
+                    <p style="color:var(--text-muted); margin:0;">Preparing the Insight workspace from the latest trainee, progress, attendance, and assessment data.</p>
+                    <div style="height:8px; border-radius:999px; background:rgba(255,255,255,0.08); border:1px solid var(--border-color); overflow:hidden; margin-top:18px;">
+                        <div style="width:42%; height:100%; border-radius:inherit; background:linear-gradient(90deg, var(--primary), #60a5fa); animation: insightLoaderPulse 1.4s ease-in-out infinite;"></div>
+                    </div>
+                    <style>
+                        @keyframes insightLoaderPulse {
+                            0% { transform: translateX(-110%); }
+                            55% { transform: translateX(120%); }
+                            100% { transform: translateX(120%); }
+                        }
+                    </style>
+                </div>
+            </div>
+        `;
+    },
 
     createValueSignature: function(value) {
         if (typeof value !== 'string') return 'missing';
@@ -155,6 +178,10 @@ const InsightStudioLoader = {
             clearTimeout(this._refreshTimer);
             this._refreshTimer = null;
         }
+        if (this._renderTimer) {
+            clearTimeout(this._renderTimer);
+            this._renderTimer = null;
+        }
 
         if (!CURRENT_USER) {
             container.innerHTML = `
@@ -185,6 +212,15 @@ const InsightStudioLoader = {
         const basePath = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
         const modulePath = basePath + '/modules/insight_studio/index.html';
 
+        this.renderLoadingScreen(container);
+        this._renderTimer = setTimeout(() => {
+            this._renderTimer = null;
+            this.attachWebview(container, modulePath, userParam, credsParam);
+        }, 80);
+    },
+
+    attachWebview: function(container, modulePath, userParam, credsParam) {
+        if (!container || !container.isConnected) return;
         container.innerHTML = `
             <webview
                 id="insight-studio-webview"
@@ -231,6 +267,10 @@ const InsightStudioLoader = {
         if (this._refreshTimer) {
             clearTimeout(this._refreshTimer);
             this._refreshTimer = null;
+        }
+        if (this._renderTimer) {
+            clearTimeout(this._renderTimer);
+            this._renderTimer = null;
         }
         const webview = document.getElementById('insight-studio-webview');
         if (webview && webview.isConnected && typeof webview.executeJavaScript === 'function') {

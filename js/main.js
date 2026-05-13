@@ -4068,6 +4068,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.81": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight now shows an immediate loading screen saying “Fetching and building records” while the workspace snapshot and embedded module are prepared.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight webview creation is deferred briefly so the loading screen paints before heavier data hydration begins.</li>
+            </ul>`,
         "2.6.80": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Compare Viewer now uses a responsive Assessment/Test Breakdown graph that scales inside the card instead of forcing the page wider than the screen.</li>

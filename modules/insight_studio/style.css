@@ -229,6 +229,46 @@ body {
     grid-column: 1 / -1;
 }
 
+.ins-loading-card {
+    width: min(620px, 100%);
+    margin: 34px auto;
+    text-align: center;
+    padding: 40px 32px;
+    border-radius: 10px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+        var(--bg-card);
+}
+
+.ins-loading-card i {
+    color: var(--primary);
+}
+
+.ins-loading-card h3 {
+    margin: 16px 0 6px 0;
+}
+
+.ins-loading-card::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.08);
+    margin-top: 18px;
+    background-image: linear-gradient(90deg, var(--primary), #60a5fa);
+    background-size: 42% 100%;
+    background-repeat: no-repeat;
+    animation: ins-loading-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes ins-loading-sweep {
+    0% { background-position: -70% 0; }
+    55% { background-position: 170% 0; }
+    100% { background-position: 170% 0; }
+}
+
 .ins-mini-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
