@@ -1458,17 +1458,42 @@ const App = {
     buildCourseRequestMailto(item, user) {
         const config = this.getCourseRequestConfig();
         if (!config.recipients.length) return '';
+        const payload = this.buildCourseRequestEmailPayload(item, user);
+        const to = config.recipients.map(address => encodeURIComponent(address)).join(',');
+        return `mailto:${to}?subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(payload.body)}`;
+    },
+
+    buildCourseRequestEmailPayload(item, user) {
         const courseName = String(item?.courseName || 'Timeline Course').trim();
         const traineeName = String(user?.user || user?.username || user?.name || 'Unknown trainee').trim();
-        const subject = `BuildZone course move request - ${courseName}`;
-        const body = [
-            `Timeline Course name: ${courseName}`,
-            `User: ${traineeName}`,
-            '',
-            'I fully understand this material and would like to move on to the next Course'
-        ].join('\n');
-        const to = config.recipients.map(address => encodeURIComponent(address)).join(',');
-        return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        return {
+            subject: `BuildZone course move request - ${courseName}`,
+            body: [
+                `Timeline Course name: ${courseName}`,
+                `User: ${traineeName}`,
+                '',
+                'I fully understand this material and would like to move on to the next Course'
+            ].join('\n')
+        };
+    },
+
+    async sendCourseRequestEmail(item, user) {
+        const config = this.getCourseRequestConfig();
+        const bridge = AppContext.host?.electronAPI?.ipcRenderer || window.electronAPI?.ipcRenderer;
+        if (!bridge || typeof bridge.invoke !== 'function' || !config.recipients.length) {
+            return { success: false };
+        }
+        try {
+            const payload = this.buildCourseRequestEmailPayload(item, user);
+            return await bridge.invoke('send-course-request-email', {
+                to: config.recipients,
+                subject: payload.subject,
+                body: payload.body
+            });
+        } catch (error) {
+            console.warn('[Schedule Studio] Automatic course request email failed:', error);
+            return { success: false, error: error.message };
+        }
     },
 
     async openExternalUrl(url) {
@@ -1493,19 +1518,22 @@ const App = {
         const confirmed = confirm('Are you sure you would like to submit this request?');
         if (!confirmed) return;
 
-        const mailto = this.buildCourseRequestMailto(item, user);
-        if (!mailto) {
+        const config = this.getCourseRequestConfig();
+        if (!config.recipients.length) {
             alert('No course request recipients are configured yet. Please ask an admin to set them in System Config.');
             return;
         }
 
-        const opened = await this.openExternalUrl(mailto);
-        if (!opened) {
-            alert('The email request could not be opened on this device.');
-            return;
+        const sent = await this.sendCourseRequestEmail(item, user);
+        if (!sent || sent.success !== true) {
+            const mailto = this.buildCourseRequestMailto(item, user);
+            const opened = await this.openExternalUrl(mailto);
+            if (!opened) {
+                alert('The email request could not be sent or opened on this device.');
+                return;
+            }
         }
 
-        const config = this.getCourseRequestConfig();
         alert(config.acknowledgementMessage);
     },
 

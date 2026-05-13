@@ -768,6 +768,45 @@ ipcMain.handle('open-external-url', async (event, rawUrl) => {
     return true;
 });
 
+ipcMain.handle('send-course-request-email', async (event, payload) => {
+    const recipients = Array.isArray(payload && payload.to)
+        ? payload.to.map(item => String(item || '').trim()).filter(item => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item))
+        : [];
+    const subject = String((payload && payload.subject) || '').trim().slice(0, 220);
+    const body = String((payload && payload.body) || '').trim().slice(0, 8000);
+
+    if (!recipients.length || !subject || !body) {
+        return { success: false, error: 'Missing email recipients, subject, or body.' };
+    }
+
+    if (os.platform() !== 'win32') {
+        return { success: false, error: 'Automatic Outlook send is only available on Windows.' };
+    }
+
+    const json = Buffer.from(JSON.stringify({ to: recipients, subject, body }), 'utf8').toString('base64');
+    const script = `
+        $ErrorActionPreference = 'Stop'
+        $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${json}')) | ConvertFrom-Json
+        $outlook = New-Object -ComObject Outlook.Application
+        $mail = $outlook.CreateItem(0)
+        $mail.To = (@($payload.to) -join ';')
+        $mail.Subject = [string]$payload.subject
+        $mail.Body = [string]$payload.body
+        $mail.Send()
+    `;
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+
+    return await new Promise((resolve) => {
+        exec(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`, { timeout: 30000 }, (error) => {
+            if (error) {
+                resolve({ success: false, error: error.message || 'Outlook send failed.' });
+                return;
+            }
+            resolve({ success: true });
+        });
+    });
+});
+
 ipcMain.on('window-control', (event, action) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
