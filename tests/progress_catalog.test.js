@@ -7,7 +7,7 @@ describe('ProgressCatalog', () => {
     ProgressCatalog = require('../js/progress_catalog.js');
   });
 
-  test('builds official candidates from timeline, tests, and vetting topics when no manual config exists', () => {
+  test('builds official candidates from Test Engine first when no manual config exists', () => {
     localStorage.setItem('schedules', JSON.stringify({
       group1: {
         items: [
@@ -24,10 +24,10 @@ describe('ProgressCatalog', () => {
 
     const names = ProgressCatalog.getOfficialItems({ includeAuto: false }).map(item => `${item.type}:${item.name}`);
 
-    expect(names).toContain('assessment:Course 1 - Terms');
+    expect(names).toContain('test:Course 1 - Terms');
     expect(names).toContain('live:Live Assessment - Router Setup');
-    expect(names).toContain('vetting:1st Vetting - Wireless Standards');
-    expect(names).toContain('vetting:Final Vetting - Wireless Standards');
+    expect(names).not.toContain('vetting:1st Vetting - Wireless Standards');
+    expect(names).not.toContain('vetting:Final Vetting - Wireless Standards');
   });
 
   test('calculates trainee progress from records, submissions, live bookings, reports, and reviews', () => {

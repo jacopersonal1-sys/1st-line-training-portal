@@ -125,13 +125,7 @@
         });
     }
 
-    function addAssessmentCandidates(map) {
-        const assessments = parseJson('assessments', []);
-        (Array.isArray(assessments) ? assessments : []).forEach(item => {
-            const name = typeof item === 'string' ? item : (item && (item.name || item.title));
-            if (name) uniquePush(map, { name, type: 'assessment', source: 'assessment-list' });
-        });
-
+    function addTestEngineCandidates(map) {
         const tests = parseJson('tests', []);
         (Array.isArray(tests) ? tests : []).forEach(test => {
             const name = String(test && (test.title || test.name) || '').trim();
@@ -143,6 +137,14 @@
                 source: 'test-engine',
                 testId: test.id || ''
             });
+        });
+    }
+
+    function addLegacyAssessmentCandidates(map) {
+        const assessments = parseJson('assessments', []);
+        (Array.isArray(assessments) ? assessments : []).forEach(item => {
+            const name = typeof item === 'string' ? item : (item && (item.name || item.title));
+            if (name) uniquePush(map, { name, type: 'assessment', source: 'assessment-list' });
         });
 
         const topics = parseJson('vettingTopics', []);
@@ -157,8 +159,12 @@
     function getCandidateItems(options = {}) {
         const map = new Map();
         if (options.includeConfigured !== false) getConfiguredItems({ includeAuto: false }).forEach(item => uniquePush(map, item));
-        addScheduleCandidates(map);
-        addAssessmentCandidates(map);
+        addTestEngineCandidates(map);
+        const hasTestEngineItems = Array.from(map.values()).some(item => item.source === 'test-engine' || (item.sources || []).includes('test-engine'));
+        if (options.includeLegacy === true || !hasTestEngineItems) {
+            addScheduleCandidates(map);
+            addLegacyAssessmentCandidates(map);
+        }
         if (options.includeAuto) AUTO_ITEMS.forEach(item => uniquePush(map, item));
         return sortItems(Array.from(map.values()));
     }

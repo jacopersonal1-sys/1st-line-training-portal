@@ -135,8 +135,14 @@
 
     function getAssessmentCatalog() {
         if (window.ProgressCatalog && typeof window.ProgressCatalog.getCandidateItems === 'function') {
-            return window.ProgressCatalog.getCandidateItems({ includeConfigured: true, includeAuto: false })
-                .map(item => ({ name: item.name, type: item.type, source: item.source || (item.sources || []).join(', ') || 'catalog' }))
+            const catalog = window.ProgressCatalog.getCandidateItems({ includeConfigured: false, includeAuto: false });
+            if (catalog.length) {
+                return catalog
+                    .map(item => ({ name: item.name, type: item.type, source: 'Test Engine' }))
+                    .filter(item => item.name);
+            }
+            return window.ProgressCatalog.getCandidateItems({ includeConfigured: true, includeAuto: false, includeLegacy: true })
+                .map(item => ({ name: item.name, type: item.type, source: 'Legacy fallback' }))
                 .filter(item => item.name);
         }
 
@@ -741,10 +747,10 @@
         const catalog = getAssessmentCatalog();
         const optionsHtml = catalog.length
             ? catalog.map(item => {
-                const label = `${item.name}${item.source ? ` (${item.source})` : ''}`;
+                const label = item.name;
                 return `<option value="${escapeHtml(item.name)}" data-type="${escapeHtml(item.type || inferProgressType(item.name, null))}">${escapeHtml(label)}</option>`;
             }).join('')
-            : '<option value="">No progress catalog items found</option>';
+            : '<option value="">No Test Engine items found</option>';
 
         if (select) select.innerHTML = optionsHtml;
         if (progressSelect) progressSelect.innerHTML = optionsHtml;
@@ -993,7 +999,7 @@
                     <option value="test" ${item.type === 'test' ? 'selected' : ''}>Test</option>
                 </select>`;
             const nameHtml = missingFromTestEngine
-                ? `${escapeHtml(item.name)}<div style="margin-top:4px; color:#f1c40f; font-size:0.76rem;">Missing from active Test Engine list</div>`
+                ? `${escapeHtml(item.name)}<div style="margin-top:4px; color:#f1c40f; font-size:0.76rem;">Legacy item - not found in active Test Engine list</div>`
                 : escapeHtml(item.name);
             const check = (key, label) => locked
                 ? '<span style="color:var(--text-muted); font-size:0.78rem;">-</span>'
@@ -1172,7 +1178,7 @@
 
         const activeSection = document.querySelector('section.active');
         if (activeSection && activeSection.id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
-            InsightStudioLoader.refresh();
+            InsightStudioLoader.refresh({ force: true });
         }
     }
 

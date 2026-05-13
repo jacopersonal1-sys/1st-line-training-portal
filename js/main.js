@@ -4068,6 +4068,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.79": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Agent Progress Builder now presents Test Engine items as the visible source of truth instead of mixing assessment-list, vetting-topic, and timeline source buckets in the selector.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Legacy assessment, vetting, and timeline names remain available only as fallback/evidence matching so historical trainee submissions can still complete the configured Test Engine progress list.</li>
+            </ul>`,
         "2.6.78": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight now opens from a full in-session host snapshot and skips background fresh-pull re-renders while you remain in the tab.</li>
