@@ -534,6 +534,10 @@ const ScheduleData = {
             cloned.ignoreTime = Boolean(cloned.ignoreTime);
             cloned.isVetting = Boolean(cloned.isVetting);
             cloned.isLive = Boolean(cloned.isLive);
+            cloned.courseRequestEnabled = Boolean(cloned.courseRequestEnabled);
+            cloned.availabilityExceptionUsers = Array.isArray(cloned.availabilityExceptionUsers)
+                ? cloned.availabilityExceptionUsers.map(user => String(user || '').trim()).filter(Boolean)
+                : [];
 
             delete cloned.createdAt;
             delete cloned.lastModified;

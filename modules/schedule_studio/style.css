@@ -317,6 +317,13 @@ select {
     margin-top: 14px;
 }
 
+.studio-course-request-btn {
+    max-width: min(100%, 620px);
+    white-space: normal;
+    text-align: left;
+    line-height: 1.35;
+}
+
 .studio-content-mini {
     margin-top: 12px;
     border: 1px solid var(--border-color);

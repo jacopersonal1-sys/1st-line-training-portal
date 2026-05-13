@@ -4068,6 +4068,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.86": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Schedule Studio timeline items can now show a trainee move-on request button with configurable recipients, confirmation text, and per-trainee availability exceptions.</li>
+            </ul>`,
         "2.6.85": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Insight Compare Viewer Two Graphs mode now lets admins choose a separate group for each Assessment/Test Breakdown graph, making direct group-vs-group comparison possible.</li>

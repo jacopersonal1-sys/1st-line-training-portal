@@ -763,7 +763,7 @@ ipcMain.handle('open-study-popout', async (event, payload) => {
 
 ipcMain.handle('open-external-url', async (event, rawUrl) => {
     const url = String(rawUrl || '').trim();
-    if (!/^https?:\/\//i.test(url)) return false;
+    if (!/^(https?:\/\/|mailto:)/i.test(url)) return false;
     await shell.openExternal(url);
     return true;
 });

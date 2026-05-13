@@ -1271,6 +1271,20 @@
                 </div>
 
                 <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
+                    <h4 style="margin:0 0 10px 0;">Course Move-On Request</h4>
+                    <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
+                        Configure the recipients and trainee confirmation message for timeline items that allow a move-to-next-course request.
+                    </p>
+                    <label for="courseRequestRecipients">Request Email Recipients</label>
+                    <textarea id="courseRequestRecipients" oninput="markCourseRequestConfigDirty('courseRequestRecipients')" placeholder="One email per line" style="min-height:74px; margin-bottom:10px;"></textarea>
+                    <label for="courseRequestAckMessage">Trainee Message After Request</label>
+                    <textarea id="courseRequestAckMessage" oninput="markCourseRequestConfigDirty('courseRequestAckMessage')" style="min-height:92px; margin-bottom:10px;"></textarea>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+                        <button class="btn-primary btn-sm" onclick="saveCourseProgressRequestConfig()" style="width:auto;">Save Course Request Settings</button>
+                    </div>
+                </div>
+
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
                     <h4 style="margin:0 0 10px 0;">Live Booking Rules</h4>
                     <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
                         These rules are shown in the Live Assessment Booking sidebar.

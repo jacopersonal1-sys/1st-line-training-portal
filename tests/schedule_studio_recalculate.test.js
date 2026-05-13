@@ -20,7 +20,9 @@ describe('Schedule Studio recalculation', () => {
                 openTime: '09:00',
                 closeTime: '16:00',
                 ignoreTime: true,
-                isVetting: true
+                isVetting: true,
+                courseRequestEnabled: true,
+                availabilityExceptionUsers: ['agent_one']
             },
             {
                 courseName: 'Course 2 - ACS',
@@ -45,7 +47,9 @@ describe('Schedule Studio recalculation', () => {
             openTime: '09:00',
             closeTime: '16:00',
             ignoreTime: true,
-            isVetting: true
+            isVetting: true,
+            courseRequestEnabled: true,
+            availabilityExceptionUsers: ['agent_one']
         });
         expect(recalculated[1]).toMatchObject({
             courseName: 'Course 2 - ACS',

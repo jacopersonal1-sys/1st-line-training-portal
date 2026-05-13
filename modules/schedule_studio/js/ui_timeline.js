@@ -108,8 +108,11 @@ const TimelineUI = {
             item.isLive ? 'Live' : '',
             item.linkedTestId ? 'Linked Test' : '',
             item.assessmentLink ? 'External Assessment' : '',
-            contentState.linked ? 'Linked Content' : ''
+            contentState.linked ? 'Linked Content' : '',
+            item.courseRequestEnabled ? 'Move-On Request' : '',
+            Array.isArray(item.availabilityExceptionUsers) && item.availabilityExceptionUsers.length ? `${item.availabilityExceptionUsers.length} exception${item.availabilityExceptionUsers.length === 1 ? '' : 's'}` : ''
         ].filter(Boolean);
+        const showCourseRequest = options.canSubmitCourseRequest && item.courseRequestEnabled;
 
         return `
             <div class="studio-item">
@@ -151,6 +154,11 @@ const TimelineUI = {
                     ${(item.linkedTestId || item.assessmentLink) ? `
                         <button class="studio-btn ${assessmentState.enabled ? 'primary' : 'secondary'}" onclick="App.openAssessment(${index})" ${assessmentState.enabled ? '' : 'disabled'}>
                             <i class="fas fa-file-signature"></i> ${assessmentState.buttonLabel}
+                        </button>
+                    ` : ''}
+                    ${showCourseRequest ? `
+                        <button class="studio-btn secondary studio-course-request-btn" onclick="App.submitCourseRequest(${index})">
+                            <i class="fas fa-arrow-right"></i> I fully understand the material and would like to move to the next Course
                         </button>
                     ` : ''}
                 </div>

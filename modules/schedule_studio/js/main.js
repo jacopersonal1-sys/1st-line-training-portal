@@ -134,6 +134,7 @@ const App = {
                                 ? CalendarUI.render(active.items || [], this.state.currentMonth)
                                 : TimelineUI.renderTimeline(active.items || [], {
                                     canEdit,
+                                    canSubmitCourseRequest: this.canSubmitCourseRequest(),
                                     totalItems: (active.items || []).length,
                                     getMaterialState: item => this.getMaterialState(item),
                                     getAssessmentState: item => this.getAssessmentState(item),
@@ -160,6 +161,30 @@ const App = {
 
     canManage() {
         return this.canEdit();
+    },
+
+    canSubmitCourseRequest() {
+        return String(ScheduleData.getCurrentUser()?.role || '').toLowerCase() === 'trainee';
+    },
+
+    getAssignedGroupMembers() {
+        const active = this.getActiveSchedule();
+        const groupId = String(active?.assigned || '').trim();
+        if (!groupId) return [];
+        const rosters = ScheduleData.getRosters();
+        const members = Array.isArray(rosters[groupId]) ? rosters[groupId] : [];
+        return [...new Set(members.map(member => String(member || '').trim()).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    },
+
+    renderAvailabilityExceptionPicker(item) {
+        const select = document.getElementById('edit-availability-exceptions');
+        if (!select) return;
+        const selected = new Set((Array.isArray(item?.availabilityExceptionUsers) ? item.availabilityExceptionUsers : []).map(value => ScheduleData.getIdentityToken(value)));
+        const members = this.getAssignedGroupMembers();
+        select.innerHTML = members.length
+            ? members.map(member => `<option value="${TimelineUI.escape(member)}" ${selected.has(ScheduleData.getIdentityToken(member)) ? 'selected' : ''}>${TimelineUI.escape(member)}</option>`).join('')
+            : '<option value="">Assign this timeline to a group first</option>';
     },
 
     notify(message, type = 'info') {
@@ -419,7 +444,9 @@ const App = {
             closeTime: '17:00',
             ignoreTime: false,
             isVetting: false,
-            isLive: false
+            isLive: false,
+            courseRequestEnabled: false,
+            availabilityExceptionUsers: []
         });
         this.stampSchedule(this.state.activeScheduleId, {
             touchGroup: true,
@@ -449,6 +476,8 @@ const App = {
         document.getElementById('edit-ignore-time').checked = Boolean(item.ignoreTime);
         document.getElementById('edit-is-vetting').checked = Boolean(item.isVetting);
         document.getElementById('edit-is-live').checked = Boolean(item.isLive);
+        document.getElementById('edit-course-request-enabled').checked = Boolean(item.courseRequestEnabled);
+        this.renderAvailabilityExceptionPicker(item);
 
         const testSelect = document.getElementById('edit-linked-test');
         testSelect.innerHTML = '<option value="">-- None (Use External Link) --</option>';
@@ -514,6 +543,10 @@ const App = {
         item.ignoreTime = document.getElementById('edit-ignore-time').checked;
         item.isVetting = document.getElementById('edit-is-vetting').checked;
         item.isLive = document.getElementById('edit-is-live').checked;
+        item.courseRequestEnabled = document.getElementById('edit-course-request-enabled').checked;
+        item.availabilityExceptionUsers = Array.from(document.getElementById('edit-availability-exceptions')?.selectedOptions || [])
+            .map(option => String(option.value || '').trim())
+            .filter(Boolean);
 
         const linkedTestId = document.getElementById('edit-linked-test').value;
         if (linkedTestId) item.linkedTestId = linkedTestId;
@@ -992,8 +1025,18 @@ const App = {
         return this.state.schedules[this.state.activeScheduleId];
     },
 
+    isCurrentUserAvailabilityException(item) {
+        const currentUser = ScheduleData.getCurrentUser();
+        const username = String(currentUser?.user || currentUser?.username || '').trim();
+        if (!username || !Array.isArray(item?.availabilityExceptionUsers)) return false;
+        return item.availabilityExceptionUsers.some(entry => ScheduleData.identitiesMatch(entry, username));
+    },
+
     getMaterialState(item) {
         const range = ScheduleData.parseRange(item);
+        if (this.isCurrentUserAvailabilityException(item)) {
+            return { enabled: true, label: 'Available by trainee exception' };
+        }
         if (!range.start) {
             return { enabled: true, label: 'Available' };
         }
@@ -1010,17 +1053,18 @@ const App = {
         const range = ScheduleData.parseRange(item);
         const releaseDate = range.end || range.start;
         const hasLinkedAssessment = Boolean(item.linkedTestId || item.assessmentLink);
+        const hasException = this.isCurrentUserAvailabilityException(item);
 
         if (!hasLinkedAssessment) {
             return { enabled: false, label: 'No linked assessment', buttonLabel: 'No Assessment' };
         }
 
         const today = this.todayString();
-        if (releaseDate && today < releaseDate) {
+        if (!hasException && releaseDate && today < releaseDate) {
             return { enabled: false, label: `Assessment unlocks on ${releaseDate}`, buttonLabel: 'Locked' };
         }
 
-        if (releaseDate && today > releaseDate) {
+        if (!hasException && releaseDate && today > releaseDate) {
             return { enabled: false, label: 'Assessment window has closed', buttonLabel: 'Closed' };
         }
 
@@ -1391,6 +1435,78 @@ const App = {
             }
             window.open(normalizedUrl, '_blank');
         }
+    },
+
+    getCourseRequestConfig() {
+        const defaults = {
+            recipients: [],
+            acknowledgementMessage: 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material'
+        };
+        try {
+            const storage = ScheduleData.getStorage();
+            const parsed = JSON.parse(storage.getItem('course_progress_request_config') || 'null');
+            const recipients = Array.isArray(parsed?.recipients) ? parsed.recipients.map(item => String(item || '').trim()).filter(Boolean) : [];
+            return {
+                recipients,
+                acknowledgementMessage: String(parsed?.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage
+            };
+        } catch (error) {
+            return defaults;
+        }
+    },
+
+    buildCourseRequestMailto(item, user) {
+        const config = this.getCourseRequestConfig();
+        if (!config.recipients.length) return '';
+        const courseName = String(item?.courseName || 'Timeline Course').trim();
+        const traineeName = String(user?.user || user?.username || user?.name || 'Unknown trainee').trim();
+        const subject = `BuildZone course move request - ${courseName}`;
+        const body = [
+            `Timeline Course name: ${courseName}`,
+            `User: ${traineeName}`,
+            '',
+            'I fully understand this material and would like to move on to the next Course'
+        ].join('\n');
+        const to = config.recipients.map(address => encodeURIComponent(address)).join(',');
+        return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    },
+
+    async openExternalUrl(url) {
+        const target = String(url || '').trim();
+        if (!target) return false;
+        const bridge = AppContext.host?.electronAPI?.shell?.openExternal || window.electronAPI?.shell?.openExternal;
+        if (bridge) {
+            try {
+                return await bridge(target);
+            } catch (error) {
+                console.warn('[Schedule Studio] External URL open failed:', error);
+            }
+        }
+        window.location.href = target;
+        return true;
+    },
+
+    async submitCourseRequest(index) {
+        const item = this.getActiveSchedule().items[Number(index)];
+        const user = ScheduleData.getCurrentUser();
+        if (!item || !item.courseRequestEnabled || !this.canSubmitCourseRequest()) return;
+        const confirmed = confirm('Are you sure you would like to submit this request?');
+        if (!confirmed) return;
+
+        const mailto = this.buildCourseRequestMailto(item, user);
+        if (!mailto) {
+            alert('No course request recipients are configured yet. Please ask an admin to set them in System Config.');
+            return;
+        }
+
+        const opened = await this.openExternalUrl(mailto);
+        if (!opened) {
+            alert('The email request could not be opened on this device.');
+            return;
+        }
+
+        const config = this.getCourseRequestConfig();
+        alert(config.acknowledgementMessage);
     },
 
     async refresh(options = {}) {

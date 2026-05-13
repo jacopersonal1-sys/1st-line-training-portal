@@ -6,6 +6,7 @@
     const LIVE_RULES_KEY = 'live_assessment_rules_config';
     const LIVE_BOOKING_RULES_KEY = 'live_booking_rules_config';
     const TRAINING_RULES_KEY = 'training_rules_config';
+    const COURSE_PROGRESS_REQUEST_KEY = 'course_progress_request_config';
     const DEFAULT_LIVE_ASSESSMENT_RULES = [
         'This assessment takes approximately 1 hour to complete.',
         'You are allowed to reference the training material. However, if the material is referenced constantly and it is clear the material was not studied, the live session will be ended.',
@@ -25,6 +26,7 @@
         'Use approved training systems and ask your trainer when anything is unclear.'
     ];
     const DEFAULT_TRAINING_RULES_HTML = `<ul>${DEFAULT_TRAINING_RULES.map(rule => `<li>${rule}</li>`).join('')}</ul>`;
+    const DEFAULT_COURSE_REQUEST_ACK = 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material';
 
     const AUTO_PROGRESS_ITEMS = [
         { name: 'Onboard Report', type: 'report', source: 'auto' },
@@ -41,7 +43,9 @@
         liveBookingRulesLoaded: false,
         liveBookingRulesConfig: null,
         trainingRulesLoaded: false,
-        trainingRulesConfig: null
+        trainingRulesConfig: null,
+        courseRequestLoaded: false,
+        courseRequestConfig: null
     };
 
     function normalizeText(value) {
@@ -243,6 +247,15 @@
         };
     }
 
+    function getDefaultCourseRequestConfig() {
+        return {
+            recipients: [],
+            acknowledgementMessage: DEFAULT_COURSE_REQUEST_ACK,
+            updatedAt: null,
+            updatedBy: null
+        };
+    }
+
     function pushPreset(map, name, severity, scoreThreshold, defaultThreshold) {
         const cleanName = String(name || '').trim();
         if (!cleanName) return;
@@ -405,6 +418,25 @@
         };
     }
 
+    function parseRecipientList(value) {
+        const source = Array.isArray(value) ? value : String(value || '').split(/[\r\n,;]+/);
+        return uniqueStrings(source.map(item => String(item || '').trim()).filter(Boolean))
+            .filter(item => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item))
+            .slice(0, 30);
+    }
+
+    function sanitizeCourseRequestConfig(rawConfig) {
+        const defaults = getDefaultCourseRequestConfig();
+        const raw = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+        const acknowledgementMessage = String(raw.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage;
+        return {
+            recipients: parseRecipientList(raw.recipients),
+            acknowledgementMessage,
+            updatedAt: raw.updatedAt || defaults.updatedAt,
+            updatedBy: raw.updatedBy || defaults.updatedBy
+        };
+    }
+
     function sanitizeLiveRulesHtml(html) {
         const raw = String(html || '').trim();
         if (!raw) return '';
@@ -525,6 +557,14 @@
         }
     }
 
+    function getCourseProgressRequestConfig() {
+        try {
+            return sanitizeCourseRequestConfig(JSON.parse(localStorage.getItem(COURSE_PROGRESS_REQUEST_KEY) || 'null'));
+        } catch (error) {
+            return getDefaultCourseRequestConfig();
+        }
+    }
+
     function getLiveAssessmentRules() {
         return getLiveAssessmentRulesConfig().rules;
     }
@@ -543,6 +583,10 @@
 
     function getTrainingOfficeOptions() {
         return getTrainingRulesConfig().officeOptions || [];
+    }
+
+    function getCourseProgressRequestAcknowledgement() {
+        return getCourseProgressRequestConfig().acknowledgementMessage;
     }
 
     function getInsightProgressRequiredItems() {
@@ -644,6 +688,19 @@
     function setDraftTrainingRulesConfig(config) {
         draftState.trainingRulesConfig = sanitizeTrainingRulesConfig(config);
         draftState.trainingRulesLoaded = true;
+    }
+
+    function getDraftCourseRequestConfig() {
+        if (!draftState.courseRequestLoaded || !draftState.courseRequestConfig) {
+            draftState.courseRequestConfig = sanitizeCourseRequestConfig(getCourseProgressRequestConfig());
+            draftState.courseRequestLoaded = true;
+        }
+        return draftState.courseRequestConfig;
+    }
+
+    function setDraftCourseRequestConfig(config) {
+        draftState.courseRequestConfig = sanitizeCourseRequestConfig(config);
+        draftState.courseRequestLoaded = true;
     }
 
     function escapeHtml(value) {
@@ -797,6 +854,17 @@
         const groupBlock = document.getElementById('trainingRulesGroupTargetBlock');
         if (userBlock) userBlock.style.display = (config.targetMode === 'users') ? 'block' : 'none';
         if (groupBlock) groupBlock.style.display = (config.targetMode === 'groups') ? 'block' : 'none';
+    }
+
+    function renderCourseRequestControls(config) {
+        const recipients = document.getElementById('courseRequestRecipients');
+        const ack = document.getElementById('courseRequestAckMessage');
+        if (recipients && document.activeElement !== recipients && !recipients.dataset.dirty) {
+            recipients.value = (config.recipients || []).join('\n');
+        }
+        if (ack && document.activeElement !== ack && !ack.dataset.dirty) {
+            ack.value = config.acknowledgementMessage || DEFAULT_COURSE_REQUEST_ACK;
+        }
     }
 
     function upsertPreset(name, severity, scoreThreshold) {
@@ -1028,6 +1096,7 @@
         const liveRulesConfig = getDraftLiveRulesConfig();
         const liveBookingRulesConfig = getDraftLiveBookingRulesConfig();
         const trainingRulesConfig = getDraftTrainingRulesConfig();
+        const courseRequestConfig = getDraftCourseRequestConfig();
         renderAssessmentSelector();
 
         const severitySelect = document.getElementById('insightPresetSeveritySelect');
@@ -1056,6 +1125,7 @@
         if (trainingInput && document.activeElement !== trainingInput && !trainingInput.dataset.dirty) {
             trainingInput.innerHTML = trainingRulesConfig.rulesHtml || rulesToLiveRulesHtml(trainingRulesConfig.rules);
         }
+        renderCourseRequestControls(courseRequestConfig);
     }
 
     function addInsightTriggerPreset() {
@@ -1285,6 +1355,48 @@
         if (typeof showToast === 'function') showToast('Training rules and office list saved.', 'success');
     }
 
+    async function saveCourseProgressRequestConfig() {
+        const recipientsInput = document.getElementById('courseRequestRecipients');
+        const ackInput = document.getElementById('courseRequestAckMessage');
+        const recipients = parseRecipientList(recipientsInput ? recipientsInput.value : []);
+
+        if (!recipients.length) {
+            if (typeof showToast === 'function') showToast('Add at least one valid recipient email address.', 'warning');
+            return;
+        }
+
+        const stamp = new Date().toISOString();
+        const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        const clean = sanitizeCourseRequestConfig({
+            recipients,
+            acknowledgementMessage: ackInput ? ackInput.value : DEFAULT_COURSE_REQUEST_ACK,
+            updatedAt: stamp,
+            updatedBy: actor
+        });
+
+        localStorage.setItem(COURSE_PROGRESS_REQUEST_KEY, JSON.stringify(clean));
+        setDraftCourseRequestConfig(clean);
+        if (recipientsInput) {
+            recipientsInput.value = clean.recipients.join('\n');
+            delete recipientsInput.dataset.dirty;
+        }
+        if (ackInput) {
+            ackInput.value = clean.acknowledgementMessage;
+            delete ackInput.dataset.dirty;
+        }
+
+        try {
+            if (typeof saveToServer === 'function') {
+                await saveToServer([COURSE_PROGRESS_REQUEST_KEY], true);
+            }
+        } catch (error) {
+            console.warn('[Course Progress Request] Cloud sync failed:', error);
+        }
+
+        refreshInsightRulesView();
+        if (typeof showToast === 'function') showToast('Course request email settings saved.', 'success');
+    }
+
     function resetLiveAssessmentRulesDraft() {
         setDraftLiveRulesConfig(getDefaultLiveRulesConfig());
         const input = document.getElementById('liveAssessmentRulesInput');
@@ -1334,6 +1446,11 @@
 
     function markTrainingRulesDirty() {
         const input = document.getElementById('trainingRulesInput');
+        if (input) input.dataset.dirty = '1';
+    }
+
+    function markCourseRequestConfigDirty(fieldId) {
+        const input = document.getElementById(fieldId);
         if (input) input.dataset.dirty = '1';
     }
 
@@ -1402,6 +1519,8 @@
     window.getTrainingRulesConfig = getTrainingRulesConfig;
     window.getTrainingRulesHtml = getTrainingRulesHtml;
     window.getTrainingOfficeOptions = getTrainingOfficeOptions;
+    window.getCourseProgressRequestConfig = getCourseProgressRequestConfig;
+    window.getCourseProgressRequestAcknowledgement = getCourseProgressRequestAcknowledgement;
     window.openTrainingRulesModal = openTrainingRulesModal;
     window.maybeShowTrainingRulesOnLogin = maybeShowTrainingRulesOnLogin;
     window.shouldShowTrainingRulesOnLogin = shouldShowTrainingRulesOnLogin;
@@ -1412,6 +1531,7 @@
         setDraftLiveRulesConfig(getLiveAssessmentRulesConfig());
         setDraftLiveBookingRulesConfig(getLiveBookingRulesConfig());
         setDraftTrainingRulesConfig(getTrainingRulesConfig());
+        setDraftCourseRequestConfig(getCourseProgressRequestConfig());
         refreshInsightRulesView();
     };
     window.saveInsightRuleConfig = saveInsightRuleConfig;
@@ -1419,12 +1539,14 @@
     window.saveLiveAssessmentRulesConfig = saveLiveAssessmentRulesConfig;
     window.saveLiveBookingRulesConfig = saveLiveBookingRulesConfig;
     window.saveTrainingRulesConfig = saveTrainingRulesConfig;
+    window.saveCourseProgressRequestConfig = saveCourseProgressRequestConfig;
     window.resetLiveAssessmentRulesDraft = resetLiveAssessmentRulesDraft;
     window.resetLiveBookingRulesDraft = resetLiveBookingRulesDraft;
     window.resetTrainingRulesDraft = resetTrainingRulesDraft;
     window.markLiveAssessmentRulesDirty = markLiveAssessmentRulesDirty;
     window.markLiveBookingRulesDirty = markLiveBookingRulesDirty;
     window.markTrainingRulesDirty = markTrainingRulesDirty;
+    window.markCourseRequestConfigDirty = markCourseRequestConfigDirty;
     window.formatLiveRulesDoc = formatLiveRulesDoc;
     window.formatLiveBookingRulesDoc = formatLiveBookingRulesDoc;
     window.formatTrainingRulesDoc = formatTrainingRulesDoc;
