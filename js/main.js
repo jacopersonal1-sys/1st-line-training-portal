@@ -4040,6 +4040,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.73": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight Compare Viewer now hydrates people, groups, and comparison data from the local app cache before waiting for the slower cloud pull.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Q&amp;A Hub now has explicit Save Draft and Publish to Library actions so FAQ answers can be prepared before going live to trainees.</li>
+            </ul>`,
         "2.6.72": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight now loads faster by using reusable in-memory indexes and a smaller module cache.</li>

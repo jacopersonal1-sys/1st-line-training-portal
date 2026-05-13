@@ -58,7 +58,7 @@ label {
 
 .qa-stats {
     display: grid;
-    grid-template-columns: repeat(3, minmax(88px, 1fr));
+    grid-template-columns: repeat(4, minmax(78px, 1fr));
     gap: 8px;
 }
 
@@ -191,6 +191,12 @@ label {
     padding: 10px;
     color: var(--primary);
     background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.qa-draft.published {
+    color: #1f9d55;
+    border-color: color-mix(in srgb, #1f9d55 55%, var(--border-color));
+    background: color-mix(in srgb, #1f9d55 10%, transparent);
 }
 
 .qa-two {

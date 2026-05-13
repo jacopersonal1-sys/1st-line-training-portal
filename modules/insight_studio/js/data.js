@@ -345,6 +345,64 @@ const InsightDataService = {
         return this._indexes || this.buildIndexes();
     },
 
+    hydrateFromLocalStorage: function() {
+        const localUsers = insParseJson('users', []);
+        const localRosters = insParseJson('rosters', {});
+        const localRecords = insParseJson('records', []);
+        const localSubmissions = insParseJson('submissions', []);
+        const localSavedReports = insParseJson('savedReports', []);
+        const localInsightReviews = insParseJson('insightReviews', []);
+        const localExemptions = insParseJson('exemptions', []);
+        const localLiveBookings = insParseJson('liveBookings', []);
+        const localAttendance = insParseJson('attendance_records', []);
+        const localMonitorHistory = insParseJson('monitor_history', []);
+        const localViolationReports = insParseJson('violation_reports', []);
+        const localFeedback = insParseJson('tl_agent_feedback', []);
+        const localContentCanonical = insParseJson('content_studio_data', null);
+        const localContentFallback = insParseJson('content_studio_data_local', null);
+        const localAssessments = insParseJson('assessments', []);
+        const localTopics = insParseJson('vettingTopics', []);
+        const localTests = insParseJson('tests', []);
+        const localSchedules = insParseJson('schedules', {});
+        const localRetrainArchives = insParseJson('retrain_archives', []);
+        const localRuleConfig = insParseJson('insight_rule_config', null);
+        const localProgressConfig = insParseJson(INSIGHT_PROGRESS_CONFIG_KEY, null);
+        const localSubjectReviews = insParseJson(INSIGHT_SUBJECT_REVIEW_KEY, []);
+        const resolvedContent = (localContentCanonical && typeof localContentCanonical === 'object')
+            ? localContentCanonical
+            : ((localContentFallback && typeof localContentFallback === 'object') ? localContentFallback : null);
+
+        this.state.users = this.normalizeUsers(localUsers);
+        this.state.rosters = localRosters && typeof localRosters === 'object' ? localRosters : {};
+        this.state.records = this.normalizeRecords(localRecords);
+        this.state.submissions = this.normalizeSubmissions(localSubmissions);
+        this.state.savedReports = this.normalizeSavedReports(localSavedReports);
+        this.state.insightReviews = this.normalizeInsightReviews(localInsightReviews);
+        this.state.exemptions = this.normalizeExemptions(localExemptions);
+        this.state.liveBookings = this.normalizeLiveBookings(localLiveBookings);
+        this.state.attendance = this.normalizeAttendance(localAttendance);
+        this.state.monitorHistory = this.normalizeMonitorHistory(localMonitorHistory);
+        this.state.violationReports = this.normalizeViolationReports(localViolationReports);
+        this.state.tlFeedback = Array.isArray(localFeedback) ? localFeedback : [];
+        this.state.contentStore = (resolvedContent && typeof resolvedContent === 'object')
+            ? {
+                entries: Array.isArray(resolvedContent.entries) ? resolvedContent.entries : [],
+                analytics: Array.isArray(resolvedContent.analytics) ? resolvedContent.analytics : [],
+                annotations: Array.isArray(resolvedContent.annotations) ? resolvedContent.annotations : []
+            }
+            : { entries: [], analytics: [], annotations: [] };
+        this.state.assessments = Array.isArray(localAssessments) ? localAssessments : [];
+        this.state.vettingTopics = Array.isArray(localTopics) ? localTopics : [];
+        this.state.tests = Array.isArray(localTests) ? localTests : [];
+        this.state.schedules = localSchedules && typeof localSchedules === 'object' ? localSchedules : {};
+        this.state.retrainArchives = Array.isArray(localRetrainArchives) ? localRetrainArchives : [];
+        this.state.ruleConfig = this.normalizeRuleConfig(localRuleConfig);
+        this.state.progressConfig = this.normalizeProgressConfig(localProgressConfig);
+        this.state.subjectReviews = this.normalizeSubjectReviews(Array.isArray(localSubjectReviews) ? localSubjectReviews : []);
+        this.resetIndexes();
+        return this.state;
+    },
+
     withTimeout: async function(promise, ms, fallbackValue = null, label = 'request') {
         let timer = null;
         try {
@@ -759,6 +817,8 @@ const InsightDataService = {
             };
             this.resetIndexes();
         }
+
+        this.hydrateFromLocalStorage();
 
         if (!AppContext.supabase) return this.state;
 

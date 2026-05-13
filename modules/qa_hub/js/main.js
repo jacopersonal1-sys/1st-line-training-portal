@@ -93,6 +93,7 @@ const App = {
             .filter(q => q.status !== 'deleted')
             .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
         const submissions = [...this.store.submissions].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        const drafts = questions.filter(q => q.status === 'draft').length;
         const published = questions.filter(q => q.status !== 'draft').length;
         const pending = submissions.filter(s => s.status === 'new').length;
 
@@ -106,6 +107,7 @@ const App = {
                     <div class="qa-stats">
                         <span><strong>${questions.length}</strong>Total</span>
                         <span><strong>${published}</strong>Published</span>
+                        <span><strong>${drafts}</strong>Drafts</span>
                         <span><strong>${pending}</strong>New asks</span>
                     </div>
                 </header>
@@ -158,9 +160,13 @@ const App = {
     },
 
     renderBuilder(q) {
-        const question = q || { question: '', answer: '', tags: [], status: 'published' };
+        const question = q || { question: '', answer: '', tags: [], status: 'draft' };
+        const statusLabel = question.status === 'draft' ? 'Draft / hidden from trainees' : 'Published to trainees';
         return `
-            ${this.mode === 'new' ? '<div class="qa-draft"><i class="fas fa-pen"></i> New FAQ draft. Complete the fields and save.</div>' : ''}
+            <div class="qa-draft ${question.status === 'draft' ? '' : 'published'}">
+                <i class="fas ${question.status === 'draft' ? 'fa-pen' : 'fa-globe'}"></i>
+                ${this.mode === 'new' ? 'New FAQ draft. Save it as draft until you are ready to publish.' : this.esc(statusLabel)}
+            </div>
             <form id="qa-form" class="qa-form">
                 <label>Question</label>
                 <textarea id="qa-question" placeholder="Example: How do I access my live assessment?">${this.esc(question.question)}</textarea>
@@ -208,7 +214,8 @@ const App = {
                     <div id="qa-resources" class="qa-resources">${this.renderResources()}</div>
                 </div>
                 <div class="qa-actions">
-                    <button type="submit" class="qa-btn primary"><i class="fas fa-save"></i> Save FAQ Question</button>
+                    <button type="button" class="qa-btn ghost" data-save-status="draft"><i class="fas fa-floppy-disk"></i> Save Draft</button>
+                    <button type="submit" class="qa-btn primary" data-save-status="published"><i class="fas fa-paper-plane"></i> Publish to Library</button>
                     <button type="button" class="qa-btn ghost" id="qa-clear-btn"><i class="fas fa-plus"></i> Start New</button>
                 </div>
             </form>
@@ -280,7 +287,11 @@ const App = {
         });
         bind('#qa-form', 'submit', (event) => {
             event.preventDefault();
-            run(this.saveQuestion(), 'Could not save FAQ question.');
+            run(this.saveQuestion('published'), 'Could not save FAQ question.');
+        });
+        bind('[data-save-status]', 'click', (event, button) => {
+            event.preventDefault();
+            run(this.saveQuestion(button.dataset.saveStatus), 'Could not save FAQ question.');
         });
         bind('#qa-search', 'input', (event) => {
             this.filterList(event.target.value);
@@ -388,18 +399,20 @@ const App = {
         });
     },
 
-    async saveQuestion() {
+    async saveQuestion(statusOverride = null) {
         const question = document.getElementById('qa-question')?.value.trim() || '';
         if (!question) return this.toast('Question text is required.', 'warn');
 
         const existing = this.mode === 'edit' ? (this.selectedQuestion() || {}) : {};
+        const requestedStatus = String(statusOverride || document.getElementById('qa-status')?.value || 'draft').toLowerCase();
+        const status = requestedStatus === 'published' ? 'published' : 'draft';
         const item = {
             ...existing,
             id: existing.id || QAData.makeId('qa'),
             question,
             answer: document.getElementById('qa-answer')?.value.trim() || '',
             tags: (document.getElementById('qa-tags')?.value || '').split(',').map(v => v.trim()).filter(Boolean),
-            status: document.getElementById('qa-status')?.value || 'published',
+            status,
             resources: this.resources.map(r => ({ ...r })),
             createdAt: existing.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -414,7 +427,7 @@ const App = {
         this.mode = 'edit';
         this.selectedId = item.id;
         this.resources = item.resources.map(r => ({ ...r }));
-        this.toast('FAQ question saved.', 'ok');
+        this.toast(status === 'draft' ? 'Draft saved. Trainees cannot see it yet.' : 'FAQ published to the live library.', 'ok');
         this.render();
     },
 
