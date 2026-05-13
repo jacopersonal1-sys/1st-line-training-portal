@@ -1175,10 +1175,17 @@
                 </div>
 
                 <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
-                    <h4 style="margin:0 0 10px 0;">Agent Progress Builder Insight</h4>
-                    <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
-                        Build the Agent Progress checklist from configured topics/tests. `Onboard Report` and `Insight Review` are auto-included. Tick the report columns to include each item in the Onboard Report score sections.
-                    </p>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+                        <div>
+                            <h4 style="margin:0 0 10px 0;">Agent Progress Builder Insight</h4>
+                            <p style="margin:0; color:var(--text-muted); font-size:0.82rem;">
+                                Build the Agent Progress checklist from configured topics/tests. `Onboard Report` and `Insight Review` are auto-included. Tick the report columns to include each item in the Onboard Report score sections.
+                            </p>
+                        </div>
+                        <button class="btn-primary btn-sm" onclick="saveInsightProgressConfig()" style="width:auto; flex-shrink:0;">
+                            <i class="fas fa-save"></i> Save Progress List
+                        </button>
+                    </div>
                     <div style="display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:10px;">
                         <div style="min-width:300px; flex:1;">
                             <label for="insightProgressItemSelect">Vetting / Assessment / Test</label>
@@ -1201,7 +1208,7 @@
                                 </tr>
                             </thead>
                             <tbody id="insightProgressTableBody">
-                                <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Loading progress requirements...</td></tr>
+                                <tr><td colspan="8" style="text-align:center; color:var(--text-muted);">Loading progress requirements...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1694,6 +1701,11 @@
             <div class="card">
                 <h3>Graduated / Archived Agents</h3>
                 <p style="color:var(--text-muted); margin-bottom:15px;">These agents have completed training and their data has been archived. You can restore them if needed.</p>
+                <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+                    <button class="btn-secondary btn-sm" onclick="repairArchiveSnapshots()" style="width:auto;">
+                        <i class="fas fa-screwdriver-wrench"></i> Repair Archive Snapshots
+                    </button>
+                </div>
                 <input type="text" id="graduateSearch" placeholder="Search Archives..." onkeyup="loadGraduatedAgents()" style="margin-bottom:10px;">
                 <div style="max-height:500px; overflow-y:auto;"><table class="admin-table"><thead><tr><th>Name</th><th>Graduated Date</th><th>Group</th><th>Action</th></tr></thead><tbody id="graduateList"></tbody></table></div>
             </div>

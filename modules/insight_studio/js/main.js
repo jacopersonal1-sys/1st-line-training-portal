@@ -35,6 +35,7 @@ const InsightApp = {
                     ...InsightDataService.state,
                     ...cached
                 };
+                if (typeof InsightDataService.resetIndexes === 'function') InsightDataService.resetIndexes();
                 this.state.loading = false;
                 this.render();
             }
@@ -226,7 +227,7 @@ const InsightApp = {
 
     getRowSummary: function(agentName) {
         const records = InsightDataService.getAgentRecords(agentName);
-        const status = InsightDataService.getAgentStatus(agentName);
+        const status = InsightDataService.buildStatusFromRecords(records);
         const attendance = InsightDataService.getAgentAttendance(agentName);
         const activity = InsightDataService.getAgentActivityBreakdown(agentName);
         const engagement = InsightDataService.getAgentContentEngagement(agentName);
@@ -792,6 +793,7 @@ const InsightApp = {
     },
 
     clampPercent: function(value) {
+        if (value === null || value === undefined || String(value).trim() === '') return null;
         const number = Number(value);
         if (!Number.isFinite(number)) return null;
         return Math.max(0, Math.min(100, Math.round(number)));
@@ -975,8 +977,9 @@ const InsightApp = {
         const regularRecords = records.filter(row => !this.isVettingAssessmentName(row.assessment) && !this.isLiveAssessmentRecord(row));
         const vettingRecords = records.filter(row => this.isVettingAssessmentName(row.assessment));
         const liveRecords = records.filter(row => this.isLiveAssessmentRecord(row));
-        const lateCount = attendance.filter(row => row.isLate).length;
-        const attendanceDays = attendance.length;
+        const countedAttendance = attendance.filter(row => !row.isIgnored);
+        const lateCount = countedAttendance.filter(row => row.isLate).length;
+        const attendanceDays = countedAttendance.length;
         const attendanceScore = attendanceDays > 0
             ? this.clampPercent(((attendanceDays - lateCount) / attendanceDays) * 100)
             : null;
@@ -984,13 +987,9 @@ const InsightApp = {
             .map(row => this.getComparisonMetricIdentity(row.assessment))
             .filter(Boolean));
         const standaloneSubmissions = submissions.filter(row => !recordMetricKeys.has(this.getComparisonMetricIdentity(row.testTitle)));
-        const assessmentScore = this.averagePercent(regularRecords.map(row => this.getComparisonScore(row)));
-        const vettingScore = this.averagePercent(vettingRecords.map(row => this.getComparisonScore(row)));
-        const liveScore = this.averagePercent(liveRecords.map(row => this.getComparisonScore(row)));
-        const testScore = this.averagePercent(standaloneSubmissions.map(row => this.getComparisonScore(row)));
         const focusScore = activity.hasData && activity.daysTracked > 0 ? this.clampPercent(activity.focusScore) : null;
         const metricValueMap = {};
-        const officialProgress = (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function')
+        const officialProgress = source.officialProgress || ((window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function')
             ? window.ProgressCatalog.getTraineeProgress(agent.name, source.group || agent.group || '', {
                 includeAuto: false,
                 data: {
@@ -1002,24 +1001,45 @@ const InsightApp = {
                     exemptions: source.exemptions || []
                 }
             })
-            : null;
+            : null);
         const progressScoreFinal = progressScore !== null ? progressScore : (officialProgress ? officialProgress.progress : null);
+        const officialScoreItems = officialProgress
+            ? (officialProgress.items || [])
+                .map((item) => ({
+                    ...item,
+                    score: this.clampPercent(item.score),
+                    type: String(item.type || '').trim().toLowerCase()
+                }))
+                .filter(item => item.score !== null && ['assessment', 'vetting', 'live', 'test'].includes(item.type))
+            : [];
+        const useOfficialScoreItems = officialScoreItems.length > 0;
+        const assessmentScore = useOfficialScoreItems
+            ? this.averagePercent(officialScoreItems.filter(item => item.type === 'assessment').map(item => item.score))
+            : this.averagePercent(regularRecords.map(row => this.getComparisonScore(row)));
+        const vettingScore = useOfficialScoreItems
+            ? this.averagePercent(officialScoreItems.filter(item => item.type === 'vetting').map(item => item.score))
+            : this.averagePercent(vettingRecords.map(row => this.getComparisonScore(row)));
+        const liveScore = useOfficialScoreItems
+            ? this.averagePercent(officialScoreItems.filter(item => item.type === 'live').map(item => item.score))
+            : this.averagePercent(liveRecords.map(row => this.getComparisonScore(row)));
+        const testScore = useOfficialScoreItems
+            ? this.averagePercent(officialScoreItems.filter(item => item.type === 'test').map(item => item.score))
+            : this.averagePercent(standaloneSubmissions.map(row => this.getComparisonScore(row)));
 
-        regularRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Assessment: ${row.assessment}`, this.getComparisonScore(row)));
-        vettingRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Vetting: ${row.assessment}`, this.getComparisonScore(row)));
-        liveRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Live: ${row.assessment}`, this.getComparisonScore(row)));
-        standaloneSubmissions.forEach(row => this.addComparisonMetricValue(metricValueMap, `Test: ${row.testTitle || 'Submission'}`, this.getComparisonScore(row)));
-        if (officialProgress) {
-            (officialProgress.items || []).forEach((item) => {
-                const score = this.clampPercent(item.score);
-                if (score === null) return;
+        if (useOfficialScoreItems) {
+            officialScoreItems.forEach((item) => {
                 const typeLabel = item.type === 'live' ? 'Live' : (item.type === 'vetting' ? 'Vetting' : (item.type === 'test' ? 'Test' : 'Assessment'));
-                this.addComparisonMetricValue(metricValueMap, `${typeLabel}: ${item.name}`, score);
+                this.addComparisonMetricValue(metricValueMap, `${typeLabel}: ${item.name}`, item.score);
             });
+        } else {
+            regularRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Assessment: ${row.assessment}`, this.getComparisonScore(row)));
+            vettingRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Vetting: ${row.assessment}`, this.getComparisonScore(row)));
+            liveRecords.forEach(row => this.addComparisonMetricValue(metricValueMap, `Live: ${row.assessment}`, this.getComparisonScore(row)));
+            standaloneSubmissions.forEach(row => this.addComparisonMetricValue(metricValueMap, `Test: ${row.testTitle || 'Submission'}`, this.getComparisonScore(row)));
         }
         this.addComparisonMetricValue(metricValueMap, 'Attendance', attendanceScore);
         this.addComparisonMetricValue(metricValueMap, 'Focus Level', focusScore);
-        this.addDailyAttendanceMetricValues(metricValueMap, attendance);
+        this.addDailyAttendanceMetricValues(metricValueMap, countedAttendance);
         this.addDailyFocusMetricValues(metricValueMap, activity.history || []);
 
         const overallScore = this.averagePercent([
@@ -1083,6 +1103,7 @@ const InsightApp = {
             exemptions: Array.isArray(archive.exemptions) ? archive.exemptions : [],
             attendance: archiveAttendance,
             activity: archiveActivity,
+            officialProgress: archive.officialProgress || null,
             progressScore: null,
             engagement: { totals: { totalQuizAttempts: 0, totalWatchSeconds: 0 } }
         });
@@ -1457,24 +1478,56 @@ const InsightApp = {
     },
 
     getComparisonLineColor: function(index) {
+        const palette = [
+            '#f97316', '#22c55e', '#38bdf8', '#e879f9', '#facc15', '#a78bfa',
+            '#fb7185', '#14b8a6', '#60a5fa', '#84cc16', '#f59e0b', '#ec4899',
+            '#06b6d4', '#c084fc', '#ef4444', '#10b981'
+        ];
         const idx = Math.max(0, Number(index) || 0);
-        const hue = Math.round((idx * 137.508) % 360);
-        const saturation = 68 + ((idx % 3) * 8);
-        const lightness = 38 + ((idx % 4) * 8);
-        return `hsl(${hue}, ${Math.min(saturation, 86)}%, ${Math.min(lightness, 58)}%)`;
+        return palette[idx % palette.length];
+    },
+
+    getTrendRowStats: function(row, metricLabels) {
+        const values = (metricLabels || [])
+            .map(label => this.clampPercent(row && row.metricMap && row.metricMap[label]))
+            .filter(value => value !== null);
+        if (!values.length) return { avg: null, low: null, high: null, last: null };
+        return {
+            avg: this.averagePercent(values),
+            low: Math.min(...values),
+            high: Math.max(...values),
+            last: values[values.length - 1]
+        };
     },
 
     renderComparisonTrend: function(rows, category, title) {
         const chartRows = Array.isArray(rows) ? rows : [];
         const metricLabels = this.getBreakdownMetricLabels(chartRows, category || 'performance');
-        const width = 720;
-        const height = category === 'performance' ? 300 : 220;
+        const compactPerformance = String(category || 'performance') === 'performance';
+        const rowPointSets = chartRows.map((row) => {
+            return metricLabels
+                .map((label) => ({
+                    label,
+                    value: row.metricMap && row.metricMap[label],
+                    score: this.clampPercent(row.metricMap && row.metricMap[label])
+                }))
+                .filter(point => point.score !== null);
+        });
+        const axisCount = compactPerformance
+            ? Math.max(1, ...rowPointSets.map(points => points.length))
+            : metricLabels.length;
+        const plotWidth = Math.max(720, axisCount * 82);
+        const labelPad = category === 'performance' ? 150 : 88;
+        const width = plotWidth + labelPad;
+        const height = category === 'performance' ? 360 : 240;
         const pad = 44;
-        const xFor = (idx) => metricLabels.length <= 1 ? pad : pad + (idx * (width - pad * 2) / (metricLabels.length - 1));
+        const rightEdge = plotWidth - pad;
+        const xFor = (idx) => axisCount <= 1 ? pad : pad + (idx * (rightEdge - pad) / (axisCount - 1));
         const yFor = (value) => height - pad - ((this.clampPercent(value) || 0) * (height - pad * 2) / 100);
+        const esc = this.escapeHtml;
 
         if (!chartRows.length || !metricLabels.length) {
-            return `<div class="ins-item">No ${this.escapeHtml(title || 'comparison')} percentages are available for this graph yet.</div>`;
+            return `<div class="ins-item">No ${esc(title || 'comparison')} percentages are available for this graph yet.</div>`;
         }
 
         if (category === 'attendance' || category === 'focus') {
@@ -1482,26 +1535,64 @@ const InsightApp = {
             if (datedLabels.length > 1) return this.renderDailyMetricGrid(chartRows, datedLabels, category);
         }
 
+        const pathRows = chartRows.map((row, rowIdx) => {
+            const available = (compactPerformance ? rowPointSets[rowIdx] : rowPointSets[rowIdx].map((point) => ({
+                ...point,
+                idx: metricLabels.indexOf(point.label)
+            }))).map((point, pointIdx) => ({
+                ...point,
+                idx: compactPerformance ? pointIdx : point.idx
+            }));
+            const points = available.map(point => `${xFor(point.idx)},${yFor(point.score)}`).join(' ');
+            const stats = this.getTrendRowStats(row, metricLabels);
+            const lastPoint = available.length ? available[available.length - 1] : null;
+            return { row, rowIdx, color: this.getComparisonLineColor(rowIdx), available, points, stats, lastPoint };
+        }).filter(item => item.points);
+
+        const endLabels = pathRows
+            .filter(item => item.lastPoint)
+            .map(item => ({
+                ...item,
+                x: xFor(item.lastPoint.idx) + 8,
+                y: yFor(item.lastPoint.score)
+            }))
+            .sort((a, b) => a.y - b.y);
+        endLabels.forEach((item, idx) => {
+            const minY = pad + 8 + (idx * 13);
+            if (item.y < minY) item.y = minY;
+        });
+
         return `
+            <div class="ins-trend-scroll">
             <svg class="ins-line-chart ins-breakdown-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Agent breakdown percentage comparison">
-                <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" class="ins-chart-axis"></line>
+                <line x1="${pad}" y1="${height - pad}" x2="${rightEdge}" y2="${height - pad}" class="ins-chart-axis"></line>
                 <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="ins-chart-axis"></line>
-                ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${width - pad}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="6" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
-                ${chartRows.map((row, rowIdx) => {
-                    const color = this.getComparisonLineColor(rowIdx);
-                    const available = metricLabels
-                        .map((label, idx) => ({ idx, value: row.metricMap && row.metricMap[label] }))
-                        .filter(point => this.clampPercent(point.value) !== null);
-                    const points = available.map(point => `${xFor(point.idx)},${yFor(point.value)}`).join(' ');
-                    return points ? `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></polyline>${available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.value)}" r="2.4" fill="${color}"></circle>`).join('')}` : '';
+                ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${rightEdge}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="6" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
+                ${pathRows.map((item) => {
+                    const titleText = `${item.row.label} | Avg ${item.stats.avg === null ? '-' : `${item.stats.avg}%`} | Low ${item.stats.low === null ? '-' : `${item.stats.low}%`} | High ${item.stats.high === null ? '-' : `${item.stats.high}%`}`;
+                    return `<g class="ins-trend-series">
+                        <title>${esc(titleText)}</title>
+                        <polyline points="${item.points}" fill="none" stroke="${item.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                        ${item.available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.score)}" r="3.2" fill="${item.color}"><title>${esc(item.row.label)} | ${esc(point.label.replace(/^(Assessment|Vetting|Live|Test):\s*/i, ''))} | ${point.score}%</title></circle>`).join('')}
+                    </g>`;
                 }).join('')}
-                ${metricLabels.map((label, idx) => `<text x="${xFor(idx)}" y="${height - 14}" text-anchor="middle" class="ins-chart-label">${idx + 1}</text>`).join('')}
+                ${Array.from({ length: axisCount }, (_, idx) => `<text x="${xFor(idx)}" y="${height - 14}" text-anchor="middle" class="ins-chart-label">${idx + 1}</text>`).join('')}
+                ${endLabels.map((item) => `<text x="${item.x}" y="${item.y + 4}" class="ins-chart-end-label" fill="${item.color}">${esc(this.shortenMetricLabel(item.row.label, 18))}</text>`).join('')}
             </svg>
-            <div class="ins-chart-legend">
-                ${chartRows.map((row, idx) => `<span><i style="background:${this.getComparisonLineColor(idx)};"></i>${this.escapeHtml(row.label)}</span>`).join('')}
+            </div>
+            <div class="ins-trend-summary">
+                ${pathRows.map((item) => `
+                    <div class="ins-trend-summary-row">
+                        <span><i style="background:${item.color};"></i>${esc(item.row.label)}</span>
+                        <strong>Avg ${item.stats.avg === null ? '-' : `${item.stats.avg}%`}</strong>
+                        <small>Low ${item.stats.low === null ? '-' : `${item.stats.low}%`} | High ${item.stats.high === null ? '-' : `${item.stats.high}%`}</small>
+                    </div>
+                `).join('')}
             </div>
             <div class="ins-axis-key">
-                ${metricLabels.map((label, idx) => `<span><strong>${idx + 1}</strong> ${this.escapeHtml(label.replace(/^(Assessment|Vetting|Live|Test|Attendance|Focus):\s*/i, ''))}</span>`).join('')}
+                ${compactPerformance
+                    ? '<span><strong>1...N</strong> Actual scored assessment/test order per person. Lines stop where that person has no further scored item.</span>'
+                    : metricLabels.map((label, idx) => `<span><strong>${idx + 1}</strong> ${esc(label.replace(/^(Assessment|Vetting|Live|Test|Attendance|Focus):\s*/i, ''))}</span>`).join('')}
             </div>
         `;
     },

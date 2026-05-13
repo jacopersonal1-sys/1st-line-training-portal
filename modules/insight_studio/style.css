@@ -348,6 +348,19 @@ body {
     display: block;
 }
 
+.ins-trend-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.ins-trend-scroll .ins-line-chart {
+    min-width: 880px;
+}
+
 .ins-radar-grid,
 .ins-radar-axis,
 .ins-chart-axis,
@@ -371,6 +384,70 @@ body {
 .ins-chart-label {
     fill: var(--text-muted);
     font-size: 10px;
+}
+
+.ins-chart-end-label {
+    font-size: 9px;
+    font-weight: 700;
+    paint-order: stroke;
+    stroke: rgba(10, 13, 19, 0.9);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+}
+
+.ins-trend-series {
+    opacity: 0.72;
+    transition: opacity 120ms ease;
+}
+
+.ins-trend-series:hover {
+    opacity: 1;
+}
+
+.ins-trend-series:hover polyline {
+    stroke-width: 4;
+}
+
+.ins-trend-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 6px 10px;
+    margin-top: 10px;
+}
+
+.ins-trend-summary-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 8px;
+    align-items: center;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: var(--text-muted);
+    font-size: 0.73rem;
+}
+
+.ins-trend-summary-row span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+
+.ins-trend-summary-row i {
+    width: 16px;
+    height: 3px;
+    border-radius: 999px;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.ins-trend-summary-row small {
+    grid-column: 1 / -1;
+    color: var(--text-muted);
 }
 
 .ins-chart-legend {

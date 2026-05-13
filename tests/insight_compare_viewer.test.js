@@ -1,6 +1,10 @@
 const InsightApp = require('../modules/insight_studio/js/main.js');
 
 describe('Insight Compare Viewer', () => {
+    afterEach(() => {
+        delete global.window.ProgressCatalog;
+    });
+
     test('prefers final records over duplicate raw submissions with the same title', () => {
         const row = InsightApp.buildComparisonRowFromData(
             { name: 'Nompumelelo Dzingwa', group: '2026-03-A' },
@@ -40,6 +44,44 @@ describe('Insight Compare Viewer', () => {
         expect(InsightApp.getComparisonScore({ score: 0, raw: {} })).toBeNull();
     });
 
+    test('uses official progress items as the definitive score source when available', () => {
+        global.window.ProgressCatalog = {
+            getTraineeProgress: jest.fn(() => ({
+                progress: 50,
+                items: [
+                    { name: 'Configured Assessment', type: 'assessment', status: 'completed', score: 80 },
+                    { name: 'Configured Live', type: 'live', status: 'completed', score: 90 },
+                    { name: 'Missing Configured Test', type: 'test', status: 'missing', score: null }
+                ],
+                completedCount: 2,
+                totalRequired: 3
+            }))
+        };
+
+        const row = InsightApp.buildComparisonRowFromData(
+            { name: 'Agent A', group: 'G1' },
+            {
+                records: [
+                    { trainee: 'Agent A', assessment: 'Configured Assessment', score: 80, raw: { score: 80 } },
+                    { trainee: 'Agent A', assessment: 'Old Extra Assessment', score: 5, raw: { score: 5 } }
+                ],
+                submissions: [],
+                attendance: [],
+                activity: { hasData: false, daysTracked: 0, violationCount: 0, focusScore: 0, dataStatus: 'no_data' },
+                engagement: { totals: { totalQuizAttempts: 0, totalWatchSeconds: 0 } },
+                progressScore: null
+            }
+        );
+
+        expect(row.assessmentScore).toBe(80);
+        expect(row.liveScore).toBe(90);
+        expect(row.progressScore).toBe(50);
+        expect(row.metricMap['Assessment: Configured Assessment']).toBe(80);
+        expect(row.metricMap['Live: Configured Live']).toBe(90);
+        expect(row.metricMap['Assessment: Old Extra Assessment']).toBeUndefined();
+        expect(row.metricMap['Test: Missing Configured Test']).toBeUndefined();
+    });
+
     test('builds attendance and focus graph points per date', () => {
         const row = InsightApp.buildComparisonRowFromData(
             { name: 'Agent A', group: 'G1' },
@@ -48,7 +90,8 @@ describe('Insight Compare Viewer', () => {
                 submissions: [],
                 attendance: [
                     { user: 'Agent A', date: '2026-05-07', isLate: false },
-                    { user: 'Agent A', date: '2026-05-08', isLate: true }
+                    { user: 'Agent A', date: '2026-05-08', isLate: true },
+                    { user: 'Agent A', date: '2026-05-09', isLate: true, isIgnored: true }
                 ],
                 activity: {
                     hasData: true,
@@ -68,6 +111,10 @@ describe('Insight Compare Viewer', () => {
 
         expect(row.metricMap['Attendance: 2026-05-07']).toBe(100);
         expect(row.metricMap['Attendance: 2026-05-08']).toBe(0);
+        expect(row.metricMap['Attendance: 2026-05-09']).toBeUndefined();
+        expect(row.attendanceDays).toBe(2);
+        expect(row.lateCount).toBe(1);
+        expect(row.attendanceScore).toBe(50);
         expect(row.metricMap['Focus: 2026-05-07']).toBe(75);
         expect(row.metricMap['Focus: 2026-05-08']).toBe(25);
         expect(InsightApp.getBreakdownMetricLabels([row], 'attendance')).toEqual([

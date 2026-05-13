@@ -296,7 +296,9 @@ function renderAgentDashboard(agentName, attemptKey = '') {
     const agentReview = selectedAttempt.reviews[0] || null;
 
     let group = selectedAttempt.group || "Unknown Group";
-    const officialProgress = (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function')
+    const officialProgress = archivedData && archivedData.officialProgress
+        ? archivedData.officialProgress
+        : ((window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function')
         ? window.ProgressCatalog.getTraineeProgress(agentName, group, {
             includeAuto: true,
             data: {
@@ -308,7 +310,7 @@ function renderAgentDashboard(agentName, attemptKey = '') {
                 exemptions: selectedAttempt.exemptions || []
             }
         })
-        : null;
+        : null);
     let gradDateHtml = "";
     if (isArchived && archivedData) {
         if (archiveType === 'retrain') {

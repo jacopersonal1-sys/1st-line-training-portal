@@ -5,6 +5,7 @@ const INSIGHT_FETCH_TIMEOUT_MS = 9000;
 const INSIGHT_BOOT_TIMEOUT_MS = 7000;
 const INSIGHT_SUBJECT_REVIEW_KEY = 'insight_subject_reviews';
 const INSIGHT_PROGRESS_CONFIG_KEY = 'insight_progress_config';
+const INSIGHT_CACHE_MAX_BYTES = 900000;
 
 const INSIGHT_AUTO_PROGRESS_ITEMS = [
     { name: 'Onboard Report', type: 'report', source: 'auto' },
@@ -196,10 +197,22 @@ const InsightDataService = {
         progressConfig: null,
         subjectReviews: []
     },
+    _indexes: null,
+
+    resetIndexes: function() {
+        this._indexes = null;
+    },
 
     loadCache: function() {
         try {
-            const parsed = JSON.parse(localStorage.getItem(INSIGHT_MODULE_CACHE_KEY) || '{}');
+            const raw = localStorage.getItem(INSIGHT_MODULE_CACHE_KEY);
+            if (!raw) return null;
+            if (raw.length > INSIGHT_CACHE_MAX_BYTES) {
+                localStorage.removeItem(INSIGHT_MODULE_CACHE_KEY);
+                console.warn('[Insight] Removed oversized startup cache to prevent UI stalls.');
+                return null;
+            }
+            const parsed = JSON.parse(raw || '{}');
             if (!parsed || typeof parsed !== 'object') return null;
             return parsed;
         } catch (error) {
@@ -208,7 +221,128 @@ const InsightDataService = {
     },
 
     saveCache: function() {
-        localStorage.setItem(INSIGHT_MODULE_CACHE_KEY, JSON.stringify(this.state));
+        const snapshot = {
+            ruleConfig: this.state.ruleConfig || null,
+            progressConfig: this.state.progressConfig || null,
+            subjectReviews: this.state.subjectReviews || [],
+            savedReports: this.state.savedReports || [],
+            insightReviews: this.state.insightReviews || [],
+            exemptions: this.state.exemptions || []
+        };
+        localStorage.setItem(INSIGHT_MODULE_CACHE_KEY, JSON.stringify(snapshot));
+    },
+
+    buildIndexes: function() {
+        const addToMap = (map, name, value) => {
+            const key = insToken(name);
+            if (!key) return;
+            if (!map[key]) map[key] = [];
+            map[key].push(value);
+        };
+        const setIfMissing = (map, name, value) => {
+            const key = insToken(name);
+            if (!key || map[key] !== undefined) return;
+            map[key] = value;
+        };
+
+        const profileByToken = {};
+        (this.state.users || []).forEach(user => setIfMissing(profileByToken, user.user, user));
+
+        const groupByToken = {};
+        Object.entries(this.state.rosters || {}).forEach(([groupId, members]) => {
+            if (!Array.isArray(members)) return;
+            members.forEach(member => setIfMissing(groupByToken, member, groupId));
+        });
+
+        const recordsByToken = {};
+        const attendanceByToken = {};
+        const monitorByToken = {};
+        const violationsByToken = {};
+        const submissionsByToken = {};
+        const feedbackByToken = {};
+        const savedReportsByToken = {};
+        const insightReviewsByToken = {};
+        const exemptionsByToken = {};
+        const contentAnalyticsByToken = {};
+        const contentSubjectMap = {};
+        const agentCandidates = [];
+
+        (this.state.users || []).forEach(user => {
+            if (['trainee', 'teamleader'].includes(user.role)) agentCandidates.push(user.user);
+        });
+        Object.values(this.state.rosters || {}).forEach((members) => {
+            if (Array.isArray(members)) agentCandidates.push(...members);
+        });
+        (this.state.records || []).forEach(row => { agentCandidates.push(row.trainee); addToMap(recordsByToken, row.trainee, row); });
+        (this.state.attendance || []).forEach(row => { agentCandidates.push(row.user); addToMap(attendanceByToken, row.user, row); });
+        (this.state.monitorHistory || []).forEach(row => { agentCandidates.push(row.user); addToMap(monitorByToken, row.user, row); });
+        (this.state.violationReports || []).forEach(row => { agentCandidates.push(row.user); addToMap(violationsByToken, row.user, row); });
+        (this.state.submissions || []).forEach(row => { agentCandidates.push(row.trainee); addToMap(submissionsByToken, row.trainee, row); });
+        (this.state.savedReports || []).forEach(row => { agentCandidates.push(row.trainee); addToMap(savedReportsByToken, row.trainee, row); });
+        (this.state.insightReviews || []).forEach(row => { agentCandidates.push(row.trainee); addToMap(insightReviewsByToken, row.trainee, row); });
+        (this.state.exemptions || []).forEach(row => addToMap(exemptionsByToken, row.trainee, row));
+        (this.state.tlFeedback || []).forEach(row => {
+            const agent = insPickIdentity(row);
+            agentCandidates.push(agent);
+            addToMap(feedbackByToken, agent, row);
+        });
+
+        const contentStore = this.state.contentStore || { entries: [], analytics: [] };
+        (contentStore.entries || []).forEach((entry) => {
+            (entry.subjects || []).forEach((subject) => {
+                const id = String(subject.id || '').trim();
+                if (!id) return;
+                contentSubjectMap[id] = {
+                    code: String(subject.code || '').trim(),
+                    title: String(subject.textHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)
+                };
+            });
+        });
+        (contentStore.analytics || []).forEach(row => addToMap(contentAnalyticsByToken, insPickIdentity(row), row));
+
+        Object.values(attendanceByToken).forEach(rows => rows.sort((a, b) => insToTs(b.date) - insToTs(a.date)));
+        Object.values(monitorByToken).forEach(rows => rows.sort((a, b) => insToTs(b.date) - insToTs(a.date)));
+        Object.values(violationsByToken).forEach(rows => rows.sort((a, b) => insToTs(b.date || b.createdAt) - insToTs(a.date || a.createdAt)));
+
+        const seen = new Set();
+        const agents = [];
+        agentCandidates.forEach((name) => {
+            const clean = String(name || '').trim();
+            const key = insToken(clean);
+            if (!key || seen.has(key)) return;
+            seen.add(key);
+            const profile = profileByToken[key] || null;
+            agents.push({
+                name: clean,
+                group: groupByToken[key] || 'Ungrouped',
+                badges: profile && Array.isArray(profile.badges) ? profile.badges : [],
+                role: profile ? profile.role : 'trainee',
+                blocked: profile ? profile.status === 'blocked' : false
+            });
+        });
+        agents.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+        this._indexes = {
+            profileByToken,
+            groupByToken,
+            recordsByToken,
+            attendanceByToken,
+            monitorByToken,
+            violationsByToken,
+            submissionsByToken,
+            feedbackByToken,
+            savedReportsByToken,
+            insightReviewsByToken,
+            exemptionsByToken,
+            contentAnalyticsByToken,
+            contentSubjectMap,
+            agents
+        };
+        return this._indexes;
+    },
+
+    getIndexes: function() {
+        return this._indexes || this.buildIndexes();
     },
 
     withTimeout: async function(promise, ms, fallbackValue = null, label = 'request') {
@@ -623,6 +757,7 @@ const InsightDataService = {
                 ...this.state,
                 ...cached
             };
+            this.resetIndexes();
         }
 
         if (!AppContext.supabase) return this.state;
@@ -779,6 +914,7 @@ const InsightDataService = {
         localStorage.setItem(INSIGHT_SUBJECT_REVIEW_KEY, JSON.stringify(this.state.subjectReviews));
 
         this.saveCache();
+        this.resetIndexes();
         return this.state;
     },
 
@@ -791,58 +927,15 @@ const InsightDataService = {
     },
 
     getAgentGroup: function(agentName) {
-        const rosters = this.state.rosters || {};
-        for (const groupId of Object.keys(rosters)) {
-            const members = Array.isArray(rosters[groupId]) ? rosters[groupId] : [];
-            if (members.some(member => insMatch(member, agentName))) return groupId;
-        }
-        return 'Ungrouped';
+        return this.getIndexes().groupByToken[insToken(agentName)] || 'Ungrouped';
     },
 
     getAgentProfile: function(agentName) {
-        return this.state.users.find(user => insMatch(user.user, agentName)) || null;
+        return this.getIndexes().profileByToken[insToken(agentName)] || null;
     },
 
     getAllAgents: function() {
-        const candidates = [];
-        this.state.users.forEach(user => {
-            if (['trainee', 'teamleader'].includes(user.role)) candidates.push(user.user);
-        });
-
-        Object.values(this.state.rosters || {}).forEach((members) => {
-            if (!Array.isArray(members)) return;
-            members.forEach(member => candidates.push(member));
-        });
-
-        this.state.records.forEach(row => candidates.push(row.trainee));
-        this.state.attendance.forEach(row => candidates.push(row.user));
-        this.state.monitorHistory.forEach(row => candidates.push(row.user));
-        this.state.violationReports.forEach(row => candidates.push(row.user));
-        this.state.submissions.forEach(row => candidates.push(row.trainee));
-        this.state.savedReports.forEach(row => candidates.push(row.trainee));
-        this.state.insightReviews.forEach(row => candidates.push(row.trainee));
-        (this.state.tlFeedback || []).forEach(row => candidates.push(insPickIdentity(row)));
-
-        const seen = new Set();
-        const list = [];
-        candidates.forEach((name) => {
-            const clean = String(name || '').trim();
-            if (!clean) return;
-            const key = insToken(clean);
-            if (!key || seen.has(key)) return;
-            seen.add(key);
-
-            const profile = this.getAgentProfile(clean);
-            list.push({
-                name: clean,
-                group: this.getAgentGroup(clean),
-                badges: profile && Array.isArray(profile.badges) ? profile.badges : [],
-                role: profile ? profile.role : 'trainee',
-                blocked: profile ? profile.status === 'blocked' : false
-            });
-        });
-
-        return list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        return this.getIndexes().agents.slice();
     },
 
     getRuleConfig: function() {
@@ -917,10 +1010,12 @@ const InsightDataService = {
     },
 
     isProgressItemCompleted: function(agentName, item) {
+        const indexes = this.getIndexes();
+        const key = insToken(agentName);
         if (window.ProgressCatalog && typeof window.ProgressCatalog.getItemEvidence === 'function') {
             return window.ProgressCatalog.getItemEvidence(agentName, item, {
                 records: this.getAgentRecords(agentName),
-                submissions: (this.state.submissions || []).filter(row => insMatch(row.trainee, agentName)),
+                submissions: (indexes.submissionsByToken[key] || []),
                 savedReports: this.state.savedReports || [],
                 insightReviews: this.state.insightReviews || [],
                 liveBookings: this.state.liveBookings || []
@@ -941,7 +1036,7 @@ const InsightDataService = {
         const records = this.getAgentRecords(agentName);
         if (records.some((row) => insNormalize(row.assessment) === normalizedName)) return true;
 
-        const subs = (this.state.submissions || []).filter(row => insMatch(row.trainee, agentName));
+        const subs = (indexes.submissionsByToken[key] || []);
         const hasSubmission = subs.some((row) => {
             const subStatus = insNormalize(row.status);
             if (!['completed', 'pass', 'passed', 'done', 'submitted'].includes(subStatus)) return false;
@@ -964,13 +1059,15 @@ const InsightDataService = {
     },
 
     getAgentProgress: function(agentName, groupID) {
+        const indexes = this.getIndexes();
+        const key = insToken(agentName);
         if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
             return window.ProgressCatalog.getTraineeProgress(agentName, groupID, {
                 includeAuto: true,
                 items: this.getProgressRequiredItems(),
                 data: {
                     records: this.getAgentRecords(agentName),
-                    submissions: (this.state.submissions || []).filter(row => insMatch(row.trainee, agentName)),
+                    submissions: (indexes.submissionsByToken[key] || []),
                     savedReports: this.state.savedReports || [],
                     insightReviews: this.state.insightReviews || [],
                     liveBookings: this.state.liveBookings || [],
@@ -1020,7 +1117,7 @@ const InsightDataService = {
     },
 
     getAgentRecords: function(agentName) {
-        return this.state.records.filter(row => insMatch(row.trainee, agentName));
+        return (this.getIndexes().recordsByToken[insToken(agentName)] || []).slice();
     },
 
     getAgentRecordsForGroup: function(agentName, groupID) {
@@ -1085,14 +1182,14 @@ const InsightDataService = {
     },
 
     getAgentAttendance: function(agentName) {
-        const rows = this.state.attendance.filter(row => insMatch(row.user, agentName));
-        rows.sort((a, b) => insToTs(b.date) - insToTs(a.date));
-        return rows;
+        return (this.getIndexes().attendanceByToken[insToken(agentName)] || []).slice();
     },
 
     getAgentActivityBreakdown: function(agentName) {
-        const history = this.state.monitorHistory.filter(row => insMatchesAgent(row, agentName));
-        const violationReports = (this.state.violationReports || []).filter(row => insMatchesAgent(row, agentName));
+        const indexes = this.getIndexes();
+        const key = insToken(agentName);
+        const history = (indexes.monitorByToken[key] || []).slice();
+        const violationReports = (indexes.violationsByToken[key] || []).slice();
         let idleMs = 0;
         let externalMs = 0;
         let studyMs = 0;
@@ -1155,8 +1252,7 @@ const InsightDataService = {
     },
 
     getAgentFeedback: function(agentName) {
-        return (this.state.tlFeedback || [])
-            .filter(item => insMatchesAgent(item, agentName))
+        return (this.getIndexes().feedbackByToken[insToken(agentName)] || [])
             .map(item => ({
                 ...item,
                 trainee: insPickIdentity(item) || item.trainee || '',
@@ -1226,23 +1322,12 @@ const InsightDataService = {
     },
 
     getAgentContentEngagement: function(agentName) {
-        const contentStore = this.state.contentStore || { entries: [], analytics: [], annotations: [] };
-        const subjectMap = {};
-
-        (contentStore.entries || []).forEach((entry) => {
-            (entry.subjects || []).forEach((subject) => {
-                const id = String(subject.id || '').trim();
-                if (!id) return;
-                subjectMap[id] = {
-                    code: String(subject.code || '').trim(),
-                    title: String(subject.textHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)
-                };
-            });
-        });
+        const indexes = this.getIndexes();
+        const key = insToken(agentName);
+        const subjectMap = indexes.contentSubjectMap || {};
 
         const bySubject = {};
-        (contentStore.analytics || []).forEach((row) => {
-            if (!insMatchesAgent(row, agentName)) return;
+        (indexes.contentAnalyticsByToken[key] || []).forEach((row) => {
             const subjectId = String(row.subjectId || row.subject_id || row.contentSubjectId || '').trim();
             if (!subjectId) return;
             if (!bySubject[subjectId]) {
@@ -1264,8 +1349,7 @@ const InsightDataService = {
             bySubject[subjectId].skips += insToNumber(row.skips, 0);
         });
 
-        this.state.submissions.forEach((submission) => {
-            if (!insMatchesAgent(submission, agentName)) return;
+        (indexes.submissionsByToken[key] || []).forEach((submission) => {
             const context = submission.contentStudioContext || {};
             const subjectId = String(context.subjectId || context.subject_id || submission.subjectId || '').trim();
             if (!subjectId) return;
@@ -1315,6 +1399,8 @@ const InsightDataService = {
 
     getAgentTimeline: function(agentName) {
         const events = [];
+        const indexes = this.getIndexes();
+        const key = insToken(agentName);
 
         this.getAgentRecords(agentName).forEach((record) => {
             events.push({
@@ -1325,8 +1411,7 @@ const InsightDataService = {
             });
         });
 
-        this.state.submissions
-            .filter(submission => insMatch(submission.trainee, agentName))
+        (indexes.submissionsByToken[key] || [])
             .forEach((submission) => {
                 events.push({
                     ts: insToTs(submission.date || submission.lastModified || submission.createdAt),
@@ -1354,8 +1439,7 @@ const InsightDataService = {
             });
         });
 
-        this.state.monitorHistory
-            .filter(history => insMatch(history.user, agentName))
+        (indexes.monitorByToken[key] || [])
             .forEach((history) => {
                 const summary = history.summary || {};
                 events.push({
@@ -1870,6 +1954,7 @@ const InsightDataService = {
 
         this.state.subjectReviews = this.normalizeSubjectReviews(list);
         localStorage.setItem(INSIGHT_SUBJECT_REVIEW_KEY, JSON.stringify(this.state.subjectReviews));
+        this.resetIndexes();
         this.saveCache();
 
         if (AppContext.supabase) {
@@ -1951,6 +2036,7 @@ const InsightDataService = {
         }
 
         localStorage.setItem('exemptions', JSON.stringify(this.state.exemptions));
+        this.resetIndexes();
         this.saveCache();
         return { ok: true };
     },
@@ -2008,6 +2094,7 @@ const InsightDataService = {
             }
         }
 
+        this.resetIndexes();
         this.saveCache();
         return { ok: true };
     }

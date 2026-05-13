@@ -895,6 +895,46 @@
         return cleanProgress;
     }
 
+    async function saveInsightProgressConfig() {
+        const stamp = new Date().toISOString();
+        const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        const progressConfig = sanitizeProgressConfig({
+            ...getDraftProgressConfig(),
+            updatedAt: stamp,
+            updatedBy: actor
+        });
+
+        localStorage.setItem(INSIGHT_PROGRESS_KEY, JSON.stringify(progressConfig));
+        setDraftProgressConfig(progressConfig);
+
+        let synced = true;
+        try {
+            if (typeof saveToServer === 'function') {
+                synced = await saveToServer([INSIGHT_PROGRESS_KEY], true);
+            }
+        } catch (error) {
+            synced = false;
+            console.warn('[Insight Rules] Progress builder cloud sync failed:', error);
+        }
+
+        refreshInsightRulesView();
+
+        if (synced === false) {
+            if (typeof showToast === 'function') showToast('Progress list saved locally, but cloud sync failed.', 'warning');
+            return false;
+        }
+
+        if (typeof showToast === 'function') {
+            showToast('Agent Progress list saved for all trainees.', 'success');
+        }
+
+        const activeSection = document.querySelector('section.active');
+        if (activeSection && activeSection.id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
+            InsightStudioLoader.refresh();
+        }
+        return true;
+    }
+
     function renderMappingTable(config) {
         const body = document.getElementById('insightRulesTableBody');
         if (!body) return;
@@ -934,7 +974,7 @@
 
         const rows = withAutoProgressItems(Array.isArray(config.requiredItems) ? config.requiredItems : []);
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No progress items configured.</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No progress items configured.</td></tr>';
             return;
         }
 
@@ -1046,7 +1086,7 @@
         if (ok) persistProgressDraftLocally();
         refreshInsightRulesView();
         if (ok && typeof showToast === 'function') {
-            showToast('Progress item added. Click Save Presets to sync it to the server.', 'success');
+            showToast('Progress item added. Click Save Progress List to sync it for everyone.', 'success');
         }
     }
 
@@ -1369,6 +1409,7 @@
         refreshInsightRulesView();
     };
     window.saveInsightRuleConfig = saveInsightRuleConfig;
+    window.saveInsightProgressConfig = saveInsightProgressConfig;
     window.saveLiveAssessmentRulesConfig = saveLiveAssessmentRulesConfig;
     window.saveLiveBookingRulesConfig = saveLiveBookingRulesConfig;
     window.saveTrainingRulesConfig = saveTrainingRulesConfig;

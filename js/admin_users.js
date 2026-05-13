@@ -168,6 +168,153 @@ function readRetrainArchives() {
     return JSON.parse(localStorage.getItem('retrain_archives') || '[]');
 }
 
+function readProgressConfigSnapshot() {
+    try {
+        return JSON.parse(localStorage.getItem('insight_progress_config') || '{}') || {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function getArchiveGroupForProgress(entry) {
+    if (!entry || typeof entry !== 'object') return '';
+    return String(
+        entry.fromGroup ||
+        entry.group ||
+        entry.groupID ||
+        (Array.isArray(entry.records) && entry.records[0] && entry.records[0].groupID) ||
+        ''
+    ).trim();
+}
+
+function buildOfficialProgressForArchive(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    if (!window.ProgressCatalog || typeof window.ProgressCatalog.getTraineeProgress !== 'function') return null;
+    const username = String(entry.user || entry.trainee || entry.username || '').trim();
+    if (!username) return null;
+
+    return window.ProgressCatalog.getTraineeProgress(username, getArchiveGroupForProgress(entry), {
+        includeAuto: true,
+        data: {
+            records: Array.isArray(entry.records) ? entry.records : [],
+            submissions: Array.isArray(entry.submissions) ? entry.submissions : [],
+            savedReports: Array.isArray(entry.reports) ? entry.reports : [],
+            insightReviews: Array.isArray(entry.reviews) ? entry.reviews : [],
+            liveBookings: Array.isArray(entry.liveBookings) ? entry.liveBookings : [],
+            exemptions: Array.isArray(entry.exemptions) ? entry.exemptions : []
+        }
+    });
+}
+
+function enrichArchiveSnapshot(entry, archiveType) {
+    if (!entry || typeof entry !== 'object') return { entry, changed: false, repairable: false };
+    const next = { ...entry };
+    let changed = false;
+    const hasArchiveRows = [
+        next.records,
+        next.submissions,
+        next.reports,
+        next.reviews,
+        next.liveBookings,
+        next.exemptions
+    ].some(rows => Array.isArray(rows) && rows.length > 0);
+
+    if (!next.id) {
+        const prefix = archiveType === 'retrain' ? 'retrain_repair' : 'graduate_repair';
+        next.id = `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        changed = true;
+    }
+
+    if (!next.archiveType) {
+        next.archiveType = archiveType;
+        changed = true;
+    }
+
+    if (!next.progressConfigSnapshot || typeof next.progressConfigSnapshot !== 'object') {
+        next.progressConfigSnapshot = readProgressConfigSnapshot();
+        changed = true;
+    }
+
+    if (!next.officialProgress && hasArchiveRows) {
+        const officialProgress = buildOfficialProgressForArchive(next);
+        if (officialProgress) {
+            next.officialProgress = officialProgress;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        next.archiveRepair = {
+            repairedAt: new Date().toISOString(),
+            source: 'archive_snapshot_backfill',
+            repairable: hasArchiveRows
+        };
+    }
+
+    return { entry: next, changed, repairable: hasArchiveRows };
+}
+
+async function repairArchiveSnapshots() {
+    const message = [
+        'Repair existing archive snapshots?',
+        '',
+        'This will add missing Progress Builder snapshots and official progress calculations to existing Graduated and Retrain archives where the archived rows still exist.',
+        '',
+        'It will not change live trainee data.'
+    ].join('\n');
+    if (!confirm(message)) return;
+
+    let graduated = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    let retrain = readRetrainArchives();
+    if (!Array.isArray(graduated)) graduated = [];
+    if (!Array.isArray(retrain)) retrain = [];
+
+    let changedGraduated = 0;
+    let changedRetrain = 0;
+    let repairableGraduated = 0;
+    let repairableRetrain = 0;
+
+    graduated = graduated.map(entry => {
+        const result = enrichArchiveSnapshot(entry, isRetrainArchiveEntry(entry) ? 'retrain' : 'graduated');
+        if (result.repairable) repairableGraduated += 1;
+        if (result.changed) changedGraduated += 1;
+        return result.entry;
+    });
+
+    retrain = retrain.map(entry => {
+        const result = enrichArchiveSnapshot(entry, 'retrain');
+        if (result.repairable) repairableRetrain += 1;
+        if (result.changed) changedRetrain += 1;
+        return result.entry;
+    });
+
+    if (changedGraduated > 0) localStorage.setItem('graduated_agents', JSON.stringify(graduated));
+    if (changedRetrain > 0) localStorage.setItem('retrain_archives', JSON.stringify(retrain));
+
+    if (changedGraduated > 0 || changedRetrain > 0) {
+        if (typeof saveToServer === 'function') {
+            await saveToServer(['graduated_agents', 'retrain_archives'], true);
+        }
+        if (typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
+            InsightStudioLoader.refresh();
+        }
+    }
+
+    const summary = [
+        'Archive repair complete.',
+        '',
+        `Graduated archives updated: ${changedGraduated}`,
+        `Retrain archives updated: ${changedRetrain}`,
+        '',
+        `Graduated archives with usable row snapshots: ${repairableGraduated}`,
+        `Retrain archives with usable row snapshots: ${repairableRetrain}`,
+        '',
+        'Archives that no longer contain their original rows cannot have historical scores recreated automatically.'
+    ].join('\n');
+    alert(summary);
+    if (typeof loadGraduatedAgents === 'function') loadGraduatedAgents();
+}
+
 function queueRetrainArchiveServerDeletes(archiveData) {
     if (!archiveData || typeof archiveData !== 'object') return { queued: 0, skipped: 0 };
 
@@ -1159,7 +1306,8 @@ async function confirmMoveUser() {
                 const allNotes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
                 const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
                 return key ? allNotes[key] : null;
-            })()
+            })(),
+            progressConfigSnapshot: readProgressConfigSnapshot()
         };
         if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
             archiveData.officialProgress = window.ProgressCatalog.getTraineeProgress(userToMove, previousGroup, {
@@ -1966,7 +2114,8 @@ async function graduateTrainee(username) {
                 const allNotes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
                 const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
                 return key ? allNotes[key] : null;
-            })()
+            })(),
+            progressConfigSnapshot: readProgressConfigSnapshot()
         };
         if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
             const archiveGroup = archiveData.records && archiveData.records[0] ? archiveData.records[0].groupID : '';
