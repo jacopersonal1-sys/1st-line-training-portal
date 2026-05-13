@@ -4062,6 +4062,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.76": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight now waits for the embedded webview to be ready before refreshing, preventing the early reload freeze that blocked trainee filters and stats.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight now injects the host app's trainee data snapshot into the module and keeps local fallbacks when cloud bootstrap rows are empty, restoring group filters, agent search, and stats across submenus.</li>
+            </ul>`,
         "2.6.75": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Added the First Line Troubleshooting Tool V3.4 as a hidden in-app workspace restricted to Jaco's Super Admin account.</li>

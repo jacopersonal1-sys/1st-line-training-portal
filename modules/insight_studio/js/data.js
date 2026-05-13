@@ -879,9 +879,19 @@ const InsightDataService = {
             subjectReviewsDoc
         ] = bootstrapData;
 
-        this.state.users = this.normalizeUsers(usersRows);
-        this.state.records = this.normalizeRecords(recordRows);
-        this.state.submissions = this.normalizeSubmissions(submissionRows);
+        const localUsers = insParseJson('users', []);
+        const localRecords = insParseJson('records', []);
+        const localSubmissions = insParseJson('submissions', []);
+        const localAttendance = insParseJson('attendance_records', []);
+        this.state.users = this.normalizeUsers(
+            (Array.isArray(usersRows) && usersRows.length) ? usersRows : localUsers
+        );
+        this.state.records = this.normalizeRecords(
+            (Array.isArray(recordRows) && recordRows.length) ? recordRows : localRecords
+        );
+        this.state.submissions = this.normalizeSubmissions(
+            (Array.isArray(submissionRows) && submissionRows.length) ? submissionRows : localSubmissions
+        );
         const localSavedReports = insParseJson('savedReports', []);
         const localInsightReviews = insParseJson('insightReviews', []);
         const localExemptions = insParseJson('exemptions', []);
@@ -898,7 +908,9 @@ const InsightDataService = {
         this.state.liveBookings = this.normalizeLiveBookings(
             (Array.isArray(liveBookingRows) && liveBookingRows.length) ? liveBookingRows : localLiveBookings
         );
-        this.state.attendance = this.normalizeAttendance(attendanceRows);
+        this.state.attendance = this.normalizeAttendance(
+            (Array.isArray(attendanceRows) && attendanceRows.length) ? attendanceRows : localAttendance
+        );
         const localMonitorHistory = insParseJson('monitor_history', []);
         this.state.monitorHistory = this.normalizeMonitorHistory(
             (Array.isArray(monitorRows) && monitorRows.length) ? monitorRows : localMonitorHistory

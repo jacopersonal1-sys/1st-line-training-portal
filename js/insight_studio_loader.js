@@ -3,6 +3,72 @@
 
 const InsightStudioLoader = {
     _windowMessageBound: false,
+    _webviewReady: false,
+    _pendingRefresh: false,
+
+    getLocalSnapshot: function() {
+        const keys = [
+            'users',
+            'rosters',
+            'records',
+            'submissions',
+            'savedReports',
+            'insightReviews',
+            'exemptions',
+            'liveBookings',
+            'attendance_records',
+            'monitor_history',
+            'violation_reports',
+            'tl_agent_feedback',
+            'content_studio_data',
+            'content_studio_data_local',
+            'assessments',
+            'vettingTopics',
+            'tests',
+            'schedules',
+            'retrain_archives',
+            'insight_rule_config',
+            'insight_progress_config',
+            'insight_subject_reviews'
+        ];
+        const snapshot = {};
+        keys.forEach(key => {
+            try {
+                const value = localStorage.getItem(key);
+                if (value !== null) snapshot[key] = value;
+            } catch (error) {
+                console.warn(`[Insight Loader] Could not read local key "${key}"`, error);
+            }
+        });
+        return snapshot;
+    },
+
+    syncHostDataToWebview: function(webview) {
+        if (!webview || !webview.isConnected || typeof webview.executeJavaScript !== 'function') {
+            return Promise.resolve(false);
+        }
+        const snapshot = this.getLocalSnapshot();
+        const script = `
+            (() => {
+                const snapshot = ${JSON.stringify(snapshot)};
+                Object.entries(snapshot).forEach(([key, value]) => {
+                    if (typeof value === 'string') localStorage.setItem(key, value);
+                });
+                if (window.InsightDataService && typeof window.InsightDataService.hydrateFromLocalStorage === 'function') {
+                    window.InsightDataService.hydrateFromLocalStorage();
+                }
+                if (window.InsightApp && window.InsightApp.state) {
+                    window.InsightApp.state.loading = false;
+                    if (typeof window.InsightApp.render === 'function') window.InsightApp.render();
+                }
+                true;
+            })();
+        `;
+        return webview.executeJavaScript(script, true).catch(error => {
+            console.warn('[Insight Loader] Host data sync failed.', error);
+            return false;
+        });
+    },
 
     launchGraduate: async function(payload) {
         const username = payload && payload.username ? String(payload.username).trim() : '';
@@ -50,6 +116,7 @@ const InsightStudioLoader = {
             console.error('[Insight Loader] Container not found.');
             return;
         }
+        this._webviewReady = false;
 
         if (!CURRENT_USER) {
             container.innerHTML = `
@@ -94,7 +161,13 @@ const InsightStudioLoader = {
         const webview = document.getElementById('insight-studio-webview');
         if (webview) {
             webview.addEventListener('dom-ready', () => {
+                this._webviewReady = true;
                 if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+                this.syncHostDataToWebview(webview).finally(() => {
+                    if (!this._pendingRefresh) return;
+                    this._pendingRefresh = false;
+                    this.refresh();
+                });
             });
             webview.addEventListener('ipc-message', (event) => {
                 if (!event || !event.channel) return;
@@ -114,8 +187,17 @@ const InsightStudioLoader = {
 
     refresh: function() {
         const webview = document.getElementById('insight-studio-webview');
-        if (webview && typeof webview.reload === 'function') {
-            webview.reload();
+        if (webview && webview.isConnected && typeof webview.reload === 'function') {
+            if (!this._webviewReady) {
+                this._pendingRefresh = true;
+                return;
+            }
+            try {
+                webview.reload();
+            } catch (error) {
+                console.warn('[Insight Loader] Webview reload was not ready; rebuilding Insight.', error);
+                this.renderUI();
+            }
             return;
         }
         this.renderUI();
