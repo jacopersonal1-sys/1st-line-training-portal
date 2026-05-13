@@ -491,6 +491,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.75 (Hidden First Line Troubleshooting Tool, 2026-05-13):** Added `modules/first_line_troubleshooting/` as an embedded copy of the First Line Troubleshooting Tool V3.4. The host app exposes it only through the hidden `first-line-troubleshooting` route, gated to Jaco's `super_admin` account by `js/first_line_troubleshooting_loader.js` and route/nav checks in `js/main.js`.
 - **v2.6.74 (Insight Immediate Local Render, 2026-05-13):** Insight renders locally hydrated users, rosters, records, submissions, and attendance immediately across all Insight submenus before the background Supabase pull completes.
 - **v2.6.73 (Insight Compare Hydration + Q&A Drafts, 2026-05-13):** Insight Compare Viewer now hydrates users, rosters, records, submissions, attendance, archives, and supporting config from localStorage before waiting for Supabase so group/person pickers populate even when the cloud pull is slow. Q&A Hub now defaults new FAQ entries to draft and exposes explicit Save Draft and Publish to Library actions.
 - **v2.6.72 (Insight Canonical Progress + Archive Repair, 2026-05-13):** Insight Compare Viewer now uses Agent Progress Builder as the definitive scoring list for assessment/vetting/live/test performance. Missing configured scores are omitted from lines instead of dropping to `0%`, the graph uses compact per-person sequences with end labels and summary cards, and attendance scoring ignores `isIgnored` rows. Insight data loading now uses in-memory indexes and a smaller module cache to reduce startup freezes. Admin Tools gained an explicit Save Progress List action and a Repair Archive Snapshots action that backfills graduation/retrain archives with progress config snapshots and official progress when original row data still exists.
@@ -550,6 +551,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.75 - 2026-05-13
+
+- Feature: Added the First Line Troubleshooting Tool V3.4 as an embedded hidden workspace available only to Jaco's Super Admin account.
+- Safety: The original Downloads project was not modified; BuildZone uses a copied module under `modules/first_line_troubleshooting/`.
+- Verification: Syntax checks and full Jest suite passed.
 
 ## v2.6.74 - 2026-05-13
 

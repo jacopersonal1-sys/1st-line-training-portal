@@ -1,0 +1,2597 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<!-- ⭐ AUTO‑APPLY THEME from index page BEFORE anything renders -->
+
+<script>
+  (function () {
+    try {
+      const THEME_KEY = 'app-theme';
+      const LIGHT = 'theme-light';
+      const DARK  = 'theme-dark';
+      const saved = localStorage.getItem(THEME_KEY);
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const cls = (saved === LIGHT || saved === DARK) ? saved : (prefersDark ? DARK : LIGHT);
+      document.documentElement.classList.add(cls);
+    } catch (e) {}
+  })();
+</script>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>First Line Support – Troubleshooting Guide V3.4</title>
+
+<style>
+
+
+/* ============================================================
+   ORIGINAL CSS (UNCHANGED STRUCTURE / UPDATED FOR GRID-BASED FORMS)
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 20px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #f1f3f6;
+}
+
+/* Two-column layout with flexible widths */
+.page-layout,
+.main-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* equal flexible columns */
+  gap: 20px; /* space between columns */
+  justify-content: center; /* center the whole grid */
+  max-width: 1420px; /* cap total width */
+  margin: 0 auto; /* center on page */
+  align-items: start; /* ensures sticky aligns at top */
+}
+
+/* Left side: content */
+.content-area {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Right side: summary (sticky) */
+.summary-panel {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  /* Sticky behavior */
+  position: sticky;
+  top: 20px; /* distance from top of viewport */
+  height: fit-content; /* prevents stretching */
+  max-height: calc(100vh - 40px); /* stays within viewport height */
+}
+
+#summary {
+  width: 100%;
+  white-space: pre-wrap; /* preserve line breaks but allow wrapping */
+  word-break: break-word; /* force long words to wrap */
+  overflow-wrap: break-word; /* modern equivalent */
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+/* Sections inside content */
+.section {
+  background: #fff;
+  padding: 24px;
+  margin-bottom: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+h1,
+h2 {
+  text-align: center;
+  margin: 16px 0;
+}
+
+/* Base inputs */
+input,
+select {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+}
+
+/* Icon rows (labels with icons) */
+.icon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0;     /* reset: we control vertical rhythm via grid row-gap */
+  font-weight: 600;
+}
+
+/* Link icon */
+.link-icon {
+  width: 18px;
+  height: 18px;
+  background: #F58220;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  color: #fff;
+}
+.link-icon:hover {
+  background: #d96a15;
+}
+
+/* Info icon + tooltip */
+.info-icon {
+  width: 18px;
+  height: 18px;
+  background: #16a34a;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  position: relative;
+}
+.info-icon:hover::after {
+  content: attr(data-info);
+  position: absolute;
+  top: 26px;
+  left: 0;
+  background: #111827;
+  color: #fff;
+  padding: 8px;
+  width: 400px;
+  font-size: 12px;
+  border-radius: 6px;
+  z-index: 100;
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+/* Fibre Slow Speed section override (kept for consistency) */
+#fibreSlowSection {
+  width: 100%;
+  margin-bottom: 32px;
+}
+
+.speed-results {
+  display: flex;
+  gap: 16px;
+}
+
+.speed-results input {
+  flex: 1;
+  min-width: 120px;
+  margin-bottom: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Input with trailing unit select (MB/GB) */
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* space between input and select */
+}
+.input-with-unit input {
+  flex: 1; /* input takes available width */
+}
+.input-with-unit select {
+  width: 80px; /* fixed width for MB/GB dropdown */
+}
+
+.copy-btn {
+  align-self: flex-start;
+}
+
+.summary-block {
+  margin-top: 12px;
+}
+.summary-block h3 {
+  text-decoration: underline;
+  margin-bottom: 6px;
+}
+
+/* Responsive fallback */
+@media (max-width: 900px) {
+  .page-layout,
+  .main-layout {
+    grid-template-columns: 1fr; /* single column */
+    max-width: 100%; /* full width */
+  }
+
+  .content-area,
+  .summary-panel {
+    width: 100%;
+    max-height: none;
+    position: static;
+  }
+}
+
+/* ------ Collapsible Sections ------ */
+
+.section.collapsible {
+  padding: 0;
+  border-radius: 8px;
+  position: relative;
+}
+
+/* Header bar using 3‑column grid */
+.section-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr; /* left | center | right */
+  align-items: center;
+  padding: 16px;
+  background: #f7f7f9;
+  border-bottom: 1px solid #eee;
+}
+
+/* Center column: heading */
+.section-header h2 {
+  grid-column: 2; /* middle column */
+  justify-self: center;
+  margin: 0;
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+/* Right column: toggle button */
+.section-toggle {
+  grid-column: 3; /* right column */
+  justify-self: end;
+
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.section-toggle:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+}
+.toggle-icon {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Collapsible panel body */
+.section-panel {
+  padding: 20px;
+}
+.section-panel.hidden {
+  display: none;
+}
+
+/* ============================================================
+   ⭐ THEME SYSTEM — VARIABLES + OVERRIDES
+   ============================================================ */
+
+:root {
+  --body-bg: #ffffff;
+  --body-text: #000000;
+
+  --card-bg: #ffffff;
+  --card-text: #000000;
+  --card-border: #dddddd;
+  --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  --summary-border: #ff5000;
+  --brand-accent: #ff5000;
+
+  --input-bg: #ffffff;
+  --input-text: #000000;
+  --input-border: #d1d5db;
+
+  --header-bg: #f7f7f9;
+  --header-border: #eeeeee;
+}
+
+.theme-light {
+  --body-bg: #ffffff;
+  --body-text: #000000;
+
+  --card-bg: #ffffff;
+  --card-text: #000000;
+  --card-border: #dddddd;
+  --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  --summary-border: #ff5000;
+  --brand-accent: #ff5000;
+}
+
+.theme-dark {
+  --body-bg: #1c2025;
+  --body-text: #ffffff;
+
+  --card-bg: #232a31;
+  --card-text: #ffffff;
+  --card-border: #3a3f45;
+  --panel-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+
+  --input-bg: #2c3238;
+  --input-text: #ffffff;
+  --input-border: #3a3f45;
+
+  --summary-border: #ff5000;
+  --brand-accent: #ff5000;
+
+  --header-bg: #1F2630;     /* Darker header bar */
+  --header-text: #F9FAFB;   /* Bright readable text */
+}
+
+/* THEME OVERRIDES */
+body {
+  background: var(--body-bg);
+  color: var(--body-text);
+}
+
+/* Panels and sections */
+.content-area,
+.section {
+  background: var(--card-bg);
+  color: var(--card-text);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--panel-shadow);
+}
+
+/* ⭐ Theme A — Left Accent Border for summary panel */
+.summary-panel {
+  background: var(--card-bg);
+  color: var(--card-text);
+  border: none;
+  border-left: 4px solid var(--summary-border);
+  padding-left: 24px;
+  border-radius: 8px;
+  box-shadow: var(--panel-shadow);
+}
+
+/* Accent for toggle */
+.section-toggle .toggle-icon {
+  color: var(--brand-accent);
+}
+
+/* Inputs adopt theme */
+input,
+select {
+  background: var(--input-bg);
+  color: var(--input-text);
+  border: 1px solid var(--input-border);
+}
+
+/* Accent buttons */
+.copy-btn,
+.accent-btn {
+  background: var(--brand-accent);
+  color: #fff;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s ease;
+}
+.copy-btn:hover,
+.accent-btn:hover {
+  background: #e04800;
+}
+
+/* Button row */
+.summary-buttons {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+/* DARK MODE — header styles + brand border */
+.theme-dark .section-header {
+  background: #1F2630 !important;
+}
+.theme-dark .section-header h2 {
+  color: #F9FAFB !important;
+}
+/* Apply brand-orange border for all themes */
+.section-header {
+  border-bottom: 1px solid var(--brand-accent) !important;
+}
+
+/* ============================================================
+   ✅ UNIVERSAL FORM GRID (keep .grid simple and equal halves)
+   - label left
+   - dropdown/input right
+   ============================================================ */
+
+/* All .grid blocks use 2 equal-width columns (as before) */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* --- label formatting inside grid --- */
+.grid > label.icon-row {
+  grid-column: 1;
+  align-self: center;
+  margin: 0; /* remove default margin so rows align nicely */
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- input / select formatting inside grid --- */
+.grid > select,
+.grid > input {
+  grid-column: 2;
+  width: 100%;
+  margin: 0;
+}
+
+/* Extra: spacing consistency between rows */
+.section-panel .grid {
+  row-gap: 14px; /* even vertical spacing between each row */
+}
+
+/* 📱 Mobile: stack label above control */
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .grid > label.icon-row,
+  .grid > select,
+  .grid > input {
+    grid-column: 1;
+  }
+}
+
+/* Ensure hidden still actually hides (belt-and-braces) */
+.hidden {
+  display: none !important;
+}
+
+/* ============================================================
+   (Optional helpers you already referenced in HTML)
+   ============================================================ */
+
+/* Inputs-only two-up grid (used where you explicitly add grid-2up) */
+.grid-2up {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 12px;
+}
+.grid-2up > * { min-width: 0; }
+
+/* Pair-grid for rows where you explicitly use it (does NOT change .grid) */
+.pair-grid {
+  display: grid;
+  grid-template-columns: clamp(200px, 33%, 360px) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 12px;
+  align-items: center;
+}
+.pair-grid > * { min-width: 0; }
+.pair-grid > label.icon-row {
+  display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pair-grid > select, .pair-grid > input { width: 100%; margin: 0; }
+
+
+/* ============================================================
+   📏 EMAIL — Global, uniform row spacing across ALL SECTIONS
+   Customer Information, CHIP Dashboard, and every Email flow
+   ============================================================ */
+
+/* 1) Align labels baseline everywhere inside panels */
+.section-panel label.icon-row {
+  margin-top: 0;
+  align-self: center;
+}
+
+/* 2) If a section uses .grid → use the same vertical rhythm as VoIP */
+.section-panel .grid {
+  row-gap: 16px !important; /* consistent gap between label and control */
+}
+
+/* 3) If a section uses .pair-grid → same rhythm */
+.section-panel .pair-grid {
+  row-gap: 16px !important;
+}
+
+/* 4) If a section has simple siblings (label followed by control) and not in a grid,
+      give those pairs the same spacing. */
+.section-panel > label.icon-row + select,
+.section-panel > label.icon-row + input {
+  display: block;
+  margin-bottom: 12px !important; /* match VoIP default row spacing */
+}
+
+/* 5) For step blocks (divs) that show/hide in flows:
+      when visible, give them an even bottom spacing, but not on the last one */
+.section-panel > div:not(.hidden) {
+  margin-bottom: 12px;            /* consistent section row spacing */
+}
+
+/* Remove bottom gap on the last visible block within the panel */
+.section-panel > div:not(.hidden):last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 6) Some Email pages wrap CHIP sub-blocks (Outage, Ticket, JobCard) in their own divs.
+      Give them the same bottom spacing without changing their layout. */
+#chipSection .section-panel #outageStatusBlock:not(.hidden),
+#chipSection .section-panel #ticketStatusBlock:not(.hidden),
+#chipSection .section-panel #jobCardBlock:not(.hidden) {
+  margin-bottom: 12px;
+}
+
+/* 7) Inputs-with-unit rows should align to the same rhythm */
+.section-panel .input-with-unit {
+  margin-bottom: 12px; /* when used as the control row content */
+}
+
+/* 8) Mobile stacking keeps the breathing room */
+@media (max-width: 900px) {
+  .section-panel > label.icon-row + select,
+  .section-panel > label.icon-row + input {
+    margin-top: 6px;               /* small gap when stacked */
+    margin-bottom: 14px;           /* readably spaced in single column */
+  }
+}
+
+
+/* ============================================================
+   📏 EMAIL — Uniform row spacing across ALL sections
+   Works for sections with .section-panel AND sections without it
+   (e.g., Cannot Send/Receive places rows directly under .section)
+   ============================================================ */
+
+/* --- 0) Helper: a scope list for both structures --- */
+:root {
+  /* noop: marker comment to keep this block grouped */
+}
+
+/* 1) Align labels baseline everywhere (both structures) */
+.section-panel label.icon-row,
+.section > label.icon-row,
+.section .pair-grid > label.icon-row,
+.section .grid > label.icon-row {
+  margin-top: 0;
+  align-self: center;
+}
+
+/* 2) Consistent row-gap for grids (both structures) */
+.section-panel .grid,
+.section .grid {
+  row-gap: 16px !important; /* VoIP-like rhythm between label/control */
+}
+.section-panel .pair-grid,
+.section .pair-grid {
+  row-gap: 16px !important;
+}
+
+/* 3) Spacing for simple label+control siblings NOT inside a grid
+      (applies whether content is in .section-panel or directly under .section) */
+.section-panel > label.icon-row + select,
+.section-panel > label.icon-row + input,
+.section > label.icon-row + select,
+.section > label.icon-row + input {
+  display: block;
+  margin-bottom: 12px !important;
+}
+
+/* 4) Spacing for visible step blocks (divs) that show/hide
+      Give even bottom spacing, but not on the last visible block */
+.section-panel > div:not(.hidden),
+.section > div:not(.hidden) {
+  margin-bottom: 12px;
+}
+.section-panel > div:not(.hidden):last-child,
+.section > div:not(.hidden):last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 5) Inputs-with-unit should align to the same rhythm no matter where they are */
+.section-panel .input-with-unit,
+.section .input-with-unit {
+  margin-bottom: 12px;
+}
+
+/* 6) Mobile: keep breathing room when stacked */
+@media (max-width: 900px) {
+  .section-panel > label.icon-row + select,
+  .section-panel > label.icon-row + input,
+  .section > label.icon-row + select,
+  .section > label.icon-row + input {
+    margin-top: 6px;
+    margin-bottom: 14px;
+  }
+}
+
+
+/* ============================================================
+   📚 EMAIL — Allow long labels/headings to wrap (no overlap)
+   Applies to ALL sections, regardless of structure
+   ============================================================ */
+
+/* 1) Let labels/headings wrap across multiple lines */
+.section-panel label.icon-row,
+.section > label.icon-row,
+.section .grid > label.icon-row,
+.section .pair-grid > label.icon-row {
+  /* Allow wrapping */
+  white-space: normal;
+  overflow: visible;          /* ensure wrapped text is visible */
+  text-overflow: clip;        /* prevent ellipsis clipping on wrap */
+  word-break: break-word;     /* break long “words” (like URLs) if needed */
+  overflow-wrap: anywhere;    /* modern wrapping for long tokens */
+  align-self: start;          /* top-align the label in the grid row */
+}
+
+/* 2) Ensure the control sits at the top to avoid crossing the label’s wrapped lines */
+.section .grid > select,
+.section .grid > input,
+.section .pair-grid > select,
+.section .pair-grid > input,
+.section > label.icon-row + select,
+.section > label.icon-row + input {
+  align-self: start;
+}
+
+/* 3) Row containers (grids) should align items to the start so multi-line labels
+      don’t vertically center against controls */
+.section .grid,
+.section .pair-grid,
+.section-panel .grid,
+.section-panel .pair-grid {
+  align-items: start;
+}
+
+/* 4) Optional: if any headings inside section headers are getting clipped,
+      allow them to wrap too (keeps center alignment) */
+.section-header h2 {
+  white-space: normal; 
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 5) Safety: ensure grid children can shrink so wrapping doesn’t force overflow */
+.section .grid > *,
+.section .pair-grid > *,
+.section-panel .grid > *,
+.section-panel .pair-grid > * {
+  min-width: 0;
+}
+
+
+/* Collapse visual state for sections that don't use .section-panel
+   (do NOT touch inner .hidden flags used by the flow) */
+.section.is-collapsed > :not(.section-header) {
+  display: none !important;
+}
+
+
+#chipSection .section-panel #outageStatusBlock > .pair-grid:not(:last-child) {
+  margin-bottom: 12px;
+}
+
+
+</style>
+  
+</head>
+
+
+<body>
+
+<div class="main-layout">
+
+  <!-- Column 1: content -->
+  <div class="content-area">
+
+    <!-- Title -->
+    <div class="section">
+      <h1>Email Troubleshooting Guide</h1>
+    </div>
+
+    <!-- CUSTOMER INFO -->
+
+    <div class="section summarizable collapsible" data-section="Customer Information" id="customerInfoSection">
+      <div class="section-header">
+        <h2 id="ci-heading">Customer Information</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="ci-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <div class="section-panel" id="ci-panel" role="region" aria-labelledby="ci-heading">
+        <!-- inputs-only list → two equal columns -->
+        <div class="grid-2up">
+          <input id="customerName" data-summary="Name & Surname" placeholder="Name & Surname">
+          <input id="cellNumber" data-summary="Cellphone Number" placeholder="000 000 0000" inputmode="tel">
+          <input id="siteLocation" data-summary="Site Location" placeholder="Site Location">
+          <input id="startTime" data-summary="Start Time / Time Frame" placeholder="Start Time / Time Frame">
+          <input id="emailName" data-summary="Email Name & Surname" placeholder="Name of person on site that can assist if needed">
+          <input id="emailCellNumber" data-summary="Cellphone Number" placeholder="Cell-Number of person on site that can assist if needed" inputmode="tel">
+          <input id="emailAddressMain" data-summary="Email Address" placeholder="Email address experiencing the problem">
+          <input id="emailDomain" data-summary="Domain" placeholder="Domain of the email address">
+        </div>
+
+        <!-- ISP -->
+        <div class="pair-grid">
+          <label class="icon-row">ISP?
+            <span class="link-icon">🔗</span>
+            <span class="info-icon" data-info="Confirm who hosts the customer's internet service.">i</span>
+          </label>
+          <select id="emailISP" data-summary="ISP">
+            <option>-- Select --</option>
+            <option>Herotel</option>
+            <option>Third Party</option>
+          </select>
+        </div>
+
+        <!-- Internet access step -->
+        <div id="emailInternetBlock" class="pair-grid">
+          <label class="icon-row">Internet access check
+            <span class="link-icon">🔗</span>
+            <span class="info-icon" data-info="Verify if the customer has internet access.">i</span>
+          </label>
+          <select id="emailInternetCheck" data-summary="Internet Access">
+            <option>-- Select --</option>
+            <option>Yes</option>
+            <option>No</option>
+          </select>
+        </div>
+        <!-- If emailInternetCheck = 'No' (⚠️ Complete the no internet flow chart for the medium) -->
+
+        <!-- Remains full-width under the grid -->
+        <select id="problemDescription" data-summary="Problem Description">
+          <option>-- Problem Description --</option>
+          <option>Cannot Send / Receive</option>
+          <option>Mailbox limit Reached</option>
+          <option>Email password change</option>
+          <option>New Email Request</option>
+          <option>Domain Request Change</option>
+          <option>Email Forwarding</option>
+        </select>
+      </div>
+    </div> <!-- Closes customer info -->
+
+    <!-- CHIP DASHBOARD -->
+
+    <div class="section summarizable hidden collapsible" data-section="CHIP Dashboard" id="chipSection">
+      <div class="section-header">
+        <h2 id="chip-heading">CHIP Dashboard</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <div class="section-panel" id="chip-panel" role="region" aria-labelledby="chip-heading">
+        <div class="pair-grid">
+          <label class="icon-row">Account Status
+		      <a class="link-icon" href="ph-CHIP Account Status" target="_blank" rel="noopener">🔗</a>
+              <span class="info-icon" data-info="The account status must be active. If its suspended / cancelled the PPPoE authentication for all radius users (installs) linked to that account will be set to reject and no PPPoe authentication will take place for those radius users.">i</span>
+          </label>
+          <select id="accountStatus" data-summary="Account Status">
+            <option>-- Select --</option>
+            <option>Active</option>
+            <option>Suspended</option>
+            <option>Cancelled</option>
+          </select>
+        </div>
+
+        <div id="outageStatusBlock">
+          <div class="pair-grid">
+            <label class="icon-row">Outage Status
+              <a class="link-icon" href="ph-CHIP Outage Status" target="_blank" rel="noopener">🔗</a>
+              <span class="info-icon" data-info="CHIP only shows active outages caused by equipment being unreachable. Degraded service , email / voip outages must still be confirmed on the teams outage channels. It is important to confirm whether a customer is affected by a outage as it will determine whether first line support is able to assist with the problem being expereinced or whether the problem is a affect of the active outage">i</span>
+            </label>
+            <select id="outageStatus" data-summary="Outage Status">
+              <option>-- Select --</option>
+              <option>Active</option>
+              <option>Suspected outage</option>
+              <option>Normal</option>
+            </select>
+          </div>
+
+          <div id="ticketStatusBlock" class="pair-grid">
+            <label class="icon-row">Ticket Status
+               <a class="link-icon" href="ph-Ticket Status" target="_blank" rel="noopener">🔗</a>
+               <span class="info-icon" data-info="In the case of duplicate tickets (multiple tickets logged for the same site & same problem) merge the duplicate tickets. If the customers has an existing ticket for the site & problem work on the existing ticket , DO NOT CREATE A NEW ONE. Only create a new ticket if no ticket for that site & problem is present. Following this procedure keeps the tickets volumes down by preventing multiple tickets logged for the same site & problem as well prevents duplicate tickets from remaining open on the system after the problem has been resolved.">i</span>
+            </label>
+            <select id="ticketStatus" data-summary="Ticket Status">
+              <option>-- Select --</option>
+              <option>New ticket</option>
+              <option>Existing ticket</option>
+            </select>
+          </div>
+
+          <div id="jobCardBlock" class="pair-grid">
+            <label class="icon-row">Active Job Card
+               <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/EbPyOS1vPXFNqNQkvHx61cUBbYpmKPxNUrfWq0ZYPNfqew?e=JQDRta" target="_blank" rel="noopener">🔗</a>
+               <span class="info-icon" data-info="When engaging with a customer about an existing job card, agents are required to reassess the fault and confirm whether any additional remote diagnostics or corrective steps can be taken. We maintain full accountability for the resolution process and do not shift responsibility prematurely. If all remote options have been exhausted and the issue persists, the comunication may be escalated to Field Operations.">i</span>
+            </label>
+            <select id="jobCard" data-summary="Active Job Card">
+              <option>-- Select --</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+          </div>
+        </div> <!-- closes outageStatusBlock -->
+      </div> <!-- closes chip-panel -->
+    </div>
+
+    <!-- Email - Cannot Send / Receive - only shows if emailInternetCheck = Yes && problemDescription = Cannot Send / Receive -->
+
+    <div class="section summarizable hidden collapsible" data-section="Email - Cannot Send / Receive" id="emailCannotSendReceive">
+      <div class="section-header">
+        <h2 id="chip-heading">Cannot Send / Receive</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <div class="pair-grid">
+        <label class="icon-row" for="portalLoginCheck1">Logged in to the Herotel email portal
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAu0v0WaV7aR7agsgU3e8tIAcy9-ucXMDzXjxgkOrOcXfM?e=Nlr5EM" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The portal allows us as First Line Support agent to confirm key details regarding the domain as well login to the hosting platform.">i</span>
+        </label>
+        <select id="portalLoginCheck1" data-summary="EmailProviderHerotel1">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If portalLoginCheck1 = 'No' (⚠️ Log into the Herotel portal in order to perform the next steps) -->
+
+      <!-- Email Provider - only shows if portalLoginCheck1 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailProviderBlock1">
+        <label class="icon-row" for="emailProviderHerotel1">Does Herotel Host the domain
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAniZVplKrXRLKvkoC_2bAAAXvhR1MallGx9Oe3nIeUBbk?e=oiBz13" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="a First Line Support agent only has access to the hosting platform (domains) that we host. We do not have access to a third parties hosting platform.">i</span>
+        </label>
+        <select id="emailProviderHerotel1" data-summary="Service With Herotel">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If emailProviderHerotel1 = 'No' (⚠️ Customer must contact their email provider) -->
+
+      <!-- Email Service status - only shows if emailProviderHerotel1 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailServiceStatusBlock1">
+        <label class="icon-row" for="emailServiceStatus1">Email Server Status
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQBZu9PRWq-tRpDxZq7LJmHlAST0NFNoUyRdo0ImJskWRts?e=045gb1" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : The status of the domain & email will determine the next troubleshooting steps you as a First Line Support agent will need to perform.">i</span>
+        </label>
+        <select id="emailServiceStatus1" data-summary="Email Service Status">
+          <option>-- Select --</option>
+          <option>Domain & Email Active</option>
+          <option>Domain / Email Quota Reached</option>
+          <option>Suspended / Email Blocked / Spam Filter / Deliverability Errors</option>
+        </select>
+      </div>
+
+      <!-- If emailServiceStatus1 = 'Domain / Email Quota Reached' (⚠️ Follow the Increase Mailbox Quota flow chart) -->
+      <!-- If emailServiceStatus1 = 'Suspended / Email Blocked / Spam Filter / Deliverability Errors' (⚠️ Escalate to Config & Analyse) -->
+
+      <!-- RM Status - only shows if emailServiceStatus1 = Domain & Email Active -->
+	  
+      <div class="hidden pair-grid" id="rmStatusBlock1">
+        <label class="icon-row" for="rmStatus1">Logged in via RM
+          <span class="info-icon" data-info="Why : The configuration of the email needs to be confirmed.">i</span>
+        </label>
+        <select id="rmStatus1" data-summary="rmStatus1">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If rmStatus1 = 'No' (⚠️ Connect via RM to the customer's device to complete the next steps) -->
+
+      <!-- Email Settings - only shows if rmStatus1 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailSettingsBlock1">
+        <label class="icon-row" for="emailSettings1">Email setting verification & problem identification
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAI0n7RG36qRa5wE2_Z81RuAfJgHTnEW4DnWIxpHR7KF6w?e=970293" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : Incorrect email settings can affect the customers sending / receiving as well caue the customer not to be able to authenticate correctly to the email server">i</span>
+        </label>
+        <select id="emailSettings1" data-summary="Email Settings Confirmed">
+          <option>-- Select --</option>
+          <option>Email Going to Spam</option>
+          <option>Email Forward Configured</option>
+          <option>Settings are correct</option>
+        </select>
+      </div>
+
+      <!-- If emailSettings1 = 'Email Going to Spam' (⚠️ Educate the customer about risks of moving spam emails to inbox) -->
+
+      <!-- Forwarding Status - only shows if emailSettings1 = Email Forward Configured -->
+	  
+      <div class="hidden pair-grid" id="forwardingUpdateBlock1">
+        <label class="icon-row" for="emailForwardingUpdate1">Forwarding rule update / remove
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDCm6pKoJsATYPCmFekGxW3AUt4orvd3kYzjmPfv7ns_Cw?e=d6tkaI" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : The customer might have forgot that a forwarding rule was configured or the forwarding rule is causing the email not to reach the correct inbox or has to be changed to another forwarder.">i</span>
+        </label>
+        <select id="emailForwardingUpdate1" data-summary="Forwarding Rules Status">
+          <option>-- Select --</option>
+          <option>Updated</option>
+          <option>Removed</option>
+        </select>
+      </div>
+
+      <!-- Forwarding Problem Resolved  - only shows if a entry was made by emailForwardingUpdate1 -->
+	  
+      <div class="hidden pair-grid" id="ForwardingresolvedBlock">
+        <label class="icon-row" for="ForwardingResolved">Is the problem resolved ?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="ForwardingResolved" data-summary="Forwarding problem resolved">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+	  
+      <!-- If ForwardingResolved = 'Yes' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+      <!-- If ForwardingResolved = 'No' (⚠️ Escalate to Config & Analyse) -->
+
+      <!-- Program Error - only shows if emailSettings1 = Settings are correct -->
+	  
+      <div class="hidden pair-grid" id="programErrorBlock1">
+        <label class="icon-row" for="programErrorOrBounce1">Program / Bounce message present?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQCZcpoypGe0S4EetspBi3IhAWnKbgJIBci8n-J8EQB1BFc?e=pZux2B" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : If a bounce error is present it will normally indicate what is causing the error and how it can be resolved">i</span>
+        </label>
+        <select id="programErrorOrBounce1" data-summary="Program / Bounce message">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- Program / Bounce error - only shows if programErrorOrBounce1 = Yes -->
+	  
+      <div class="hidden" id="programErrorBlock2">
+        <input id="programBounceError" data-summary="Program / Bounce Error" placeholder="Program / Bounce error present">
+      </div>
+
+      <!-- Mail Tester -->
+	  
+      <div class="hidden pair-grid" id="mailTesterBlock1">
+        <label class="icon-row" for="mailTester1">Mail tester test completed?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDdUlHd8dnnTaD9epuXkVJUAanxgx48T5d8mi0zoZ5bQ40?e=9kmc5P" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : If a bounce error is present it will normally indicate what is causing the error and how it can be resolved">i</span>
+        </label>
+        <select id="mailTester1" data-summary="mailTester1">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If mailTester1 = 'No' (⚠️ Complete mail tester test) -->
+
+      <!-- Cannot Send / Receive problem resolved - only shows if mailTester1 = Yes -->
+	  
+      <div class="hidden pair-grid" id="problemResolvedBlock1">
+        <label class="icon-row" for="cannotSendReceiveProblemResolved1">Is the problem resolved?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="cannotSendReceiveProblemResolved1" data-summary="Problem Resolved Status">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+	  
+      <!-- If cannotSendReceiveProblemResolved1 = 'Yes' (✅ Confirm server, update & close the ticket) -->
+      <!-- If cannotSendReceiveProblemResolved1 = 'No' (⚠️ Escalate to Config & Analyse) -->
+	  
+    </div> <!-- ✅ closes emailCannotSendReceive -->
+
+    <!-- Email - Mailbox Limit Reached - only shows if emailInternetCheck = Yes && problemDescription = Mailbox limit Reached -->
+
+    <div class="section summarizable hidden collapsible" data-section="Email - Mailbox Limit Reached" id="emailMailboxLimit">
+      <div class="section-header">
+        <h2 id="chip-heading">Email - Mailbox Limit Reached</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <div class="pair-grid">
+        <label class="icon-row" for="portalLoginCheck2">Logged in to the Herotel email portal
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAu0v0WaV7aR7agsgU3e8tIAcy9-ucXMDzXjxgkOrOcXfM?e=Nlr5EM" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The portal allows us as First Line Support agent to confirm key details regarding the domain as well login to the hosting platform.">i</span>
+        </label>
+        <select id="portalLoginCheck2" data-summary="portalLoginCheck2">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If portalLoginCheck2 = 'No' (⚠️ Log into the Herotel portal in order to perform the next steps) -->
+
+      <!-- Email Service - only shows if portalLoginCheck2 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailServiceHerotelBlock2">
+        <label class="icon-row" for="emailServiceHerotel2">Does Herotel Host the domain
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAniZVplKrXRLKvkoC_2bAAAXvhR1MallGx9Oe3nIeUBbk?e=oiBz13" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="a First Line Support agent only has access to the hosting platform (domains) that we host. We do not have access to a third parties hosting platform.">i</span>
+        </label>
+        <select id="emailServiceHerotel2" data-summary="Service With Herotel">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If emailServiceHerotel2 = 'No' (⚠️ Customer must contact their email provider) -->
+
+      <!-- Domain & Email Quota - only shows if emailServiceHerotel2 = Yes -->
+	  
+      <div class="hidden pair-grid" id="quotaStatusBlock1">
+        <label class="icon-row" for="quotaCheck1">What is the Quota of the current domain & Email?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDOqD1OcnnaSJF5MDyCTW3tAaOMfev_2Od3ydapReMaKW8?e=YqyUAf" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : Confirming this will determine whether you as a First Line Support agent can assist the customer with resolving the problem or whether a escalation to another department is required to get the problem resolved.">i</span>
+        </label>
+        <select id="quotaCheck1" data-summary="Quota Status">
+          <option>-- Select --</option>
+          <option>Quota Available</option>
+          <option>Quota Full</option>
+        </select>
+      </div>
+
+      <!-- If quotaCheck1 = 'Quota Full' (⚠️ Escalate to Sales_Specialist for package upgrade) -->
+
+      <!-- Storage Resolution - only shows if quotaCheck1 = Quota Full -->
+	  
+      <div class="hidden pair-grid" id="customerResolutionBlock1">
+          <label class="icon-row" for="customerChosenResolution1">Resolution chosen by the customer?
+          <span class="info-icon" data-info="Why : The customer can choose a resolution that is more budget friendly to them.">i</span>
+        </label>
+        <select id="customerChosenResolution1" data-summary="Customer Chosen Resolution">
+          <option>-- Select --</option>
+          <option>Email Package Increase</option>
+          <option>Delete emails (Written consent)</option>
+        </select>
+      </div>
+
+      <!-- If customerChosenResolution1 = 'Email Package Increase' (⚠️ Escalate to Sales_Specialist for package upgrade) -->
+
+      <!-- Written Consent - only shows if customerChosenResolution1 = Delete emails (Written consent) -->
+	  
+      <div class="hidden pair-grid" id="consentBlock1">
+        <label class="icon-row" for="consent1">Written Consent Obtained?
+          <span class="info-icon" data-info="Why : Emails cannot be deleted or adjusted without the customers written consent.">i</span>
+        </label>
+        <select id="consent1" data-summary="Written Consent">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+	  
+      <!-- If customerChosenResolution1 = 'Delete emails (Written consent)' && consent1 = 'Yes' (✅ Delete the required emails on the server) -->
+      <!-- If customerChosenResolution1 = 'Delete emails (Written consent)' && consent1 = 'No' (⚠️ Suggest package upgrade instead of deletion) -->
+
+      <!-- Quota Change - only shows if customerChosenResolution1 = Email Package Increase -->
+	  
+      <div class="hidden" id="quotaIncreaseBlock1">
+        <label class="icon-row" for="domainStorageValue">Quota Changes Required
+          <span class="info-icon" data-info="Why : Confirming this will determine whether you as a First Line Support agent can assist the customer with resolving the problem or whether a escalation to another department is required to get the problem resolved.">i</span>
+        </label>
+
+        <div class="grid-2up">
+          <div>
+            <label for="domainStorageValue">Current Domain Quota</label>
+            <div class="input-with-unit">
+              <input id="domainStorageValue" type="number" min="0"
+                     data-summary="Domain Storage Value"
+                     placeholder="Enter storage amount">
+              <select id="domainStorageUnit" data-summary="Domain Storage Unit">
+                <option>MB</option>
+                <option>GB</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label for="emailStorageValue">Current Email Quota</label>
+            <div class="input-with-unit">
+              <input id="emailStorageValue" type="number" min="0"
+                     data-summary="Email Storage Value"
+                     placeholder="Enter storage amount">
+              <select id="emailStorageUnit" data-summary="Email Storage Unit">
+                <option>MB</option>
+                <option>GB</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label for="updatedEmailStorageValue">New Email Quota</label>
+            <div class="input-with-unit">
+              <input id="updatedEmailStorageValue" type="number" min="0"
+                     data-summary="Updated Email Storage Value"
+                     placeholder="Enter storage amount">
+              <select id="updatedEmailStorageUnit" data-summary="Updated Email Storage Unit">
+                <option>MB</option>
+                <option>GB</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Problem Resolved - only shows if consent1 = Yes or if all three entries were made in quotaIncreaseBlock1 -->
+	  
+      <div class="hidden pair-grid" id="mailboxResolvedBlock1">
+        <label class="icon-row" for="mailboxProblemResolved3">Is the problem resolved?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="mailboxProblemResolved3" data-summary="Problem Resolved Status">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+	  
+      <!-- If mailboxProblemResolved3 = 'Yes' (✅ Confirm server, update & close the ticket) -->
+      <!-- If mailboxProblemResolved3 = 'No' (⚠️ Suggest package upgrade or move to Cannot Send/Receive flow chart) -->
+	  
+    </div> <!-- ✅ closes emailMailboxLimit -->
+
+    <!-- Email - Password Change - only shows if emailInternetCheck = Yes && problemDescription = Email password change -->
+
+    <div class="section summarizable hidden collapsible" data-section="Email - Password Change" id="emailPasswordChange">
+      <div class="section-header">
+        <h2 id="chip-heading">Email - Password Change</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <div class="pair-grid">
+        <label class="icon-row" for="portalLoginCheck3">Logged in to the Herotel email portal
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAu0v0WaV7aR7agsgU3e8tIAcy9-ucXMDzXjxgkOrOcXfM?e=Nlr5EM" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The portal allows us as First Line Support agent to confirm key details regarding the domain as well login to the hosting platform.">i</span>
+        </label>
+        <select id="portalLoginCheck3" data-summary="portalLoginCheck3">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If portalLoginCheck3 = No (⚠️ Log into the Herotel portal in order to perform the next steps) -->
+
+      <!-- Email service with Herotel - Only shows if portalLoginCheck3 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailServiceHerotelBlock3">
+        <label class="icon-row" for="emailServiceHerotel3">Does Herotel Host the domain
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAniZVplKrXRLKvkoC_2bAAAXvhR1MallGx9Oe3nIeUBbk?e=oiBz13" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="a First Line Support agent only has access to the hosting platform (domains) that we host. We do not have access to a third parties hosting platform.">i</span>
+        </label>
+        <select id="emailServiceHerotel3" data-summary="Service With Herotel">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If emailServiceHerotel3 = No (⚠️ Customer must contact their email provider) -->
+
+      <!-- New Password - Only shows if emailServiceHerotel3 = Yes -->
+	  
+      <div class="hidden pair-grid" id="newPasswordBlock1">
+        <label class="icon-row" for="emailPassword">New Password
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/r/sites/CEN_Helpdesk-1stLineTraining/Shared%20Documents/1st%20Line%20Training/V%203.4/Email/Email%20Password%20Change/PDF%20Agent/Email%20Password%20Change%20V1.2.pdf?csf=1&web=1&e=pK8EZt" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : Auto generate is more secure as it provides a randomization of characters as well special icons. It is important to explain to the customer that its for security purposes and there for a custom password cannot be used.">i</span>
+        </label>
+        <input id="emailPassword" type="text" data-summary="New Email Password" placeholder="Insert the new auto-generated password">
+      </div>
+
+      <!-- Problem resolved - Only shows if an entry was made in emailPassword -->
+	  
+      <div class="hidden pair-grid" id="passwordResolvedBlock1">
+        <label class="icon-row" for="emailPasswordResolved4">Is the problem resolved?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="emailPasswordResolved4" data-summary="Problem Resolved Status">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+	  
+      <!-- If emailPasswordResolved4 = Yes (✅ Customer confirm server, update & close the ticket) -->
+      <!-- If emailPasswordResolved4 = No (⚠️ Move to Email Cannot Send / Receive flow chart) -->
+	  
+    </div> <!-- ✅ closes emailPasswordChange -->
+
+    <!-- Email - New Email Request - only shows if emailInternetCheck = Yes && problemDescription = New Email Request -->
+
+    <div class="section summarizable hidden collapsible" data-section="Email - New Email Request" id="emailNewRequest">
+      <div class="section-header">
+        <h2 id="chip-heading">Email - New Email Request</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <!-- Portal Login -->
+	  
+      <div class="pair-grid">
+        <label class="icon-row" for="portalLoginCheck5">Logged in to the Herotel email portal
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAu0v0WaV7aR7agsgU3e8tIAcy9-ucXMDzXjxgkOrOcXfM?e=Nlr5EM" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The portal allows us as First Line Support agent to confirm key details regarding the domain as well login to the hosting platform.">i</span>
+        </label>
+        <select id="portalLoginCheck5" data-summary="portalLoginCheck5">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If portalLoginCheck5 = No (⚠️ Log into the Herotel portal in order to perform the next steps) -->
+
+      <!-- Email service with Herotel - Only shows if portalLoginCheck5 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailServiceHerotelBlock5">
+        <label class="icon-row" for="emailServiceHerotel5">Does Herotel Host the domain
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAniZVplKrXRLKvkoC_2bAAAXvhR1MallGx9Oe3nIeUBbk?e=oiBz13" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="a First Line Support agent only has access to the hosting platform (domains) that we host. We do not have access to a third parties hosting platform.">i</span>
+        </label>
+        <select id="emailServiceHerotel5" data-summary="Service With Herotel">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If emailServiceHerotel5 = No (⚠️ Customer must contact their email provider) -->
+
+      <!-- Email Address Availability Check - Only shows if emailServiceHerotel5 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailAvailabilityBlock1">
+        <label class="icon-row" for="emailAvailability">Email Availability
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDSC3kFx2k3RZolyOTfIflPASBW1paOziEP-yXbP7G1YQs?e=tsJr11" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : To complete the customers request.">i</span>
+        </label>
+        <select id="emailAvailability" data-summary="Email Availability">
+          <option>-- Select --</option>
+          <option>Additional mail can be created</option>
+          <option>Mail Limit Reached</option>
+        </select>
+      </div>
+
+      <!-- If emailAvailability = Mail Limit Reached (⚠️ Escalate to Sales_Specialist to quote package with more email addresses) -->
+
+      <!-- Email Address Creation - Only shows if emailAvailability = Additional mail can be created -->
+	  
+      <div class="hidden pair-grid" id="newEmailAddressBlock1">
+        <label class="icon-row" for="emailAddress">New Email Address
+        </label>
+        <input id="emailAddress" type="text" data-summary="New Email Address" placeholder="Insert the new email address">
+      </div>
+
+      <!-- Email Address Configuration - Only shows if there is an entry in emailAddress -->
+	  
+      <div class="hidden pair-grid" id="newEmailConfigBlock1">
+        <label class="icon-row" for="newEmailConfig">New Email Address Configured
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQA3XNd1_7LvQ7gFu58qRKm9AToSurSdXJ3dMUJ5yhQ7AyY?e=fffSXE" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : To complete the customers request.">i</span>
+        </label>
+        <select id="newEmailConfig" data-summary="New Email Configured">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If newEmailConfig = No (⚠️ Configure the email address on the customer's device) -->
+
+      <!-- Problem resolved - Only shows if newEmailConfig = Yes -->
+	  
+      <div class="hidden pair-grid" id="newEmailResolvedBlock1">
+        <label class="icon-row" for="newEmailResolved">Is the problem resolved?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="newEmailResolved" data-summary="Problem Resolved Status">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+	  
+      <!-- If newEmailResolved = Yes (✅ Confirm server, update & close the ticket)-->
+      <!-- If newEmailResolved = No (⚠️ Move to Email Cannot Send / Receive flow chart) -->
+	  
+    </div> <!-- ✅ closes emailNewRequest -->
+
+    <!-- Email - Domain Request Change - only shows if emailInternetCheck = Yes && problemDescription = Domain Request Change -->
+
+    <div class="section summarizable hidden collapsible" data-section="Email - Domain Request Change" id="emailDomainChange">
+      <div class="section-header">
+        <h2 id="chip-heading">Email - Domain Request Change</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <!-- Domain Request Change -->
+      <div id="emailDomainChangeBlock" class="pair-grid">
+        <label for="domainRequest">Domain Request</label>
+        <select id="domainRequest" data-summary="Domain Request">
+          <option>-- Select --</option>
+          <option>New Domain</option>
+          <option>Domain Transfer</option>
+          <option>Domain Cancellation</option>
+        </select>
+      </div>
+      <!-- If domainRequest = New Domain (⚠️ Escalate to Sales_Specialist) -->
+      <!-- If domainRequest = Domain Transfer (⚠️ The new domain provider must send a transfer request via email) -->
+      <!-- If domainRequest = Domain Cancellation (⚠️ Customer must send an email to slasupport@herotel.com with the domain information to cancel) -->
+    </div> <!-- ✅ closes emailDomainChange -->
+
+    <!-- Email - Forwarding - only shows if emailInternetCheck = Yes && problemDescription = Email Forwardinge -->
+
+    <div class="section summarizable hidden collapsible" data-section="Email - Forwarding" id="emailForwarding">
+      <div class="section-header">
+        <h2 id="chip-heading">Email - Forwarding</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <!-- Portal Login -->
+	  
+      <div class="pair-grid">
+        <label class="icon-row" for="portalLoginCheck6">Logged in to the Herotel email portal
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAu0v0WaV7aR7agsgU3e8tIAcy9-ucXMDzXjxgkOrOcXfM?e=Nlr5EM" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The portal allows us as First Line Support agent to confirm key details regarding the domain as well login to the hosting platform.">i</span>
+        </label>
+        <select id="portalLoginCheck6" data-summary="portalLoginCheck6">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If portalLoginCheck6 = 'No' (⚠️ Log into the Herotel portal in order to perform the next steps) -->
+
+      <!-- Email service with Herotel - Only shows if portalLoginCheck6 = Yes -->
+	  
+      <div class="hidden pair-grid" id="emailServiceHerotelBlock6">
+        <label class="icon-row" for="emailServiceHerotel6">Does Herotel host the domain
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAniZVplKrXRLKvkoC_2bAAAXvhR1MallGx9Oe3nIeUBbk?e=oiBz13" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="a First Line Support agent only has access to the hosting platform (domains) that we host. We do not have access to a third parties hosting platform.">i</span>
+        </label>
+        <select id="emailServiceHerotel6" data-summary="Service With Herotel">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If emailServiceHerotel6 = 'No' (⚠️ Customer must contact their email provider) -->
+
+      <!-- Forwarding Rule Creation - Only shows if emailServiceHerotel6 = Yes -->
+	  
+      <div class="hidden pair-grid" id="forwardingRuleBlock1">
+        <label class="icon-row" for="forwardingRule">Configured the forwarding rule
+           <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQBKAa1Qhgr_SZ-Br37wr5BfAUS343iOTSggPNblcrfivc4?e=5sp2fv" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Why : To complete the customer reqeust.">i</span>
+        </label>
+        <select id="forwardingRule" data-summary="Forwarding Rule Configured">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+
+      <!-- If forwardingRule = 'No' (⚠️ Configure the forwarding rule correctly in the portal) -->
+
+      <!-- Email Forwarding Address - Only shows if forwardingRule = Yes -->
+      <div class="hidden pair-grid" id="forwardingAddressBlock1">
+        <label class="icon-row" for="forwardingAddress">Email address forwarded to</label>
+        <input id="forwardingAddress" type="text" data-summary="Forwarding Address" placeholder="Insert the forwarding email address here">
+      </div>
+
+      <!-- Problem resolved - Only shows if an entry was made in forwardingAddress -->
+	  
+      <div class="hidden pair-grid" id="forwardingResolvedBlock1">
+        <label class="icon-row" for="forwardingResolved">Is the problem resolved?
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="forwardingResolved" data-summary="Problem Resolved Status">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+	  
+      <!-- If forwardingAddress.value.trim() !== '' && forwardingResolved = 'Yes' (✅ Confirm server, update & close the ticket) -->
+      <!-- If forwardingAddress.value.trim() !== '' && forwardingResolved = 'No' (⚠️ Escalate to Config & Analyse) -->
+    </div> <!-- ✅ closes emailForwarding -->
+
+  </div>  <!-- ✅ closes column 1 (content-area) -->
+
+<!-- SUMMARY PANEL -->
+
+  <div class="summary-panel">
+    <div class="section summary-section">
+      <h2>Summary</h2>
+      <div id="summary"></div>
+
+      <!-- ⭐ Copy left, Home right -->
+      <div class="summary-buttons">
+        <button class="copy-btn">Copy Summary</button>
+        <a class="accent-btn" href="index.html" role="button">Home</a>
+      </div>
+	  
+    </div>
+  </div> <!-- ✅ closes summary-panel -->
+
+</div> <!-- ✅ closes main-layout -->
+
+</body>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const SELECT_PLACEHOLDER_PREFIX = '-- Select';
+
+  // ==============================
+  //  BASIC REFS
+  // ==============================
+  const summaryPanel = document.getElementById('summary');
+  const copyBtn      = document.querySelector('.copy-btn');
+  const homeBtn      = document.getElementById('homeBtn');
+
+  // Customer info
+  const customerName       = document.getElementById('customerName');
+  const cellNumber         = document.getElementById('cellNumber');
+  const siteLocation       = document.getElementById('siteLocation');
+  const startTime          = document.getElementById('startTime');
+
+  // Email-specific customer fields
+  const emailName          = document.getElementById('emailName');
+  const emailCellNumber    = document.getElementById('emailCellNumber');
+  const emailAddressMain   = document.getElementById('emailAddressMain');
+  const emailDomain        = document.getElementById('emailDomain');
+
+  // Internet + Problem description
+  const emailISP           = document.getElementById('emailISP');
+  const emailInternetCheck = document.getElementById('emailInternetCheck');
+  const problemDescription = document.getElementById('problemDescription'); // select with scenarios
+
+  // CHIP (present on page)
+  const chipSection        = document.getElementById('chipSection'); // ⭐ drives CHIP visibility
+  const accountStatus      = document.getElementById('accountStatus');
+  const outageStatus       = document.getElementById('outageStatus');
+  const ticketStatus       = document.getElementById('ticketStatus');
+  const jobCard            = document.getElementById('jobCard');
+
+  // Sections (Email flows)
+  const emailCannotSendReceive = document.getElementById('emailCannotSendReceive');
+  const emailMailboxLimit      = document.getElementById('emailMailboxLimit');
+  const emailPasswordChange    = document.getElementById('emailPasswordChange');
+  const emailNewRequest        = document.getElementById('emailNewRequest');
+  const emailDomainChange      = document.getElementById('emailDomainChange');
+  const emailForwarding        = document.getElementById('emailForwarding');
+
+  // ---------- Cannot Send / Receive ----------
+  const portalLoginCheck1        = document.getElementById('portalLoginCheck1');
+  const emailProviderBlock1      = document.getElementById('emailProviderBlock1');
+  const emailProviderHerotel1    = document.getElementById('emailProviderHerotel1');
+  const emailServiceStatusBlock1 = document.getElementById('emailServiceStatusBlock1');
+  const emailServiceStatus1      = document.getElementById('emailServiceStatus1');
+  const rmStatusBlock1           = document.getElementById('rmStatusBlock1');
+  const rmStatus1                = document.getElementById('rmStatus1');
+  const emailSettingsBlock1      = document.getElementById('emailSettingsBlock1');
+  const emailSettings1           = document.getElementById('emailSettings1');
+
+  const forwardingUpdateBlock1   = document.getElementById('forwardingUpdateBlock1');
+  const emailForwardingUpdate1   = document.getElementById('emailForwardingUpdate1');
+  const ForwardingresolvedBlock  = document.getElementById('ForwardingresolvedBlock');
+  const ForwardingResolved       = document.getElementById('ForwardingResolved');
+
+  const programErrorBlock1       = document.getElementById('programErrorBlock1');
+  const programErrorOrBounce1    = document.getElementById('programErrorOrBounce1');
+  const programErrorBlock2       = document.getElementById('programErrorBlock2');
+  const programBounceError       = document.getElementById('programBounceError');
+
+  const mailTesterBlock1         = document.getElementById('mailTesterBlock1');
+  const mailTester1              = document.getElementById('mailTester1');
+  const problemResolvedBlock1    = document.getElementById('problemResolvedBlock1');
+  const cannotSendReceiveProblemResolved1 = document.getElementById('cannotSendReceiveProblemResolved1');
+
+  // ---------- Mailbox Limit Reached ----------
+  const portalLoginCheck2           = document.getElementById('portalLoginCheck2');
+  const emailServiceHerotelBlock2   = document.getElementById('emailServiceHerotelBlock2');
+  const emailServiceHerotel2        = document.getElementById('emailServiceHerotel2');
+  const quotaStatusBlock1           = document.getElementById('quotaStatusBlock1');
+  const quotaCheck1                 = document.getElementById('quotaCheck1');
+  const customerResolutionBlock1    = document.getElementById('customerResolutionBlock1');
+  const customerChosenResolution1   = document.getElementById('customerChosenResolution1');
+  const consentBlock1               = document.getElementById('consentBlock1');
+  const consent1                    = document.getElementById('consent1');
+
+  const quotaIncreaseBlock1         = document.getElementById('quotaIncreaseBlock1');
+  const domainStorageValue          = document.getElementById('domainStorageValue');
+  const domainStorageUnit           = document.getElementById('domainStorageUnit');
+  const emailStorageValue           = document.getElementById('emailStorageValue');
+  const emailStorageUnit            = document.getElementById('emailStorageUnit');
+  const updatedEmailStorageValue    = document.getElementById('updatedEmailStorageValue');
+  const updatedEmailStorageUnit     = document.getElementById('updatedEmailStorageUnit');
+
+  const mailboxResolvedBlock1       = document.getElementById('mailboxResolvedBlock1');
+  const mailboxProblemResolved3     = document.getElementById('mailboxProblemResolved3');
+
+  // ---------- Password Change ----------
+  const portalLoginCheck3           = document.getElementById('portalLoginCheck3');
+  const emailServiceHerotelBlock3   = document.getElementById('emailServiceHerotelBlock3');
+  const emailServiceHerotel3        = document.getElementById('emailServiceHerotel3');
+  const newPasswordBlock1           = document.getElementById('newPasswordBlock1');
+  const emailPassword               = document.getElementById('emailPassword');
+  const passwordResolvedBlock1      = document.getElementById('passwordResolvedBlock1');
+  const emailPasswordResolved4      = document.getElementById('emailPasswordResolved4');
+
+  // ---------- New Email Request ----------
+  const portalLoginCheck5           = document.getElementById('portalLoginCheck5');
+  const emailServiceHerotelBlock5   = document.getElementById('emailServiceHerotelBlock5');
+  const emailServiceHerotel5        = document.getElementById('emailServiceHerotel5');
+  const emailAvailabilityBlock1     = document.getElementById('emailAvailabilityBlock1');
+  const emailAvailability           = document.getElementById('emailAvailability');
+  const newEmailAddressBlock1       = document.getElementById('newEmailAddressBlock1');
+  const emailAddress                = document.getElementById('emailAddress');
+  const newEmailConfigBlock1        = document.getElementById('newEmailConfigBlock1');
+  const newEmailConfig              = document.getElementById('newEmailConfig');
+  const newEmailResolvedBlock1      = document.getElementById('newEmailResolvedBlock1');
+  const newEmailResolved            = document.getElementById('newEmailResolved');
+
+  // ---------- Domain Request Change ----------
+  const domainRequest               = document.getElementById('domainRequest');
+
+  // ---------- Forwarding ----------
+  const portalLoginCheck6           = document.getElementById('portalLoginCheck6');
+  const emailServiceHerotelBlock6   = document.getElementById('emailServiceHerotelBlock6');
+  const emailServiceHerotel6        = document.getElementById('emailServiceHerotel6');
+  const forwardingRuleBlock1        = document.getElementById('forwardingRuleBlock1');
+  const forwardingRule              = document.getElementById('forwardingRule');
+  const forwardingAddressBlock1     = document.getElementById('forwardingAddressBlock1');
+  const forwardingAddress           = document.getElementById('forwardingAddress');
+  const forwardingResolvedBlock1    = document.getElementById('forwardingResolvedBlock1');
+  const forwardingResolved          = document.getElementById('forwardingResolved');
+
+  // ==============================
+  //  HELPERS
+  // ==============================
+  const show = el => { if (el) el.classList.remove('hidden'); };
+  const hide = el => { if (el) el.classList.add('hidden'); };
+  const isPlaceholderValue = val => !val || String(val).startsWith(SELECT_PLACEHOLDER_PREFIX);
+  const resetSelect = el => { if (el && el.tagName === 'SELECT') el.selectedIndex = 0; };
+  const resetInput  = el => { if (el && 'value' in el) el.value = ''; };
+
+  function resetContainer(container) {
+    if (!container) return;
+    container.querySelectorAll('select').forEach(resetSelect);
+    container.querySelectorAll('input, textarea').forEach(resetInput);
+  }
+
+  // Hidden detection: ignore .section-panel collapse, do not hide when ancestor is .is-collapsed
+  const isEffectivelyHidden = (el) => {
+    let node = el;
+    while (node && node !== document.body) {
+      if (node.classList?.contains('hidden') && !node.classList.contains('section-panel')) return true;
+      node = node.parentElement;
+    }
+    return false;
+  };
+
+  let rafId = null;
+  function scheduleUpdateSummary() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      updateSummary();
+    });
+  }
+  
+  // ==============================
+  //  COLLAPSIBLES — safe for Email sections w/o .section-panel
+  // ==============================
+  (function setupCollapsibles() {
+
+    function setExpanded(section, expanded) {
+      const btn  = section.querySelector('.section-toggle');
+      const icon = btn?.querySelector('.toggle-icon');
+
+      // Try the standard container first
+      const panel = section.querySelector(':scope > .section-panel');
+
+      if (panel) {
+        // Standard pages (with .section-panel) → just hide the panel
+        panel.classList.toggle('hidden', !expanded);
+      } else {
+        // Email pages (no .section-panel) → never touch inner .hidden states
+        // Just collapse the section visually
+        section.classList.toggle('is-collapsed', !expanded);
+      }
+
+      // ARIA + icon
+      btn?.setAttribute('aria-expanded', String(expanded));
+      if (icon) icon.textContent = expanded ? '−' : '+';
+    }
+
+    function toggle(section) {
+      // Do nothing if router has hidden the whole section
+      if (section.classList.contains('hidden')) return;
+
+      const btn = section.querySelector('.section-toggle');
+      const current = btn?.getAttribute('aria-expanded') === 'true';
+      setExpanded(section, !current);
+    }
+
+    document.querySelectorAll('.section.collapsible').forEach(section => {
+      const btn = section.querySelector('.section-toggle');
+      if (!btn) return;
+
+      const initialExpanded =
+        btn.hasAttribute('aria-expanded')
+          ? btn.getAttribute('aria-expanded') === 'true'
+          : true;
+
+      // Initialize without touching flow visibility
+      setExpanded(section, initialExpanded);
+
+      btn.addEventListener('click', () => toggle(section));
+      btn.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle(section);
+        }
+      });
+    });
+  })();
+
+  // ==============================
+  //  PHONE FORMATTER — cell + emailCell
+  // ==============================
+  (function phoneFormatterMulti() {
+    const targets = [cellNumber, emailCellNumber].filter(Boolean);
+    if (!targets.length) return;
+
+    const MAX_DIGITS = 10;
+    const formatDigits = (d) => {
+      const clean = (d || '').replace(/\D/g, '').slice(0, MAX_DIGITS);
+      const len = clean.length;
+      if (len <= 3) return clean;
+      if (len <= 6) return `${clean.slice(0,3)} ${clean.slice(3)}`;
+      return `${clean.slice(0,3)} ${clean.slice(3,6)} ${clean.slice(6)}`;
+    };
+    const mapDigitsToCaret = (formatted, digitsToLeft) => {
+      let count = 0, pos = 0;
+      while (pos < formatted.length && count < digitsToLeft) { if (/\d/.test(formatted[pos])) count++; pos++; }
+      return pos;
+    };
+    function apply(el, triggerSummary = true) {
+      const start = el.selectionStart ?? el.value.length;
+      const digitsLeft = (el.value.slice(0, start).match(/\d/g) || []).length;
+      const formatted = formatDigits(el.value);
+      el.value = formatted;
+      const newPos = mapDigitsToCaret(formatted, digitsLeft);
+      try { el.setSelectionRange(newPos, newPos); } catch {}
+      if (triggerSummary) scheduleUpdateSummary();
+    }
+    function onPasteSanitize(e, el) {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text') || '';
+      const digits = text.replace(/\D/g, '').slice(0, MAX_DIGITS);
+      try { document.execCommand('insertText', false, digits); } catch { el.value += digits; }
+      apply(el);
+    }
+    targets.forEach(el => {
+      if (!el.getAttribute('inputmode')) el.setAttribute('inputmode', 'tel');
+      el.addEventListener('input', () => apply(el));
+      el.addEventListener('paste', e => onPasteSanitize(e, el));
+      el.addEventListener('blur',  () => apply(el, false));
+      apply(el, false);
+    });
+  })();
+
+  // ==============================
+  //  EMAIL SECTIONS VISIBILITY (router)
+  // ==============================
+  const emailSections = [
+    emailCannotSendReceive, emailMailboxLimit, emailPasswordChange,
+    emailNewRequest, emailDomainChange, emailForwarding
+  ];
+
+  function hideAllEmailSections() {
+    emailSections.forEach(sec => { if (sec) { hide(sec); resetContainer(sec); } });
+  }
+
+  function updateEmailProblemSection() {
+    const hasInternet = emailInternetCheck?.value === 'Yes';
+    const prob = (problemDescription?.value || '').trim();
+
+    hideAllEmailSections();
+
+    if (!hasInternet) {
+      // ✅ Exception: if Internet is No but the problem is "Domain Request Change",
+      // still show the Domain Request Change section.
+      if (prob === 'Domain Request Change') {
+        show(emailDomainChange);
+      }
+      scheduleUpdateSummary();
+      return;
+    }
+
+    // Normal online routing
+    switch (prob) {
+      case 'Cannot Send / Receive':        show(emailCannotSendReceive); break;
+      case 'Mailbox limit Reached':        show(emailMailboxLimit);      break;
+      case 'Email password change':        show(emailPasswordChange);    break;
+      case 'New Email Request':            show(emailNewRequest);        break;
+      case 'Domain Request Change':        show(emailDomainChange);      break;
+      case 'Email Forwarding':             show(emailForwarding);        break;
+      default: /* nothing */               break;
+    }
+    scheduleUpdateSummary();
+  }
+
+  emailInternetCheck?.addEventListener('change', updateEmailProblemSection);
+  problemDescription?.addEventListener('change', updateEmailProblemSection);
+
+  // ==============================
+  //  CHIP VISIBILITY — only when ISP = Herotel AND Internet = Yes
+  // ==============================
+  function updateChipVisibility() {
+    const isHerotel   = (emailISP?.value || '').trim() === 'Herotel';
+    const hasInternet = (emailInternetCheck?.value || '').trim() === 'Yes';
+
+    if (isHerotel && hasInternet) {
+      show(chipSection);
+      // Ensure it's visually expanded when shown (does not affect flows)
+      const btn   = chipSection?.querySelector('.section-toggle');
+      const panel = chipSection?.querySelector(':scope > .section-panel');
+      btn?.setAttribute('aria-expanded', 'true');
+      panel?.classList.remove('hidden');
+      chipSection?.classList.remove('is-collapsed');
+    } else {
+      // Hide and reset CHIP when not allowed
+      hide(chipSection);
+      resetSelect(accountStatus);
+      resetSelect(outageStatus);
+      resetSelect(ticketStatus);
+      resetSelect(jobCard);
+    }
+    scheduleUpdateSummary();
+  }
+  emailISP?.addEventListener('change', updateChipVisibility);
+  emailInternetCheck?.addEventListener('change', updateChipVisibility); // ⭐ react to Internet Access changes too
+
+
+  // ==============================
+  //  CANNOT SEND / RECEIVE FLOW
+  // ==============================
+  function resetCSRDownstream() {
+    hide(emailProviderBlock1);      resetSelect(emailProviderHerotel1);
+    hide(emailServiceStatusBlock1); resetSelect(emailServiceStatus1);
+    hide(rmStatusBlock1);           resetSelect(rmStatus1);
+    hide(emailSettingsBlock1);      resetSelect(emailSettings1);
+
+    hide(forwardingUpdateBlock1);   resetSelect(emailForwardingUpdate1);
+    hide(ForwardingresolvedBlock);  resetSelect(ForwardingResolved);
+
+    hide(programErrorBlock1);       resetSelect(programErrorOrBounce1);
+    hide(programErrorBlock2);       resetInput(programBounceError);
+
+    hide(mailTesterBlock1);         resetSelect(mailTester1);
+    hide(problemResolvedBlock1);    resetSelect(cannotSendReceiveProblemResolved1);
+  }
+
+  portalLoginCheck1?.addEventListener('change', () => {
+    resetCSRDownstream();
+    if (portalLoginCheck1.value === 'Yes') show(emailProviderBlock1);
+    scheduleUpdateSummary();
+  });
+
+  emailProviderHerotel1?.addEventListener('change', () => {
+    hide(emailServiceStatusBlock1); resetSelect(emailServiceStatus1);
+    hide(rmStatusBlock1);           resetSelect(rmStatus1);
+    hide(emailSettingsBlock1);      resetSelect(emailSettings1);
+    hide(forwardingUpdateBlock1);   resetSelect(emailForwardingUpdate1);
+    hide(ForwardingresolvedBlock);  resetSelect(ForwardingResolved);
+    hide(programErrorBlock1);       resetSelect(programErrorOrBounce1);
+    hide(programErrorBlock2);       resetInput(programBounceError);
+    hide(mailTesterBlock1);         resetSelect(mailTester1);
+    hide(problemResolvedBlock1);    resetSelect(cannotSendReceiveProblemResolved1);
+
+    if (emailProviderHerotel1.value === 'Yes') show(emailServiceStatusBlock1);
+    scheduleUpdateSummary();
+  });
+
+  emailServiceStatus1?.addEventListener('change', () => {
+    hide(rmStatusBlock1);           resetSelect(rmStatus1);
+    hide(emailSettingsBlock1);      resetSelect(emailSettings1);
+    hide(forwardingUpdateBlock1);   resetSelect(emailForwardingUpdate1);
+    hide(ForwardingresolvedBlock);  resetSelect(ForwardingResolved);
+    hide(programErrorBlock1);       resetSelect(programErrorOrBounce1);
+    hide(programErrorBlock2);       resetInput(programBounceError);
+    hide(mailTesterBlock1);         resetSelect(mailTester1);
+    hide(problemResolvedBlock1);    resetSelect(cannotSendReceiveProblemResolved1);
+
+    if (emailServiceStatus1.value === 'Domain & Email Active') {
+      show(rmStatusBlock1);
+    }
+    scheduleUpdateSummary();
+  });
+
+  rmStatus1?.addEventListener('change', () => {
+    hide(emailSettingsBlock1);      resetSelect(emailSettings1);
+    hide(forwardingUpdateBlock1);   resetSelect(emailForwardingUpdate1);
+    hide(ForwardingresolvedBlock);  resetSelect(ForwardingResolved);
+    hide(programErrorBlock1);       resetSelect(programErrorOrBounce1);
+    hide(programErrorBlock2);       resetInput(programBounceError);
+    hide(mailTesterBlock1);         resetSelect(mailTester1);
+    hide(problemResolvedBlock1);    resetSelect(cannotSendReceiveProblemResolved1);
+
+    if (rmStatus1.value === 'Yes') {
+      show(emailSettingsBlock1);
+    }
+    scheduleUpdateSummary();
+  });
+
+  emailSettings1?.addEventListener('change', () => {
+    hide(forwardingUpdateBlock1);   resetSelect(emailForwardingUpdate1);
+    hide(ForwardingresolvedBlock);  resetSelect(ForwardingResolved);
+    hide(programErrorBlock1);       resetSelect(programErrorOrBounce1);
+    hide(programErrorBlock2);       resetInput(programBounceError);
+    hide(mailTesterBlock1);         resetSelect(mailTester1);
+    hide(problemResolvedBlock1);    resetSelect(cannotSendReceiveProblemResolved1);
+
+    if (emailSettings1.value === 'Email Forward Configured') {
+      show(forwardingUpdateBlock1);
+    } else if (emailSettings1.value === 'Settings are correct') {
+      show(programErrorBlock1);
+      show(mailTesterBlock1); // Mail tester step appears in this path
+    }
+    scheduleUpdateSummary();
+  });
+
+  emailForwardingUpdate1?.addEventListener('change', () => {
+    hide(ForwardingresolvedBlock);  resetSelect(ForwardingResolved);
+    if (!isPlaceholderValue(emailForwardingUpdate1.value)) show(ForwardingresolvedBlock);
+    scheduleUpdateSummary();
+  });
+
+  programErrorOrBounce1?.addEventListener('change', () => {
+    hide(programErrorBlock2); resetInput(programBounceError);
+    if (programErrorOrBounce1.value === 'Yes') show(programErrorBlock2);
+    scheduleUpdateSummary();
+  });
+
+  mailTester1?.addEventListener('change', () => {
+    hide(problemResolvedBlock1); resetSelect(cannotSendReceiveProblemResolved1);
+    if (mailTester1.value === 'Yes') show(problemResolvedBlock1);
+    scheduleUpdateSummary();
+  });
+
+  cannotSendReceiveProblemResolved1?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  //  MAILBOX LIMIT REACHED FLOW
+  // ==============================
+  function resetLimitDownstream() {
+    hide(emailServiceHerotelBlock2); resetSelect(emailServiceHerotel2);
+    hide(quotaStatusBlock1);         resetSelect(quotaCheck1);
+    hide(customerResolutionBlock1);  resetSelect(customerChosenResolution1);
+    hide(consentBlock1);             resetSelect(consent1);
+
+    hide(quotaIncreaseBlock1);
+    resetInput(domainStorageValue);  resetSelect(domainStorageUnit);
+    resetInput(emailStorageValue);   resetSelect(emailStorageUnit);
+    resetInput(updatedEmailStorageValue); resetSelect(updatedEmailStorageUnit);
+
+    hide(mailboxResolvedBlock1);     resetSelect(mailboxProblemResolved3);
+  }
+
+  function checkQuotaInputsComplete() {
+    const a = (domainStorageValue?.value || '').trim();
+    const b = (emailStorageValue?.value || '').trim();
+    const c = (updatedEmailStorageValue?.value || '').trim();
+    return a !== '' && b !== '' && c !== '';
+  }
+
+  portalLoginCheck2?.addEventListener('change', () => {
+    resetLimitDownstream();
+    if (portalLoginCheck2.value === 'Yes') show(emailServiceHerotelBlock2);
+    scheduleUpdateSummary();
+  });
+
+  emailServiceHerotel2?.addEventListener('change', () => {
+    hide(quotaStatusBlock1);         resetSelect(quotaCheck1);
+    hide(customerResolutionBlock1);  resetSelect(customerChosenResolution1);
+    hide(consentBlock1);             resetSelect(consent1);
+
+    hide(quotaIncreaseBlock1);
+    resetInput(domainStorageValue);  resetSelect(domainStorageUnit);
+    resetInput(emailStorageValue);   resetSelect(emailStorageUnit);
+    resetInput(updatedEmailStorageValue); resetSelect(updatedEmailStorageUnit);
+
+    hide(mailboxResolvedBlock1);     resetSelect(mailboxProblemResolved3);
+
+    if (emailServiceHerotel2.value === 'Yes') show(quotaStatusBlock1);
+    scheduleUpdateSummary();
+  });
+
+  // Handles both 'Quota Full' and 'Quota Available'
+  quotaCheck1?.addEventListener('change', () => {
+    // Reset downstream
+    hide(customerResolutionBlock1);  resetSelect(customerChosenResolution1);
+    hide(consentBlock1);             resetSelect(consent1);
+
+    hide(quotaIncreaseBlock1);
+    resetInput(domainStorageValue);  resetSelect(domainStorageUnit);
+    resetInput(emailStorageValue);   resetSelect(emailStorageUnit);
+    resetInput(updatedEmailStorageValue); resetSelect(updatedEmailStorageUnit);
+
+    hide(mailboxResolvedBlock1);     resetSelect(mailboxProblemResolved3);
+
+    if (quotaCheck1.value === 'Quota Full') {
+      // Ask the customer to pick a resolution
+      show(customerResolutionBlock1);
+    } else if (quotaCheck1.value === 'Quota Available') {
+      // Go straight to quota increase entries path
+      show(quotaIncreaseBlock1);
+      if (checkQuotaInputsComplete()) show(mailboxResolvedBlock1);
+    }
+    scheduleUpdateSummary();
+  });
+
+  customerChosenResolution1?.addEventListener('change', () => {
+    // Always clear both branches first
+    hide(consentBlock1);             resetSelect(consent1);
+
+    hide(quotaIncreaseBlock1);
+    resetInput(domainStorageValue);  resetSelect(domainStorageUnit);
+    resetInput(emailStorageValue);   resetSelect(emailStorageUnit);
+    resetInput(updatedEmailStorageValue); resetSelect(updatedEmailStorageUnit);
+
+    hide(mailboxResolvedBlock1);     resetSelect(mailboxProblemResolved3);
+
+    if (customerChosenResolution1.value === 'Email Package Increase') {
+      // 🚦 Flow stops here. UI shows nothing further.
+      // Next Recommended Step will be provided by getEscalation().
+      // (Do not show quotaIncreaseBlock1 or consent or resolved.)
+    } else if (customerChosenResolution1.value === 'Delete emails (Written consent)') {
+      // Ask for written consent, then show resolved when Yes
+      show(consentBlock1);
+    }
+    scheduleUpdateSummary();
+  });
+
+  consent1?.addEventListener('change', () => {
+    hide(mailboxResolvedBlock1); resetSelect(mailboxProblemResolved3);
+
+    if (consent1.value === 'Yes') {
+      show(mailboxResolvedBlock1);
+    }
+    scheduleUpdateSummary();
+  });
+
+  // Number inputs only affect the 'Quota Available' path.
+  ['input', 'change'].forEach(evt => {
+    [domainStorageValue, emailStorageValue, updatedEmailStorageValue].forEach(el => {
+      el?.addEventListener(evt, () => {
+        const quotaAvailablePath = quotaCheck1.value === 'Quota Available';
+        if (quotaAvailablePath) {
+          if (checkQuotaInputsComplete()) {
+            show(mailboxResolvedBlock1);
+          } else {
+            hide(mailboxResolvedBlock1);
+            resetSelect(mailboxProblemResolved3);
+          }
+        }
+        scheduleUpdateSummary();
+      });
+    });
+  });
+
+  mailboxProblemResolved3?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  //  PASSWORD CHANGE FLOW
+  // ==============================
+  function resetPwdDownstream() {
+    hide(emailServiceHerotelBlock3); resetSelect(emailServiceHerotel3);
+    hide(newPasswordBlock1);         resetInput(emailPassword);
+    hide(passwordResolvedBlock1);    resetSelect(emailPasswordResolved4);
+  }
+
+  portalLoginCheck3?.addEventListener('change', () => {
+    resetPwdDownstream();
+    if (portalLoginCheck3.value === 'Yes') show(emailServiceHerotelBlock3);
+    scheduleUpdateSummary();
+  });
+
+  emailServiceHerotel3?.addEventListener('change', () => {
+    hide(newPasswordBlock1);         resetInput(emailPassword);
+    hide(passwordResolvedBlock1);    resetSelect(emailPasswordResolved4);
+
+    if (emailServiceHerotel3.value === 'Yes') show(newPasswordBlock1);
+    scheduleUpdateSummary();
+  });
+
+  emailPassword?.addEventListener('input', () => {
+    hide(passwordResolvedBlock1); resetSelect(emailPasswordResolved4);
+    if ((emailPassword.value || '').trim() !== '') show(passwordResolvedBlock1);
+    scheduleUpdateSummary();
+  });
+
+  emailPasswordResolved4?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  //  NEW EMAIL REQUEST FLOW
+  // ==============================
+  function resetNewEmailDownstream() {
+    hide(emailServiceHerotelBlock5);  resetSelect(emailServiceHerotel5);
+    hide(emailAvailabilityBlock1);    resetSelect(emailAvailability);
+    hide(newEmailAddressBlock1);      resetInput(emailAddress);
+    hide(newEmailConfigBlock1);       resetSelect(newEmailConfig);
+    hide(newEmailResolvedBlock1);     resetSelect(newEmailResolved);
+  }
+
+  portalLoginCheck5?.addEventListener('change', () => {
+    resetNewEmailDownstream();
+    if (portalLoginCheck5.value === 'Yes') show(emailServiceHerotelBlock5);
+    scheduleUpdateSummary();
+  });
+
+  emailServiceHerotel5?.addEventListener('change', () => {
+    hide(emailAvailabilityBlock1);    resetSelect(emailAvailability);
+    hide(newEmailAddressBlock1);      resetInput(emailAddress);
+    hide(newEmailConfigBlock1);       resetSelect(newEmailConfig);
+    hide(newEmailResolvedBlock1);     resetSelect(newEmailResolved);
+
+    if (emailServiceHerotel5.value === 'Yes') show(emailAvailabilityBlock1);
+    scheduleUpdateSummary();
+  });
+
+  emailAvailability?.addEventListener('change', () => {
+    hide(newEmailAddressBlock1);      resetInput(emailAddress);
+    hide(newEmailConfigBlock1);       resetSelect(newEmailConfig);
+    hide(newEmailResolvedBlock1);     resetSelect(newEmailResolved);
+
+    if (emailAvailability.value === 'Additional mail can be created') {
+      show(newEmailAddressBlock1);
+    }
+    scheduleUpdateSummary();
+  });
+
+  emailAddress?.addEventListener('input', () => {
+    hide(newEmailConfigBlock1);   resetSelect(newEmailConfig);
+    hide(newEmailResolvedBlock1); resetSelect(newEmailResolved);
+
+    if ((emailAddress.value || '').trim() !== '') show(newEmailConfigBlock1);
+    scheduleUpdateSummary();
+  });
+
+  newEmailConfig?.addEventListener('change', () => {
+    hide(newEmailResolvedBlock1); resetSelect(newEmailResolved);
+    if (newEmailConfig.value === 'Yes') show(newEmailResolvedBlock1);
+    scheduleUpdateSummary();
+  });
+
+  newEmailResolved?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  //  DOMAIN REQUEST CHANGE FLOW
+  // ==============================
+  domainRequest?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  //  FORWARDING FLOW
+  // ==============================
+  function resetForwardDownstream() {
+    hide(emailServiceHerotelBlock6);  resetSelect(emailServiceHerotel6);
+    hide(forwardingRuleBlock1);       resetSelect(forwardingRule);
+    hide(forwardingAddressBlock1);    resetInput(forwardingAddress);
+    hide(forwardingResolvedBlock1);   resetSelect(forwardingResolved);
+  }
+
+  portalLoginCheck6?.addEventListener('change', () => {
+    resetForwardDownstream();
+    if (portalLoginCheck6.value === 'Yes') show(emailServiceHerotelBlock6);
+    scheduleUpdateSummary();
+  });
+
+  emailServiceHerotel6?.addEventListener('change', () => {
+    hide(forwardingRuleBlock1);       resetSelect(forwardingRule);
+    hide(forwardingAddressBlock1);    resetInput(forwardingAddress);
+    hide(forwardingResolvedBlock1);   resetSelect(forwardingResolved);
+
+    if (emailServiceHerotel6.value === 'Yes') show(forwardingRuleBlock1);
+    scheduleUpdateSummary();
+  });
+
+  forwardingRule?.addEventListener('change', () => {
+    hide(forwardingAddressBlock1);  resetInput(forwardingAddress);
+    hide(forwardingResolvedBlock1); resetSelect(forwardingResolved);
+
+    if (forwardingRule.value === 'Yes') show(forwardingAddressBlock1);
+    scheduleUpdateSummary();
+  });
+
+  forwardingAddress?.addEventListener('input', () => {
+    hide(forwardingResolvedBlock1); resetSelect(forwardingResolved);
+    if ((forwardingAddress.value || '').trim() !== '') show(forwardingResolvedBlock1);
+    scheduleUpdateSummary();
+  });
+
+  forwardingResolved?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  //  SUMMARY LIVE UPDATING — with skip list
+  // ==============================
+  document.addEventListener('input',  e => { if (e.target?.matches?.('[data-summary]')) scheduleUpdateSummary(); });
+  document.addEventListener('change', e => { if (e.target?.matches?.('[data-summary]')) scheduleUpdateSummary(); });
+
+  // ==============================
+  //  COPY SUMMARY (strip Next Recommended Step on copy)
+  // ==============================
+  copyBtn?.addEventListener('click', async () => {
+    try {
+      const full = (summaryPanel?.textContent || '').trim();
+      const textToCopy = full.replace(/(^|\n)===\s*Next Recommended Step\s*===([\s\S]*)$/i, '$1').trim();
+      await navigator.clipboard.writeText(textToCopy);
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => (copyBtn.textContent = prev), 1200);
+    } catch {
+      const temp = document.createElement('textarea');
+      temp.style.position = 'fixed';
+      temp.style.opacity = '0';
+      const full = (summaryPanel?.textContent || '').trim();
+      temp.value = full.replace(/(^|\n)===\s*Next Recommended Step\s*===([\s\S]*)$/i, '$1').trim();
+      document.body.appendChild(temp);
+      temp.select();
+      document.execCommand('copy');
+      document.body.removeChild(temp);
+      window.getSelection()?.removeAllRanges?.();
+    }
+  });
+
+  homeBtn?.addEventListener('click', () => {
+    if (history.length > 1) history.back(); else location.href = 'index.html';
+  });
+
+  
+// ==============================
+//  SUMMARY GENERATION (matches No‑Internet) + COMBO PATCH
+// ==============================
+// 🔸 Do NOT show these in the printed Summary text,
+//     BUT still allow them to produce Next Recommended Step entries.
+const skipSummaryIds = [
+  "portalLoginCheck1",
+  "portalLoginCheck2",
+  "portalLoginCheck3",
+  "portalLoginCheck5",
+  "portalLoginCheck6",
+  "rmStatus1",
+  "mailTester1",
+];
+
+function updateSummary() {
+
+  // --- FIXED readValue() so MB (first option) is *not* treated as placeholder ---
+  const readValue = (el) => {
+    if (!el) return '';
+
+    if (el.tagName === 'SELECT') {
+
+      const v = (el.value || '').trim();
+
+      // Determine if *this select* actually has a placeholder option at index 0
+      const firstText =
+        (el.options && el.options.length > 0)
+          ? (el.options[0].text || '').trim()
+          : '';
+
+      const firstIsPlaceholder = firstText.startsWith('--'); // true for “-- Select --”
+      const isPlaceholder =
+        (firstIsPlaceholder && el.selectedIndex === 0) ||
+        v.startsWith('--');
+
+      return isPlaceholder ? '' : v;
+    }
+
+    if ('value' in el) return (el.value || '').trim();
+    return '';
+  };
+
+  // --- Combo field helper: joins numeric value + unit into one line
+  function readCombo(inputEl, unitEl) {
+    const v = readValue(inputEl);
+    const u = readValue(unitEl);
+    if (!v) return '';
+    return u ? `${v} ${u}` : v;
+  }
+
+  // Group text
+  let customerInfo = '';
+  let chipInfo     = '';
+  let problemInfo  = '';
+  const escalationSet = new Set();
+
+  const fields = Array.from(document.querySelectorAll('[data-summary]'));
+  fields.forEach(el => {
+    if (isEffectivelyHidden(el)) return;
+
+    const id    = el.id || '';
+    const label = el.getAttribute('data-summary') || id || 'Field';
+
+    // --- Suppress unit-only lines in summary
+    if (
+      id === 'domainStorageUnit' ||
+      id === 'emailStorageUnit' ||
+      id === 'updatedEmailStorageUnit'
+    ) {
+      return;
+    }
+
+    // --- QUOTA INCREASE COMBINED FIELDS (one-line value + unit)
+    if (id === 'domainStorageValue') {
+      const combo = readCombo(domainStorageValue, domainStorageUnit);
+      if (combo) problemInfo += `${label}: ${combo}\n`;
+      return;
+    }
+    if (id === 'emailStorageValue') {
+      const combo = readCombo(emailStorageValue, emailStorageUnit);
+      if (combo) problemInfo += `${label}: ${combo}\n`;
+      return;
+    }
+    if (id === 'updatedEmailStorageValue') {
+      const combo = readCombo(updatedEmailStorageValue, updatedEmailStorageUnit);
+      if (combo) problemInfo += `${label}: ${combo}\n`;
+      return;
+    }
+
+    const value = readValue(el);
+    if (!value) return;
+
+    // Always compute "Next Recommended Step" even for skipped IDs
+    const step = getEscalation(id, value);
+    if (step) {
+      step.split('\n').forEach(line => {
+        const t = line.trim();
+        if (t) escalationSet.add(t);
+      });
+    }
+
+    // Skip adding to visible summary if in skip list
+    if (skipSummaryIds.includes(id)) return;
+
+    // Otherwise add normally
+    if (
+      id === 'customerName'        || id === 'cellNumber'        ||
+      id === 'siteLocation'        || id === 'startTime'         ||
+      id === 'emailName'           || id === 'emailCellNumber'   ||
+      id === 'emailAddressMain'    || id === 'emailDomain'       ||
+      id === 'emailISP'            || id === 'emailInternetCheck'||
+      id === 'problemDescription'
+    ) {
+      customerInfo += `${label}: ${value}\n`;
+    } else if (
+      id === 'accountStatus' || id === 'outageStatus' ||
+      id === 'ticketStatus'  || id === 'jobCard'
+    ) {
+      chipInfo += `${label}: ${value}\n`;
+    } else {
+      problemInfo += `${label}: ${value}\n`;
+    }
+  });
+
+  // Problem heading
+  const prob = (problemDescription?.value || '').trim();
+  let problemHeading = '';
+  if (emailInternetCheck?.value === 'Yes') {
+    switch (prob) {
+      case 'Cannot Send / Receive':        problemHeading = 'Email - Cannot Send / Receive'; break;
+      case 'Mailbox limit Reached':        problemHeading = 'Email - Mailbox Limit Reached';  break;
+      case 'Email password change':        problemHeading = 'Email - Password Change';        break;
+      case 'New Email Request':            problemHeading = 'Email - New Email Request';      break;
+      case 'Domain Request Change':        problemHeading = 'Email - Domain Request Change';  break;
+      case 'Email Forwarding':             problemHeading = 'Email - Forwarding';             break;
+    }
+  }
+
+  const escalationInfo = Array.from(escalationSet).join('\n');
+
+  // Assemble summary text
+  let summaryText = '';
+  if (customerInfo)
+    summaryText += '=== Customer Information ===\n' + customerInfo + '\n\n';
+  if (chipInfo)
+    summaryText += '=== CHIP Troubleshooting ===\n' + chipInfo + '\n\n';
+  if (problemInfo && problemHeading)
+    summaryText += '=== ' + problemHeading + ' ===\n' + problemInfo + '\n\n';
+
+  if (escalationInfo)
+    summaryText += '=== Next Recommended Step ===\n' + escalationInfo + '\n';
+
+  if (summaryPanel) summaryPanel.textContent = summaryText.trim();
+}
+
+  // ==============================
+  //  NEXT RECOMMENDED STEP (ONLY from your HTML comments)
+  // ==============================
+  function getEscalation(id, value) {
+    // Internet access — now ISP-aware
+    if (id === 'emailInternetCheck' && value === 'No') {
+      const isp = (emailISP?.value || '').trim();
+      if (isp === 'Herotel') {
+        return '⚠️ Complete the no internet flow chart for the medium';
+      }
+      if (isp === 'Third Party') {
+        return '⚠️ Customer to contact their ISP for assistance with internet access';
+      }
+      return '';
+    }
+
+    // ----- Cannot Send / Receive -----
+    if (id === 'portalLoginCheck1' && value === 'No') {
+      return '⚠️ Log into the Herotel portal in order to perform the next steps.';
+    } 
+    
+    if (id === 'emailProviderHerotel1' && value === 'No') {
+      return '⚠️ Customer must contact their email provider';
+    }
+    if (id === 'emailServiceStatus1') {
+      if (value === 'Domain / Email Quota Reached') {
+        return '⚠️ Follow the Increase Mailbox Quota flow chart';
+      }
+      if (value === 'Suspended / Email Blocked / Spam Filter / Deliverability Errors') {
+        return '⚠️ Escalate to Config & Analyse';
+      }
+    }
+    if (id === 'rmStatus1' && value === 'No') {
+      return '⚠️ Connect via RM to the customer\'s device to complete the next steps';
+    }
+    if (id === 'emailSettings1') {
+      if (value === 'Email Going to Spam') {
+        return '⚠️ Educate the customer about risks of moving spam emails to inbox';
+      }
+    }
+    if (id === 'mailTester1' && value === 'No') {
+      return '⚠️ Complete mail tester test';
+    }
+    if (id === 'ForwardingResolved') {
+      if (value === 'Yes') {
+        return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+      }
+      if (value === 'No') {
+        return '⚠️ Escalate to Config & Analyse';
+      }
+    }
+    if (id === 'cannotSendReceiveProblemResolved1') {
+      if (value === 'Yes') {
+        return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+      }
+      if (value === 'No') {
+        return '⚠️ Escalate to Config & Analyse';
+      }
+    }
+
+    // ----- Mailbox Limit Reached -----
+    if (id === 'portalLoginCheck2' && value === 'No') {
+      return '⚠️ Log into the Herotel portal in order to perform the next steps.';
+    }
+    
+    if (id === 'emailServiceHerotel2' && value === 'No') {
+      return '⚠️ Customer must contact their email provider';
+    }
+    if (id === 'customerChosenResolution1' && value === 'Email Package Increase') {
+      return '⚠️ Escalate to Sales_Specialist for package upgrade';
+    }
+    if (id === 'customerChosenResolution1') {
+      if (value === 'Email Package Increase') {
+        return '⚠️ Escalate to Sales_Specialist for package upgrade';
+      }
+    }
+    if (id === 'consent1') {
+      if (value === 'Yes') {
+        return '✅ Delete the required emails on the server';
+      }
+      if (value === 'No') {
+        return '⚠️ Suggest package upgrade instead of deletion';
+      }
+    }
+    if (id === 'mailboxProblemResolved3') {
+      if (value === 'Yes') {
+        return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+      }
+      if (value === 'No') {
+        return '⚠️ Suggest package upgrade or move to Cannot Send/Receive flow chart';
+      }
+    }
+
+    // ----- Password Change -----
+	 if (id === 'portalLoginCheck3' && value === 'No') {
+      return '⚠️ Log into the Herotel portal in order to perform the next steps.';
+    }
+	
+    if (id === 'emailServiceHerotel3' && value === 'No') {
+      return '⚠️ Customer must contact their email provider';
+    }
+    if (id === 'emailPasswordResolved4') {
+      if (value === 'Yes') {
+        return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+      }
+      if (value === 'No') {
+        return '⚠️ Move to Email Cannot Send / Receive flow chart';
+      }
+    }
+
+    // ----- New Email Request -----
+	if (id === 'portalLoginCheck5' && value === 'No') {
+      return '⚠️ Log into the Herotel portal in order to perform the next steps.';
+    }
+	
+    if (id === 'emailServiceHerotel5' && value === 'No') {
+      return '⚠️ Customer must contact their email provider';
+    }
+    if (id === 'emailAvailability' && value === 'Mail Limit Reached') {
+      return '⚠️ Escalate to Sales_Specialist to quote package with more email addresses';
+    }
+    if (id === 'newEmailConfig' && value === 'No') {
+      return '⚠️ Configure the email address on the customer\'s device';
+    }
+    if (id === 'newEmailResolved') {
+      if (value === 'Yes') {
+        return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+      }
+      if (value === 'No') {
+        return '⚠️ Move to Email Cannot Send / Receive flow chart';
+      }
+    }
+
+    // ----- Domain Request Change -----
+    if (id === 'domainRequest') {
+      if (value === 'New Domain') {
+        return '⚠️ Escalate to Sales_Specialist';
+      }
+      if (value === 'Domain Transfer') {
+        return '⚠️ The new domain provider must send a transfer request via email';
+      }
+      if (value === 'Domain Cancellation') {
+        return '⚠️ Customer must send an email to slasupport@herotel.com with the domain information to cancel';
+      }
+    }
+
+    // ----- Forwarding -----
+    if (id === 'portalLoginCheck6' && value === 'No') {
+      return '⚠️ Log into the Herotel portal in order to perform the next steps.';
+    }
+	
+	if (id === 'emailServiceHerotel6' && value === 'No') {
+      return '⚠️ Customer must contact their email provider';
+    }
+    if (id === 'forwardingRule' && value === 'No') {
+      return '⚠️ Configure the forwarding rule correctly in the portal';
+    }
+    if (id === 'forwardingResolved') {
+      const hasAddress = ((forwardingAddress?.value || '').trim() !== '');
+      if (hasAddress && value === 'Yes') {
+        return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+      }
+      if (hasAddress && value === 'No') {
+        return '⚠️ Escalate to Config & Analyse';
+      }
+    }
+
+    return '';
+  }
+
+  // ==============================
+  //  INIT
+  // ==============================
+  updateEmailProblemSection();
+  updateChipVisibility();   // ⭐ ensure CHIP visibility matches current ISP & Internet on load
+  updateSummary();
+
+  // Kick flow once so UI aligns with any prefilled values
+  setTimeout(() => {
+    emailISP?.dispatchEvent(new Event('change'));              // ⭐ fire ISP → CHIP visibility
+    emailInternetCheck?.dispatchEvent(new Event('change'));
+    problemDescription?.dispatchEvent(new Event('change'));
+
+    portalLoginCheck1?.dispatchEvent(new Event('change'));
+    emailProviderHerotel1?.dispatchEvent(new Event('change'));
+    emailServiceStatus1?.dispatchEvent(new Event('change'));
+    rmStatus1?.dispatchEvent(new Event('change'));
+    emailSettings1?.dispatchEvent(new Event('change'));
+    emailForwardingUpdate1?.dispatchEvent(new Event('change'));
+    programErrorOrBounce1?.dispatchEvent(new Event('change'));
+    mailTester1?.dispatchEvent(new Event('change'));
+    cannotSendReceiveProblemResolved1?.dispatchEvent(new Event('change'));
+
+    portalLoginCheck2?.dispatchEvent(new Event('change'));
+    emailServiceHerotel2?.dispatchEvent(new Event('change'));
+    quotaCheck1?.dispatchEvent(new Event('change'));
+    customerChosenResolution1?.dispatchEvent(new Event('change'));
+    consent1?.dispatchEvent(new Event('change'));
+    mailboxProblemResolved3?.dispatchEvent(new Event('change'));
+
+    portalLoginCheck3?.dispatchEvent(new Event('change'));
+    emailServiceHerotel3?.dispatchEvent(new Event('change'));
+    emailPassword?.dispatchEvent(new Event('input'));
+    emailPasswordResolved4?.dispatchEvent(new Event('change'));
+
+    portalLoginCheck5?.dispatchEvent(new Event('change'));
+    emailServiceHerotel5?.dispatchEvent(new Event('change'));
+    emailAvailability?.dispatchEvent(new Event('change'));
+    emailAddress?.dispatchEvent(new Event('input'));
+    newEmailConfig?.dispatchEvent(new Event('change'));
+    newEmailResolved?.dispatchEvent(new Event('change'));
+
+    domainRequest?.dispatchEvent(new Event('change'));
+
+    portalLoginCheck6?.dispatchEvent(new Event('change'));
+    emailServiceHerotel6?.dispatchEvent(new Event('change'));
+    forwardingRule?.dispatchEvent(new Event('change'));
+    forwardingAddress?.dispatchEvent(new Event('input'));
+    forwardingResolved?.dispatchEvent(new Event('change'));
+  }, 0);
+});
+</script>
+
+</body>
+</html>

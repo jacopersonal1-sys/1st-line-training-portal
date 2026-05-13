@@ -1,0 +1,1831 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!-- ⭐ AUTO‑APPLY THEME from index page BEFORE anything renders -->
+<script>
+  (function () {
+    try {
+      const THEME_KEY = 'app-theme';
+      const LIGHT = 'theme-light';
+      const DARK  = 'theme-dark';
+      const saved = localStorage.getItem(THEME_KEY);
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const cls = (saved === LIGHT || saved === DARK) ? saved : (prefersDark ? DARK : LIGHT);
+      document.documentElement.classList.add(cls);
+    } catch (e) {}
+  })();
+</script>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>First Line Support – Troubleshooting Guide V3.4</title>
+
+  <style>
+    /* ============================================================
+       ORIGINAL CSS (UNCHANGED)
+       ============================================================ */
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #f1f3f6;
+    }
+
+    /* Two-column layout with flexible widths */
+    .page-layout,
+    .main-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr; /* equal flexible columns */
+      gap: 20px; /* space between columns */
+      justify-content: center; /* center the whole grid */
+      max-width: 1420px; /* cap total width */
+      margin: 0 auto; /* center on page */
+      align-items: start; /* ensures sticky aligns at top */
+    }
+
+    /* Left side: content */
+    .content-area {
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    /* Right side: summary (sticky) */
+    .summary-panel {
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      overflow-x: hidden;
+      overflow-y: auto;
+
+      /* Sticky behavior */
+      position: sticky;
+      top: 20px; /* distance from top of viewport */
+      height: fit-content; /* prevents stretching */
+      max-height: calc(100vh - 40px); /* stays within viewport height */
+    }
+
+    #summary {
+      width: 100%;
+      white-space: pre-wrap; /* preserve line breaks but allow wrapping */
+      word-break: break-word; /* force long words to wrap */
+      overflow-wrap: break-word; /* modern equivalent */
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    /* Sections inside content */
+    .section {
+      background: #fff;
+      padding: 24px;
+      margin-bottom: 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    h1,
+    h2 {
+      text-align: center;
+      margin: 16px 0;
+    }
+
+    /* Grid for inputs: only 2 per row */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+    }
+
+    /* Icon rows */
+    .icon-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      font-weight: 600;
+    }
+
+    /* Link icon */
+    .link-icon {
+      width: 18px;
+      height: 18px;
+      background: #F58220;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      color: #fff;
+    }
+    .link-icon:hover {
+      background: #d96a15;
+    }
+
+    /* Info icon */
+    .info-icon {
+      width: 18px;
+      height: 18px;
+      background: #16a34a;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: help;
+      position: relative;
+    }
+    .info-icon:hover::after {
+      content: attr(data-info);
+      position: absolute;
+      top: 26px;
+      left: 0;
+      background: #111827;
+      color: #fff;
+      padding: 8px;
+      width: 400px;
+      font-size: 12px;
+      border-radius: 6px;
+      z-index: 100;
+      white-space: normal;
+      word-wrap: break-word;
+    }
+
+    /* Fibre Slow Speed section override */
+    #fibreSlowSection {
+      width: 100%;
+      margin-bottom: 32px;
+    }
+
+    .speed-results {
+      display: flex;
+      gap: 16px;
+    }
+
+    .speed-results input {
+      flex: 1;
+      min-width: 120px;
+      margin-bottom: 0;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .input-with-unit {
+      display: flex;
+      align-items: center;
+      gap: 8px; /* space between input and select */
+    }
+
+    .input-with-unit input {
+      flex: 1; /* input takes available width */
+    }
+
+    .input-with-unit select {
+      width: 80px; /* fixed width for MB/GB dropdown */
+    }
+
+    .copy-btn {
+      align-self: flex-start;
+    }
+
+    .summary-block {
+      margin-top: 12px;
+    }
+    .summary-block h3 {
+      text-decoration: underline;
+      margin-bottom: 6px;
+    }
+
+    /* Responsive fallback */
+    @media (max-width: 900px) {
+      .page-layout,
+      .main-layout {
+        grid-template-columns: 1fr; /* single column */
+        max-width: 100%; /* full width */
+      }
+
+      .content-area,
+      .summary-panel {
+        width: 100%;
+        max-height: none;
+        position: static;
+      }
+    }
+
+    /* ------ Collapsible Sections ------ */
+
+    .section.collapsible {
+      padding: 0;
+      border-radius: 8px;
+      position: relative;
+    }
+
+    /* Header bar using 3‑column grid */
+    .section-header {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr; /* left | center | right */
+      align-items: center;
+      padding: 16px;
+      background: #f7f7f9;
+      border-bottom: 1px solid #eee;
+    }
+
+    /* Center column: heading */
+    .section-header h2 {
+      grid-column: 2; /* middle column */
+      justify-self: center;
+      margin: 0;
+      font-size: 1.2rem;
+      text-align: center;
+    }
+
+    /* Right column: toggle button */
+    .section-toggle {
+      grid-column: 3; /* right column */
+      justify-self: end;
+
+      border: 1px solid #d1d5db;
+      background: #fff;
+      border-radius: 6px;
+      width: 28px;
+      height: 28px;
+
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .section-toggle:focus {
+      outline: 2px solid #2563eb;
+      outline-offset: 3px;
+    }
+
+    .toggle-icon {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    /* Collapsible panel body */
+    .section-panel {
+      padding: 20px;
+    }
+
+    .section-panel.hidden {
+      display: none;
+    }
+
+    /* ============================================================
+       ⭐ THEME SYSTEM — VARIABLES + OVERRIDES
+       ============================================================ */
+
+    :root {
+      --body-bg: #ffffff;
+      --body-text: #000000;
+
+      --card-bg: #ffffff;
+      --card-text: #000000;
+      --card-border: #dddddd;
+      --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+      --summary-border: #ff5000;
+      --brand-accent: #ff5000;
+
+      --input-bg: #ffffff;
+      --input-text: #000000;
+      --input-border: #d1d5db;
+
+      --header-bg: #f7f7f9;
+      --header-border: #eeeeee;
+    }
+
+    .theme-light {
+      --body-bg: #ffffff;
+      --body-text: #000000;
+
+      --card-bg: #ffffff;
+      --card-text: #000000;
+      --card-border: #dddddd;
+      --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+      --summary-border: #ff5000;
+      --brand-accent: #ff5000;
+    }
+
+    
+.theme-dark {
+  --body-bg: #1c2025;
+  --body-text: #ffffff;
+
+  --card-bg: #232a31;
+  --card-text: #ffffff;
+  --card-border: #3a3f45;
+  --panel-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+
+  --input-bg: #2c3238;
+  --input-text: #ffffff;
+  --input-border: #3a3f45;
+
+  --summary-border: #ff5000;
+  --brand-accent: #ff5000;
+
+  --header-bg: #1F2630;     /* Darker header bar */
+  --header-text: #F9FAFB;   /* Bright readable text */
+}
+
+    /* THEME OVERRIDES */
+    body {
+      background: var(--body-bg);
+      color: var(--body-text);
+    }
+
+    /* Panels and sections */
+    .content-area,
+    .section {
+      background: var(--card-bg);
+      color: var(--card-text);
+      border: 1px solid var(--card-border);
+      box-shadow: var(--panel-shadow);
+    }
+
+    /* ⭐ Theme A — Left Accent Border */
+    .summary-panel {
+      background: var(--card-bg);
+      color: var(--card-text);
+      border: none;
+      border-left: 4px solid var(--summary-border);
+      padding-left: 24px;
+      border-radius: 8px;
+      box-shadow: var(--panel-shadow);
+    }
+
+    /* Accent for toggle */
+    .section-toggle .toggle-icon {
+      color: var(--brand-accent);
+    }
+
+    /* Inputs adopt theme */
+    input,
+    select {
+      background: var(--input-bg);
+      color: var(--input-text);
+      border: 1px solid var(--input-border);
+    }
+
+    /* Accent buttons */
+    .copy-btn,
+    .accent-btn {
+      background: var(--brand-accent);
+      color: #fff;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.2s ease;
+    }
+
+    .copy-btn:hover,
+    .accent-btn:hover {
+      background: #e04800;
+    }
+
+    /* Button row */
+    .summary-buttons {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+	
+	
+/* DARK MODE — override header background */
+.theme-dark .section-header {
+  background: #1F2630 !important;   /* choose your shade here */
+}
+
+/* DARK MODE — make header text readable */
+.theme-dark .section-header h2 {
+  color: #F9FAFB !important;
+}
+
+
+/* Apply brand-orange border for all themes */
+.section-header {
+  border-bottom: 1px solid var(--brand-accent) !important;
+}
+
+
+/* ============================================================
+   CHIP — unify all rows into a single 2‑column grid (VoIP-style)
+   - Panel is the grid container (when visible)
+   - Account Status: label + select participate directly
+   - Outage/Ticket/JobCard blocks are flattened (display: contents)
+   - .hidden respected to preserve your JS flow
+   ============================================================ */
+
+/* 1) Make the CHIP panel the 2‑column grid ONLY when not hidden */
+#chipSection > .section-panel:not(.hidden) {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 1fr; /* label | control */
+  column-gap: 16px;
+  row-gap: 12px;
+  align-items: center;
+}
+
+/* 2) ACCOUNT STATUS — label + select placed into the shared grid columns */
+#chipSection label.icon-row:has(+ #accountStatus) {
+  grid-column: 1;
+  margin-top: 0;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+}
+#chipSection #accountStatus {
+  grid-column: 2;
+  margin: 0;
+  width: 100%;
+  justify-self: stretch; /* ensure full column width */
+}
+
+/* 3) OUTAGE / TICKET / JOB CARD — flatten wrappers so their children
+      (label + select) participate directly in the CHIP panel grid */
+#chipSection #outageStatusBlock:not(.hidden),
+#chipSection #ticketStatusBlock:not(.hidden),
+#chipSection #jobCardBlock:not(.hidden) {
+  display: contents !important; /* flatten only when visible */
+}
+
+/* Their labels go left, selects go right — same shared columns */
+#chipSection #outageStatusBlock:not(.hidden) > label.icon-row,
+#chipSection #ticketStatusBlock:not(.hidden) > label.icon-row,
+#chipSection #jobCardBlock:not(.hidden) > label.icon-row {
+  grid-column: 1;
+  margin-top: 0;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+}
+#chipSection #outageStatusBlock:not(.hidden) > select,
+#chipSection #ticketStatusBlock:not(.hidden) > select,
+#chipSection #jobCardBlock:not(.hidden) > select {
+  grid-column: 2;
+  margin: 0;
+  width: 100%;
+  justify-self: stretch; /* ensure full column width */
+}
+
+/* 4) Ensure hidden CHIP blocks remain fully removed (JS decides visibility) */
+#chipSection #outageStatusBlock.hidden,
+#chipSection #ticketStatusBlock.hidden,
+#chipSection #jobCardBlock.hidden {
+  display: none !important;
+}
+
+/* 5) Mobile — stack all CHIP rows */
+@media (max-width: 900px) {
+  #chipSection > .section-panel:not(.hidden) {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+  }
+
+  #chipSection label.icon-row:has(+ #accountStatus),
+  #chipSection #accountStatus,
+  #chipSection #outageStatusBlock > label.icon-row,
+  #chipSection #ticketStatusBlock > label.icon-row,
+  #chipSection #jobCardBlock > label.icon-row,
+  #chipSection #outageStatusBlock > select,
+  #chipSection #ticketStatusBlock > select,
+  #chipSection #jobCardBlock > select {
+    grid-column: 1 !important;
+    justify-self: stretch;
+  }
+}
+
+
+/* ============================================================
+   Fibre Slow Speed — VoIP-style rows
+   - Each visible block becomes a 2‑column grid
+   - Label in col 1, control in col 2
+   - Speed results stay inline on the right
+   - .hidden respected (JS flow intact)
+   ============================================================ */
+
+/* Make each Fibre block a 2‑column row (when visible) */
+#fibreslowProblemSection .section-panel > #fibreTestingMediumBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreSpeedTestBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreSpeedResultsBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreUsageMatchBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreRouterConfigBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreSlowResolvedBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreLightBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreLightImpactBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreAdsStatusBlock:not(.hidden),
+#fibreslowProblemSection .section-panel > #fibreSlowSpeedStatusBlock:not(.hidden) {
+  display: grid !important;                 /* ensure this wins */
+  grid-template-columns: minmax(220px,1fr) 1fr;
+  column-gap: 16px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+/* Label left (wrap long headings) */
+#fibreslowProblemSection .section-panel > #fibreTestingMediumBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreSpeedTestBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreSpeedResultsBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreUsageMatchBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreRouterConfigBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreSlowResolvedBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreLightBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreLightImpactBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreAdsStatusBlock:not(.hidden) > label.icon-row,
+#fibreslowProblemSection .section-panel > #fibreSlowSpeedStatusBlock:not(.hidden) > label.icon-row {
+  grid-column: 1;
+  margin-top: 0;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+/* Control right (select/input/speed-results container) */
+#fibreslowProblemSection .section-panel > #fibreTestingMediumBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreSpeedTestBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreSpeedResultsBlock:not(.hidden) > .speed-results,
+#fibreslowProblemSection .section-panel > #fibreUsageMatchBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreRouterConfigBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreSlowResolvedBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreLightBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreLightImpactBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreAdsStatusBlock:not(.hidden) > select,
+#fibreslowProblemSection .section-panel > #fibreSlowSpeedStatusBlock:not(.hidden) > select {
+  grid-column: 2;
+  margin: 0;
+  width: 100%;
+}
+
+/* Keep the three speed result inputs inline in the right column */
+#fibreslowProblemSection #fibreSpeedResultsBlock .speed-results {
+  grid-column: 2 !important;
+  display: flex !important;
+  gap: 16px;
+}
+
+/* Mobile stacking for Fibre rows */
+@media (max-width: 900px) {
+  #fibreslowProblemSection .section-panel > #fibreTestingMediumBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreSpeedTestBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreSpeedResultsBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreUsageMatchBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreRouterConfigBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreSlowResolvedBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreLightBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreLightImpactBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreAdsStatusBlock:not(.hidden),
+  #fibreslowProblemSection .section-panel > #fibreSlowSpeedStatusBlock:not(.hidden) {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+  }
+
+  #fibreslowProblemSection .section-panel > #fibreTestingMediumBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreSpeedTestBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreSpeedResultsBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreUsageMatchBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreRouterConfigBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreSlowResolvedBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreLightBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreLightImpactBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreAdsStatusBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreSlowSpeedStatusBlock:not(.hidden) > label.icon-row,
+  #fibreslowProblemSection .section-panel > #fibreTestingMediumBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreSpeedTestBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreSpeedResultsBlock:not(.hidden) > .speed-results,
+  #fibreslowProblemSection .section-panel > #fibreUsageMatchBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreRouterConfigBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreSlowResolvedBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreLightBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreLightImpactBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreAdsStatusBlock:not(.hidden) > select,
+  #fibreslowProblemSection .section-panel > #fibreSlowSpeedStatusBlock:not(.hidden) > select {
+    grid-column: 1 !important;
+  }
+}
+
+/* ============================================
+   Link icon: no underline, stay black
+   (scoped so it won't affect normal links)
+   ============================================ */
+
+/* If you used: <a class="link-icon">🔗</a> */
+a.link-icon,
+a.link-icon:visited,
+a.link-icon:hover,
+a.link-icon:focus {
+  text-decoration: none !important; /* remove underline in all states */
+  color: #000 !important;           /* keep the icon black across themes */
+}
+
+/* If you used: <a><span class="link-icon">🔗</span></a> */
+.icon-row a .link-icon {
+  text-decoration: none !important; /* ensure underline doesn't pass through */
+  color: #000 !important;
+}
+
+/* Optional niceties for alignment (safe) */
+a.link-icon,
+.icon-row a .link-icon {
+  display: inline-block;            /* avoids baseline quirks */
+  vertical-align: middle;           /* aligns nicely next to text/icons */
+}
+
+  </style>
+</head>
+
+<body>
+
+<div class="main-layout"> 
+
+  <!-- Column 1: content -->
+  
+  <div class="content-area">
+
+    <!-- Title -->
+    
+    <div class="section">
+      <h1>Slow Speed Troubleshooting Guide</h1>
+    </div>
+    
+
+<!-- CUSTOMER INFO -->
+
+<div class="section summarizable collapsible" data-section="Customer Information" id="customerInfoSection">
+  <div class="section-header">
+    <h2 id="ci-heading">Customer Information</h2>
+    <button class="section-toggle" aria-expanded="true" aria-controls="ci-panel" aria-label="Toggle">
+      <span class="toggle-icon" aria-hidden="true">−</span>
+    </button>
+  </div>
+
+  <div class="section-panel" id="ci-panel" role="region" aria-labelledby="ci-heading">
+    <div class="grid">
+      <input id="customerName" data-summary="Name & Surname" placeholder="Name & Surname">
+      <input id="cellNumber" data-summary="Cellphone Number" placeholder="000 000 0000" inputmode="tel">
+      <input id="siteLocation" data-summary="Site Location" placeholder="Site Location">
+      <input id="startTime" data-summary="Start Time / Time Frame" placeholder="Start Time / Time Frame">
+      <input id="problemDescription" data-summary="Problem Description" placeholder="Problem Description">
+
+      <select id="servicemedium" data-summary="Service Medium">
+        <option>-- Select the service medium --</option>
+        <option>Fibre</option>
+        <option>Wireless</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- CHIP DASHBOARD -->
+
+<div class="section summarizable collapsible" data-section="CHIP Dashboard" id="chipSection">
+  <div class="section-header">
+    <h2 id="chip-heading">CHIP Dashboard</h2>
+    <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+      <span class="toggle-icon" aria-hidden="true">−</span>
+    </button>
+  </div>
+
+ <div class="section-panel" id="chip-panel" role="region" aria-labelledby="chip-heading">
+    <label class="icon-row">Account Status
+    <a class="link-icon" href="ph-CHIP Account Status" target="_blank" rel="noopener">🔗</a>
+    <span class="info-icon" data-info="The account status must be active. If its suspended / cancelled the PPPoE authentication for all radius users (installs) linked to that account will be set to reject and no PPPoe authentication will take place for those radius users.">i</span>
+    </label>
+    <select id="accountStatus" data-summary="Account Status">
+      <option>-- Select --</option>
+      <option>Active</option>
+      <option>Suspended</option>
+      <option>Cancelled</option>
+    </select>
+
+    <div id="outageStatusBlock" class="hidden">
+      <label class="icon-row">Outage Status
+        <a class="link-icon" href="ph-CHIP Outage Status" target="_blank" rel="noopener">🔗</a>
+        <span class="info-icon" data-info="CHIP only shows active outages caused by equipment being unreachable. Degraded service , email / voip outages must still be confirmed on the teams outage channels. It is important to confirm whether a customer is affected by a outage as it will determine whether first line support is able to assist with the problem being expereinced or whether the problem is a affect of the active outage">i</span>
+      </label>
+      <select id="outageStatus" data-summary="Outage Status">
+        <option>-- Select --</option>
+        <option>Active</option>
+        <option>Suspected outage</option>
+        <option>Normal</option>
+      </select>
+
+      <div id="ticketStatusBlock" class="hidden">
+        <label class="icon-row">Ticket Status
+          <a class="link-icon" href="ph-Ticket Status" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="In the case of duplicate tickets (multiple tickets logged for the same site & same problem) merge the duplicate tickets. If the customers has an existing ticket for the site & problem work on the existing ticket , DO NOT CREATE A NEW ONE. Only create a new ticket if no ticket for that site & problem is present. Following this procedure keeps the tickets volumes down by preventing multiple tickets logged for the same site & problem as well prevents duplicate tickets from remaining open on the system after the problem has been resolved.">i</span>
+        </label>
+        <select id="ticketStatus" data-summary="Ticket Status">
+          <option>-- Select --</option>
+          <option>New ticket</option>
+          <option>Existing ticket</option>
+        </select>
+      </div>
+
+      <div id="jobCardBlock" class="hidden">
+        <label class="icon-row">Active Job Card
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/EbPyOS1vPXFNqNQkvHx61cUBbYpmKPxNUrfWq0ZYPNfqew?e=JQDRta" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="When engaging with a customer about an existing job card, agents are required to reassess the fault and confirm whether any additional remote diagnostics or corrective steps can be taken. We maintain full accountability for the resolution process and do not shift responsibility prematurely. If all remote options have been exhausted and the issue persists, the comunication may be escalated to Field Operations.">i</span>
+        </label>
+        <select id="jobCard" data-summary="Active Job Card">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+    </div> <!-- closes outageStatusBlock -->
+  </div> <!-- closes chip-panel -->
+</div>
+
+<!-- Fibre – Slow Speed - only shows if servicemedium = Fibre && accountStatus = Active -->
+
+<div class="section summarizable hidden collapsible" id="fibreslowProblemSection" data-section="Fibre - Slow Speed">
+  <div class="section-header">
+    <h2 id="fibre-slow-heading">Fibre – Slow Speed</h2>
+    <button class="section-toggle" aria-expanded="false" aria-controls="fibreslow-panel" aria-label="Toggle">
+      <span class="toggle-icon" aria-hidden="true">+</span>
+    </button>
+  </div>
+
+  <div class="section-panel hidden" id="fibreslow-panel" role="region" aria-labelledby="fibre-slow-heading">
+
+      <!-- Testing Medium -->
+	  
+      <div id="fibreTestingMediumBlock">
+        <label class="icon-row">Is the customer testing via WiFi / LAN
+          <span class="info-icon" data-info="Wi‑Fi connections are vulnerable to various forms of interference, unlike Ethernet connections which provide a stable, interference‑free link. Performing a test via Ethernet helps isolate whether the fault lies with the wireless connection or if the entire network is experiencing reduced bandwidth.">i</span>
+        </label>
+        <select id="fibreTestingMedium" data-summary="Testing Medium">
+          <option>-- Select --</option>
+          <option>LAN</option>
+          <option>WiFi</option>
+        </select>
+      </div>
+  
+      <!-- If fibreTestingMedium = 'WiFi' (⚠️ Guide the customer to perform a speed test via a LAN connection if possible) -->
+
+      <!-- Speed Test Completed - Only appears if a selection was made by fibreTestingMedium -->
+	  
+      <div id="fibreSpeedTestBlock" class="hidden">
+        <label class="icon-row">Speed test completed & monitored
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQCEZvPn0B6BRbGfz7ynyOQVAaNSI8he6-ib8PRjI3926J0?e=BYe2mw" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The speed test needs to run for a specific amount of time in order for Preseem to poll the usage over a period of 2 minutes or more. This is to identify if the customer has any usage internally.">i</span>
+        </label>
+        <select id="fibreSpeedTest" data-summary="Speed Test Completed">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If fibreSpeedTest = 'No' (⚠️ No speed test performed — guide the customer to run a test and monitor the usage through Preseem) -->
+
+      <!-- Speed Test Results - Only shows if fibreSpeedTest = Yes -->
+	  
+      <div id="fibreSpeedResultsBlock" class="hidden">
+        <label class="icon-row">Speed test results
+          <span class="info-icon" data-info="The download and upload results are vital to confirm whether the customer is receiving their bandwidth offered by the package or to determine whether the customers internal network is not receiving bandwidth.">i</span>
+        </label>
+        <div class="speed-results">
+          <input type="text" id="fibreDownloadResult" data-summary="Download Speed" placeholder="Download Mbps">
+          <input type="text" id="fibreUploadResult" data-summary="Upload Speed" placeholder="Upload Mbps">
+          <input type="text" id="fibreLatencyResult" data-summary="Latency" placeholder="Latency">
+        </div>
+      </div>
+
+      <!-- Usage Match -->
+	  
+      <div id="fibreUsageMatchBlock" class="hidden">
+        <label class="icon-row">Does the usage match the customer’s package?
+          <span class="info-icon" data-info="Compare the speed results to the customers package. This will assist in indicating whether the customer network is receiving the required bandwidh. It can also aid in determining whether the customer is utilizing their full bandwidth.">i</span>
+        </label>
+        <select id="fibreUsageMatch" data-summary="Usage Match">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- if fibreUsageMatch = 'Yes' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+
+      <!-- Router Config - Only appears if fibreUsageMatch = No -->
+	  
+      <div id="fibreRouterConfigBlock" class="hidden">
+        <label class="icon-row">Router config correct
+		  <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQAVFgEUSRzKT5XaAUZQ6rtOAU10e_A2wiGZCVz7uTlurSc?e=7LYoOG" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="Incorectly configured settings on the Gateway / Access point can cause no internet / slow speed.">i</span>
+        </label>
+        <select id="fibreRouterConfig" data-summary="Router Config Correct">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- if fibreRouterConfig = 'No' (⚠️ Verify & correct the Gateway / AP's configuration) -->
+
+      <!-- Problem Resolved - only shows if fibreRouterConfig = Yes -->
+	  
+      <div id="fibreSlowResolvedBlock" class="hidden">
+        <label class="icon-row">Problem resolved
+		  <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=USNsYz" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="fibreSlowResolved" data-summary="Problem Resolved">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If fibreRouterConfig = 'Yes' && fibreSlowResolved = 'Yes' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+
+      <!-- Fibre Light - Only shows if fibreSlowResolved = No --> 
+	  
+      <div id="fibreLightBlock" class="hidden">
+        <label class="icon-row">What is the customer’s fibre light?
+		  <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQBcMwGlSZzTQ6Nc-Am1FeovAXmCoJTCcF3XUabFHpEDvBg?e=idmbnp" target="_blank" rel="noopener">🔗</a>
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="The fibre light needs to be in an acceptable range for the customers service to run without bandwidth problems. A bad fibre light cannot be resolved remotely.">i</span>
+        </label>
+        <select id="fibreLightLevel" data-summary="Fibre Light Level">
+          <option>-- Select --</option>
+          <option>0 – 26.9</option>
+          <option>27 & Up</option>
+        </select>
+      </div>
+
+      <!-- Fibre Light Impact - Only shows if fibreLightLevel = 27 & Up -->
+	  
+      <div id="fibreLightImpactBlock" class="hidden">
+        <label class="icon-row">Fibre Light Level Impact
+          <span class="info-icon" data-info="How many customers are impacted will determine the escalation path.">i</span>
+        </label>
+        <select id="fibreLightImpact" data-summary="Fibre Light Impact">
+          <option>-- Select --</option>
+          <option>Singular</option>
+          <option>Multiple</option>
+        </select>
+      </div>
+  
+      <!-- If fibreLightLevel = '27 & Up' && fibreLightImpact = 'Singular' (⚠️ Escalate to Field Operations) -->
+      <!-- If fibreLightLevel = '27 & Up' && fibreLightImpact = 'Multiple' (⚠️ Escalate to Config & Analyse) -->
+
+      <!-- ADS Status - Only shows if fibreLightLevel = 0 – 26.9 -->
+	  
+      <div id="fibreAdsStatusBlock" class="hidden">
+        <label class="icon-row">ADS Status
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDTLt1rsKgUQ4_8AfHHiDkfAWgNATJeUiAGlgVXVna4IW8?e=dFrLjU" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="a Unstable PPPOE session will cause intermitted connectivity leading to slow speed being expereinced internally by the customer.">i</span>
+        </label>
+        <select id="fibreAdsStatus" data-summary="ADS Status">
+          <option>-- Select --</option>
+          <option>Stable & No Errors</option>
+          <option>Unstable</option>
+        </select>
+      </div>
+  
+      <!-- If fibreAdsStatus = 'Unstable' (⚠️ Perform a Power & Cable cycle for this service. If ADS remains unstable, escalate to Config & Analyse) -->
+
+      <!-- Device Impact - Only shows if fibreAdsStatus = Stable & No Errors -->
+	  
+      <div id="fibreSlowSpeedStatusBlock" class="hidden">
+        <label class="icon-row">Slow Speed Status
+          <span class="info-icon" data-info="If multiple devices are affected it indicates a problem on the network. If its a singular device affected it could indicate a problem with the device it self.">i</span>
+        </label>
+        <select id="fibreSlowSpeedStatus" data-summary="Slow Speed Status">
+          <option>-- Select --</option>
+          <option>Singular Device Experiencing Slow Speed</option>
+          <option>Certain Website / Program is slow</option>
+          <option>Multiple Devices Experiencing Slow Speed</option>
+          <option>Slow Speed Problem Resolved</option>
+        </select>
+      </div>
+  
+      <!-- If fibreAdsStatus = 'Stable & No Errors' && fibreSlowSpeedStatus = 'Singular Device Experiencing Slow Speed' (⚠️ Notify the customer the problem is only present on the device and advise them to get the device checked by a third party (IT)) -->
+      <!-- If fibreAdsStatus = 'Stable & No Errors' && fibreSlowSpeedStatus = 'Multiple Devices Experiencing Slow Speed' (⚠️ Escalate to Config & Analyse) -->
+      <!-- If fibreAdsStatus = 'Stable & No Errors' && fibreSlowSpeedStatus = 'Slow Speed Problem Resolved' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+      <!-- If fibreAdsStatus = 'Stable & No Errors' && fibreSlowSpeedStatus = 'Certain Website / Program is slow' (⚠️ Confirm Gateway configuration (DNS), confirm if the problem is only present on one device / Multiple) -->
+
+  </div> <!-- closes fibreslow-panel -->
+</div> <!-- ✅ closes fibreSlowSection -->
+
+<!-- Wireless – Slow Speed - only shows if servicemedium = Wireless && accountStatus = Active --> 
+
+<div class="section summarizable hidden collapsible" id="wirelessSlowSection" data-section="Wireless - Slow Speed">
+  <div class="section-header">
+    <h2 id="wireless-slow-heading">Wireless – Slow Speed *** </h2>
+    <button class="section-toggle" aria-expanded="false" aria-controls="wireless-slow-panel" aria-label="Toggle">
+      <span class="toggle-icon" aria-hidden="true">+</span>
+    </button>
+  </div>
+
+  <div class="section-panel hidden" id="wireless-slow-panel" role="region" aria-labelledby="wireless-slow-heading">
+
+      <!-- Testing Medium -->
+      <div id="wirelessTestingMediumBlock">
+        <label class="icon-row">Is the customer testing via WiFi / LAN
+        <span class="info-icon" data-info="Wi‑Fi connections are vulnerable to various forms of interference, unlike Ethernet connections which provide a stable, interference‑free link. Performing a test via Ethernet helps isolate whether the fault lies with the wireless connection or if the entire network is experiencing reduced bandwidth.">i</span>
+        </label>
+        <select id="wirelessTestingMedium" data-summary="Testing Medium">
+          <option>-- Select --</option>
+          <option>LAN</option>
+          <option>WiFi</option>
+        </select>
+      </div>
+  
+      <!-- If wirelessTestingMedium = 'WiFi' (⚠️ Guide the customer to perform a speed test via a LAN connection if possible) -->
+
+      <!-- Speed Test Completed - only shows if something is selected by wirelessTestingMedium -->
+      <div id="wirelessSpeedTestBlock" class="hidden">
+        <label class="icon-row">Speed test completed & monitored
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Guide customer to complete speed test and monitor via Preseem.">i</span>
+        </label>
+        <select id="wirelessSpeedTest" data-summary="Speed Test Completed">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If wirelessSpeedTest = 'No' (⚠️ Speed test not completed — guide customer to complete and monitor via the customer's ODU) -->
+
+      <!-- Speed Test Results - only shows if wirelessSpeedTest = Yes -->
+      <div id="wirelessSpeedResultsBlock" class="hidden">
+        <label class="icon-row">Speed test results
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Enter download and upload results.">i</span>
+        </label>
+        <div class="speed-results">
+          <input type="text" id="wirelessDownloadResult" data-summary="Download Speed" placeholder="Download Mbps">
+          <input type="text" id="wirelessUploadResult" data-summary="Upload Speed" placeholder="Upload Mbps">
+          <input type="text" id="wirelessLatencyResult" data-summary="Latency" placeholder="Latency">
+        </div>
+      </div>
+
+      <!-- Usage Match -->
+      <div id="wirelessUsageMatchBlock" class="hidden">
+        <label class="icon-row">Does the usage match the customer’s package?
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Compare speed results with package.">i</span>
+        </label>
+        <select id="wirelessUsageMatch" data-summary="Usage Match">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If wirelessUsageMatch = 'Yes' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+
+      <!-- Router Config - only shows if wirelessUsageMatch = No -->
+      <div id="wirelessRouterConfigBlock" class="hidden">
+        <label class="icon-row">Router config correct
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Confirm router configuration and reboot if needed.">i</span>
+        </label>
+        <select id="wirelessRouterConfig" data-summary="Router Config Correct">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If wirelessRouterConfig = 'No' (⚠️ Verify & correct the Gateway / AP's configuration) -->
+      
+      <!-- RF & Health Score - Only shows if wirelessRouterConfig = Yes -->
+      
+      <div id="RF/HealthBlock" class="hidden">
+        <label class="icon-row">Router config correct
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Confirm router configuration and reboot if needed.">i</span>
+        </label>
+        <select id="RF/Health" data-summary="Router Config Correct">
+          <option>-- Select --</option>
+          <option>Good RF but poor health score</option>
+          <option>Good health & RF score</option>
+          <option>Poor health & RF score</option>
+        </select>
+      </div>
+      
+      <!-- If RF/Health = 'Poor health & RF score' (⚠️ Escalate to Config & Analyse) -->
+      
+      
+
+      <!-- Wireless Slow Resolved - Only shows if wirelessRouterConfig = Yes --> ****
+      <div id="wirelessSlowResolvedBlock" class="hidden">
+        <label class="icon-row">Problem resolved
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Close ticket if customer confirms full service.">i</span>
+        </label>
+        <select id="wirelessSlowResolved" data-summary="Problem Resolved">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If wirelessRouterConfig = 'Yes' && wirelessSlowResolved = 'Yes' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+
+      <!-- ADS Status - Only shows if wirelessSlowResolved = No -->
+      <div id="wirelessSlowSpeedAdsBlock" class="hidden">
+        <label class="icon-row">ADS Status
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Check ADS logs and errors.">i</span>
+        </label>
+        <select id="wirelessSlowSpeedAdsStatus" data-summary="ADS Status">
+          <option>-- Select --</option>
+          <option>Stable & No Errors</option>
+          <option>Unstable</option>
+        </select>
+      </div>
+  
+      <!-- If wirelessAdsStatus = 'Unstable' (⚠️ Perform a Power & Cable cycle for this service. If ADS remains unstable, escalate to Config & Analyse) -->
+
+      <!-- Device Impact - Only shows if wirelessAdsStatus = Stable & No Errors -->
+      <div id="wirelessSlowSpeedStatusBlock" class="hidden">
+        <label class="icon-row">Slow Speed Status
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Check if issue is device-specific or widespread.">i</span>
+        </label>
+        <select id="wirelessSlowSpeedStatus" data-summary="Slow Speed Status">
+          <option>-- Select --</option>
+          <option>Singular Device Experiencing Slow Speed</option>
+          <option>Certain Website / Program is slow</option>
+          <option>Multiple Devices Experiencing Slow Speed</option>
+          <option>Slow Speed Problem Resolved</option>
+        </select>
+      </div>
+  
+      <!-- If wirelessAdsStatus = 'Stable & No Errors' && wirelessSlowSpeedStatus = 'Singular Device Experiencing Slow Speed' (⚠️ Notify the customer the problem is only present on the device and advise them to get the device checked by a third party (IT)) -->
+      <!-- If wirelessAdsStatus = 'Stable & No Errors' && wirelessSlowSpeedStatus = 'Multiple Devices Experiencing Slow Speed' (⚠️ Escalate to Config & Analyse) -->
+      <!-- If wirelessAdsStatus = 'Stable & No Errors' && wirelessSlowSpeedStatus = 'Slow Speed Problem Resolved' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+      <!-- If wirelessAdsStatus = 'Stable & No Errors' && wirelessSlowSpeedStatus = 'Certain Website / Program is slow' (⚠️ Confirm Gateway configuration (DNS), confirm if the problem is only present on one device / Multiple) -->
+
+  </div> <!-- closes wireless-slow-panel -->
+</div> <!-- ✅ closes wirelessSlowSection -->
+
+    </div> <!-- closes column 1 -->
+    
+<!-- SUMMARY PANEL -->
+
+  <div class="summary-panel">
+    <div class="section summary-section">
+      <h2>Summary</h2>
+      <div id="summary"></div>
+
+      <!-- ⭐ Copy left, Home right -->
+      <div class="summary-buttons">
+        <button class="copy-btn">Copy Summary</button>
+        <a class="accent-btn" href="index.html" role="button">Home</a>
+      </div>
+	  
+    </div> <!-- ✅ closes summary-panel -->
+
+  </div> <!-- ✅ closes content-area -->
+
+</div> <!-- ✅ closes main-layout -->
+
+</body>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const SELECT_PLACEHOLDER_PREFIX = '-- Select';
+
+  // ==============================
+  //  BASIC REFS
+  // ==============================
+  const summaryPanel = document.getElementById('summary');
+  const copyBtn = document.querySelector('.copy-btn');
+
+  // CUSTOMER INFO + CHIP
+  const cellNumber = document.getElementById('cellNumber');
+
+  const servicemedium = document.getElementById('servicemedium');
+  const accountStatus = document.getElementById('accountStatus');
+
+  const outageStatusBlock = document.getElementById('outageStatusBlock');
+  const outageStatus = document.getElementById('outageStatus');
+
+  const ticketStatusBlock = document.getElementById('ticketStatusBlock');
+  const ticketStatus = document.getElementById('ticketStatus');
+
+  const jobCardBlock = document.getElementById('jobCardBlock');
+  const jobCard = document.getElementById('jobCard');
+
+  // ==============================
+  //  FIBRE SLOW SPEED DOM REFS
+  // ==============================
+  const fibreslowProblemSection = document.getElementById('fibreslowProblemSection');
+
+  const fibreTestingMediumBlock = document.getElementById('fibreTestingMediumBlock');
+  const fibreTestingMedium = document.getElementById('fibreTestingMedium');
+
+  const fibreSpeedTestBlock = document.getElementById('fibreSpeedTestBlock');
+  const fibreSpeedTest = document.getElementById('fibreSpeedTest');
+
+  const fibreSpeedResultsBlock = document.getElementById('fibreSpeedResultsBlock');
+  const fibreDownloadResult = document.getElementById('fibreDownloadResult');
+  const fibreUploadResult = document.getElementById('fibreUploadResult');
+  const fibreLatencyResult = document.getElementById('fibreLatencyResult');
+
+  const fibreUsageMatchBlock = document.getElementById('fibreUsageMatchBlock');
+  const fibreUsageMatch = document.getElementById('fibreUsageMatch');
+
+  const fibreRouterConfigBlock = document.getElementById('fibreRouterConfigBlock');
+  const fibreRouterConfig = document.getElementById('fibreRouterConfig');
+
+  const fibreSlowResolvedBlock = document.getElementById('fibreSlowResolvedBlock');
+  const fibreSlowResolved = document.getElementById('fibreSlowResolved');
+
+  const fibreLightBlock = document.getElementById('fibreLightBlock');
+  const fibreLightLevel = document.getElementById('fibreLightLevel');
+
+  const fibreLightImpactBlock = document.getElementById('fibreLightImpactBlock');
+  const fibreLightImpact = document.getElementById('fibreLightImpact');
+
+  const fibreAdsStatusBlock = document.getElementById('fibreAdsStatusBlock');
+  const fibreAdsStatus = document.getElementById('fibreAdsStatus');
+
+  const fibreSlowSpeedStatusBlock = document.getElementById('fibreSlowSpeedStatusBlock');
+  const fibreSlowSpeedStatus = document.getElementById('fibreSlowSpeedStatus');
+
+  // ==============================
+  //  WIRELESS SLOW SPEED DOM REFS
+  // ==============================
+  const wirelessSlowSection = document.getElementById('wirelessSlowSection');
+
+  const wirelessTestingMediumBlock = document.getElementById('wirelessTestingMediumBlock');
+  const wirelessTestingMedium = document.getElementById('wirelessTestingMedium');
+
+  const wirelessSpeedTestBlock = document.getElementById('wirelessSpeedTestBlock');
+  const wirelessSpeedTest = document.getElementById('wirelessSpeedTest');
+
+  const wirelessSpeedResultsBlock = document.getElementById('wirelessSpeedResultsBlock');
+  const wirelessDownloadResult = document.getElementById('wirelessDownloadResult');
+  const wirelessUploadResult = document.getElementById('wirelessUploadResult');
+  const wirelessLatencyResult = document.getElementById('wirelessLatencyResult');
+
+  const wirelessUsageMatchBlock = document.getElementById('wirelessUsageMatchBlock');
+  const wirelessUsageMatch = document.getElementById('wirelessUsageMatch');
+
+  const wirelessRouterConfigBlock = document.getElementById('wirelessRouterConfigBlock');
+  const wirelessRouterConfig = document.getElementById('wirelessRouterConfig');
+
+  const rfHealthBlock = document.getElementById('RF/HealthBlock');
+  const rfHealth = document.getElementById('RF/Health');
+
+  const wirelessSlowResolvedBlock = document.getElementById('wirelessSlowResolvedBlock');
+  const wirelessSlowResolved = document.getElementById('wirelessSlowResolved');
+
+  const wirelessSlowSpeedAdsBlock = document.getElementById('wirelessSlowSpeedAdsBlock');
+  const wirelessSlowSpeedAdsStatus = document.getElementById('wirelessSlowSpeedAdsStatus');
+
+  const wirelessSlowSpeedStatusBlock = document.getElementById('wirelessSlowSpeedStatusBlock');
+  const wirelessSlowSpeedStatus = document.getElementById('wirelessSlowSpeedStatus');
+
+  // ==============================
+  // 📱 PHONE FORMATTER
+  // ==============================
+  (function phoneFormatter() {
+    if (!cellNumber) return;
+
+    const MAX_DIGITS = 10;
+
+    function formatDigits(raw) {
+      const d = raw.replace(/\D/g, '').slice(0, MAX_DIGITS);
+      if (d.length <= 3) return d;
+      if (d.length <= 6) return `${d.slice(0,3)} ${d.slice(3)}`;
+      return `${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6)}`;
+    }
+
+    function caretPosition(formatted, countDigitsLeft) {
+      let count = 0, pos = 0;
+      while (pos < formatted.length && count < countDigitsLeft) {
+        if (/\d/.test(formatted[pos])) count++;
+        pos++;
+      }
+      return pos;
+    }
+
+    function apply(el, triggerSummary = true) {
+      const start = el.selectionStart ?? el.value.length;
+      const digitsLeft = (el.value.slice(0, start).match(/\d/g) || []).length;
+
+      el.value = formatDigits(el.value);
+      const newPos = caretPosition(el.value, digitsLeft);
+      try { el.setSelectionRange(newPos, newPos); } catch {}
+
+      if (triggerSummary) scheduleUpdateSummary();
+    }
+
+    cellNumber.addEventListener('input', () => apply(cellNumber));
+    cellNumber.addEventListener('blur', () => apply(cellNumber, false));
+
+    cellNumber.addEventListener('paste', e => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      const digits = text.replace(/\D/g, '').slice(0, MAX_DIGITS);
+      document.execCommand('insertText', false, digits);
+    });
+
+    apply(cellNumber, false);
+  })();
+
+  // ==============================
+  // HELPERS
+  // ==============================
+  const show = (el) => el?.classList.remove('hidden');
+  const hide = (el) => el?.classList.add('hidden');
+
+  const resetSelect = (el) => { if (el?.tagName === 'SELECT') el.selectedIndex = 0; };
+  const resetInput = (el) => { if ('value' in el) el.value = ''; };
+
+  const isPlaceholderValue = (v) => !v || v.startsWith(SELECT_PLACEHOLDER_PREFIX);
+
+  function resetSection(sec) {
+    if (!sec) return;
+    sec.querySelectorAll('select').forEach(resetSelect);
+    sec.querySelectorAll('input').forEach(resetInput);
+  }
+
+  // ==============================
+  // CORRECTED HIDDEN CHECK (IMPORTANT!)
+  // ==============================
+  const isEffectivelyHidden = (el) => {
+    let node = el;
+    while (node && node !== document.body) {
+      if (node.classList?.contains('hidden') &&
+          !node.classList.contains('section-panel')) {
+        return true; // truly hidden
+      }
+      node = node.parentElement;
+    }
+    return false;
+  };
+
+  // ==============================
+  // COLLAPSIBLES
+  // ==============================
+  (function setupCollapsibles() {
+    function toggle(btn, panel) {
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', String(!expanded));
+      panel.classList.toggle('hidden', expanded);
+      btn.querySelector('.toggle-icon').textContent = expanded ? '+' : '−';
+      scheduleUpdateSummary();
+    }
+
+    document.querySelectorAll('.section.collapsible').forEach((section, idx) => {
+      const btn = section.querySelector('.section-toggle');
+      const panel = section.querySelector('.section-panel');
+      if (!btn || !panel) return;
+
+      if (!btn.hasAttribute('aria-controls')) {
+        const id = panel.id || ('section-panel-' + idx);
+        panel.id = id;
+        btn.setAttribute('aria-controls', id);
+      }
+
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      panel.classList.toggle('hidden', !expanded);
+
+      btn.addEventListener('click', () => toggle(btn, panel));
+    });
+
+    window.expandSection = (sec) => {
+      const btn = sec?.querySelector('.section-toggle');
+      const panel = sec?.querySelector('.section-panel');
+
+      if (!btn || !panel) return;
+
+      btn.setAttribute('aria-expanded', 'true');
+      panel.classList.remove('hidden');
+      btn.querySelector('.toggle-icon').textContent = '−';
+    };
+  })();
+
+  // ==============================
+  // CHIP VISIBILITY
+  // ==============================
+  function updateChipBlocks() {
+    const s = accountStatus.value || '';
+    if (s === 'Active') {
+      show(outageStatusBlock);
+      show(ticketStatusBlock);
+      show(jobCardBlock);
+    } else {
+      hide(outageStatusBlock); resetSelect(outageStatus);
+      hide(ticketStatusBlock); resetSelect(ticketStatus);
+      hide(jobCardBlock); resetSelect(jobCard);
+    }
+  }
+
+  // ==============================
+  // WHICH PROBLEM SECTION SHOWS?
+  // ==============================
+  function updateProblemSections() {
+    const medium = servicemedium.value;
+    const status = accountStatus.value;
+
+    hide(fibreslowProblemSection);  resetSection(fibreslowProblemSection);  
+    hide(wirelessSlowSection);      resetSection(wirelessSlowSection);      
+
+    collapseFibreSlowFlow();
+    collapseWirelessSlowFlow();
+
+    if (status !== 'Active') return;
+
+    if (medium === 'Fibre') {
+      show(fibreslowProblemSection);
+      expandSection(fibreslowProblemSection);
+    }
+    if (medium === 'Wireless') {
+      show(wirelessSlowSection);
+      expandSection(wirelessSlowSection);
+    }
+  }
+
+  // ==============================
+  // RESET SLOW SPEED FLOWS
+  // ==============================
+  function collapseFibreSlowFlow() {
+    hide(fibreSpeedTestBlock); resetSelect(fibreSpeedTest);
+    hide(fibreSpeedResultsBlock); resetInput(fibreDownloadResult); resetInput(fibreUploadResult); resetInput(fibreLatencyResult);
+    hide(fibreUsageMatchBlock); resetSelect(fibreUsageMatch);
+    hide(fibreRouterConfigBlock); resetSelect(fibreRouterConfig);
+    hide(fibreSlowResolvedBlock); resetSelect(fibreSlowResolved);
+    hide(fibreLightBlock); resetSelect(fibreLightLevel);
+    hide(fibreLightImpactBlock); resetSelect(fibreLightImpact);
+    hide(fibreAdsStatusBlock); resetSelect(fibreAdsStatus);
+    hide(fibreSlowSpeedStatusBlock); resetSelect(fibreSlowSpeedStatus);
+  }
+
+  function collapseWirelessSlowFlow() {
+    hide(wirelessSpeedTestBlock); resetSelect(wirelessSpeedTest);
+    hide(wirelessSpeedResultsBlock); resetInput(wirelessDownloadResult); resetInput(wirelessUploadResult); resetInput(wirelessLatencyResult);
+    hide(wirelessUsageMatchBlock); resetSelect(wirelessUsageMatch);
+    hide(wirelessRouterConfigBlock); resetSelect(wirelessRouterConfig);
+    hide(rfHealthBlock); resetSelect(rfHealth);
+    hide(wirelessSlowResolvedBlock); resetSelect(wirelessSlowResolved);
+    hide(wirelessSlowSpeedAdsBlock); resetSelect(wirelessSlowSpeedAdsStatus);
+    hide(wirelessSlowSpeedStatusBlock); resetSelect(wirelessSlowSpeedStatus);
+  }
+
+  // ==============================
+  // FIBRE SLOW SPEED LOGIC
+  // ==============================
+  fibreTestingMedium?.addEventListener('change', () => {
+    collapseFibreSlowFlow();
+    if (!isPlaceholderValue(fibreTestingMedium.value)) show(fibreSpeedTestBlock);
+    scheduleUpdateSummary();
+  });
+
+  // FIXED: don't reset/hide the same block/select on its own change
+  fibreSpeedTest?.addEventListener('change', () => {
+    // Only clear subsequent blocks; keep this select & block intact
+    hide(fibreSpeedResultsBlock);   resetInput(fibreDownloadResult); resetInput(fibreUploadResult); resetInput(fibreLatencyResult);
+    hide(fibreUsageMatchBlock);     resetSelect(fibreUsageMatch);
+    hide(fibreRouterConfigBlock);   resetSelect(fibreRouterConfig);
+    hide(fibreSlowResolvedBlock);   resetSelect(fibreSlowResolved);
+    hide(fibreLightBlock);          resetSelect(fibreLightLevel);
+    hide(fibreLightImpactBlock);    resetSelect(fibreLightImpact);
+    hide(fibreAdsStatusBlock);      resetSelect(fibreAdsStatus);
+    hide(fibreSlowSpeedStatusBlock);resetSelect(fibreSlowSpeedStatus);
+
+    show(fibreSpeedTestBlock); // ensure visible
+
+    if (fibreSpeedTest.value === 'Yes') {
+      show(fibreSpeedResultsBlock);
+      show(fibreUsageMatchBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  fibreUsageMatch?.addEventListener('change', () => {
+    hide(fibreRouterConfigBlock);   resetSelect(fibreRouterConfig);
+    hide(fibreSlowResolvedBlock);   resetSelect(fibreSlowResolved);
+    hide(fibreLightBlock);          resetSelect(fibreLightLevel);
+    hide(fibreLightImpactBlock);    resetSelect(fibreLightImpact);
+    hide(fibreAdsStatusBlock);      resetSelect(fibreAdsStatus);
+    hide(fibreSlowSpeedStatusBlock);resetSelect(fibreSlowSpeedStatus);
+
+    if (fibreUsageMatch.value === 'No') {
+      show(fibreRouterConfigBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  fibreRouterConfig?.addEventListener('change', () => {
+    hide(fibreSlowResolvedBlock);   resetSelect(fibreSlowResolved);
+    hide(fibreLightBlock);          resetSelect(fibreLightLevel);
+    hide(fibreLightImpactBlock);    resetSelect(fibreLightImpact);
+    hide(fibreAdsStatusBlock);      resetSelect(fibreAdsStatus);
+    hide(fibreSlowSpeedStatusBlock);resetSelect(fibreSlowSpeedStatus);
+
+    if (fibreRouterConfig.value === 'Yes') {
+      show(fibreSlowResolvedBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  fibreSlowResolved?.addEventListener('change', () => {
+    hide(fibreLightBlock);          resetSelect(fibreLightLevel);
+    hide(fibreLightImpactBlock);    resetSelect(fibreLightImpact);
+    hide(fibreAdsStatusBlock);      resetSelect(fibreAdsStatus);
+    hide(fibreSlowSpeedStatusBlock);resetSelect(fibreSlowSpeedStatus);
+
+    if (fibreSlowResolved.value === 'No') {
+      show(fibreLightBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  fibreLightLevel?.addEventListener('change', () => {
+    hide(fibreLightImpactBlock);    resetSelect(fibreLightImpact);
+    hide(fibreAdsStatusBlock);      resetSelect(fibreAdsStatus);
+    hide(fibreSlowSpeedStatusBlock);resetSelect(fibreSlowSpeedStatus);
+
+    // ✅ compare against decoded values
+    if (fibreLightLevel.value === '27 & Up') {
+      show(fibreLightImpactBlock);
+    } else if (fibreLightLevel.value === '0 – 26.9') {
+      show(fibreAdsStatusBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  fibreLightImpact?.addEventListener('change', scheduleUpdateSummary);
+
+  fibreAdsStatus?.addEventListener('change', () => {
+    hide(fibreSlowSpeedStatusBlock); resetSelect(fibreSlowSpeedStatus);
+
+    // ✅ compare against decoded value
+    if (fibreAdsStatus.value === 'Stable & No Errors') {
+      show(fibreSlowSpeedStatusBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  fibreSlowSpeedStatus?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  // WIRELESS SLOW SPEED LOGIC
+  // ==============================
+  wirelessTestingMedium?.addEventListener('change', () => {
+    collapseWirelessSlowFlow();
+    if (!isPlaceholderValue(wirelessTestingMedium.value)) show(wirelessSpeedTestBlock);
+    scheduleUpdateSummary();
+  });
+
+  // FIXED: don't reset/hide the same block/select on its own change
+  wirelessSpeedTest?.addEventListener('change', () => {
+    // Only clear subsequent blocks; keep this select & block intact
+    hide(wirelessSpeedResultsBlock);   resetInput(wirelessDownloadResult); resetInput(wirelessUploadResult); resetInput(wirelessLatencyResult);
+    hide(wirelessUsageMatchBlock);     resetSelect(wirelessUsageMatch);
+    hide(wirelessRouterConfigBlock);   resetSelect(wirelessRouterConfig);
+    hide(rfHealthBlock);               resetSelect(rfHealth);
+    hide(wirelessSlowResolvedBlock);   resetSelect(wirelessSlowResolved);
+    hide(wirelessSlowSpeedAdsBlock);   resetSelect(wirelessSlowSpeedAdsStatus);
+    hide(wirelessSlowSpeedStatusBlock);resetSelect(wirelessSlowSpeedStatus);
+
+    show(wirelessSpeedTestBlock); // ensure visible
+
+    if (wirelessSpeedTest.value === 'Yes') {
+      show(wirelessSpeedResultsBlock);
+      show(wirelessUsageMatchBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  wirelessUsageMatch?.addEventListener('change', () => {
+    hide(wirelessRouterConfigBlock);   resetSelect(wirelessRouterConfig);
+    hide(rfHealthBlock);               resetSelect(rfHealth);
+    hide(wirelessSlowResolvedBlock);   resetSelect(wirelessSlowResolved);
+    hide(wirelessSlowSpeedAdsBlock);   resetSelect(wirelessSlowSpeedAdsStatus);
+    hide(wirelessSlowSpeedStatusBlock);resetSelect(wirelessSlowSpeedStatus);
+
+    if (wirelessUsageMatch.value === 'No') {
+      show(wirelessRouterConfigBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  wirelessRouterConfig?.addEventListener('change', () => {
+    hide(rfHealthBlock);               resetSelect(rfHealth);
+    hide(wirelessSlowResolvedBlock);   resetSelect(wirelessSlowResolved);
+    hide(wirelessSlowSpeedAdsBlock);   resetSelect(wirelessSlowSpeedAdsStatus);
+    hide(wirelessSlowSpeedStatusBlock);resetSelect(wirelessSlowSpeedStatus);
+
+    if (wirelessRouterConfig.value === 'Yes') {
+      show(rfHealthBlock);
+      show(wirelessSlowResolvedBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  rfHealth?.addEventListener('change', scheduleUpdateSummary);
+
+  wirelessSlowResolved?.addEventListener('change', () => {
+    hide(wirelessSlowSpeedAdsBlock);   resetSelect(wirelessSlowSpeedAdsStatus);
+    hide(wirelessSlowSpeedStatusBlock);resetSelect(wirelessSlowSpeedStatus);
+
+    if (wirelessSlowResolved.value === 'No') {
+      show(wirelessSlowSpeedAdsBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  wirelessSlowSpeedAdsStatus?.addEventListener('change', () => {
+    hide(wirelessSlowSpeedStatusBlock); resetSelect(wirelessSlowSpeedStatus);
+
+    // ✅ compare against decoded value
+    if (wirelessSlowSpeedAdsStatus.value === 'Stable & No Errors') {
+      show(wirelessSlowSpeedStatusBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  wirelessSlowSpeedStatus?.addEventListener('change', scheduleUpdateSummary);
+
+  // ==============================
+  // CHIP EVENTS
+  // ==============================
+  accountStatus.addEventListener('change', () => {
+    updateChipBlocks();
+    updateProblemSections();
+    scheduleUpdateSummary();
+  });
+
+  servicemedium.addEventListener('change', () => {
+    updateProblemSections();
+    scheduleUpdateSummary();
+  });
+
+  outageStatus.addEventListener('change', scheduleUpdateSummary);
+  ticketStatus.addEventListener('change', scheduleUpdateSummary);
+  jobCard.addEventListener('change', scheduleUpdateSummary);
+
+  // Keep summary synced with phone input
+  cellNumber.addEventListener('input', scheduleUpdateSummary);
+
+  // ==============================
+  // ⚡ INSTANT SUMMARY UPDATES FOR ALL data-summary FIELDS
+  // (covers text inputs like Download/Upload/Latency while typing)
+  // ==============================
+  document.addEventListener('input', (e) => {
+    const el = e.target;
+    if (el && el.matches?.('[data-summary]')) {
+      scheduleUpdateSummary();
+    }
+  });
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el && el.matches?.('[data-summary]')) {
+      scheduleUpdateSummary();
+    }
+  });
+
+  // Tiny scheduler to keep it snappy but efficient
+  let rafId = null;
+  function scheduleUpdateSummary() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      updateSummary();
+    });
+  }
+
+  // ==============================
+  // COPY SUMMARY (exclude Next Step)
+  // ==============================
+  copyBtn.addEventListener('click', async () => {
+    const full = summaryPanel.textContent.trim();
+    const filtered = full.replace(/(^|\n)===\s*Next Recommended Step\s*===([\s\S]*)$/i, '$1').trim();
+
+    try {
+      await navigator.clipboard.writeText(filtered);
+
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => (copyBtn.textContent = prev), 1200);
+    } catch {
+      const txt = document.createElement('textarea');
+      txt.style.position = 'fixed';
+      txt.style.opacity = 0;
+      txt.value = filtered;
+      document.body.appendChild(txt);
+      txt.select();
+      document.execCommand('copy');
+      document.body.removeChild(txt);
+    }
+  });
+
+  // ==============================
+  // SUMMARY BUILDER
+  // ==============================
+  function updateSummary() {
+    const readValue = (el) => {
+      if (!el) return '';
+      if (el.tagName === 'SELECT') {
+        const v = el.value;
+        return isPlaceholderValue(v) ? '' : v;
+      }
+      if ('value' in el) return el.value.trim();
+      return '';
+    };
+
+    let customerInfo = '';
+    let chipInfo = '';
+    let problemInfo = '';
+    const escalationSet = new Set();
+
+    const fields = [...document.querySelectorAll('[data-summary]')];
+
+    fields.forEach((el) => {
+      if (isEffectivelyHidden(el)) return;
+
+      const id = el.id;
+      const label = el.getAttribute('data-summary') || id;
+      const value = readValue(el);
+
+      if (!value) return;
+
+      if (['customerName','cellNumber','siteLocation','startTime','problemDescription','servicemedium'].includes(id)) {
+        customerInfo += `${label}: ${value}\n`;
+      } else if (['accountStatus','outageStatus','ticketStatus','jobCard'].includes(id)) {
+        chipInfo += `${label}: ${value}\n`;
+      } else {
+        problemInfo += `${label}: ${value}\n`;
+      }
+
+      const step = getEscalation(id, value);
+      if (step) step.split('\n').forEach((s) => {
+        const t = s.trim();
+        if (t) escalationSet.add(t);
+      });
+    });
+
+    const m = servicemedium.value;
+    let problemHeading = '';
+    if (!fibreslowProblemSection.classList.contains('hidden') && m === 'Fibre') {
+      problemHeading = 'Fibre – Slow Speed';
+    } else if (!wirelessSlowSection.classList.contains('hidden') && m === 'Wireless') {
+      problemHeading = 'Wireless – Slow Speed';
+    }
+
+    const escalationInfo = [...escalationSet].join('\n');
+
+    let text = '';
+    if (customerInfo) text += `=== Customer Information ===\n${customerInfo}\n\n`;
+    if (chipInfo) text += `=== CHIP Troubleshooting ===\n${chipInfo}\n\n`;
+    if (problemInfo && problemHeading) text += `=== ${problemHeading} ===\n${problemInfo}\n\n`;
+    // ✅ show Next Steps whenever we have them (even for CHIP-only cases)
+    if (escalationInfo) text += `=== Next Recommended Step ===\n${escalationInfo}`;
+
+    summaryPanel.textContent = text.trim();
+  }
+
+  // ==============================
+  // NEXT RECOMMENDED STEP LOGIC
+  // ==============================
+  function getEscalation(id, value) {
+    const status = accountStatus.value;
+    const medium = servicemedium.value;
+
+    const frcVal = fibreRouterConfig.value;
+    const fllVal = fibreLightLevel.value;
+    const fasVal = fibreAdsStatus.value;
+
+    const wrcVal = wirelessRouterConfig.value;
+
+    // CHIP LOGIC
+    if (id === 'accountStatus') {
+      if (value === 'Suspended')
+        return '⚠️ Suspended — escalate to Accounts (or TL after-hours with POP).';
+      if (value === 'Cancelled')
+        return '⚠️ Cancelled — verify account details; escalate to TL if incorrect.';
+    }
+    if (id === 'outageStatus' && value === 'Active')
+      return '⚠️ Known outage — update/log ticket and inform customer.';
+    if (id === 'jobCard' && value === 'Yes')
+      return '⚠️ Active job card — escalate to Field Ops (or educate after-hours).';
+
+    // FIBRE SLOW SPEED
+    if (status === 'Active' && medium === 'Fibre') {
+      switch (id) {
+        case 'fibreTestingMedium':
+          if (value === 'WiFi') return '⚠️ Testing over Wi‑Fi — guide LAN test.';
+          break;
+        case 'fibreSpeedTest':
+          if (value === 'No') return '⚠️ No speed test — guide Preseem monitored test.';
+          break;
+        case 'fibreUsageMatch':
+          if (value === 'Yes') return '✅ Speeds match package — update ticket and close.';
+          break;
+        case 'fibreRouterConfig':
+          if (value === 'No') return '⚠️ Incorrect config — verify & correct Gateway/AP.';
+          break;
+        case 'fibreSlowResolved':
+          if (frcVal === 'Yes' && value === 'Yes')
+            return '✅ Issue resolved — update ticket and close after customer confirms.';
+          break;
+        case 'fibreLightLevel':
+          // ✅ decoded value
+          if (value === '27 & Up') return '⚠️ High light — determine if singular or multiple.';
+          break;
+        case 'fibreLightImpact':
+          if (fllVal === '27 & Up') {
+            if (value === 'Singular') return '⚠️ High light (singular) — escalate to Field Ops.';
+            if (value === 'Multiple') return '⚠️ High light (multiple) — escalate to Config & Analyse.';
+          }
+          break;
+        case 'fibreAdsStatus':
+          if (value === 'Unstable') return '⚠️ ADS unstable — power cycle; escalate to C&A if persists.';
+          break;
+        case 'fibreSlowSpeedStatus':
+          if (value.includes('Singular Device')) return '⚠️ Device-specific — advise customer to have device checked.';
+          if (value.includes('Multiple Devices')) return '⚠️ Multiple devices — escalate to Config & Analyse.';
+          if (value === 'Slow Speed Problem Resolved') return '✅ Slow speed resolved — update ticket and close.';
+          if (value.includes('Certain Website')) return '⚠️ Possible DNS/content issue — verify Gateway DNS, test multiple devices.';
+          break;
+      }
+    }
+
+    // WIRELESS SLOW SPEED
+    if (status === 'Active' && medium === 'Wireless') {
+      switch (id) {
+        case 'wirelessTestingMedium':
+          if (value === 'WiFi') return '⚠️ Testing over Wi‑Fi — guide LAN test.';
+          break;
+        case 'wirelessSpeedTest':
+          if (value === 'No') return '⚠️ No speed test — guide ODU monitored test.';
+          break;
+        case 'wirelessUsageMatch':
+          if (value === 'Yes') return '✅ Speeds match package — update ticket and close.';
+          break;
+        case 'wirelessRouterConfig':
+          if (value === 'No') return '⚠️ Incorrect config — verify & correct Gateway/AP.';
+          break;
+        case 'RF/Health':
+          // ✅ decoded value
+          if (value === 'Poor health & RF score') return '⚠️ Poor RF/Health — escalate to Config & Analyse.';
+          break;
+        case 'wirelessSlowResolved':
+          if (wrcVal === 'Yes' && value === 'Yes') return '✅ Issue resolved — update ticket and close.';
+          break;
+        case 'wirelessSlowSpeedAdsStatus':
+          if (value === 'Unstable') return '⚠️ ADS unstable — power cycle; escalate to C&A if persists.';
+          break;
+        case 'wirelessSlowSpeedStatus':
+          if (value.includes('Singular Device')) return '⚠️ Device-specific — advise customer IT check.';
+          if (value.includes('Multiple Devices')) return '⚠️ Multiple devices — escalate to Config & Analyse.';
+          if (value === 'Slow Speed Problem Resolved') return '✅ Slow speed resolved — update ticket and close.';
+          if (value.includes('Certain Website')) return '⚠️ Possible DNS/content issue — verify Gateway DNS.';
+          break;
+      }
+    }
+
+    return '';
+  }
+
+  // ==============================
+  // INIT
+  // ==============================
+  updateChipBlocks();
+  updateProblemSections();
+  updateSummary();
+});
+</script>
+
+</body>
+</html>

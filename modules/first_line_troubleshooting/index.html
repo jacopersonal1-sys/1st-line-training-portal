@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+
+<head>
+
+  <meta charset="UTF-8">
+  
+  <title>First Line Support - Troubleshooting Tool V1.0</title>
+  
+  <style>
+   
+   
+/* ==============================
+   THEME VARIABLES (default)
+   ============================== */
+:root {
+  /* Light defaults, will be overridden by theme classes on <html> */
+  --bg-color: #FFFFFF;
+  --text-color: #000000;
+
+  /* Card / blocks */
+  --card-bg: #ffffff;
+  --card-text: #000000;
+  --card-border: #007BFF;
+  --card-shadow: 0 2px 5px rgba(0,0,0,0.1);
+
+  /* Header */
+  --header-bg: #333333;
+  --header-text: #ffffff;
+
+  /* Links/Buttons inside blocks */
+  --btn-bg: #007BFF;
+  --btn-bg-hover: #0056b3;
+  --btn-text: #ffffff;
+
+  /* Summary panel border (used on other pages too) */
+  --summary-border: #FF5000;
+
+  /* Transitions */
+  --ease-fast: 0.25s ease;
+
+  /* Optional: heading scales for easy tuning */
+  --h1-size: 30px;
+  --h2-size: 20px;
+  --h1-weight: 700;
+  --h2-weight: 700;
+}
+
+/* ==============================
+   LIGHT THEME
+   ============================== */
+.theme-light {
+  --bg-color: #FFFFFF;
+  --text-color: #000000;
+
+  --card-bg: #ffffff;
+  --card-text: #000000;
+  --card-border: #007BFF;
+  --card-shadow: 0 2px 5px rgba(0,0,0,0.1);
+
+  /* Warm off‑white header per your choice */
+  --header-bg: #F3F1EE;
+  --header-text: #000000;
+
+  --btn-bg: #007BFF;
+  --btn-bg-hover: #0056b3;
+  --btn-text: #ffffff;
+
+  --summary-border: #FF5000;
+}
+
+/* ==============================
+   DARK THEME
+   ============================== */
+.theme-dark {
+  --bg-color: #1C2025;
+  --text-color: #FFFFFF;
+
+  --card-bg: #232A31;            /* a touch lighter than body for contrast */
+  --card-text: #ffffff;
+  --card-border: #3A7BFF;        /* slightly softened blue on dark */
+  --card-shadow: 0 2px 10px rgba(0,0,0,0.35);
+
+  --header-bg: #11161B;
+  --header-text: #ffffff;
+
+  --btn-bg: #3A7BFF;
+  --btn-bg-hover: #2b60cc;
+  --btn-text: #ffffff;
+
+  --summary-border: #FF5000;     /* per your spec, same orange */
+}
+
+/* ==============================
+   BASE STYLES (use variables)
+   ============================== */
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: var(--bg-color);
+  color: var(--text-color);
+  transition: background var(--ease-fast), color var(--ease-fast);
+}
+
+header {
+  background: var(--header-bg);
+  color: var(--header-text);
+  padding: 15px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative; /* establish positioning context for the centered title */
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 24px;
+}
+.brand img {
+  height: 80px;
+  width: auto;
+  vertical-align: middle;
+}
+
+/* ===== Main page title (now H1) — keep perfectly centered ===== */
+.brand > h1.page-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;                 /* remove default H1 margins */
+  line-height: 1.2;
+  white-space: nowrap;       /* keep one line on wide screens */
+  text-align: center;
+  pointer-events: none;      /* don’t block clicks to the toggle on the right */
+  z-index: 1;
+  font-weight: var(--h1-weight);
+  font-size: var(--h1-size);
+  color: var(--header-text);
+}
+
+/* Responsive wrap for H1 on small screens */
+@media (max-width: 640px) {
+  .brand > h1.page-title {
+    white-space: normal;
+    max-width: 70vw;
+    font-size: 18px;
+  }
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: transparent;
+  color: var(--header-text);
+  padding: 8px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background var(--ease-fast), border-color var(--ease-fast), color var(--ease-fast);
+}
+.theme-toggle:hover {
+  background: rgba(255,255,255,0.08);
+}
+.theme-toggle .icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.theme-toggle .label {
+  font-size: 14px;
+}
+
+/* Container for sections */
+.container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 20px;
+  gap: 20px;
+  transition: color var(--ease-fast), background var(--ease-fast);
+}
+
+/* Each block */
+.section-block {
+  flex: 1 1 300px; /* responsive: min width 300px */
+  border: 2px solid var(--card-border);
+  border-radius: 8px;
+  padding: 20px;
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow);
+  color: var(--card-text);
+  transition: background var(--ease-fast), color var(--ease-fast), border-color var(--ease-fast), box-shadow var(--ease-fast);
+}
+
+/* Section titles — H2 */
+.section-block h2 {
+  margin-top: 0;
+  color: var(--card-text);
+  text-align: center !important;
+  font-weight: var(--h2-weight);
+  font-size: var(--h2-size);
+}
+
+/* Buttons inside blocks */
+.section-block a {
+  display: inline-block;
+  margin: 5px;
+  padding: 10px 15px;
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  text-decoration: none;
+  border-radius: 5px;
+  transition: background var(--ease-fast), color var(--ease-fast);
+}
+.section-block a:hover { background: var(--btn-bg-hover); }
+
+/* (Optional) Summary panel shared style for other pages
+   If a page has .summary-panel, this border will be the orange you wanted. */
+.summary-panel {
+  border: 2px solid var(--summary-border);
+  border-radius: 6px;
+}
+
+/* ============================================================
+   INDEX — Brand alignment overwrite
+   - Use Herotel orange for block borders and buttons
+   - Works for both light and dark themes
+   - Non-destructive: overrides just the needed variables
+   ============================================================ */
+
+/* Define a reusable accent var for index as well */
+:root {
+  --brand-accent: #FF5000;
+  --brand-accent-hover: #e04800;
+}
+
+/* Light theme overrides */
+.theme-light {
+  --card-border: var(--brand-accent);
+  --btn-bg: var(--brand-accent);
+  --btn-bg-hover: var(--brand-accent-hover);
+}
+
+/* Dark theme overrides */
+.theme-dark {
+  --card-border: var(--brand-accent);
+  --btn-bg: var(--brand-accent);
+  --btn-bg-hover: var(--brand-accent-hover);
+}
+
+/* Ensure section block border uses the updated variable */
+.section-block {
+  border-color: var(--card-border) !important;
+}
+
+/* Ensure buttons inside blocks pick up the new accent */
+.section-block a {
+  background: var(--btn-bg) !important;
+  color: var(--btn-text) !important;
+}
+.section-block a:hover {
+  background: var(--btn-bg-hover) !important;
+}
+
+/* (Optional but nice) add a subtle focus ring in brand color for accessibility */
+.section-block a:focus-visible {
+  outline: 2px solid var(--brand-accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(255, 80, 0, 0.2);
+}
+
+/* ============================================================
+   UNIVERSAL HEADING CENTERING (ALL TOPICS)
+   ============================================================ */
+
+/* Center ALL headings on all pages */
+h1, h2, h3, h4, h5, h6 {
+  text-align: center !important;
+}
+
+/* Ensure section-header titles stay perfectly centered inside the grid */
+.section-header h2 {
+  justify-self: center !important;
+  text-align: center !important;
+  width: 100%;
+}
+
+/* Ensure summary-section headings are centered (Summary panel) */
+.summary-section h2 {
+  text-align: center !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ============================================================
+   INDEX — Center "Select a Problem" buttons with equal spacing
+   (No HTML changes; only styles. Targets the first card only.)
+   ============================================================ */
+.container .section-block:nth-of-type(1) {
+  /* Make the card a flex container so buttons can center as a group */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;   /* center buttons as a group */
+  align-items: flex-start;
+  gap: 10px 12px;            /* vertical x horizontal spacing between items */
+}
+
+/* Keep the heading on its own row and centered */
+.container .section-block:nth-of-type(1) > h2 {
+  flex: 0 0 100%;            /* take the full row */
+  margin-bottom: 6px;
+  text-align: center;        /* redundancy with your global heading centering */
+}
+
+/* Optional: make buttons consistent and responsive in the row */
+.container .section-block:nth-of-type(1) > a {
+  /* The anchors are already inline-block; as flex items they size to content.
+     You can tweak min-width to standardize widths if you like. */
+  min-width: 120px;          /* tweak or remove if you prefer natural width */
+  text-align: center;
+  margin: 0;                 /* gap handles spacing now */
+}
+
+/* Optional: if you prefer a tighter or wider layout on very large screens */
+@media (min-width: 1200px) {
+  .container .section-block:nth-of-type(1) {
+    gap: 12px 16px;
+  }
+}
+
+
+
+/* ===========================================
+   Pre‑section Banner — Full width, darker red, lean text
+   =========================================== */
+
+/* Adjustable variables */
+:root {
+  --prebanner-bg: #E84C4C;   /* darker red (Material Red 800) */
+  --prebanner-text: #000000; /* black text as requested */
+}
+
+.pre-section-banner {
+  width: 100%;                        /* full width */
+  background: var(--prebanner-bg);
+  color: var(--prebanner-text);
+  padding: 18px 0;                    /* lean vertical spacing */
+  margin: 0;                          /* no container-style margins */
+  font-size: 18px;                    /* clean readable text */
+  font-weight: 400;                   /* REMOVE bold */
+  text-align: center;
+  line-height: 1.3;
+  border-bottom: 2px solid rgba(0,0,0,0.25);  /* subtle anchor line */
+}
+
+/* Allow wrapping nicely on narrow screens */
+.pre-section-banner span {
+  display: inline-block;
+  white-space: normal;
+}
+
+/* Optional: icon style */
+.pre-section-banner .icon {
+  margin-right: 8px;
+  font-size: 20px;
+  vertical-align: -2px;
+}
+
+
+/* ============================================================
+   Knowledge Base — mimic No‑Internet collapsible styling
+   ============================================================ */
+
+#knowledgeBase .section {
+  /* same card look as your No‑Internet sections */
+  background: var(--card-bg);
+  color: var(--card-text);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow: var(--panel-shadow);
+  margin: 12px 0;
+  padding: 0; /* header + panel control spacing */
+}
+
+/* Header layout identical to your reference:
+   - 3-column grid (1fr auto 1fr)
+   - H2 perfectly centered (col 2)
+   - Toggle on right (col 3)
+   - Orange bottom rule
+*/
+#knowledgeBase .section-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 16px;
+  background: var(--header-bg, #f7f7f9);
+  border-bottom: 2px solid var(--brand-accent);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+#knowledgeBase .section-header h2 {
+  grid-column: 2;
+  justify-self: center;
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--header-text, inherit);
+  text-align: center;
+}
+
+#knowledgeBase .section-toggle {
+  grid-column: 3;
+  justify-self: end;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: var(--brand-accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.15);
+  margin-right: 12px;  /* adjust 6–12px to taste */
+}
+#knowledgeBase .section-toggle .toggle-icon {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+#knowledgeBase .section-toggle:hover { filter: brightness(0.95); }
+
+/* Panel spacing like your reference */
+#knowledgeBase .section-panel {
+  padding: 12px;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+/* Subheadings inside Antenna Training */
+#knowledgeBase .kb-subheading {
+  margin: 8px 0;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+/* List + rows (one per line), visually similar to your inputs panel:
+   slightly inset, subtle border, rounded
+*/
+#knowledgeBase .kb-list {
+  display: grid;
+  row-gap: 10px;
+}
+#knowledgeBase .kb-row {
+  display: grid;
+  grid-template-columns: 1fr auto; /* title | icon button */
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--input-bg);          /* same tone as inputs */
+  color: var(--input-text);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+#knowledgeBase .kb-title { font-weight: 600; }
+
+/* Small right icon that opens PDF in new tab */
+#knowledgeBase .kb-open {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  text-decoration: none;
+  font-size: 14px;
+  line-height: 1;
+}
+#knowledgeBase .kb-open:hover { background: var(--btn-bg-hover); }
+
+/* Respect hidden states used by your collapsible script */
+[hidden], .hidden { display: none !important; }
+
+
+/* ============================================================
+   KB — Remove header background, match No‑Internet style
+   ============================================================ */
+
+#knowledgeBase .section-header {
+  background: none !important;         /* remove box background */
+  border-bottom: 2px solid var(--brand-accent) !important;
+  padding: 14px 0 !important;          /* tighter spacing */
+}
+
+#knowledgeBase .section-header h2 {
+  color: var(--card-text) !important;  /* match theme text */
+}
+
+/* Keep toggle aligned and styled as before */
+#knowledgeBase .section-toggle {
+  background: var(--brand-accent);
+  color: #fff;
+}
+
+
+/* ============================================================
+   KB — Compact row styling (smaller, cleaner, tighter)
+   ============================================================ */
+
+#knowledgeBase .kb-row {
+  padding: 6px 10px !important;        /* was ~10px 12px */
+  gap: 8px !important;                 /* less spacing between title + icon */
+  border-radius: 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+}
+
+#knowledgeBase .kb-title {
+  font-size: 14px !important;          /* slightly smaller */
+  font-weight: 600;
+}
+
+/* Smaller right-side open icon */
+#knowledgeBase .kb-open {
+  width: 22px !important;
+  height: 22px !important;
+  font-size: 12px !important;
+  border-radius: 4px !important;
+  padding: 0 !important;
+}
+
+/* Space between vendor groups */
+#knowledgeBase .kb-subheading {
+  margin-top: 14px !important;
+  margin-bottom: 6px !important;
+  font-size: 15px !important;
+}
+
+
+/* ============================================
+   Troubleshooting Guides & Knowledge Base
+   - Same row, equal widths
+   - Keep existing gap
+   - Independent heights (no stretch)
+   - No HTML changes
+   ============================================ */
+
+/* 1) Target ONLY the nested container that wraps both cards */
+.container > .container {
+  display: flex;          /* ensure it's flex (already is, but reaffirm) */
+  flex-wrap: nowrap;      /* keep both on the same row */
+  align-items: flex-start; /* prevent equal-height stretching */
+  /* Do NOT change gap; inherit your existing gap from .container */
+}
+
+/* 2) Make both cards equal-width siblings and allow shrinking */
+.container > .container > .section-block {
+  flex: 1 1 0;    /* equal width: grow evenly, base 0 so they split 50/50 */
+  min-width: 0;   /* allow content to shrink without forcing wrap */
+  /* no max-width here so we don't accidentally push a wrap */
+}
+
+/* 3) (Optional) On very narrow screens, allow stacking for usability.
+      Remove this block if you want them ALWAYS side-by-side. */
+@media (max-width: 840px) {
+  .container > .container {
+    flex-wrap: wrap;       /* allow wrap on small screens */
+  }
+  .container > .container > .section-block {
+    flex: 1 1 100%;        /* full width when wrapped */
+  }
+}
+
+
+  </style>
+  
+</head>
+<body>
+  <header>
+  
+   
+<div class="brand">
+  <img src="logo.png" alt="Business Logo">
+  <h1 class="page-title">First Line Support - Troubleshooting Tool V1.0</h1>
+</div>
+
+    <!-- Theme toggle button: icon + label updates dynamically -->
+	
+    <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Toggle color theme">
+      <span class="icon" id="themeIcon">🌙</span>
+      <span class="label" id="themeLabel">Dark</span>
+    </button>
+  </header>
+
+
+<div class="container">
+
+  <!-- Important !!! -->
+  
+  <div class="pre-section-banner" role="note" aria-label="Important Notice">
+    <span class="icon"></span>
+    <span>⚠️ Router Training is currenlty under maintance</span>
+	<span>⚠️ Antenna Training is currently under maintanance</span>
+  </div>
+
+
+<!-- Troubleshooting Guides -->
+
+  <div class="container">
+    
+    <div class="section-block">
+      <h2 style="text-decoration: underline;">Troubleshooting Guides</h2>
+      <a href="no-internet.html">No Internet</a>
+      <a href="slow-speed.html">Slow Speed</a>
+      <a href="voip.html">VoIP</a>
+      <a href="email.html">Email</a>
+	  <a href="offnet.html">Offnet</a>
+    </div>
+
+
+<!-- Knowledge Base -->
+<div class="section-block" id="knowledgeBase">
+  <h2 style="text-decoration: underline;">Knowledge Base</h2>
+
+  <!-- Router Training -->
+  <div class="section summarizable collapsible" data-section="Router Training" id="kbRouterSection">
+    <div class="section-header">
+      <h2 id="kb-router-heading">Router Training</h2>
+      <button class="section-toggle" aria-expanded="true" aria-controls="kb-router-panel" aria-label="Toggle">
+        <span class="toggle-icon" aria-hidden="true">−</span>
+      </button>
+    </div>
+    <div class="section-panel" id="kb-router-panel" role="region" aria-labelledby="kb-router-heading">
+      <div class="kb-list">
+        <div class="kb-row">
+          <span class="kb-title">MikroTik</span>
+          <a class="kb-open" href="pdfs/router/mikrotik.pdf" target="_blank" rel="noopener" aria-label="Open MikroTik PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">Toto Link A3002RU &amp; A702R</span>
+          <a class="kb-open" href="pdfs/router/totolink-a3002ru-a702r.pdf" target="_blank" rel="noopener" aria-label="Open Toto Link A3002RU & A702R PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">XPON HG3221D &amp; V2801RW</span>
+          <a class="kb-open" href="pdfs/router/xpon-hg3221d-v2801rw.pdf" target="_blank" rel="noopener" aria-label="Open XPON HG3221D & V2801RW PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">Calix</span>
+          <a class="kb-open" href="pdfs/router/calix.pdf" target="_blank" rel="noopener" aria-label="Open Calix PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">Toto‑Link N300 &amp; N600</span>
+          <a class="kb-open" href="pdfs/router/totolink-n300-n600.pdf" target="_blank" rel="noopener" aria-label="Open Toto‑Link N300 & N600 PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">TP‑Link EX141 AC1500</span>
+          <a class="kb-open" href="pdfs/router/tp-link-ex141-ac1500.pdf" target="_blank" rel="noopener" aria-label="Open TP‑Link EX141 AC1500 PDF">↗</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Antenna Training -->
+  <div class="section summarizable collapsible" data-section="Antenna Training" id="kbAntennaSection">
+    <div class="section-header">
+      <h2 id="kb-antenna-heading">Antenna Training</h2>
+      <button class="section-toggle" aria-expanded="true" aria-controls="kb-antenna-panel" aria-label="Toggle">
+        <span class="toggle-icon" aria-hidden="true">−</span>
+      </button>
+    </div>
+    <div class="section-panel" id="kb-antenna-panel" role="region" aria-labelledby="kb-antenna-heading">
+      <h4 class="kb-subheading">Cambium</h4>
+      <div class="kb-list">
+        <div class="kb-row">
+          <span class="kb-title">ODU</span>
+          <a class="kb-open" href="pdfs/antenna/cambium-odu.pdf" target="_blank" rel="noopener" aria-label="Open Cambium ODU PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">AP</span>
+          <a class="kb-open" href="pdfs/antenna/cambium-ap.pdf" target="_blank" rel="noopener" aria-label="Open Cambium AP PDF">↗</a>
+        </div>
+      </div>
+
+      <h4 class="kb-subheading">MikroTik</h4>
+      <div class="kb-list">
+        <!-- Replace placeholders with real MikroTik antenna PDFs when ready -->
+        <div class="kb-row">
+          <span class="kb-title">ODU</span>
+          <a class="kb-open" href="pdfs/antenna/cambium-odu.pdf" target="_blank" rel="noopener" aria-label="Open MikroTik ODU PDF (placeholder)">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">AP</span>
+          <a class="kb-open" href="pdfs/antenna/cambium-ap.pdf" target="_blank" rel="noopener" aria-label="Open MikroTik AP PDF (placeholder)">↗</a>
+        </div>
+      </div>
+
+      <h4 class="kb-subheading">Ubiquiti</h4>
+      <div class="kb-list">
+        <!-- Replace placeholders with real Ubiquiti antenna PDFs when ready -->
+        <div class="kb-row">
+          <span class="kb-title">ODU</span>
+          <a class="kb-open" href="pdfs/antenna/cambium-odu.pdf" target="_blank" rel="noopener" aria-label="Open Ubiquiti ODU PDF (placeholder)">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">AP</span>
+          <a class="kb-open" href="pdfs/antenna/cambium-ap.pdf" target="_blank" rel="noopener" aria-label="Open Ubiquiti AP PDF (placeholder)">↗</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+ <!-- Offnet -->
+  <div class="section summarizable collapsible" data-section="Offnet" id="kbOffnetSection">
+    <div class="section-header">
+      <h2 id="kb-fls-heading">Offnet</h2>
+      <button class="section-toggle" aria-expanded="true" aria-controls="kb-fls-panel" aria-label="Toggle">
+        <span class="toggle-icon" aria-hidden="true">−</span>
+      </button>
+    </div>
+    <div class="section-panel" id="kb-fls-panel" role="region" aria-labelledby="kb-fls-heading">
+      <div class="kb-list">
+        <div class="kb-row">
+          <span class="kb-title">Vumatel</span>
+          <a class="kb-open" href="pdfs/fls/call-back-procedure.pdf" target="_blank" rel="noopener" aria-label="Open Call Back Procedure PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">Openserve</span>
+          <a class="kb-open" href="pdfs/fls/shift-handover-procedure.pdf" target="_blank" rel="noopener" aria-label="Open Shift Handover PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">Frog Foot</span>
+          <a class="kb-open" href="pdfs/fls/working-from-home-policy.pdf" target="_blank" rel="noopener" aria-label="Open WFH Policy PDF">↗</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- First Line Support Procedures -->
+  <div class="section summarizable collapsible" data-section="First Line Support Procedures" id="kbFlsSection">
+    <div class="section-header">
+      <h2 id="kb-fls-heading">First Line Support Procedures</h2>
+      <button class="section-toggle" aria-expanded="true" aria-controls="kb-fls-panel" aria-label="Toggle">
+        <span class="toggle-icon" aria-hidden="true">−</span>
+      </button>
+    </div>
+    <div class="section-panel" id="kb-fls-panel" role="region" aria-labelledby="kb-fls-heading">
+      <div class="kb-list">
+        <div class="kb-row">
+          <span class="kb-title">Call Back Procedure</span>
+          <a class="kb-open" href="pdfs/fls/call-back-procedure.pdf" target="_blank" rel="noopener" aria-label="Open Call Back Procedure PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">Shift Handover Procedure</span>
+          <a class="kb-open" href="pdfs/fls/shift-handover-procedure.pdf" target="_blank" rel="noopener" aria-label="Open Shift Handover PDF">↗</a>
+        </div>
+        <div class="kb-row">
+          <span class="kb-title">Working From Home Policy</span>
+          <a class="kb-open" href="pdfs/fls/working-from-home-policy.pdf" target="_blank" rel="noopener" aria-label="Open WFH Policy PDF">↗</a>
+		</div>
+		<div class="kb-row">
+          <span class="kb-title">Field Operations Escalation Procedure</span>
+          <a class="kb-open" href="pdfs/fls/working-from-home-policy.pdf" target="_blank" rel="noopener" aria-label="Open WFH Policy PDF">↗</a>
+		</div>
+		<div class="kb-row">
+          <span class="kb-title">Accounts Escalation Procedure</span>
+          <a class="kb-open" href="pdfs/fls/working-from-home-policy.pdf" target="_blank" rel="noopener" aria-label="Open WFH Policy PDF">↗</a>
+		</div>
+		<div class="kb-row">
+          <span class="kb-title">Sales Escalation Procedure</span>
+          <a class="kb-open" href="pdfs/fls/working-from-home-policy.pdf" target="_blank" rel="noopener" aria-label="Open WFH Policy PDF">↗</a>
+		</div>
+		<div class="kb-row">
+          <span class="kb-title">HB Escalation Procedure</span>
+          <a class="kb-open" href="pdfs/fls/working-from-home-policy.pdf" target="_blank" rel="noopener" aria-label="Open WFH Policy PDF">↗</a>
+		</div>
+		
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+<script>
+/* ============================================================
+   THEME — Initialization & Persistence (no HTML changes)
+   ============================================================ */
+(function themeInit() {
+  const root = document.documentElement; // <html>
+  const toggleBtn = document.getElementById('themeToggle');
+  const themeIcon = document.getElementById('themeIcon');
+  const themeLabel = document.getElementById('themeLabel');
+
+  const THEME_KEY = 'app-theme';
+  const LIGHT = 'theme-light';
+  const DARK  = 'theme-dark';
+
+  function getInitialTheme() {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === LIGHT || saved === DARK) return saved;
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? DARK : LIGHT;
+  }
+
+  function applyTheme(themeClass) {
+    root.classList.remove(LIGHT, DARK);
+    root.classList.add(themeClass);
+    localStorage.setItem(THEME_KEY, themeClass);
+
+    // Update toggle visual state
+    const isDark = themeClass === DARK;
+    if (toggleBtn) toggleBtn.setAttribute('aria-pressed', String(isDark));
+    if (themeIcon) themeIcon.textContent = isDark ? '☀️' : '🌙';  // show opposite action
+    if (themeLabel) themeLabel.textContent = isDark ? 'Light' : 'Dark';
+  }
+
+  // Initialize on load
+  applyTheme(getInitialTheme());
+
+  // Toggle on click
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      const current = root.classList.contains(DARK) ? DARK : LIGHT;
+      const next = current === DARK ? LIGHT : DARK;
+      applyTheme(next);
+    });
+  }
+})();
+
+/* ============================================================
+   Knowledge Base — Email-style collapsibles (no menus/views)
+   - Start ALL KB sections collapsed by default
+   - Matches No‑Internet section behavior
+   ============================================================ */
+(function knowledgeBaseCollapsibles() {
+  const kb = document.getElementById('knowledgeBase');
+  if (!kb) return;
+
+  // Ensure all small "open" buttons behave as external links and don't toggle the panel
+  function hardenOpenButtons() {
+    kb.querySelectorAll('.kb-open[href]').forEach(a => {
+      a.setAttribute('target', '_blank');
+      const rel = (a.getAttribute('rel') || '').split(/\s+/).filter(Boolean);
+      if (!rel.includes('noopener')) rel.push('noopener');
+      a.setAttribute('rel', rel.join(' '));
+    });
+  }
+
+  function wireSection(section, idx) {
+    const btn = section.querySelector('.section-toggle');
+    const panel = section.querySelector('.section-panel');
+    if (!btn || !panel) return;
+
+    // Ensure aria-controls points to the panel
+    if (!btn.hasAttribute('aria-controls')) {
+      const id = panel.id || `kb-panel-${idx}`;
+      panel.id = id;
+      btn.setAttribute('aria-controls', id);
+    }
+
+    // 🔽 Force collapsed on init (overrides any HTML state)
+    let expanded = false;
+    btn.setAttribute('aria-expanded', 'false');
+    panel.classList.add('hidden');
+    const icon = btn.querySelector('.toggle-icon');
+    if (icon) icon.textContent = '+';
+
+    // Toggle action
+    const toggle = () => {
+      expanded = !expanded;
+      btn.setAttribute('aria-expanded', String(expanded));
+      panel.classList.toggle('hidden', !expanded);
+      if (icon) icon.textContent = expanded ? '−' : '+';
+    };
+
+    btn.addEventListener('click', toggle);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  // Wire all KB collapsible sections (and force them collapsed)
+  kb.querySelectorAll('.section.collapsible').forEach(wireSection);
+
+  // Prevent the little "open" icon from collapsing the section when clicked.
+  kb.addEventListener('click', (e) => {
+    const openBtn = e.target.closest('.kb-open');
+    if (openBtn && kb.contains(openBtn)) {
+      e.stopPropagation();  // anchor opens in new tab without toggling
+    }
+  });
+
+  hardenOpenButtons();
+})();
+</script>
+
+
+  
+</body>
+</html>

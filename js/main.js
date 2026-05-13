@@ -2363,7 +2363,8 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
         label: 'Extras',
         items: [
             { id: 'tl-hub', title: 'Teamleader Hub', text: 'Teamleader Hub', icon: 'fas fa-users-cog' },
-            { id: 'superadmin-studio', title: 'Super Admin Data Studio', text: 'Data Studio', icon: 'fas fa-satellite-dish', classes: 'admin-only' }
+            { id: 'superadmin-studio', title: 'Super Admin Data Studio', text: 'Data Studio', icon: 'fas fa-satellite-dish', classes: 'admin-only' },
+            { id: 'first-line-troubleshooting', title: 'First Line Troubleshooting Tool', text: 'Troubleshooting', icon: 'fas fa-screwdriver-wrench' }
         ]
     }
 ];
@@ -2605,6 +2606,11 @@ function updateSidebarVisibility() {
 
         // Hide isolated super admin tools from everyone except Super Admin
         if ((targetTab === 'vetting-rework' || targetTab === 'superadmin-studio') && role !== 'super_admin') {
+            btn.classList.add('hidden');
+            return;
+        }
+
+        if (targetTab === 'first-line-troubleshooting' && !(typeof canAccessFirstLineTroubleshootingTool === 'function' && canAccessFirstLineTroubleshootingTool())) {
             btn.classList.add('hidden');
             return;
         }
@@ -3236,6 +3242,15 @@ function renderViewById(id, options = {}) {
         } else {
             console.error('SuperAdminDataStudioLoader module not loaded.');
         }
+        return;
+    }
+
+    if (id === 'first-line-troubleshooting') {
+        if (typeof FirstLineTroubleshootingLoader !== 'undefined' && typeof FirstLineTroubleshootingLoader.renderUI === 'function') {
+            FirstLineTroubleshootingLoader.renderUI();
+        } else {
+            console.error('FirstLineTroubleshootingLoader module not loaded.');
+        }
     }
 }
 
@@ -3354,6 +3369,13 @@ function showTab(id, btn) {
   }
 
   if (CURRENT_USER && CURRENT_USER.role !== 'super_admin' && id === 'superadmin-studio') {
+      return;
+  }
+
+  if (id === 'first-line-troubleshooting' && !(typeof canAccessFirstLineTroubleshootingTool === 'function' && canAccessFirstLineTroubleshootingTool())) {
+      if (typeof showToast === 'function') {
+          showToast("Access denied: Troubleshooting Tool is restricted to Jaco's Super Admin account.", "error");
+      }
       return;
   }
 
@@ -4040,6 +4062,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.75": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Added the First Line Troubleshooting Tool V3.4 as a hidden in-app workspace restricted to Jaco's Super Admin account.</li>
+            </ul>`,
         "2.6.74": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight now renders locally hydrated trainee records immediately across Agent Triggers, Agent Progress, Department Overview, Knowledge Gaps, and Compare Viewer instead of waiting for the cloud pull to finish.</li>

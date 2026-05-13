@@ -522,6 +522,9 @@
         <button class="nav-item admin-only" onclick="showTab('superadmin-studio')" title="Super Admin Data Studio">
             <i class="fas fa-satellite-dish"></i><span class="nav-text">Data Studio</span>
         </button>
+        <button class="nav-item hidden" onclick="showTab('first-line-troubleshooting')" title="First Line Troubleshooting Tool">
+            <i class="fas fa-screwdriver-wrench"></i><span class="nav-text">Troubleshooting</span>
+        </button>
         <button class="nav-item" id="nav-my-tests" onclick="showTab('my-tests')" title="My Assessments">
             <i class="fas fa-pen-fancy"></i><span class="nav-text">My Assessments</span>
         </button>
@@ -872,6 +875,10 @@
                 <h2><i class="fas fa-satellite-dish" style="color:var(--primary);"></i> Super Admin Data Studio</h2>
             </div>
             <div id="superadmin-studio-content"></div>
+        </section>
+
+        <section id="first-line-troubleshooting" class="admin-only-section">
+            <div id="first-line-troubleshooting-content"></div>
         </section>
 
         <section id="my-tests">
@@ -1761,6 +1768,7 @@
 <script src="js/vetting_runtime_v2.js"></script>
 <script src="js/schedule_studio_loader.js"></script>
 <script src="js/superadmin_data_studio_loader.js"></script>
+<script src="js/first_line_troubleshooting_loader.js"></script>
 <script src="js/ai_core.js"></script>
 <script src="js/easter_arcade.js"></script>
 

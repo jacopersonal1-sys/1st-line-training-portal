@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!-- Theme bootstrap (unchanged) -->
+<script>
+  (function () {
+    try {
+      const THEME_KEY = 'app-theme';
+      const LIGHT = 'theme-light';
+      const DARK  = 'theme-dark';
+      const saved = localStorage.getItem(THEME_KEY);
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const cls = (saved === LIGHT || saved === DARK) ? saved : (prefersDark ? DARK : LIGHT);
+      document.documentElement.classList.add(cls);
+    } catch (e) {}
+  })();
+</script>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>First Line Support – Troubleshooting Guide V3.4</title>
+
+  <style>
+/* ============================================================
+   ORIGINAL CSS (UNCHANGED)
+   ============================================================ */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 20px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #f1f3f6;
+}
+
+/* Two-column layout with flexible widths */
+.page-layout,
+.main-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  justify-content: center;
+  max-width: 1420px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+/* Left side: content */
+.content-area {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Right side: summary (sticky) */
+.summary-panel {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow-x: hidden;
+  overflow-y: auto;
+  position: sticky;
+  top: 20px;
+  height: fit-content;
+  max-height: calc(100vh - 40px);
+}
+
+#summary {
+  width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.section {
+  background: #fff;
+  padding: 24px;
+  margin-bottom: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+h1, h2 { text-align: center; margin: 16px 0; }
+
+/* Two-column grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+input, select {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+}
+
+.icon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-weight: 600;
+}
+
+.link-icon {
+  width: 18px;
+  height: 18px;
+  background: #F58220;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #fff;
+}
+
+.info-icon {
+  width: 18px;
+  height: 18px;
+  background: #16a34a;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  position: relative;
+}
+.info-icon:hover::after {
+  content: attr(data-info);
+  position: absolute; top: 26px; left: 0;
+  background: #111827; color: #fff; padding: 8px; width: 400px;
+  font-size: 12px; border-radius: 6px; z-index: 100;
+}
+
+.hidden { display: none; }
+
+.input-with-unit { display: flex; align-items: center; gap: 8px; }
+.input-with-unit select { width: 80px; }
+
+.copy-btn { align-self: flex-start; }
+
+.summary-buttons { display: flex; justify-content: space-between; gap: 12px; }
+
+/* Collapsible */
+.section.collapsible { padding: 0; border-radius: 8px; position: relative; }
+.section-header {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  padding: 16px; background: #f7f7f9; border-bottom: 1px solid #eee;
+}
+.section-header h2 { grid-column: 2; justify-self: center; margin: 0; font-size: 1.2rem; }
+.section-toggle {
+  grid-column: 3; justify-self: end; border: 1px solid #d1d5db; background: #fff;
+  border-radius: 6px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+}
+.toggle-icon { font-size: 18px; font-weight: 700; }
+.section-panel { padding: 20px; }
+.section-panel.hidden { display: none; }
+
+/* === FO Template === */
+#foOutput h3 {
+  font-family: inherit; font-weight: 600; margin: 0 0 12px 0; text-align: center; color: var(--card-text);
+}
+#foText {
+  font-family: inherit !important; font-size: 1rem; line-height: 1.5; color: var(--card-text);
+  background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 6px; padding: 16px; white-space: pre-wrap;
+}
+#foNextStep {
+  font-family: inherit; font-size: 0.95rem; line-height: 1.45; margin-top: 12px;
+  background: rgba(255, 80, 0, 0.10);
+  border-left: 4px solid var(--brand-accent); padding: 10px 12px; border-radius: 4px; color: var(--card-text);
+}
+#foPanel pre { font-family: inherit !important; }
+
+/* ============================================================
+   NEW: SSID / LAN / ROUTER FAULT ROWS – TEXT LEFT, CHECKBOX RIGHT
+   (applies to both Fibre & Wireless groups)
+   ============================================================ */
+.ssid-lan-row label.icon-row { justify-content: space-between; }
+.ssid-lan-row label.icon-row input[type="checkbox"] { width: auto; margin-left: auto; margin-right: 0; }
+
+/* ============================================================
+   ⭐ THEME SYSTEM — VARIABLES + OVERRIDES
+   ============================================================ */
+:root {
+  --body-bg: #ffffff; --body-text: #000000; --card-bg: #ffffff; --card-text: #000000; --card-border: #dddddd;
+  --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --summary-border: #ff5000; --brand-accent: #ff5000;
+  --input-bg: #ffffff; --input-text: #000000; --input-border: #d1d5db;
+  --header-bg: #f7f7f9; --header-border: #eeeeee;
+}
+.theme-light {}
+.theme-dark {
+  --body-bg: #1c2025; --body-text: #ffffff; --card-bg: #232a31; --card-text: #ffffff; --card-border: #3a3f45;
+  --panel-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --input-bg: #2c3238; --input-text: #ffffff; --input-border: #3a3f45;
+  --summary-border: #ff5000; --brand-accent: #ff5000; --header-bg: #1F2630; --header-text: #F9FAFB;
+}
+body { background: var(--body-bg); color: var(--body-text); }
+.content-area, .section { background: var(--card-bg); color: var(--card-text); border: 1px solid var(--card-border); box-shadow: var(--panel-shadow); }
+.summary-panel {
+  background: var(--card-bg); color: var(--card-text); border: none; border-left: 4px solid var(--summary-border);
+  padding-left: 24px; border-radius: 8px; box-shadow: var(--panel-shadow);
+}
+.section-toggle .toggle-icon { color: var(--brand-accent); }
+input, select { background: var(--input-bg); color: var(--input-text); border: 1px solid var(--input-border); }
+.copy-btn, .accent-btn { background: var(--brand-accent); color: #fff; padding: 10px 16px; border: none; border-radius: 6px; }
+
+.theme-dark .section-header { background: #1F2630 !important; }
+.theme-dark .section-header h2 { color: #F9FAFB !important; }
+.section-header { border-bottom: 1px solid var(--brand-accent) !important; }
+
+/* ============================================================
+   ⭐ UPDATED PAIR-GRID ALIGNMENT (single source of truth)
+   ============================================================ */
+
+/* Main panels share a single rule via .pair-grid */
+.pair-grid:not(.hidden) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+  row-gap: 12px;
+  align-items: center;             /* center label + select vertically */
+}
+
+/* Label cell (column 1) */
+.pair-grid:not(.hidden) > label.icon-row {
+  grid-column: 1;
+  display: flex;                    /* normalize behavior across browsers */
+  align-items: center;
+  justify-content: flex-start;      /* keep icons next to label text */
+  gap: 8px;
+  margin-top: 0;                    /* override global 14px for grid rows */
+  min-height: 38px;                 /* visually matches most select heights */
+}
+
+/* Select cell (column 2) */
+.pair-grid:not(.hidden) > label.icon-row + select {
+  grid-column: 2;
+  align-self: center;
+}
+
+/* Prevent icons from stretching/pushing apart in label rows */
+.pair-grid:not(.hidden) > label.icon-row .info-icon,
+.pair-grid:not(.hidden) > label.icon-row .link-icon {
+  flex: 0 0 auto;
+  margin-left: 0;
+}
+
+/* Mobile stacking for main panels only */
+@media (max-width: 900px) {
+  .pair-grid:not(.hidden) { grid-template-columns: 1fr; row-gap: 8px; }
+}
+
+/* Flatten wrapper blocks so children fall into the parent grid */
+#outageStatusBlock:not(.hidden),
+#ticketStatusBlock:not(.hidden),
+#jobCardBlock:not(.hidden),
+
+#fibreConnectBlock:not(.hidden),
+#fibreSteps:not(.hidden),
+#fibreImpactBlock:not(.hidden),
+#fibreAdsBlock:not(.hidden),
+#fibreBrowseBlock:not(.hidden),
+#fibreResolvedBlock:not(.hidden),
+
+#wirelessConnectBlock:not(.hidden),
+#wirelessOduBlock:not(.hidden),
+#wirelessImpactBlock:not(.hidden),
+#wirelessNoInternetAdsBlock:not(.hidden),
+#wirelessBrowseBlock:not(.hidden),
+#wirelessResolvedBlock:not(.hidden) {
+  display: contents !important;
+}
+
+/* === Ensure label + select alignment for ONT (Fibre) and ODU (Wireless) === */
+#fibreSteps:not(.hidden),
+#wirelessOduBlock:not(.hidden) {
+  display: grid;                 /* force a local 2-col grid for each pair */
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+  align-items: center;           /* centered to match main grids */
+  row-gap: 0;                    /* single pair */
+}
+#fibreSteps:not(.hidden) > label.icon-row,
+#wirelessOduBlock:not(.hidden) > label.icon-row {
+  grid-column: 1;
+  margin-top: 0;
+}
+#fibreSteps:not(.hidden) > select,
+#wirelessOduBlock:not(.hidden) > select {
+  grid-column: 2;                 /* dropdown sits to the right of the label */
+  align-self: center;
+}
+
+/* ============================================
+   Link icon: no underline, stay black
+   ============================================ */
+a.link-icon, a.link-icon:visited, a.link-icon:hover, a.link-icon:focus {
+  text-decoration: none !important; color: #000 !important;
+}
+.icon-row a .link-icon { text-decoration: none !important; color: #000 !important; }
+a.link-icon, .icon-row a .link-icon { display: inline-block; vertical-align: middle; }
+</style>
+  
+</head>
+
+<body>
+
+<div class="main-layout">
+
+  <!-- Column 1: content -->
+
+  <div class="content-area">
+
+    <!-- Title -->
+    <div class="section">
+      <h1>No Internet Troubleshooting Guide</h1>
+    </div>
+
+    <!-- CUSTOMER INFO -->
+
+    <div class="section summarizable collapsible" data-section="Customer Information" id="customerInfoSection">
+      <div class="section-header">
+        <h2 id="ci-heading">Customer Information</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="ci-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <div class="section-panel" id="ci-panel" role="region" aria-labelledby="ci-heading">
+        <div class="grid">
+          <input id="customerName" data-summary="Name & Surname" placeholder="Name & Surname">
+          <input id="cellNumber" data-summary="Cellphone Number" placeholder="000 000 0000" inputmode="tel">
+          <input id="siteLocation" data-summary="Site Location" placeholder="Site Location">
+          <input id="startTime" data-summary="Start Time / Time Frame" placeholder="Start Time / Time Frame">
+          <input id="problemDescription" data-summary="Problem Description" placeholder="Problem Description">
+
+          <select id="servicemedium" data-summary="Service Medium">
+            <option>-- Select the service medium --</option>
+            <option>Fibre</option>
+            <option>Pre-Paid Fibre</option>
+            <option>Wireless</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHIP DASHBOARD -->
+
+    <div class="section summarizable collapsible" data-section="CHIP Dashboard" id="chipSection">
+      <div class="section-header">
+        <h2 id="chip-heading">CHIP Dashboard</h2>
+        <button class="section-toggle" aria-expanded="true" aria-controls="chip-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">−</span>
+        </button>
+      </div>
+
+      <div class="section-panel pair-grid" id="chip-panel" role="region" aria-labelledby="chip-heading">
+        <label class="icon-row">Account Status
+          <a class="link-icon" href="ph-CHIP Account Status" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The account status must be active. If its suspended / cancelled the PPPoE authentication for all radius users (installs) linked to that account will be set to reject and no PPPoe authentication will take place for those radius users.">i</span>
+        </label>
+        <select id="accountStatus" data-summary="Account Status">
+          <option>-- Select --</option>
+          <option>Active</option>
+          <option>Suspended</option>
+          <option>Cancelled</option>
+        </select>
+
+        <div id="outageStatusBlock" class="hidden">
+          <label class="icon-row">Outage Status
+            <a class="link-icon" href="ph-CHIP Outage Status" target="_blank" rel="noopener">🔗</a>
+            <span class="info-icon" data-info="CHIP only shows active outages caused by equipment being unreachable. Degraded service , email / voip outages must still be confirmed on the teams outage channels. It is important to confirm whether a customer is affected by a outage as it will determine whether first line support is able to assist with the problem being expereinced or whether the problem is a affect of the active outage">i</span>
+          </label>
+          <select id="outageStatus" data-summary="Outage Status">
+            <option>-- Select --</option>
+            <option>Active</option>
+            <option>Suspected outage</option>
+            <option>Normal</option>
+          </select>
+
+          <div id="ticketStatusBlock" class="hidden">
+            <label class="icon-row">Ticket Status
+              <a class="link-icon" href="ph-Ticket Status" target="_blank" rel="noopener">🔗</a>
+              <span class="info-icon" data-info="In the case of duplicate tickets (multiple tickets logged for the same site & same problem) merge the duplicate tickets. If the customers has an existing ticket for the site & problem work on the existing ticket , DO NOT CREATE A NEW ONE. Only create a new ticket if no ticket for that site & problem is present. Following this procedure keeps the tickets volumes down by preventing multiple tickets logged for the same site & problem as well prevents duplicate tickets from remaining open on the system after the problem has been resolved.">i</span>
+            </label>
+            <select id="ticketStatus" data-summary="Ticket Status">
+              <option>-- Select --</option>
+              <option>New ticket</option>
+              <option>Existing ticket</option>
+            </select>
+          </div>
+
+          <div id="jobCardBlock" class="hidden">
+            <label class="icon-row">Active Job Card
+              <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/EbPyOS1vPXFNqNQkvHx61cUBbYpmKPxNUrfWq0ZYPNfqew?e=JQDRta" target="_blank" rel="noopener">🔗</a>
+              <span class="info-icon" data-info="When engaging with a customer about an existing job card, agents are required to reassess the fault and confirm whether any additional remote diagnostics or corrective steps can be taken. We maintain full accountability for the resolution process and do not shift responsibility prematurely. If all remote options have been exhausted and the issue persists, the comunication may be escalated to Field Operations.">i</span>
+            </label>
+            <select id="jobCard" data-summary="Active Job Card">
+              <option>-- Select --</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+          </div>
+        </div> <!-- closes outageStatusBlock -->
+      </div> <!-- closes chip-panel -->
+    </div>
+
+    <!-- FIBRE – NO INTERNET -->
+
+    <div class="section summarizable hidden collapsible" id="fibreProblemSection" data-section="Fibre - No Internet">
+      <div class="section-header">
+        <h2 id="fibre-heading">Fibre – No Internet</h2>
+        <button class="section-toggle" aria-expanded="false" aria-controls="fibre-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">+</span>
+        </button>
+      </div>
+
+      <div class="section-panel hidden pair-grid" id="fibre-panel" role="region" aria-labelledby="fibre-heading">
+        <label class="icon-row">Power & Cable Cycle Completed
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/EeawkuJh-LZLmb9jzHIH6DcBziqMU6vhieVPf67LMg51wA?e=lvFCfm" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="If the cables and power is not correct for the devices on the customers premises then the equipment will not be able to dail out to the radius server to reqeust PPPoE authentication there for causing the customer not to have a active data session.">i</span>
+        </label>
+        <select id="fibrePower" data-summary="Power & Cable Cycle">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+
+        <div id="fibreConnectBlock" class="hidden">
+          <label class="icon-row">Can the customer connect to their network?
+            <span class="info-icon" data-info="Can the customer connect to the wi-fi via there SSID & Ethernet. The SSID can help determine whether the router could have reset to default settings.">i</span>
+          </label>
+          <select id="fibreConnect" data-summary="Customer Network Connection">
+            <option>-- Select --</option>
+            <option>Yes</option>
+            <option>Default</option>
+            <option>No</option>
+          </select>
+
+          <!-- Only shown when fibreConnect = No -->
+          <div id="fibreSsidLanRow" class="hidden ssid-lan-row">
+            <label class="icon-row">
+              Devices are not picking up the SSID
+              <input type="checkbox" id="fibreSsidIssue" data-summary="Devices not picking up SSID">
+            </label>
+            <label class="icon-row">
+              LAN ports faulty
+              <input type="checkbox" id="fibreLanIssue" data-summary="LAN ports faulty">
+            </label>
+            <label class="icon-row">
+              Possible Faulty Router
+              <input type="checkbox" id="fibreRouterIssue" data-summary="Possible Faulty Router">
+            </label>
+          </div>
+
+          <!-- Only shown when fibreConnect = Default -->
+          <div id="fibreDefaultConfigRow" class="hidden ssid-lan-row">
+            <label class="icon-row">
+              Re-Configured the Gateway
+              <input type="checkbox" id="fibreReconfGw" data-summary="Re-Configured the Gateway">
+            </label>
+            <label class="icon-row">
+              Re-Configured the AP
+              <input type="checkbox" id="fibreReconfAp" data-summary="Re-Configured the AP">
+            </label>
+            <label class="icon-row">
+              Remote configuration not possible - Gateway
+              <input type="checkbox" id="fibreNoRemoteGw" data-summary="Remote configuration not possible - Gateway">
+            </label>
+            <label class="icon-row">
+              Remote configuration not possible - AP
+              <input type="checkbox" id="fibreNoRemoteAp" data-summary="Remote configuration not possible - AP">
+            </label>
+          </div>
+        </div>
+
+        <div id="fibreSteps" class="hidden">
+          <label class="icon-row">ONT Status
+            <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQBa6KkInMhIRb2A7OnjpkJ_Ab56YcQAYpdPf1T3czYYRHc?e=hPezyU" target="_blank" rel="noopener">🔗</a>
+            <span class="info-icon" data-info="The customers ONT / ONU must be connected to the Herotel network in order for packets to travel between the customers network and Herotels network.">i</span>
+          </label>
+          <select id="fibreOntStatus" data-summary="ONT Status">
+            <option>-- Select --</option>
+            <option>ONT Connected</option>
+            <option>Wire Down</option>
+            <option>Power Off</option>
+          </select>
+
+          <div id="fibreImpactBlock" class="hidden">
+            <label class="icon-row">Disconnection Impact
+              <span class="info-icon" data-info="It is vital to confirm whether a singular customer / multiple customers are disconnected from the herotle network. This will determine where the problem is escalated to.">i</span>
+            </label>
+            <select id="fibreImpact" data-summary="Disconnection Impact">
+              <option>-- Select --</option>
+              <option>Singular</option>
+              <option>Multiple</option>
+            </select>
+          </div>
+
+          <div id="fibreAdsBlock" class="hidden">
+            <label class="icon-row">ADS Status
+              <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQB7KIc_iPmzRK9dYv5QKs6GARWzNSHh-BhRrrgZOurNMQ8?e=HBEaQB" target="_blank" rel="noopener">🔗</a>
+              <span class="info-icon" data-info="To confirm whether the customer is trying to authenticate to the Herotel radius server or if there are any authentication errors preventing the customers PPPOE to succesfully authenticate.">i</span>
+            </label>
+            <select id="fibreAds" data-summary="Fibre ADS Status">
+              <option>-- Select --</option>
+              <option>ADS Present & Stable</option>
+              <option>No ADS but logs present</option>
+              <option>No ADS & no logs</option>
+            </select>
+          </div>
+
+          <div id="fibreBrowseBlock" class="hidden">
+            <label class="icon-row">Can the customer browse?
+              <span class="info-icon" data-info="A browse check confirms whether the customer’s internet connection is actually restored from an end‑user perspective. Even if tests, pings, or equipment indicators show improvement, they don’t guarantee that the customer can successfully load websites. A browse check confirms whether the problem is resolved or if further troubleshooting is required .">i</span>
+            </label>
+            <select id="fibreBrowse" data-summary="Browsing Test">
+              <option>-- Select --</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+          </div>
+
+          <div id="fibreResolvedBlock" class="hidden">
+            <label class="icon-row">Problem Resolved?
+              <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+              <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+            </label>
+            <select id="fibreResolved" data-summary="Problem Resolved">
+              <option>-- Select --</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+          </div>
+        </div> <!-- closes fibreSteps -->
+      </div> <!-- closes fibre-panel -->
+    </div>
+
+    <!-- WIRELESS – NO INTERNET -->
+
+    <div class="section summarizable hidden collapsible" id="wirelessProblemSection" data-section="Wireless - No Internet">
+      <div class="section-header">
+        <h2 id="wireless-heading">Wireless – No Internet</h2>
+        <button class="section-toggle" aria-expanded="false" aria-controls="wireless-panel" aria-label="Toggle">
+          <span class="toggle-icon" aria-hidden="true">+</span>
+        </button>
+      </div>
+
+      <div class="section-panel hidden pair-grid" id="wireless-panel" role="region" aria-labelledby="wireless-heading">
+        <label class="icon-row">Power & Cable Cycle Completed
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQCijhD4C8uqQqGnwYpK3_dWAZ8L_W1AMJs9HbLynagaoJ0?e=cj0xyZ" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="If the cables and power is not correct for the devices on the customers premises then the equipment will not be able to dail out to the radius server to reqeust PPPoE authentication there for causing the customer not to have a active data session.">i</span>
+        </label>
+        <select id="wirelessPower" data-summary="Power & Cable Cycle">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+
+        <div id="wirelessConnectBlock" class="hidden">
+          <label class="icon-row">Can the customer connect to their network?
+            <span class="info-icon" data-info="Can the customer connect to the wi-fi via there SSID & Ethernet. The SSID can help determine whether the router could have reset to default settings.">i</span>
+          </label>
+          <select id="wirelessConnect" data-summary="Customer Network Connection">
+            <option>-- Select --</option>
+            <option>Yes</option>
+            <option>Default</option>
+            <option>No</option>
+          </select>
+
+          <!-- Only shown when wirelessConnect = No -->
+          <div id="wirelessSsidLanRow" class="hidden ssid-lan-row">
+            <label class="icon-row">
+              Devices are not picking up the SSID
+              <input type="checkbox" id="wirelessSsidIssue" data-summary="Devices not picking up SSID">
+            </label>
+            <label class="icon-row">
+              LAN ports faulty
+              <input type="checkbox" id="wirelessLanIssue" data-summary="LAN ports faulty">
+            </label>
+            <label class="icon-row">
+              Possible Faulty Router
+              <input type="checkbox" id="wirelessRouterIssue" data-summary="Possible Faulty Router">
+            </label>
+          </div>
+
+          <!-- Only shown when wirelessConnect = Default -->
+          <div id="wirelessDefaultConfigRow" class="hidden ssid-lan-row">
+            <label class="icon-row">
+              Re-Configured the Gateway
+              <input type="checkbox" id="wirelessReconfGw" data-summary="Re-Configured the Gateway">
+            </label>
+            <label class="icon-row">
+              Re-Configured the AP
+              <input type="checkbox" id="wirelessReconfAp" data-summary="Re-Configured the AP">
+            </label>
+            <label class="icon-row">
+              Remote configuration not possible - Gateway
+              <input type="checkbox" id="wirelessNoRemoteGw" data-summary="Remote configuration not possible - Gateway">
+            </label>
+            <label class="icon-row">
+              Remote configuration not possible - AP
+              <input type="checkbox" id="wirelessNoRemoteAp" data-summary="Remote configuration not possible - AP">
+            </label>
+          </div>
+        </div>
+
+        <div id="wirelessOduBlock" class="hidden">
+          <label class="icon-row">ODU Status
+            <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQBlBDoH6NtgR7oI1ZnFTBFAAfs2G3VDJN8P8esL_2D2tvk?e=u63alY" target="_blank" rel="noopener">🔗</a>
+            <span class="info-icon" data-info="The customers ODU must be connected to the Herotel network in order for packets to travel between the customers network and Herotels network..">i</span>
+          </label>
+          <select id="wirelessOduStatus" data-summary="ODU Status">
+            <option>-- Select --</option>
+            <option>Connected</option>
+            <option>Disconnected</option>
+          </select>
+        </div>
+
+        <div id="wirelessImpactBlock" class="hidden">
+          <label class="icon-row">Disconnection Impact
+            <span class="info-icon" data-info="It is vital to confirm whether a singular customer / multiple customers are disconnected from the herotle network. This will determine where the problem is escalated to.">i</span>
+          </label>
+          <select id="wirelessImpact" data-summary="Disconnection Impact">
+            <option>-- Select --</option>
+            <option>Singular</option>
+            <option>Multiple</option>
+          </select>
+        </div>
+
+        <div id="wirelessNoInternetAdsBlock" class="hidden">
+          <label class="icon-row">ADS Status
+            <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQB7KIc_iPmzRK9dYv5QKs6GARWzNSHh-BhRrrgZOurNMQ8?e=qZejRM" target="_blank" rel="noopener">🔗</a>
+            <span class="info-icon" data-info="To confirm whether the customer is trying to authenticate to the Herotel radius server or if there are any authentication errors preventing the customers PPPOE to succesfully authenticate">i</span>
+          </label>
+          <select id="wirelessNoInternetAdsStatus" data-summary="ADS Status">
+            <option>-- Select --</option>
+            <option>ADS Present & Stable</option>
+            <option>No ADS but logs present</option>
+            <option>No ADS & no logs</option>
+          </select>
+        </div>
+
+        <div id="wirelessBrowseBlock" class="hidden">
+          <label class="icon-row">Can the customer browse?
+            <span class="info-icon" data-info="A browse check confirms whether the customer’s internet connection is actually restored from an end‑user perspective. Even if tests, pings, or equipment indicators show improvement, they don’t guarantee that the customer can successfully load websites. A browse check confirms whether the problem is resolved or if further troubleshooting is required .">i</span>
+          </label>
+          <select id="wirelessBrowse" data-summary="Browsing Test">
+            <option>-- Select --</option>
+            <option>Yes</option>
+            <option>No</option>
+          </select>
+        </div>
+
+        <div id="wirelessResolvedBlock" class="hidden">
+          <label class="icon-row">Problem Resolved?
+            <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=iohc5L" target="_blank" rel="noopener">🔗</a>
+            <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+          </label>
+          <select id="wirelessResolved" data-summary="Problem Resolved">
+            <option>-- Select --</option>
+            <option>Yes</option>
+            <option>No</option>
+          </select>
+        </div>
+      </div> <!-- closes wireless-panel -->
+    </div>
+
+  </div> <!-- closes column 1 content-area -->
+
+  <!-- SUMMARY PANEL -->
+
+  <div class="summary-panel">
+    <div class="section summary-section">
+      <h2>Summary</h2>
+      <div id="summary"></div>
+
+      <div class="summary-buttons">
+        <button class="copy-btn">Copy Summary</button>
+        <a class="accent-btn" href="index.html" role="button">Home</a>
+      </div>
+
+      <!-- FIELD OPERATIONS COLLAPSIBLE -->
+
+      <div id="foSection" class="section collapsible hidden">
+        <div class="section-header">
+          <h2>Field Operations Scheduling Details</h2>
+          <button class="section-toggle" aria-expanded="false" aria-controls="fo-panel">
+            <span class="toggle-icon">+</span>
+          </button>
+        </div>
+
+        <div class="section-panel hidden" id="fo-panel">
+          <div class="grid">
+            <input id="foperson" placeholder="Person On Site">
+            <input id="foContactPerson" placeholder="Contact Number - Person On Site">
+            <input id="foAltNumber" placeholder="Alternative Contact Number">
+            <input id="foPPPoE" placeholder="PPPoE Username (Radius User)">
+            <input id="foVIPStatus" placeholder="VIP Status">
+            <select id="foCallOutStatus">
+              <option>Call Out Fee Discussed ?</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+
+            <textarea id="foNotes" placeholder="Special Notes / Instructions" rows="3"></textarea>
+          </div>
+
+          <br>
+
+          <button id="generateFoBtn" class="accent-btn">Generate FO Template</button>
+
+          <div id="foOutput" class="section hidden" style="margin-top:16px;">
+            <h3>FO Template</h3>
+            <pre id="foText" style="white-space:pre-wrap;"></pre>
+
+            <div style="display:flex; gap:12px; margin-top:12px;">
+              <button id="copyFoBtn" class="copy-btn">Copy Template</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div> <!-- summary-panel -->
+</div> <!-- main-layout -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const SELECT_PLACEHOLDER_PREFIX = '-- Select';
+
+  /* ==========================================================
+     ELEMENT REFERENCES
+     ========================================================== */
+
+  const summaryPanel = document.getElementById('summary');
+  const copyBtn = document.querySelector('.copy-btn');
+
+  const cellNumber = document.getElementById('cellNumber');
+  const servicemedium = document.getElementById('servicemedium');
+  const accountStatus = document.getElementById('accountStatus');
+  const outageStatus = document.getElementById('outageStatus');
+  const ticketStatus = document.getElementById('ticketStatus');
+  const jobCard = document.getElementById('jobCard');
+
+  const outageStatusBlock = document.getElementById('outageStatusBlock');
+  const ticketStatusBlock = document.getElementById('ticketStatusBlock');
+  const jobCardBlock = document.getElementById('jobCardBlock');
+
+  /* Fibre */
+  const fibreProblemSection = document.getElementById('fibreProblemSection');
+  const fibrePower = document.getElementById('fibrePower');
+  const fibreConnect = document.getElementById('fibreConnect');
+  const fibreOntStatus = document.getElementById('fibreOntStatus');
+  const fibreImpact = document.getElementById('fibreImpact');
+  const fibreAds = document.getElementById('fibreAds');
+  const fibreBrowse = document.getElementById('fibreBrowse');
+  const fibreResolved = document.getElementById('fibreResolved');
+
+  const fibreConnectBlock = document.getElementById('fibreConnectBlock');
+  const fibreSteps = document.getElementById('fibreSteps');
+  const fibreImpactBlock = document.getElementById('fibreImpactBlock');
+  const fibreAdsBlock = document.getElementById('fibreAdsBlock');
+  const fibreBrowseBlock = document.getElementById('fibreBrowseBlock');
+  const fibreResolvedBlock = document.getElementById('fibreResolvedBlock');
+
+  const fibreSsidLanRow = document.getElementById('fibreSsidLanRow');
+  const fibreSsidIssue = document.getElementById('fibreSsidIssue');
+  const fibreLanIssue = document.getElementById('fibreLanIssue');
+  const fibreRouterIssue = document.getElementById('fibreRouterIssue');
+
+  const fibreDefaultConfigRow = document.getElementById('fibreDefaultConfigRow');
+  const fibreReconfGw = document.getElementById('fibreReconfGw');
+  const fibreReconfAp = document.getElementById('fibreReconfAp');
+  const fibreNoRemoteGw = document.getElementById('fibreNoRemoteGw');
+  const fibreNoRemoteAp = document.getElementById('fibreNoRemoteAp');
+
+  /* Wireless */
+  const wirelessProblemSection = document.getElementById('wirelessProblemSection');
+  const wirelessPower = document.getElementById('wirelessPower');
+  const wirelessConnect = document.getElementById('wirelessConnect');
+  const wirelessOduStatus = document.getElementById('wirelessOduStatus');
+  const wirelessImpact = document.getElementById('wirelessImpact');
+  const wirelessNoInternetAdsStatus = document.getElementById('wirelessNoInternetAdsStatus');
+  const wirelessBrowse = document.getElementById('wirelessBrowse');
+  const wirelessResolved = document.getElementById('wirelessResolved');
+
+  const wirelessConnectBlock = document.getElementById('wirelessConnectBlock');
+  const wirelessOduBlock = document.getElementById('wirelessOduBlock');
+  const wirelessImpactBlock = document.getElementById('wirelessImpactBlock');
+  const wirelessNoInternetAdsBlock = document.getElementById('wirelessNoInternetAdsBlock');
+  const wirelessBrowseBlock = document.getElementById('wirelessBrowseBlock');
+  const wirelessResolvedBlock = document.getElementById('wirelessResolvedBlock');
+
+  const wirelessSsidLanRow = document.getElementById('wirelessSsidLanRow');
+  const wirelessSsidIssue = document.getElementById('wirelessSsidIssue');
+  const wirelessLanIssue = document.getElementById('wirelessLanIssue');
+  const wirelessRouterIssue = document.getElementById('wirelessRouterIssue');
+
+  const wirelessDefaultConfigRow = document.getElementById('wirelessDefaultConfigRow');
+  const wirelessReconfGw = document.getElementById('wirelessReconfGw');
+  const wirelessReconfAp = document.getElementById('wirelessReconfAp');
+  const wirelessNoRemoteGw = document.getElementById('wirelessNoRemoteGw');
+  const wirelessNoRemoteAp = document.getElementById('wirelessNoRemoteAp');
+
+  /* ==========================================================
+     PHONE FORMATTER (unchanged)
+     ========================================================== */
+
+  (function attachPhoneFormatter() {
+    const cellNumber = document.getElementById('cellNumber');
+    const foContactPerson = document.getElementById('foContactPerson');
+    const foAltNumber = document.getElementById('foAltNumber');
+    if (!cellNumber && !foContactPerson && !foAltNumber) return;
+
+    const MAX = 10;
+    function fmt(x) {
+      x = x.replace(/\D/g, '').slice(0, MAX);
+      if (x.length <= 3) return x;
+      if (x.length <= 6) return `${x.slice(0, 3)} ${x.slice(3)}`;
+      return `${x.slice(0, 3)} ${x.slice(3, 6)} ${x.slice(6)}`;
+    }
+
+    function caretMap(str, digits) {
+      let d = 0, i = 0;
+      while (i < str.length && d < digits) {
+        if (/\d/.test(str[i])) d++;
+        i++;
+      }
+      return i;
+    }
+
+    function apply(el) {
+      const start = el.selectionStart ?? el.value.length;
+      const digs = (el.value.slice(0, start).match(/\d/g) || []).length;
+      const formatted = fmt(el.value);
+      el.value = formatted;
+      const newPos = caretMap(formatted, digs);
+      try { el.setSelectionRange(newPos, newPos); } catch { }
+    }
+
+    function bind(el) {
+      if (!el) return;
+      el.addEventListener('input', () => apply(el));
+      el.addEventListener('blur', () => apply(el));
+    }
+
+    bind(cellNumber);
+    bind(foContactPerson);
+    bind(foAltNumber);
+  })();
+
+  /* ==========================================================
+     HELPERS
+     ========================================================== */
+
+  const show = el => el?.classList.remove('hidden');
+  const hide = el => el?.classList.add('hidden');
+
+  const resetSelect = el => {
+    if (el?.tagName === 'SELECT') el.selectedIndex = 0;
+  };
+
+  const isPlaceholder = v => !v || v.startsWith('-- Select');
+
+  const isHidden = el => {
+    let n = el;
+    while (n && n !== document.body) {
+      if (n.classList?.contains('hidden') && !n.classList.contains('section-panel'))
+        return true;
+      n = n.parentElement;
+    }
+    return false;
+  };
+
+  let raf = null;
+  function scheduleUpdateSummary() {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = null;
+      updateSummary();
+    });
+  }
+
+  /* ==========================================================
+     COLLAPSIBLE SECTIONS (unchanged)
+     ========================================================== */
+
+  (function setup() {
+    document.querySelectorAll('.section.collapsible').forEach((section, idx) => {
+      const btn = section.querySelector('.section-toggle');
+      const panel = section.querySelector('.section-panel');
+      if (!btn || !panel) return;
+
+      if (!btn.hasAttribute('aria-controls')) {
+        const id = panel.id || `section-panel-${idx}`;
+        panel.id = id;
+        btn.setAttribute('aria-controls', id);
+      }
+
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      panel.classList.toggle('hidden', !expanded);
+      btn.querySelector('.toggle-icon').textContent = expanded ? '−' : '+';
+
+      btn.addEventListener('click', () => {
+        const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', !isExpanded);
+        panel.classList.toggle('hidden', isExpanded);
+        btn.querySelector('.toggle-icon').textContent = !isExpanded ? '−' : '+';
+        scheduleUpdateSummary();
+      });
+    });
+  })();
+
+  /* ==========================================================
+     CHIP LOGIC
+     ========================================================== */
+
+  function updateChipBlocks() {
+    if (accountStatus.value === 'Active') {
+      show(outageStatusBlock);
+      show(ticketStatusBlock);
+      show(jobCardBlock);
+    } else {
+      hide(outageStatusBlock); outageStatus.selectedIndex = 0;
+      hide(ticketStatusBlock); ticketStatus.selectedIndex = 0;
+      hide(jobCardBlock); jobCard.selectedIndex = 0;
+    }
+  }
+
+  /* ==========================================================
+     SHOW CORRECT PROBLEM SECTION
+     ========================================================== */
+
+  function updateProblemSections() {
+    const medium = servicemedium.value;
+    const active = accountStatus.value === 'Active';
+
+    hide(fibreProblemSection);
+    hide(wirelessProblemSection);
+
+    if (active && (medium === 'Fibre' || medium === 'Pre-Paid Fibre'))
+      show(fibreProblemSection);
+
+    if (active && medium === 'Wireless')
+      show(wirelessProblemSection);
+  }
+
+  /* ==========================================================
+     FLOW RESET HELPERS
+     ========================================================== */
+
+  function resetFibreFlow() {
+    hide(fibreConnectBlock); resetSelect(fibreConnect);
+    hide(fibreSteps); resetSelect(fibreOntStatus);
+    hide(fibreImpactBlock); resetSelect(fibreImpact);
+    hide(fibreAdsBlock); resetSelect(fibreAds);
+    hide(fibreBrowseBlock); resetSelect(fibreBrowse);
+    hide(fibreResolvedBlock); resetSelect(fibreResolved);
+
+    fibreSsidIssue.checked = false;
+    fibreLanIssue.checked = false;
+    fibreRouterIssue.checked = false;
+    hide(fibreSsidLanRow);
+
+    hide(fibreDefaultConfigRow);
+    fibreReconfGw.checked = false;
+    fibreReconfAp.checked = false;
+    fibreNoRemoteGw.checked = false;
+    fibreNoRemoteAp.checked = false;
+  }
+
+  function resetWirelessFlow() {
+    hide(wirelessConnectBlock); resetSelect(wirelessConnect);
+    hide(wirelessOduBlock); resetSelect(wirelessOduStatus);
+    hide(wirelessImpactBlock); resetSelect(wirelessImpact);
+    hide(wirelessNoInternetAdsBlock); resetSelect(wirelessNoInternetAdsStatus);
+    hide(wirelessBrowseBlock); resetSelect(wirelessBrowse);
+    hide(wirelessResolvedBlock); resetSelect(wirelessResolved);
+
+    wirelessSsidIssue.checked = false;
+    wirelessLanIssue.checked = false;
+    wirelessRouterIssue.checked = false;
+    hide(wirelessSsidLanRow);
+
+    hide(wirelessDefaultConfigRow);
+    wirelessReconfGw.checked = false;
+    wirelessReconfAp.checked = false;
+    wirelessNoRemoteGw.checked = false;
+    wirelessNoRemoteAp.checked = false;
+  }
+
+  /* ==========================================================
+     DEFAULT MODE EVALUATION — FIXED LOGIC
+     ========================================================== */
+
+  function fibreDefaultMessage() {
+    const isDefault = fibreConnect.value === 'Default';
+    if (!isDefault) return "";
+
+    const reconf = fibreReconfGw.checked || fibreReconfAp.checked;
+    const remote = fibreNoRemoteGw.checked || fibreNoRemoteAp.checked;
+
+    if (remote) return "⚠️ Escalate to Field Operations.";
+    if (reconf) return "";
+    return "⚠️ Gateway/AP appears reset — confirm and reconfigure.";
+  }
+
+  function wirelessDefaultMessage() {
+    const isDefault = wirelessConnect.value === 'Default';
+    if (!isDefault) return "";
+
+    const reconf = wirelessReconfGw.checked || wirelessReconfAp.checked;
+    const remote = wirelessNoRemoteGw.checked || wirelessNoRemoteAp.checked;
+
+    if (remote) return "⚠️ Escalate to Field Operations.";
+    if (reconf) return "";
+    return "⚠️ Gateway/AP appears reset — confirm and reconfigure.";
+  }
+
+  /* ==========================================================
+     FIBRE EVENTS
+     ========================================================== */
+
+  fibrePower.addEventListener('change', () => {
+    resetFibreFlow();
+    if (fibrePower.value === 'Yes') show(fibreConnectBlock);
+    scheduleUpdateSummary();
+  });
+
+  fibreConnect.addEventListener('change', () => {
+    resetSection(fibreSteps, fibreOntStatus);
+    resetSection(fibreImpactBlock, fibreImpact);
+    resetSection(fibreAdsBlock, fibreAds);
+    resetSection(fibreBrowseBlock, fibreBrowse);
+    resetSection(fibreResolvedBlock, fibreResolved);
+
+    hide(fibreSsidLanRow);
+
+    hide(fibreDefaultConfigRow);
+    fibreReconfGw.checked = fibreReconfAp.checked =
+      fibreNoRemoteGw.checked = fibreNoRemoteAp.checked = false;
+
+    /* Path 1 — YES */
+    if (fibreConnect.value === 'Yes') {
+      show(fibreSteps);
+    }
+
+    /* Path 2 — NO */
+    else if (fibreConnect.value === 'No') {
+      show(fibreSsidLanRow);
+    }
+
+    /* Path 3 — DEFAULT */
+    else if (fibreConnect.value === 'Default') {
+      show(fibreDefaultConfigRow);
+      // SHOW STEPS ONLY IF RECONFIGURED IS SELECTED
+      if (fibreReconfGw.checked || fibreReconfAp.checked)
+        show(fibreSteps);
+      else
+        hide(fibreSteps);
+    }
+
+    scheduleUpdateSummary();
+  });
+
+  /* Default tick boxes update */
+  fibreReconfGw.onchange =
+    fibreReconfAp.onchange =
+      fibreNoRemoteGw.onchange =
+        fibreNoRemoteAp.onchange = () => {
+
+          // SHOW STEPS ONLY on Reconf
+          if (fibreReconfGw.checked || fibreReconfAp.checked)
+            show(fibreSteps);
+          else
+            hide(fibreSteps);
+
+          scheduleUpdateSummary();
+        };
+
+  /* ONT status flow */
+  fibreOntStatus.addEventListener('change', () => {
+    hide(fibreImpactBlock); resetSelect(fibreImpact);
+    hide(fibreAdsBlock); resetSelect(fibreAds);
+    hide(fibreBrowseBlock); resetSelect(fibreBrowse);
+    hide(fibreResolvedBlock); resetSelect(fibreResolved);
+
+    if (['Wire Down', 'Power Off'].includes(fibreOntStatus.value))
+      show(fibreImpactBlock);
+    else if (fibreOntStatus.value === 'ONT Connected')
+      show(fibreAdsBlock);
+
+    scheduleUpdateSummary();
+  });
+
+  fibreImpact.onchange = scheduleUpdateSummary;
+
+  fibreAds.addEventListener('change', () => {
+    hide(fibreBrowseBlock); resetSelect(fibreBrowse);
+    hide(fibreResolvedBlock); resetSelect(fibreResolved);
+    if (fibreAds.value === "ADS Present & Stable")
+      show(fibreBrowseBlock);
+    scheduleUpdateSummary();
+  });
+
+  fibreBrowse.addEventListener('change', () => {
+    hide(fibreResolvedBlock); resetSelect(fibreResolved);
+    if (!isPlaceholder(fibreBrowse.value))
+      show(fibreResolvedBlock);
+    scheduleUpdateSummary();
+  });
+
+  fibreResolved.onchange = scheduleUpdateSummary;
+
+  /* ==========================================================
+     WIRELESS FLOW — FIXED LOGIC
+     ========================================================== */
+
+  wirelessPower.addEventListener('change', () => {
+    resetWirelessFlow();
+    if (wirelessPower.value === 'Yes') show(wirelessConnectBlock);
+    scheduleUpdateSummary();
+  });
+
+  wirelessConnect.addEventListener('change', () => {
+    // Mirror fibre: don't reset entire flow (keeps this block visible)
+    hide(wirelessOduBlock);        resetSelect(wirelessOduStatus);
+    hide(wirelessImpactBlock);     resetSelect(wirelessImpact);
+    hide(wirelessNoInternetAdsBlock); resetSelect(wirelessNoInternetAdsStatus);
+    hide(wirelessBrowseBlock);     resetSelect(wirelessBrowse);
+    hide(wirelessResolvedBlock);   resetSelect(wirelessResolved);
+
+    wirelessSsidIssue.checked = false;
+    wirelessLanIssue.checked = false;
+    wirelessRouterIssue.checked = false;
+    hide(wirelessSsidLanRow);
+
+    hide(wirelessDefaultConfigRow);
+    wirelessReconfGw.checked = wirelessReconfAp.checked =
+      wirelessNoRemoteGw.checked = wirelessNoRemoteAp.checked = false;
+
+    if (wirelessConnect.value === 'Yes') {
+      show(wirelessOduBlock);
+    } else if (wirelessConnect.value === 'No') {
+      show(wirelessSsidLanRow);
+    } else if (wirelessConnect.value === 'Default') {
+      show(wirelessDefaultConfigRow);
+      if (wirelessReconfGw.checked || wirelessReconfAp.checked)
+        show(wirelessOduBlock);
+      else
+        hide(wirelessOduBlock);
+    }
+
+    scheduleUpdateSummary();
+  });
+
+  wirelessReconfGw.onchange =
+    wirelessReconfAp.onchange =
+      wirelessNoRemoteGw.onchange =
+        wirelessNoRemoteAp.onchange = () => {
+
+          if (wirelessReconfGw.checked || wirelessReconfAp.checked)
+            show(wirelessOduBlock);
+          else
+            hide(wirelessOduBlock);
+
+          scheduleUpdateSummary();
+        };
+
+  wirelessOduStatus.addEventListener('change', () => {
+    hide(wirelessImpactBlock); resetSelect(wirelessImpact);
+    hide(wirelessNoInternetAdsBlock); resetSelect(wirelessNoInternetAdsStatus);
+    hide(wirelessBrowseBlock); resetSelect(wirelessBrowse);
+    hide(wirelessResolvedBlock); resetSelect(wirelessResolved);
+
+    if (wirelessOduStatus.value === 'Disconnected')
+      show(wirelessImpactBlock);
+    else if (wirelessOduStatus.value === 'Connected')
+      show(wirelessNoInternetAdsBlock);
+
+    scheduleUpdateSummary();
+  });
+
+  wirelessImpact.addEventListener('change', scheduleUpdateSummary);
+
+  wirelessNoInternetAdsStatus.addEventListener('change', () => {
+    hide(wirelessBrowseBlock); resetSelect(wirelessBrowse);
+    hide(wirelessResolvedBlock); resetSelect(wirelessResolved);
+
+    if (wirelessNoInternetAdsStatus.value === 'ADS Present & Stable')
+      show(wirelessBrowseBlock);
+
+    scheduleUpdateSummary();
+  });
+
+  wirelessBrowse.addEventListener('change', () => {
+    hide(wirelessResolvedBlock); resetSelect(wirelessResolved);
+    if (!isPlaceholder(wirelessBrowse.value)) show(wirelessResolvedBlock);
+    scheduleUpdateSummary();
+  });
+
+  wirelessResolved.addEventListener('change', scheduleUpdateSummary);
+
+  /* ==========================================================
+     FO SECTION
+     ========================================================== */
+  const foSection = document.getElementById('foSection');
+  const generateFoBtn = document.getElementById('generateFoBtn');
+  const foOutput = document.getElementById('foOutput');
+  const foText = document.getElementById('foText');
+  const copyFoBtnSummarySafe = document.getElementById('copyFoBtn');
+
+  // FO inputs (needed for template; prevents ReferenceError)
+  const foperson = document.getElementById('foperson');
+  const foContactPerson = document.getElementById('foContactPerson');
+  const foAltNumber = document.getElementById('foAltNumber');
+  const foPPPoE = document.getElementById('foPPPoE');
+  const foVIPStatus = document.getElementById('foVIPStatus');
+  const foCallOutStatus = document.getElementById('foCallOutStatus');
+  const foNotes = document.getElementById('foNotes');
+
+  function readVal(el) {
+    if (!el) return '';
+    if (el.type === 'checkbox') return el.checked ? 'Yes' : '';
+    if (el.tagName === 'SELECT') return isPlaceholder(el.value) ? '' : el.value;
+    return (el.value || '').trim();
+  }
+
+  function collectSectionsForFO() {
+    let customerInfo = '';
+    let chipInfo = '';
+    let problemInfo = '';
+
+    const fields = [...document.querySelectorAll('[data-summary]')];
+
+    fields.forEach(el => {
+      if (isHidden(el)) return;
+      const label = el.getAttribute('data-summary');
+      const val = readVal(el);
+      if (!val) return;
+
+      if (['customerName', 'cellNumber', 'siteLocation', 'startTime', 'problemDescription', 'servicemedium']
+        .includes(el.id))
+        customerInfo += `${label}: ${val}\n`;
+
+      else if (['accountStatus', 'outageStatus', 'ticketStatus', 'jobCard']
+        .includes(el.id))
+        chipInfo += `${label}: ${val}\n`;
+
+      else
+        problemInfo += `${label}: ${val}\n`;
+    });
+
+    return { customerInfo, chipInfo, problemInfo };
+  }
+
+  generateFoBtn.onclick = () => {
+    const { customerInfo, chipInfo, problemInfo } = collectSectionsForFO();
+
+    let medium = servicemedium.value.includes("Fibre") ? "Fibre – No Internet"
+      : servicemedium.value === "Wireless" ? "Wireless – No Internet" : "";
+
+    let out = "";
+    if (customerInfo) out += `=== Customer Information ===\n${customerInfo}\n\n`;
+    if (chipInfo) out += `=== CHIP Troubleshooting ===\n${chipInfo}\n\n`;
+    if (problemInfo) out += `=== ${medium} ===\n${problemInfo}\n\n`;
+
+    out += `
+=== FO Scheduling Details ===
+Person On Site: ${readVal(foperson)}
+Contact Number (On Site): ${readVal(foContactPerson)}
+Alternative Contact Number: ${readVal(foAltNumber)}
+PPPoE Username (Radius User): ${readVal(foPPPoE)}
+VIP Status: ${readVal(foVIPStatus)}
+Call Out Fee Discussed?: ${readVal(foCallOutStatus)}
+Special Notes: ${readVal(foNotes)}
+`;
+
+    foText.textContent = out.trim();
+    show(foOutput);
+  };
+
+  copyFoBtnSummarySafe.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(foText.textContent.trim());
+      copyFoBtnSummarySafe.textContent = "Copied!";
+      setTimeout(() => copyFoBtnSummarySafe.textContent = "Copy Template", 1200);
+    } catch { }
+  };
+
+  /* ==========================================================
+     ESCALATION LOGIC — FULLY FIXED
+     ========================================================== */
+
+  function getEscalation(id, value) {
+    const medium = servicemedium.value;
+
+    /* CHIP RULES */
+    if (id === 'jobCard' && value === 'Yes')
+      return "⚠️ Perform further remote checks. Escalate to Field Operations if unresolved.";
+    if (id === 'accountStatus' && value === 'Suspended')
+      return " ⚠️ Suspended — escalate to Accounts (or TL after-hours with POP). ";
+    if (id === 'accountStatus' && value === 'Cancelled')
+      return "⚠️ Cancelled — verify account details; escalate to TL if incorrect.";
+    if (id === 'outageStatus' && value === 'Active')
+      return "⚠️ Determine whether the outage is affecting the customers service. If yes notify the customer about the outage & how they can expect updates (DO NOT LOG A TICKET). If no log a ticket / work on the existing ticket and assist the customer with the problem.";
+
+    /* ===================== FIBRE ===================== */
+    if (medium.includes("Fibre")) {
+
+      if (id === 'fibrePower' && value === 'No')
+        return "⚠️ Advise the customer to complete a full power & cable cycle.";
+
+      if (id === 'fibreConnect' && value === 'Default')
+        return fibreDefaultMessage();
+
+      if ((id === 'fibreReconfGw' || id === 'fibreReconfAp') && value === 'Yes')
+        return fibreDefaultMessage();
+
+      if ((id === 'fibreNoRemoteGw' || id === 'fibreNoRemoteAp') && value === 'Yes')
+        return "⚠️ Escalate to Field Operations.";
+
+      if (id === 'fibreConnect' && value === 'No') {
+        if (fibreSsidIssue.checked || fibreLanIssue.checked || fibreRouterIssue.checked)
+          return "⚠️ Escalate to Field Operations.";
+        return "";
+      }
+
+      if (id === 'fibreOntStatus' && ['Wire Down', 'Power Off'].includes(value))
+        return "⚠️ Determine the disconnection impact (Singular vs Multiple).";
+
+      if (id === 'fibreImpact') {
+        if (value === 'Singular') return "⚠️ Escalate to Field Operations.";
+        if (value === 'Multiple') return "⚠️ Escalate to Config & Analyse.";
+      }
+
+      if (id === 'fibreAds') {
+        if (value.includes("no logs")) return "⚠️ Escalate to Field Operations.";
+        if (value.includes("logs present")) return "⚠️ Escalate to Config & Analyse.";
+      }
+
+      if (id === 'fibreBrowse' || id === 'fibreResolved') {
+        if (fibreBrowse.value === 'No' && fibreResolved.value === 'No')
+          return "⚠️ Escalate to Team Leader.";
+        if (fibreBrowse.value === 'Yes' && fibreResolved.value === 'Yes')
+          return "✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer";
+      }
+    }
+
+    /* ===================== WIRELESS ===================== */
+    if (medium === 'Wireless') {
+
+      if (id === 'wirelessPower' && value === 'No')
+        return "⚠️ Advise the customer to complete a full power & cable cycle.";
+
+      if (id === 'wirelessConnect' && value === 'Default')
+        return wirelessDefaultMessage();
+
+      if ((id === 'wirelessReconfGw' || id === 'wirelessReconfAp') && value === 'Yes')
+        return wirelessDefaultMessage();
+
+      if ((id === 'wirelessNoRemoteGw' || id === 'wirelessNoRemoteAp') && value === 'Yes')
+        return "⚠️ Escalate to Field Operations.";
+
+      if (id === 'wirelessConnect' && value === 'No') {
+        if (wirelessSsidIssue.checked || wirelessLanIssue.checked || wirelessRouterIssue.checked)
+          return "⚠️ Escalate to Field Operations.";
+        return "";
+      }
+
+      if (id === 'wirelessOduStatus' && value === 'Disconnected')
+        return "⚠️ Determine the disconnection impact (Singular vs Multiple).";
+
+      if (id === 'wirelessImpact') {
+        if (value === 'Singular') return "⚠️ Escalate to Field Operations.";
+        if (value === 'Multiple') return "⚠️ Escalate to Config & Analyse.";
+      }
+
+      if (id === 'wirelessNoInternetAdsStatus') {
+        if (value.includes("no logs")) return "⚠️ Escalate to Field Operations.";
+        if (value.includes("logs present")) return "⚠️ Escalate to Config & Analyse.";
+      }
+
+      if (id === 'wirelessBrowse' || id === 'wirelessResolved') {
+        if (wirelessBrowse.value === 'No' && wirelessResolved.value === 'No')
+          return "⚠️ Escalate to Team Leader.";
+        if (wirelessBrowse.value === 'Yes' && wirelessResolved.value === 'Yes')
+          return "✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer";
+      }
+    }
+
+    return "";
+  }
+
+  /* ==========================================================
+     SUMMARY GENERATOR
+     ========================================================== */
+
+  function updateSummary() {
+    let customerInfo = '';
+    let chipInfo = '';
+    let problemInfo = '';
+    const steps = new Set();
+
+    const fields = [...document.querySelectorAll('[data-summary]')];
+
+    fields.forEach(el => {
+      if (isHidden(el)) return;
+
+      const id = el.id;
+      const label = el.getAttribute('data-summary');
+      const val = readVal(el);
+      if (!val) return;
+
+      if (
+        ['customerName', 'cellNumber', 'siteLocation', 'startTime', 'problemDescription', 'servicemedium']
+          .includes(id)
+      ) {
+        customerInfo += `${label}: ${val}\n`;
+      } else if (
+        ['accountStatus', 'outageStatus', 'ticketStatus', 'jobCard']
+          .includes(id)
+      ) {
+        chipInfo += `${label}: ${val}\n`;
+      } else {
+        problemInfo += `${label}: ${val}\n`;
+      }
+
+      const s = getEscalation(id, val);
+      if (s) s.split("\n").forEach(v => steps.add(v));
+    });
+
+    // --- Apply escalation priority rules (robust) ---
+    let filtered = [...steps];
+
+    // If a later escalation is present, remove the "determine impact" message
+    const hasFO = filtered.some(s => /Escalate to Field Operations/i.test(s));
+    const hasCA = filtered.some(s => /Escalate to Config/i.test(s));
+
+    if (hasFO || hasCA) {
+      filtered = filtered.filter(
+        s => !/disconnection impact/i.test(s)   // robust match (emoji/variants safe)
+      );
+    }
+
+    const next = filtered.join("\n");
+
+    let output = "";
+    if (customerInfo) output += `=== Customer Information ===\n${customerInfo}\n\n`;
+    if (chipInfo) output += `=== CHIP Troubleshooting ===\n${chipInfo}\n\n`;
+    if (problemInfo) {
+      const medium = servicemedium.value.includes("Fibre")
+        ? "Fibre – No Internet"
+        : servicemedium.value === "Wireless"
+          ? "Wireless – No Internet"
+          : "";
+      output += `=== ${medium} ===\n${problemInfo}\n\n`;
+    }
+    if (next) output += `=== Next Recommended Step ===\n${next}\n`;
+
+    summaryPanel.textContent = output.trim();
+
+    // NEW: Only show FO panel for Fibre/Wireless flow FO (exclude CHIP job card FO)
+    const isInternetMedium = servicemedium.value.includes("Fibre") || servicemedium.value === "Wireless";
+    const hasFONonChip = [...steps].some(s =>
+      /Escalate to Field Operations/i.test(s) &&
+      !/Perform further remote checks/i.test(s) // filters out CHIP job-card message
+    );
+
+    if (isInternetMedium && hasFONonChip)
+      foSection.classList.remove('hidden');
+    else
+      foSection.classList.add('hidden');
+  }
+
+  /* ==========================================================
+     COPY SUMMARY BUTTON
+     ========================================================== */
+
+  // NEW: exclude "Next Recommended Step" from clipboard while keeping it in UI
+  copyBtn.onclick = async () => {
+    try {
+      let text = summaryPanel.textContent.trim();
+      text = text.replace(/=== Next Recommended Step ===[\s\S]*$/i, '').trim();
+      await navigator.clipboard.writeText(text);
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => copyBtn.textContent = "Copy Summary", 1200);
+    } catch { }
+  };
+
+  /* ==========================================================
+     GLOBAL LISTENERS
+     ========================================================== */
+
+  accountStatus.onchange = () => {
+    updateChipBlocks();
+    updateProblemSections();
+    scheduleUpdateSummary();
+  };
+
+  servicemedium.onchange = () => {
+    updateProblemSections();
+    scheduleUpdateSummary();
+  };
+
+  outageStatus.onchange = scheduleUpdateSummary;
+  ticketStatus.onchange = scheduleUpdateSummary;
+  jobCard.onchange = scheduleUpdateSummary;
+
+  document.addEventListener('input', e => {
+    if (e.target.matches('[data-summary]')) scheduleUpdateSummary();
+  });
+
+  document.addEventListener('change', e => {
+    if (e.target.matches('[data-summary]')) scheduleUpdateSummary();
+  });
+
+  /* Initial load */
+  updateChipBlocks();
+  updateProblemSections();
+  updateSummary();
+});
+
+/* helper */
+function resetSection(block, select) {
+  block?.classList.add('hidden');
+  if (select) select.selectedIndex = 0;
+}
+</script>
+
+</body>
+</html>

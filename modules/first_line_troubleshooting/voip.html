@@ -1,0 +1,1347 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<!-- ⭐ AUTO‑APPLY THEME from index page BEFORE anything renders -->
+<script>
+  (function () {
+    try {
+      const THEME_KEY = 'app-theme';
+      const LIGHT = 'theme-light';
+      const DARK  = 'theme-dark';
+      const saved = localStorage.getItem(THEME_KEY);
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const cls = (saved === LIGHT || saved === DARK) ? saved : (prefersDark ? DARK : LIGHT);
+      document.documentElement.classList.add(cls);
+    } catch (e) {}
+  })();
+</script>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>First Line Support – Troubleshooting Guide V3.4</title>
+
+<style>
+
+/* ============================================================
+   ORIGINAL CSS (UNCHANGED)
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 20px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #f1f3f6;
+}
+
+/* Two-column layout with flexible widths */
+.page-layout,
+.main-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* equal flexible columns */
+  gap: 20px; /* space between columns */
+  justify-content: center; /* center the whole grid */
+  max-width: 1420px; /* cap total width */
+  margin: 0 auto; /* center on page */
+  align-items: start; /* ensures sticky aligns at top */
+}
+
+/* 🔒 Pin left/right panels on desktop */
+.main-layout > .content-area { grid-column: 1; }  /* LEFT column */
+.main-layout > .summary-panel { grid-column: 2; } /* RIGHT column */
+
+/* Left side: content */
+.content-area {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Right side: summary (sticky) */
+.summary-panel {
+  background: #fff;
+  border: 1px solid #ddd;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  /* Sticky behavior */
+  position: sticky;
+  top: 20px; /* distance from top of viewport */
+  height: fit-content; /* prevents stretching */
+  max-height: calc(100vh - 40px); /* stays within viewport height */
+}
+
+#summary {
+  width: 100%;
+  white-space: pre-wrap; /* preserve line breaks but allow wrapping */
+  word-break: break-word; /* force long words to wrap */
+  overflow-wrap: break-word; /* modern equivalent */
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+/* Sections inside content */
+.section {
+  background: #fff;
+  padding: 24px;
+  margin-bottom: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+h1,
+h2 {
+  text-align: center;
+  margin: 16px 0;
+}
+
+/* Grid for inputs: only 2 per row */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+}
+
+/* === Make the Internet block's children participate directly in the form grid === */
+#voipInternetBlock {
+  display: contents; /* label + select become direct grid items of the parent .grid */
+}
+
+/* Pair label in left column… */
+.section-panel .grid > label.icon-row {
+  grid-column: 1;            /* left column inside the form grid */
+  align-self: center;
+}
+
+/* …and the next select in right column */
+.section-panel .grid > label.icon-row + select {
+  grid-column: 2;            /* right column inside the form grid */
+  align-self: center;
+}
+
+/* Mobile: stack label above select on one column layout */
+@media (max-width: 900px) {
+  .section-panel .grid > label.icon-row,
+  .section-panel .grid > label.icon-row + select {
+    grid-column: 1;          /* stack in single column on small screens */
+  }
+}
+
+.icon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-weight: 600;
+}
+
+/* Link icon */
+.link-icon {
+  width: 18px;
+  height: 18px;
+  background: #F58220;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  color: #fff;
+}
+.link-icon:hover {
+  background: #d96a15;
+}
+
+/* Info icon */
+.info-icon {
+  width: 18px;
+  height: 18px;
+  background: #16a34a;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  position: relative;
+}
+.info-icon:hover::after {
+  content: attr(data-info);
+  position: absolute;
+  top: 26px;
+  left: 0;
+  background: #111827;
+  color: #fff;
+  padding: 8px;
+  width: 400px;
+  font-size: 12px;
+  border-radius: 6px;
+  z-index: 100;
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+/* Fibre Slow Speed section override */
+#fibreSlowSection {
+  width: 100%;
+  margin-bottom: 32px;
+}
+
+.speed-results {
+  display: flex;
+  gap: 16px;
+}
+
+.speed-results input {
+  flex: 1;
+  min-width: 120px;
+  margin-bottom: 0;
+}
+
+.hidden {
+  display: none;
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* space between input and select */
+}
+
+.input-with-unit input {
+  flex: 1; /* input takes available width */
+}
+
+.input-with-unit select {
+  width: 80px; /* fixed width for MB/GB dropdown */
+}
+
+.copy-btn {
+  align-self: flex-start;
+}
+
+.summary-block {
+  margin-top: 12px;
+}
+.summary-block h3 {
+  text-decoration: underline;
+  margin-bottom: 6px;
+}
+
+/* Responsive fallback (page-level) */
+@media (max-width: 900px) {
+  .page-layout,
+  .main-layout {
+    grid-template-columns: 1fr; /* single column */
+    max-width: 100%; /* full width */
+  }
+
+  /* 📱 When stacked, both panels go to the single column */
+  .main-layout > .content-area,
+  .main-layout > .summary-panel {
+    grid-column: 1;
+  }
+
+  .content-area,
+  .summary-panel {
+    width: 100%;
+    max-height: none;
+    position: static;
+  }
+}
+
+/* ------ Collapsible Sections ------ */
+
+.section.collapsible {
+  padding: 0;
+  border-radius: 8px;
+  position: relative;
+}
+
+/* Header bar using 3‑column grid */
+.section-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr; /* left | center | right */
+  align-items: center;
+  padding: 16px;
+  background: #f7f7f9;
+  border-bottom: 1px solid #eee;
+}
+
+/* Center column: heading */
+.section-header h2 {
+  grid-column: 2; /* middle column */
+  justify-self: center;
+  margin: 0;
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+/* Right column: toggle button */
+.section-toggle {
+  grid-column: 3; /* right column */
+  justify-self: end;
+
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.section-toggle:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+}
+
+.toggle-icon {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Collapsible panel body */
+.section-panel {
+  padding: 20px;
+}
+
+.section-panel.hidden {
+  display: none;
+}
+
+/* ============================================================
+   ⭐ THEME SYSTEM — VARIABLES + OVERRIDES
+   ============================================================ */
+
+:root {
+  --body-bg: #ffffff;
+  --body-text: #000000;
+
+  --card-bg: #ffffff;
+  --card-text: #000000;
+  --card-border: #dddddd;
+  --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  --summary-border: #ff5000;
+  --brand-accent: #ff5000;
+
+  --input-bg: #ffffff;
+  --input-text: #000000;
+  --input-border: #d1d5db;
+
+  --header-bg: #f7f7f9;
+  --header-border: #eeeeee;
+  /* If you later add --header-text for light theme, section-header h2 will pick it up */
+}
+
+.theme-light {
+  --body-bg: #ffffff;
+  --body-text: #000000;
+
+  --card-bg: #ffffff;
+  --card-text: #000000;
+  --card-border: #dddddd;
+  --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  --summary-border: #ff5000;
+  --brand-accent: #ff5000;
+}
+
+.theme-dark {
+  --body-bg: #1c2025;
+  --body-text: #ffffff;
+
+  --card-bg: #232a31;
+  --card-text: #ffffff;
+  --card-border: #3a3f45;
+  --panel-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+
+  --input-bg: #2c3238;
+  --input-text: #ffffff;
+  --input-border: #3a3f45;
+
+  --summary-border: #ff5000;
+  --brand-accent: #ff5000;
+
+  --header-bg: #1F2630;     /* Darker header bar */
+  --header-text: #F9FAFB;   /* Bright readable text */
+}
+
+/* THEME OVERRIDES */
+body {
+  background: var(--body-bg);
+  color: var(--body-text);
+}
+
+/* Panels and sections */
+.content-area,
+.section {
+  background: var(--card-bg);
+  color: var(--card-text);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--panel-shadow);
+}
+
+/* ⭐ Theme A — Left Accent Border */
+.summary-panel {
+  background: var(--card-bg);
+  color: var(--card-text);
+  border: none;
+  border-left: 4px solid var(--summary-border);
+  padding-left: 24px;
+  border-radius: 8px;
+  box-shadow: var(--panel-shadow);
+}
+
+/* Accent for toggle */
+.section-toggle .toggle-icon {
+  color: var(--brand-accent);
+}
+
+/* Inputs adopt theme */
+input,
+select {
+  background: var(--input-bg);
+  color: var(--input-text);
+  border: 1px solid var(--input-border);
+}
+
+/* Accent buttons */
+.copy-btn,
+.accent-btn {
+  background: var(--brand-accent);
+  color: #fff;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s ease;
+}
+
+.copy-btn:hover,
+.accent-btn:hover {
+  background: #e04800;
+}
+
+/* Button row */
+.summary-buttons {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+/* DARK MODE — override header background + text */
+.theme-dark .section-header {
+  background: #1F2630 !important;
+}
+.theme-dark .section-header h2 {
+  color: #F9FAFB !important;
+}
+
+/* Apply brand-orange border for all themes */
+.section-header {
+  border-bottom: 1px solid var(--brand-accent) !important;
+}
+
+/* ============================================================
+   📏 VoIP: match No Internet spacing between label & select
+   - Normalize .icon-row margin inside VoIP steps
+   - Two-column grid per step, consistent vertical rhythm
+   - Keep .hidden working via :not(.hidden)
+   ============================================================ */
+
+#VoIPproblemsection #voipPowerCycleBlock > label.icon-row,
+#VoIPproblemsection #voipNetworkBlock > label.icon-row,
+#VoIPproblemsection #voipDialErrorBlock > label.icon-row,
+#VoIPproblemsection #voipRebootBlock > label.icon-row,
+#VoIPproblemsection #voipProblemResolvedBlock > label.icon-row {
+  margin-top: 0;           /* override global margin to keep rows aligned */
+  align-self: center;
+}
+
+#VoIPproblemsection #voipPowerCycleBlock:not(.hidden),
+#VoIPproblemsection #voipNetworkBlock:not(.hidden),
+#VoIPproblemsection #voipDialErrorBlock:not(.hidden),
+#VoIPproblemsection #voipRebootBlock:not(.hidden),
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;  /* label | select */
+  column-gap: 16px;                /* match .grid gap */
+  align-items: center;
+  margin-bottom: 12px;             /* consistent vertical spacing between rows */
+}
+
+/* Optional: remove bottom gap on last row for neat edge */
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) {
+  margin-bottom: 0;
+}
+
+/* Place label / select into columns */
+#VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipNetworkBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipDialErrorBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipRebootBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > label.icon-row {
+  grid-column: 1;
+}
+#VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > select,
+#VoIPproblemsection #voipNetworkBlock:not(.hidden) > select,
+#VoIPproblemsection #voipDialErrorBlock:not(.hidden) > select,
+#VoIPproblemsection #voipRebootBlock:not(.hidden) > select,
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > select {
+  grid-column: 2;
+  margin: 0;
+}
+
+/* 📱 Mobile: stack like No Internet */
+@media (max-width: 900px) {
+  #VoIPproblemsection #voipPowerCycleBlock:not(.hidden),
+  #VoIPproblemsection #voipNetworkBlock:not(.hidden),
+  #VoIPproblemsection #voipDialErrorBlock:not(.hidden),
+  #VoIPproblemsection #voipRebootBlock:not(.hidden),
+  #VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) {
+    grid-template-columns: 1fr;
+    row-gap: 8px; /* slight gap between label and select when stacked */
+  }
+
+  #VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipNetworkBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipDialErrorBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipRebootBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipNetworkBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipDialErrorBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipRebootBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > select {
+    grid-column: 1;
+  }
+}
+
+/* If you want a belt-and-braces guarantee for hiding:
+.hidden { display: none !important; } */
+
+
+/* ============================================================
+   ✅ COLLAPSIBLE: hide body without touching flow .hidden states
+   ============================================================ */
+.section.collapsible.is-collapsed > :not(.section-header) {
+  display: none !important;
+}
+
+/* ============================================================
+   📏 VoIP: match No Internet spacing between label & select
+   - Normalize .icon-row margin inside VoIP steps
+   - Two-column grid per visible step, consistent vertical rhythm
+   - Keep .hidden working via :not(.hidden)
+   ============================================================ */
+
+#VoIPproblemsection #voipPowerCycleBlock > label.icon-row,
+#VoIPproblemsection #voipNetworkBlock > label.icon-row,
+#VoIPproblemsection #voipDialErrorBlock > label.icon-row,
+#VoIPproblemsection #voipRebootBlock > label.icon-row,
+#VoIPproblemsection #voipProblemResolvedBlock > label.icon-row {
+  margin-top: 0;            /* override global margin to keep rows aligned */
+  align-self: center;
+}
+
+#VoIPproblemsection #voipPowerCycleBlock:not(.hidden),
+#VoIPproblemsection #voipNetworkBlock:not(.hidden),
+#VoIPproblemsection #voipDialErrorBlock:not(.hidden),
+#VoIPproblemsection #voipRebootBlock:not(.hidden),
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;  /* label | select */
+  column-gap: 16px;                /* match .grid gap */
+  align-items: center;
+  margin-bottom: 12px;             /* even vertical spacing between rows */
+}
+
+/* optional: remove bottom gap on the last row for a clean edge */
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) {
+  margin-bottom: 0;
+}
+
+/* Place label / select into columns */
+#VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipNetworkBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipDialErrorBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipRebootBlock:not(.hidden) > label.icon-row,
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > label.icon-row {
+  grid-column: 1;
+}
+#VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > select,
+#VoIPproblemsection #voipNetworkBlock:not(.hidden) > select,
+#VoIPproblemsection #voipDialErrorBlock:not(.hidden) > select,
+#VoIPproblemsection #voipRebootBlock:not(.hidden) > select,
+#VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > select {
+  grid-column: 2;
+  margin: 0;
+}
+
+/* 📱 Mobile: stack like No Internet */
+@media (max-width: 900px) {
+  #VoIPproblemsection #voipPowerCycleBlock:not(.hidden),
+  #VoIPproblemsection #voipNetworkBlock:not(.hidden),
+  #VoIPproblemsection #voipDialErrorBlock:not(.hidden),
+  #VoIPproblemsection #voipRebootBlock:not(.hidden),
+  #VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) {
+    grid-template-columns: 1fr;
+    row-gap: 8px; /* slight gap between label and select when stacked */
+  }
+
+  #VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipNetworkBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipDialErrorBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipRebootBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > label.icon-row,
+  #VoIPproblemsection #voipPowerCycleBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipNetworkBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipDialErrorBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipRebootBlock:not(.hidden) > select,
+  #VoIPproblemsection #voipProblemResolvedBlock:not(.hidden) > select {
+    grid-column: 1;
+  }
+}
+
+/* If you want a belt-and-braces hide guarantee, uncomment:
+.hidden { display: none !important; }
+*/
+
+/* ============================================
+   Link icon: no underline, stay black
+   (scoped so it won't affect normal links)
+   ============================================ */
+
+/* If you used: <a class="link-icon">🔗</a> */
+a.link-icon,
+a.link-icon:visited,
+a.link-icon:hover,
+a.link-icon:focus {
+  text-decoration: none !important; /* remove underline in all states */
+  color: #000 !important;           /* keep the icon black across themes */
+}
+
+/* If you used: <a><span class="link-icon">🔗</span></a> */
+.icon-row a .link-icon {
+  text-decoration: none !important; /* ensure underline doesn't pass through */
+  color: #000 !important;
+}
+
+/* Optional niceties for alignment (safe) */
+a.link-icon,
+.icon-row a .link-icon {
+  display: inline-block;            /* avoids baseline quirks */
+  vertical-align: middle;           /* aligns nicely next to text/icons */
+}
+
+
+</style>
+
+</head>
+
+<body>
+
+<div class="main-layout"> 
+
+  <!-- Column 1: content -->
+  
+  <div class="content-area">
+
+    <!-- Title -->
+    
+    <div class="section">
+      <h1>VoIP Troubleshooting Guide</h1>
+    </div>
+    
+    <!-- CUSTOMER INFO -->
+
+<div class="section summarizable collapsible" data-section="Customer Information" id="customerInfoSection">
+  <div class="section-header">
+    <h2 id="ci-heading">Customer Information</h2>
+    <button class="section-toggle" aria-expanded="true" aria-controls="ci-panel" aria-label="Toggle">
+      <span class="toggle-icon" aria-hidden="true">−</span>
+    </button>
+  </div>
+
+  <div class="section-panel" id="ci-panel" role="region" aria-labelledby="ci-heading">
+    <div class="grid">
+      <input id="customerName" data-summary="Name & Surname" placeholder="Name & Surname">
+      <input id="cellNumber" data-summary="Cellphone Number" placeholder="000 000 0000" inputmode="tel">
+      <input id="siteLocation" data-summary="Site Location" placeholder="Site Location">
+      <input id="startTime" data-summary="Start Time / Time Frame" placeholder="Start Time / Time Frame">
+      <input id="problemDescription" data-summary="Problem Description" placeholder="Problem Description">
+      <input id="voipName" data-summary="VoIP Name & Surname" placeholder="Name of person on site that can assist if needed">
+      <input id="voipCellNumber" data-summary="Cellphone Number" placeholder="Cell-Number of person on site that can assist if needed" inputmode="tel">
+      <input id="voipNumber" data-summary="VoIP Number" placeholder="VoIP number experiencing the problem" inputmode="tel">
+      <input id="voipExtension" data-summary="Extension" placeholder="Extension">
+      <input id="voipDeviceType" data-summary="Device Type" placeholder="Type Of VoIP Devices on the customer's premises">
+      
+      <!-- ISP -->
+      
+      <label class="icon-row">ISP?
+        <span class="link-icon">🔗</span>
+        <span class="info-icon" data-info="Confirm who hosts the customer's internet service.">i</span>
+      </label>
+      <select id="voipISP" data-summary="ISP">
+        <option>-- Select --</option>
+        <option>Herotel</option>
+        <option>Third Party</option>
+      </select>
+
+      <!-- VoIP service with Herotel -->
+      <label class="icon-row">VoIP service with Herotel?
+        <span class="link-icon">🔗</span>
+        <span class="info-icon" data-info="Confirm if VoIP service is provided by Herotel.">i</span>
+      </label>
+      <select id="voipProvider" data-summary="VoIP Provider">
+        <option>-- Select --</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+
+      <!-- Internet access step -->
+      <div id="voipInternetBlock">
+        <label class="icon-row">Internet access check
+          <span class="link-icon">🔗</span>
+          <span class="info-icon" data-info="Verify if the customer has internet access.">i</span>
+        </label>
+        <select id="voipInternetCheck" data-summary="Internet Access">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If voipInternetCheck = 'No' (⚠️ Complete the no internet flow chart for the medium) -->
+      
+    </div>
+    </div>
+    </div>
+
+     <!-- VoIP - Only shows if voipInternetCheck = Yes -->
+
+<div class="section summarizable hidden collapsible" data-section="VoIP" id="VoIPproblemsection">
+  <div class="section-header">
+    <h2 id="ci-heading">VoIP</h2>
+    <button class="section-toggle" aria-expanded="true" aria-controls="ci-panel" aria-label="Toggle">
+      <span class="toggle-icon" aria-hidden="true">−</span>
+    </button>
+  </div>
+
+      <!-- VoIP Power & Cable Cycle step - only shows if voipInternetCheck = Yes -->
+      
+      <div id="voipPowerCycleBlock">
+        <label class="icon-row">Completed the VoIP Power & Cable Cycle 
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQCAGcIBVBdhR5M_WIVuhEMmAXuOSdJLi_MMdTPk-mvYLbI?e=e5YlMF" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="If the VoIP device is not powered correctly & the cables are not connected properly then the VoIP service will not function correctly.">i</span>
+        </label>
+        <select id="voipPowerCycle" data-summary="VoIP Power & Cable Cycle">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If voipPowerCycle = 'No' (⚠️ Guide the customer to complete power & cable cycle before proceeding) -->
+
+      <!-- VoIP Network Status Check - only shows if voipPowerCycle = Yes -->
+	  
+      <div id="voipNetworkBlock" class="hidden">
+        <label class="icon-row">Network Connection Status 
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQCWVsvRRp-_TqXuDKzlCwVSAQQn70Xqho96XEL3NDtRdqs?e=fMUQnC" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="The VoIP protocol works via IPv4. If the VoIP device does not have a IPv4 address it will not comunicate on the network.">i</span>
+        </label>
+        <select id="voipNetworkCheck" data-summary="VoIP Network Check">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No - Unreachable On the Network</option>
+          <option>No - Damaged cable preventing network connection</option>
+        </select>
+      </div>
+  
+      <!-- If voipNetworkCheck = 'No - Unreachable On the Network' (⚠️ Escalate to HB VoIP) -->
+      <!-- If voipNetworkCheck = 'No - Damaged cable preventing network connection' (⚠️ Escalate to Field Operations) -->
+
+      <!-- Dial tone / error status - only shows if voipNetworkCheck = Yes -->
+      
+      <div id="voipDialErrorBlock" class="hidden">
+        <label class="icon-row">Dial Tone Status  
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDeMbC8n5-hT6MdWPp-75FlAeDH0l0EHfixGFii0cChqZ4?e=W7n5PZ" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info=" If any display errors are present it could explain why the VoIP service is not functioning correctly. The error normally also indicates what is causing the problem and how it can be resolved.">i</span>
+        </label>
+        <select id="voipDialErrorCheck" data-summary="Dial Tone & Error Check">
+          <option>-- Select --</option>
+          <option>Dial Tone & No Errors Present</option>
+          <option>No Dial Tone / Error Present</option>
+        </select>
+      </div>
+   
+      <!-- If voipDialErrorCheck = 'Dial Tone & No Errors Present' && voipProblemResolved = 'Yes' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+
+      <!-- CPE reboot - only shows if voipDialErrorCheck = No Dial Tone / Error Present -->
+      
+      <div id="voipRebootBlock" class="hidden">
+        <label class="icon-row">Has the CPE been rebooted (Network & VoIP devices) 
+          <span class="info-icon" data-info="Best practice is to ask the customer to turn the equipment off by the wall. This prevents buttons such as the reset button from accidently being pressed.">i</span>
+        </label>
+        <select id="voipReboot" data-summary="CPE Rebooted">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If voipReboot = 'No' (⚠️ Guide the customer to reboot all CPE & VoIP devices) -->
+
+      <!-- Problem resolved check - Only shows if voipDialErrorCheck = Dial Tone & No Errors OR voipReboot = Yes -->
+      
+      <div id="voipProblemResolvedBlock" class="hidden">
+        <label class="icon-row">Is the problem resolved 
+          <a class="link-icon" href="https://hereto.sharepoint.com/:b:/s/CEN_Helpdesk-1stLineTraining/IQDxlPayt44QRr6U8drRxxgkAZT7w9_05eOb-4MQzDsudNk?e=1XV8ZA" target="_blank" rel="noopener">🔗</a>
+          <span class="info-icon" data-info="A ticket can only be solved when the customer confirms full service. Ensure all troubleshooting steps (screen shots included) is updated on the ticket.">i</span>
+        </label>
+        <select id="voipProblemResolved" data-summary="Problem Resolved">
+          <option>-- Select --</option>
+          <option>Yes</option>
+          <option>No</option>
+        </select>
+      </div>
+  
+      <!-- If voipDialErrorCheck = 'Dial Tone & No Errors Present' && voipProblemResolved = 'No' (⚠️ Escalate to HB VoIP) -->
+      <!-- If voipReboot = 'Yes' && voipProblemResolved = 'Yes' (✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer) -->
+      <!-- If voipReboot = 'Yes' && voipProblemResolved = 'No' (⚠️ Escalate to HB VoIP) -->
+
+    </div> <!-- ✅ closes voipSection -->
+
+  </div> <!-- closes column 1 -->
+    
+<!-- SUMMARY PANEL -->
+
+  <div class="summary-panel">
+    <div class="section summary-section">
+      <h2>Summary</h2>
+      <div id="summary"></div>
+
+      <!-- ⭐ Copy left, Home right -->
+      <div class="summary-buttons">
+        <button class="copy-btn">Copy Summary</button>
+        <a class="accent-btn" href="index.html" role="button">Home</a>
+      </div>
+
+  </div> <!-- ✅ closes content-area -->
+
+</div> <!-- ✅ closes main-layout -->
+
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const SELECT_PLACEHOLDER_PREFIX = '-- Select';
+
+  // ==============================
+  //  BASIC REFS (match No-Internet style)
+  // ==============================
+  const summaryPanel = document.getElementById('summary');
+  const copyBtn      = document.querySelector('.copy-btn');
+  const homeBtn      = document.getElementById('homeBtn');
+
+  // Customer fields
+  const customerName       = document.getElementById('customerName');
+  const cellNumber         = document.getElementById('cellNumber');
+  const siteLocation       = document.getElementById('siteLocation');
+  const startTime          = document.getElementById('startTime');
+  const problemDescription = document.getElementById('problemDescription');
+
+  // Extra VoIP contact fields
+  const voipName       = document.getElementById('voipName');
+  const voipCellNumber = document.getElementById('voipCellNumber');
+  const voipNumber     = document.getElementById('voipNumber');
+  const voipExtension  = document.getElementById('voipExtension');
+  const voipDeviceType = document.getElementById('voipDeviceType');
+
+  // ISP / Provider / Internet gate
+  const voipISP           = document.getElementById('voipISP');
+  const voipProvider      = document.getElementById('voipProvider');
+  const voipInternetCheck = document.getElementById('voipInternetCheck');
+
+  // VoIP section + blocks
+  const voipProblemSection       = document.getElementById('voipSection') || document.getElementById('VoIPproblemsection');
+  const voipPowerCycleBlock      = document.getElementById('voipPowerCycleBlock');
+  const voipPowerCycle           = document.getElementById('voipPowerCycle');
+  const voipNetworkBlock         = document.getElementById('voipNetworkBlock');
+  const voipNetworkCheck         = document.getElementById('voipNetworkCheck');
+  const voipDialErrorBlock       = document.getElementById('voipDialErrorBlock');
+  const voipDialErrorCheck       = document.getElementById('voipDialErrorCheck');
+  const voipRebootBlock          = document.getElementById('voipRebootBlock');
+  const voipReboot               = document.getElementById('voipReboot');
+  const voipProblemResolvedBlock = document.getElementById('voipProblemResolvedBlock');
+  const voipProblemResolved      = document.getElementById('voipProblemResolved');
+
+  // ==============================
+  //  📱 PHONE FORMATTER (multi-input)
+  // ==============================
+  (function attachPhoneFormatterMulti() {
+    const targets = [cellNumber, voipCellNumber, voipNumber].filter(Boolean);
+    if (!targets.length) return;
+
+    const MAX_DIGITS = 10;
+
+    function formatDigits(d) {
+      const clean = (d || '').replace(/\D/g, '').slice(0, MAX_DIGITS);
+      const len = clean.length;
+      if (len <= 3) return clean;
+      if (len <= 6) return `${clean.slice(0,3)} ${clean.slice(3)}`;
+      return `${clean.slice(0,3)} ${clean.slice(3,6)} ${clean.slice(6)}`;
+    }
+    function mapDigitsToCaret(formatted, digitsToLeft) {
+      let count = 0, pos = 0;
+      while (pos < formatted.length && count < digitsToLeft) {
+        if (/\d/.test(formatted[pos])) count++;
+        pos++;
+      }
+      return pos;
+    }
+    function apply(el, triggerSummary = true) {
+      const start = el.selectionStart ?? el.value.length;
+      const digitsLeft = (el.value.slice(0, start).match(/\d/g) || []).length;
+      const formatted = formatDigits(el.value);
+      el.value = formatted;
+      const newPos = mapDigitsToCaret(formatted, digitsLeft);
+      try { el.setSelectionRange(newPos, newPos); } catch {}
+      if (triggerSummary) scheduleUpdateSummary();
+    }
+    function onPasteSanitize(e, el) {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text') || '';
+      const digits = text.replace(/\D/g, '').slice(0, MAX_DIGITS);
+      try { document.execCommand('insertText', false, digits); } catch { el.value += digits; }
+      apply(el);
+    }
+    targets.forEach(el => {
+      if (!el.getAttribute('inputmode')) el.setAttribute('inputmode', 'tel');
+      el.addEventListener('input',  () => apply(el));
+      el.addEventListener('paste',  e  => onPasteSanitize(e, el));
+      el.addEventListener('blur',   () => apply(el, false));
+      apply(el, false);
+    });
+  })();
+
+  // ==============================
+  //  HELPERS (match No‑Internet)
+  // ==============================
+  const show = (el) => { if (el) el.classList.remove('hidden'); };
+  const hide = (el) => { if (el) el.classList.add('hidden'); };
+
+  const isPlaceholderValue = (val) => !val || String(val).startsWith(SELECT_PLACEHOLDER_PREFIX);
+
+  const resetSelect = (el) => { if (el && el.tagName === 'SELECT') el.selectedIndex = 0; };
+  const resetInput  = (el) => { if (el && 'value' in el) el.value = ''; };
+
+  function resetSection(container) {
+    if (!container) return;
+    container.querySelectorAll('select').forEach(resetSelect);
+    container.querySelectorAll('input, textarea').forEach(resetInput);
+  }
+
+  // Hidden detection (like No‑Internet):
+  // - Ignore .section-panel hidden so collapsing a panel doesn't remove data from summary
+  // - DO NOT treat .is-collapsed as hidden (collapsed sections still summarize)
+  const isEffectivelyHidden = (el) => {
+    let node = el;
+    while (node && node !== document.body) {
+      if (node.classList?.contains('hidden') && !node.classList.contains('section-panel')) {
+        return true;
+      }
+      // NOTE: intentionally NOT checking for .is-collapsed here
+      node = node.parentElement;
+    }
+    return false;
+  };
+
+  let rafId = null;
+  function scheduleUpdateSummary() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      updateSummary();
+    });
+  }
+
+  // ==============================
+  //  COLLAPSIBLES — preserves flow .hidden; works with/without .section-panel
+  // ==============================
+  (function setupCollapsibles() {
+    function setExpanded(section, expanded) {
+      const btn       = section.querySelector('.section-toggle');
+      const icon      = btn?.querySelector('.toggle-icon');
+      const realPanel = section.querySelector(':scope > .section-panel');
+
+      // Wrapper class for visual collapse (doesn't touch flow .hidden)
+      section.classList.toggle('is-collapsed', !expanded);
+
+      // Parity with No‑Internet if a real panel exists
+      if (realPanel) {
+        realPanel.classList.toggle('hidden', !expanded);
+        if (!btn.getAttribute('aria-controls')) {
+          const id = realPanel.id || `section-panel-${Math.random().toString(36).slice(2, 8)}`;
+          realPanel.id = id;
+          btn.setAttribute('aria-controls', id);
+        }
+      }
+
+      btn?.setAttribute('aria-expanded', String(expanded));
+      if (icon) icon.textContent = expanded ? '−' : '+';
+      scheduleUpdateSummary();
+    }
+
+    function toggle(section) {
+      const btn = section.querySelector('.section-toggle');
+      const current = btn?.getAttribute('aria-expanded') === 'true';
+      setExpanded(section, !current);
+    }
+
+    document.querySelectorAll('.section.collapsible').forEach((section) => {
+      const btn = section.querySelector('.section-toggle');
+      if (!btn) return;
+
+      const initialExpanded = btn.hasAttribute('aria-expanded')
+        ? (btn.getAttribute('aria-expanded') === 'true')
+        : true;
+      setExpanded(section, initialExpanded);
+
+      btn.addEventListener('click', () => toggle(section));
+      btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle(section);
+        }
+      });
+    });
+
+    window.expandSection = function(sectionEl) {
+      const btn = sectionEl?.querySelector('.section-toggle');
+      if (!btn) return;
+      btn.setAttribute('aria-expanded', 'true');
+      setExpanded(sectionEl, true);
+    };
+  })();
+
+  // ==============================
+  //  VOIP FLOW — show/hide + resets (matches your HTML comments)
+  // ==============================
+  function collapseVoipFlow() {
+    hide(voipProblemResolvedBlock); resetSelect(voipProblemResolved);
+    hide(voipRebootBlock);          resetSelect(voipReboot);
+    hide(voipDialErrorBlock);       resetSelect(voipDialErrorCheck);
+    hide(voipNetworkBlock);         resetSelect(voipNetworkCheck);
+    resetSelect(voipPowerCycle);
+  }
+
+  // Internet gate
+  voipInternetCheck?.addEventListener('change', () => {
+    if (voipInternetCheck.value === 'Yes') {
+      show(voipProblemSection);
+      show(voipPowerCycleBlock);
+    } else if (voipInternetCheck.value === 'No') {
+      // ⚠️ Complete the no internet flow chart for the medium
+      collapseVoipFlow();
+      hide(voipProblemSection);
+    } else {
+      collapseVoipFlow();
+      hide(voipProblemSection);
+    }
+    scheduleUpdateSummary();
+  });
+
+  // Power & Cable Cycle
+  voipPowerCycle?.addEventListener('change', () => {
+    hide(voipProblemResolvedBlock); resetSelect(voipProblemResolved);
+    hide(voipRebootBlock);          resetSelect(voipReboot);
+    hide(voipDialErrorBlock);       resetSelect(voipDialErrorCheck);
+    hide(voipNetworkBlock);         resetSelect(voipNetworkCheck);
+
+    if (voipPowerCycle.value === 'Yes') {
+      show(voipNetworkBlock);
+    } else if (voipPowerCycle.value === 'No') {
+      // ⚠️ Guide the customer to complete power & cable cycle before proceeding
+    }
+    scheduleUpdateSummary();
+  });
+
+  // Network Status
+  voipNetworkCheck?.addEventListener('change', () => {
+    hide(voipProblemResolvedBlock); resetSelect(voipProblemResolved);
+    hide(voipRebootBlock);          resetSelect(voipReboot);
+    hide(voipDialErrorBlock);       resetSelect(voipDialErrorCheck);
+
+    if (voipNetworkCheck.value === 'Yes') {
+      show(voipDialErrorBlock);
+    } else if (voipNetworkCheck.value === 'No - Unreachable On the Network') {
+      // ⚠️ Escalate to HB VoIP
+    } else if (voipNetworkCheck.value === 'No - Damaged cable preventing network connection') {
+      // ⚠️ Escalate to Field Operations
+    }
+    scheduleUpdateSummary();
+  });
+
+  // Dial Tone / Error
+  voipDialErrorCheck?.addEventListener('change', () => {
+    hide(voipProblemResolvedBlock); resetSelect(voipProblemResolved);
+    hide(voipRebootBlock);          resetSelect(voipReboot);
+
+    if (voipDialErrorCheck.value === 'No Dial Tone / Error Present') {
+      show(voipRebootBlock);
+    } else if (voipDialErrorCheck.value === 'Dial Tone & No Errors Present') {
+      show(voipProblemResolvedBlock);
+    }
+    scheduleUpdateSummary();
+  });
+
+  // Reboot
+  voipReboot?.addEventListener('change', () => {
+    hide(voipProblemResolvedBlock); resetSelect(voipProblemResolved);
+
+    if (voipReboot.value === 'Yes') {
+      show(voipProblemResolvedBlock);
+    } else if (voipReboot.value === 'No') {
+      // ⚠️ Guide the customer to reboot all CPE & VoIP devices
+    }
+    scheduleUpdateSummary();
+  });
+
+  // Problem Resolved
+  voipProblemResolved?.addEventListener('change', scheduleUpdateSummary);
+
+  // Keep summary in sync on phone input
+  [cellNumber, voipCellNumber, voipNumber].filter(Boolean).forEach(el => {
+    el.addEventListener('input', scheduleUpdateSummary);
+  });
+
+  // ==============================
+  //  SUMMARY LIVE UPDATING (same as No‑Internet)
+  // ==============================
+  document.addEventListener('input', (e) => {
+    const el = e.target;
+    if (el && el.matches?.('[data-summary]')) {
+      scheduleUpdateSummary();
+    }
+  });
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el && el.matches?.('[data-summary]')) {
+      scheduleUpdateSummary();
+    }
+  });
+
+  // ==============================
+  //  COPY SUMMARY (strip Next Recommended Step on copy)
+  // ==============================
+  copyBtn?.addEventListener('click', async () => {
+    try {
+      const full = (summaryPanel?.textContent || '').trim();
+      const textToCopy = full.replace(
+        /(^|\n)===\s*Next Recommended Step\s*===([\s\S]*)$/i,
+        '$1'
+      ).trim();
+      await navigator.clipboard.writeText(textToCopy);
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => (copyBtn.textContent = prev), 1200);
+    } catch {
+      const temp = document.createElement('textarea');
+      temp.style.position = 'fixed';
+      temp.style.opacity = '0';
+      const full = (summaryPanel?.textContent || '').trim();
+      temp.value = full.replace(
+        /(^|\n)===\s*Next Recommended Step\s*===([\s\S]*)$/i,
+        '$1'
+      ).trim();
+      document.body.appendChild(temp);
+      temp.select();
+      document.execCommand('copy');
+      document.body.removeChild(temp);
+      window.getSelection()?.removeAllRanges?.();
+    }
+  });
+
+  // Home
+  homeBtn?.addEventListener('click', () => {
+    if (history.length > 1) history.back();
+    else location.href = 'index.html';
+  });
+
+  // ==============================
+  //  SUMMARY GENERATION (identical layout/format to No‑Internet)
+  // ==============================
+  function updateSummary() {
+    const readValue = (el) => {
+      if (!el) return '';
+      if (el.tagName === 'SELECT') {
+        const v = el.value || '';
+        return isPlaceholderValue(v) ? '' : v;
+      }
+      if ('value' in el) return (el.value || '').trim();
+      return '';
+    };
+
+    let customerInfo = '';
+    let problemInfo  = '';
+    const escalationSet = new Set();
+
+    const fields = Array.from(document.querySelectorAll('[data-summary]'));
+    fields.forEach((el) => {
+      if (isEffectivelyHidden(el)) return;
+
+      const id = el.id || '';
+      const label = el.getAttribute('data-summary') || id || 'Field';
+      const value = readValue(el);
+      if (!value) return;
+
+      // Grouping — Customer vs VoIP (no CHIP on this page)
+      if (
+        id === 'customerName' ||
+        id === 'cellNumber'   ||
+        id === 'siteLocation' ||
+        id === 'startTime'    ||
+        id === 'problemDescription'
+      ) {
+        customerInfo += `${label}: ${value}\n`;
+      } else {
+        problemInfo += `${label}: ${value}\n`;
+      }
+
+      const step = getEscalation(id, value);
+      if (step) {
+        step.split('\n').forEach((line) => {
+          const t = line.trim();
+          if (t) escalationSet.add(t);
+        });
+      }
+    });
+
+    const voipShown = voipProblemSection && !voipProblemSection.classList.contains('hidden');
+    const problemHeading = voipShown ? 'VoIP' : 'VoIP';
+    const escalationInfo = Array.from(escalationSet).join('\n');
+
+    let summaryText = '';
+    if (customerInfo)
+      summaryText +=
+        '=== Customer Information ===\n' +
+        customerInfo +
+        '\n\n';
+
+    if (problemInfo && problemHeading) {
+      summaryText +=
+        '=== ' + problemHeading + ' ===\n' +
+        problemInfo +
+        '\n\n';
+    }
+
+    if (problemHeading && escalationInfo) {
+      summaryText +=
+        '=== Next Recommended Step ===\n' +
+        escalationInfo +
+        '\n';
+    }
+
+    if (summaryPanel) summaryPanel.textContent = summaryText.trim();
+  }
+
+  // ==============================
+  //  NEXT RECOMMENDED STEP LOGIC (ONLY your HTML comments)
+  // ==============================
+  function getEscalation(id, value) {
+    switch (id) {
+      case 'voipInternetCheck':
+        if (value === 'No') {
+          return '⚠️ Complete the no internet flow chart for the medium';
+        }
+        break;
+
+      case 'voipPowerCycle':
+        if (value === 'No') {
+          return '⚠️ Guide the customer to complete power & cable cycle before proceeding';
+        }
+        break;
+
+      case 'voipNetworkCheck':
+        if (value === 'No - Unreachable On the Network') {
+          return '⚠️ Escalate to HB VoIP';
+        }
+        if (value === 'No - Damaged cable preventing network connection') {
+          return '⚠️ Escalate to Field Operations';
+        }
+        break;
+
+      case 'voipReboot':
+        if (value === 'No') {
+          return '⚠️ Guide the customer to reboot all CPE & VoIP devices';
+        }
+        break;
+
+      case 'voipProblemResolved': {
+        const dial   = (voipDialErrorCheck?.value || '').trim();
+        const reboot = (voipReboot?.value || '').trim();
+
+        if (value === 'Yes' && dial === 'Dial Tone & No Errors Present') {
+          return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+        }
+        if (value === 'No' && dial === 'Dial Tone & No Errors Present') {
+          return '⚠️ Escalate to HB VoIP';
+        }
+        if (value === 'Yes' && reboot === 'Yes') {
+          return '✅ Update the ticket with all relevant information & troubleshooting completed (include screenshots). Close the ticket if full service is confirmed by the customer';
+        }
+        if (value === 'No' && reboot === 'Yes') {
+          return '⚠️ Escalate to HB VoIP';
+        }
+        break;
+      }
+    }
+    return '';
+  }
+
+  // ==============================
+  //  INIT
+  // ==============================
+  updateSummary(); // initial render
+
+  // Kick the flow once so visibility aligns with current values
+  setTimeout(() => {
+    document.getElementById('voipInternetCheck')?.dispatchEvent(new Event('change'));
+    document.getElementById('voipPowerCycle')?.dispatchEvent(new Event('change'));
+    document.getElementById('voipNetworkCheck')?.dispatchEvent(new Event('change'));
+    document.getElementById('voipDialErrorCheck')?.dispatchEvent(new Event('change'));
+    document.getElementById('voipReboot')?.dispatchEvent(new Event('change'));
+  }, 0);
+});
+</script>
+
+</body>
+</html>
