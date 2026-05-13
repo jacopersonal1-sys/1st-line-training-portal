@@ -39,7 +39,7 @@
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
 | `violation_reports` | Array | Blob (`app_documents`) | Mandatory trainee explanations for external-app training-scope violations. Stores trigger, reason, platform, person informed, status, and review metadata. |
-| `insight_progress_config` | Object | Blob (`app_documents`) | Agent Progress Builder checklist configuration, including checklist type and Onboard Report section flags. |
+| `insight_progress_config` | Object | Blob (`app_documents`) | Agent Progress Builder checklist configuration. This is the canonical progress/scoring list for Insight Compare Viewer and Agent Search archive progress, including checklist type and Onboard Report section flags. |
 | `insight_rule_config` | Object | Blob (`app_documents`) | Insight severity/threshold trigger mapping. |
 | `live_assessment_rules_config` | Object | Blob (`app_documents`) | Rich-text Live Assessment pre-question rules shown in the arena. |
 | `live_booking_rules_config` | Object | Blob (`app_documents`) | Rich-text Rules of Booking shown in the Live Assessment Booking sidebar and edited from Admin Tools > System Config. |
@@ -56,7 +56,8 @@
 | `insightReviews` | Array | Row (`insight_reviews`) | Admin manual reviews of agents. |
 | `exemptions` | Array | Row (`exemptions`) | Assessment exemptions. |
 | `nps_responses` | Array | Row (`nps_responses`) | Trainee feedback. |
-| `graduated_agents` | Array | Row (`archived_users`) | Archived data for former trainees. |
+| `graduated_agents` | Array | Row (`archived_users`) | Archived data for former trainees. Graduation snapshots should include original row data plus `progressConfigSnapshot` and `officialProgress` when available. |
+| `retrain_archives` | Array | Blob (`app_documents`) | Archived attempt snapshots for trainees moved to retraining groups. Stores the outgoing attempt rows, attempt metadata, cleanup summary, and current progress/scoring snapshot data. |
 | `linkRequests` | Array | Row (`link_requests`) | TL requests for assessment links. |
 | `calendarEvents` | Array | Row (`calendar_events`) | Custom calendar items. |
 
@@ -217,7 +218,9 @@ Maps local `localStorage` keys to Supabase tables.
     - `loadAdminUsers()`: Renders user list with filters.
     - `addUser()` / `remUser()`: Manages user accounts.
     - `saveRoster()`: Creates/Updates groups.
-    - `graduateTrainee()`: Archives a user and wipes their active data.
+    - `graduateTrainee()`: Archives a user and wipes their active data. Graduation archive payloads include `progressConfigSnapshot` and `officialProgress` when ProgressCatalog data is available.
+    - `confirmMoveUser()`: Moves trainees between groups and writes the outgoing attempt to `retrain_archives` with source rows, attempt metadata, cleanup summary, `progressConfigSnapshot`, and `officialProgress`.
+    - `repairArchiveSnapshots()`: Backfills existing graduation and retrain archive snapshots with missing archive IDs/types, current Progress Builder config snapshots, and official progress where original row data is still present.
 
 #### `js/admin_sys.js` (System Tools)
 - **Responsibility:** Database tools, Super Admin Console.
@@ -308,8 +311,13 @@ Maps local `localStorage` keys to Supabase tables.
 - **Key Functions:**
     - `InsightDataService.getAgentDetail(...)`: Builds agent-level status, attendance, activity, content engagement, TL feedback, timeline, and subject-review state.
     - `InsightDataService.getDepartmentOverview(...)`: Builds department-level health, activity, effort/performance, content engagement, and feedback summaries.
+    - `InsightDataService` indexes agent records, submissions, attendance, monitor history, feedback, and reviews in memory per load so Insight startup and tab changes avoid repeated full-array scans.
     - `InsightDataService.buildKnowledgeGaps(...)`: Groups failed questions by assessment, individual, and all groups. A question is failed when its awarded score is below the full available marks, including partial scores like `1/2`.
     - `InsightApp.renderKnowledgeGaps()`: Renders the Knowledge Gaps sub-view inside Insight.
+    - `InsightApp.renderCompareViewer()`: Renders Current Live Attempt, Training Attempt 1 Archive, Training Attempt 2 Archive, and Attempt 1 vs Current Live comparison scopes.
+    - **Compare Viewer Source of Truth:** Assessment/vetting/live/test score lines prefer Progress Builder official items (`insight_progress_config` through ProgressCatalog/`officialProgress`) over raw records. Extra legacy records not configured in Progress Builder should not affect comparison averages or graph lines.
+    - **Compare Graph Semantics:** Missing configured scores are omitted, not plotted as `0%`. A real scored zero still plots as zero. Individual lines are compacted to each person's available scored sequence and stop at the end when later scores do not exist.
+    - **Attendance Graph Semantics:** Attendance comparison calculations ignore attendance rows marked `isIgnored` in both score totals and daily grids.
 
 #### `js/analyticsDashboard.js` (Legacy Analytics Helpers)
 - **Responsibility:** Shared analytics helpers retained for Agent Search and tests after the old Training Insight Dashboard view was removed.
@@ -483,6 +491,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.71 (Insight Canonical Progress + Archive Repair, 2026-05-13):** Insight Compare Viewer now uses Agent Progress Builder as the definitive scoring list for assessment/vetting/live/test performance. Missing configured scores are omitted from lines instead of dropping to `0%`, the graph uses compact per-person sequences with end labels and summary cards, and attendance scoring ignores `isIgnored` rows. Insight data loading now uses in-memory indexes and a smaller module cache to reduce startup freezes. Admin Tools gained an explicit Save Progress List action and a Repair Archive Snapshots action that backfills graduation/retrain archives with progress config snapshots and official progress when original row data still exists.
 - **v2.6.70 (Live Booking Polish + Rules Config, 2026-05-11):** Live Assessment Booking received a cleaner schedule workspace and now reads Rules of Booking from the synced `live_booking_rules_config` document edited in Admin Tools > System Config. Live trainee stats now count completed live submissions/records as completion evidence even when a booking row is missing. Study Notes pop-out uses an opener-linked notes window so it reads/writes the same local notes store as the main app.
 - **v2.6.69 (Compare Graph Full Selection, 2026-05-08):** Insight Compare Viewer breakdown graphs now render every selected trainee/group row instead of capping at 8, and line colors are generated from a larger hue sequence so larger selections are easier to distinguish.
 - **v2.6.68 (Compare Attempt 1 vs Current Live, 2026-05-08):** Insight Compare Viewer now includes an `Attempt 1 vs Current Live` scope. In this mode, the picker selects trainees and the viewer plots two rows/lines per selected trainee: retrain archive Attempt 1 and the trainee's current live attempt.
@@ -539,6 +548,14 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.71 - 2026-05-13
+
+- Improvement: Insight startup now builds reusable in-memory indexes and avoids caching large analytics payloads in the module cache, reducing the freeze before content appears.
+- Improvement: Compare Viewer assessment/test lines use Progress Builder official score items as the scoring source of truth, omit missing scores instead of plotting them as zero, and render clearer compact trend lines with end labels and summary stats.
+- Fix: Attendance comparison graphs now exclude `isIgnored` attendance rows from both totals and day grids.
+- Feature: Agent Progress Builder has an explicit Save Progress List button, and archive repair can backfill existing graduation/retrain snapshots with progress configuration snapshots plus official progress when source rows still exist.
+- Verification: Jest suite passed before main push.
 
 ## v2.6.70 - 2026-05-11
 
