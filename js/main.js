@@ -4040,6 +4040,14 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.72": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight now loads faster by using reusable in-memory indexes and a smaller module cache.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Compare Viewer assessment/test graphs now use the Agent Progress Builder list as the scoring source of truth.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Missing assessment scores no longer drop graph lines to 0%; lines stop cleanly until a real score exists.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Attendance comparison now excludes ignored attendance rows from totals and daily grids.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Admin Tools now includes Save Progress List and Repair Archive Snapshots actions for progress and archive data integrity.</li>
+            </ul>`,
         "2.6.71": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Q&amp;A Hub now has an admin workspace for FAQ entries, trainee question submissions, and attached resources.</li>
