@@ -4068,6 +4068,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.80": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Compare Viewer now uses a responsive Assessment/Test Breakdown graph that scales inside the card instead of forcing the page wider than the screen.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Compare Viewer cards, filters, chart summaries, and graph headers have been visually tightened for a cleaner modern comparison workspace.</li>
+            </ul>`,
         "2.6.79": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Agent Progress Builder now presents Test Engine items as the visible source of truth instead of mixing assessment-list, vetting-topic, and timeline source buckets in the selector.</li>

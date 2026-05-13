@@ -1544,12 +1544,10 @@ const InsightApp = {
         const axisCount = compactPerformance
             ? Math.max(1, ...rowPointSets.map(points => points.length))
             : metricLabels.length;
-        const plotWidth = Math.max(720, axisCount * 82);
-        const labelPad = category === 'performance' ? 150 : 88;
-        const width = plotWidth + labelPad;
-        const height = category === 'performance' ? 360 : 240;
+        const width = category === 'performance' ? 1040 : 860;
+        const height = category === 'performance' ? 330 : 240;
         const pad = 44;
-        const rightEdge = plotWidth - pad;
+        const rightEdge = width - pad;
         const xFor = (idx) => axisCount <= 1 ? pad : pad + (idx * (rightEdge - pad) / (axisCount - 1));
         const yFor = (value) => height - pad - ((this.clampPercent(value) || 0) * (height - pad * 2) / 100);
         const esc = this.escapeHtml;
@@ -1577,36 +1575,29 @@ const InsightApp = {
             return { row, rowIdx, color: this.getComparisonLineColor(rowIdx), available, points, stats, lastPoint };
         }).filter(item => item.points);
 
-        const endLabels = pathRows
-            .filter(item => item.lastPoint)
-            .map(item => ({
-                ...item,
-                x: xFor(item.lastPoint.idx) + 8,
-                y: yFor(item.lastPoint.score)
-            }))
-            .sort((a, b) => a.y - b.y);
-        endLabels.forEach((item, idx) => {
-            const minY = pad + 8 + (idx * 13);
-            if (item.y < minY) item.y = minY;
-        });
-
         return `
-            <div class="ins-trend-scroll">
-            <svg class="ins-line-chart ins-breakdown-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Agent breakdown percentage comparison">
-                <line x1="${pad}" y1="${height - pad}" x2="${rightEdge}" y2="${height - pad}" class="ins-chart-axis"></line>
-                <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="ins-chart-axis"></line>
-                ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${rightEdge}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="6" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
-                ${pathRows.map((item) => {
-                    const titleText = `${item.row.label} | Avg ${item.stats.avg === null ? '-' : `${item.stats.avg}%`} | Low ${item.stats.low === null ? '-' : `${item.stats.low}%`} | High ${item.stats.high === null ? '-' : `${item.stats.high}%`}`;
-                    return `<g class="ins-trend-series">
-                        <title>${esc(titleText)}</title>
-                        <polyline points="${item.points}" fill="none" stroke="${item.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></polyline>
-                        ${item.available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.score)}" r="3.2" fill="${item.color}"><title>${esc(item.row.label)} | ${esc(point.label.replace(/^(Assessment|Vetting|Live|Test):\s*/i, ''))} | ${point.score}%</title></circle>`).join('')}
-                    </g>`;
-                }).join('')}
-                ${Array.from({ length: axisCount }, (_, idx) => `<text x="${xFor(idx)}" y="${height - 14}" text-anchor="middle" class="ins-chart-label">${idx + 1}</text>`).join('')}
-                ${endLabels.map((item) => `<text x="${item.x}" y="${item.y + 4}" class="ins-chart-end-label" fill="${item.color}">${esc(this.shortenMetricLabel(item.row.label, 18))}</text>`).join('')}
-            </svg>
+            <div class="ins-trend-scroll ${compactPerformance ? 'performance' : ''}">
+                <svg class="ins-line-chart ins-breakdown-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Agent breakdown percentage comparison">
+                    <defs>
+                        <linearGradient id="insChartWash" x1="0" x2="0" y1="0" y2="1">
+                            <stop offset="0%" stop-color="rgba(255,255,255,0.08)"></stop>
+                            <stop offset="100%" stop-color="rgba(255,255,255,0.01)"></stop>
+                        </linearGradient>
+                    </defs>
+                    <rect x="${pad}" y="${pad}" width="${rightEdge - pad}" height="${height - pad * 2}" rx="10" fill="url(#insChartWash)"></rect>
+                    <line x1="${pad}" y1="${height - pad}" x2="${rightEdge}" y2="${height - pad}" class="ins-chart-axis"></line>
+                    <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="ins-chart-axis"></line>
+                    ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${rightEdge}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="10" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
+                    ${pathRows.map((item) => {
+                        const titleText = `${item.row.label} | Avg ${item.stats.avg === null ? '-' : `${item.stats.avg}%`} | Low ${item.stats.low === null ? '-' : `${item.stats.low}%`} | High ${item.stats.high === null ? '-' : `${item.stats.high}%`}`;
+                        return `<g class="ins-trend-series">
+                            <title>${esc(titleText)}</title>
+                            <polyline points="${item.points}" fill="none" stroke="${item.color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                            ${item.available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.score)}" r="3.4" fill="${item.color}" stroke="rgba(8,13,22,0.82)" stroke-width="1.5"><title>${esc(item.row.label)} | ${esc(point.label.replace(/^(Assessment|Vetting|Live|Test):\s*/i, ''))} | ${point.score}%</title></circle>`).join('')}
+                        </g>`;
+                    }).join('')}
+                    ${Array.from({ length: axisCount }, (_, idx) => `<text x="${xFor(idx)}" y="${height - 15}" text-anchor="middle" class="ins-chart-label">${idx + 1}</text>`).join('')}
+                </svg>
             </div>
             <div class="ins-trend-summary">
                 ${pathRows.map((item) => `
@@ -1704,7 +1695,7 @@ const InsightApp = {
 
         return `
             <div class="ins-dept-grid">
-                <div class="ins-card full">
+                <div class="ins-card full ins-compare-hero">
                     <div class="ins-item-top" style="align-items:flex-start;">
                         <div>
                             <h3 style="margin:0 0 4px 0;">Compare Viewer</h3>
@@ -1731,7 +1722,7 @@ const InsightApp = {
                     </div>
                 </div>
 
-                <div class="ins-card full">
+                <div class="ins-card full ins-compare-filter-card">
                     <div class="ins-item-top" style="align-items:flex-start;">
                         <div>
                             <h3 style="margin:0 0 4px 0;">Filter Result Set</h3>
@@ -1753,7 +1744,7 @@ const InsightApp = {
                     </div>
                 </div>
 
-                <div class="ins-card">
+                <div class="ins-card ins-compare-rank-card">
                     <h3>Ranked Overall</h3>
                     <div class="ins-compare-bars">
                         ${topRows.length ? topRows.map(row => `
@@ -1766,21 +1757,34 @@ const InsightApp = {
                     </div>
                 </div>
 
-                <div class="ins-card full">
-                    <h3>Assessment / Test Breakdown Graph</h3>
-                    <p class="ins-subtle" style="margin-bottom:8px;">Each thin line is one ${groupAggregateMode ? 'group average' : 'agent'} across actual assessment, vetting, live assessment, and test percentage items.</p>
+                <div class="ins-card full ins-graph-card">
+                    <div class="ins-graph-head">
+                        <div>
+                            <h3>Assessment / Test Breakdown Graph</h3>
+                            <p class="ins-subtle">Each line is one ${groupAggregateMode ? 'group average' : 'agent'} across scored Test Engine progress items. Missing scores are skipped, so lines stop instead of dropping to 0.</p>
+                        </div>
+                        <span class="ins-graph-pill">${rows.length} ${groupAggregateMode ? 'groups' : 'people'}</span>
+                    </div>
                     ${rows.length ? this.renderComparisonTrend(rows, 'performance', 'assessment/test') : '<div class="ins-item">No data available for graphing.</div>'}
                 </div>
 
-                <div class="ins-card">
-                    <h3>Attendance Graph</h3>
-                    <p class="ins-subtle" style="margin-bottom:8px;">Attendance percentage is calculated from captured attendance days minus late-coming days.</p>
+                <div class="ins-card ins-graph-card">
+                    <div class="ins-graph-head">
+                        <div>
+                            <h3>Attendance Graph</h3>
+                            <p class="ins-subtle">Calculated from captured attendance days minus late-coming days.</p>
+                        </div>
+                    </div>
                     ${rows.length ? this.renderComparisonTrend(rows, 'attendance', 'attendance') : '<div class="ins-item">No attendance data available for graphing.</div>'}
                 </div>
 
-                <div class="ins-card">
-                    <h3>Focus Level Graph</h3>
-                    <p class="ins-subtle" style="margin-bottom:8px;">Focus percentage uses captured activity monitor study time versus total tracked time.</p>
+                <div class="ins-card ins-graph-card">
+                    <div class="ins-graph-head">
+                        <div>
+                            <h3>Focus Level Graph</h3>
+                            <p class="ins-subtle">Study time versus total tracked time from the activity monitor.</p>
+                        </div>
+                    </div>
                     ${rows.length ? this.renderComparisonTrend(rows, 'focus', 'focus level') : '<div class="ins-item">No focus data available for graphing.</div>'}
                 </div>
 

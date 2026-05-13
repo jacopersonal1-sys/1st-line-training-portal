@@ -6,6 +6,10 @@ body {
     overflow-y: auto;
 }
 
+* {
+    box-sizing: border-box;
+}
+
 #insight-app {
     min-height: calc(100vh - 210px);
 }
@@ -20,6 +24,7 @@ body {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
+    min-width: 0;
 }
 
 .ins-dept-kpi-grid {
@@ -206,8 +211,9 @@ body {
 .ins-card {
     border: 1px solid var(--border-color);
     background: var(--bg-card);
-    border-radius: 12px;
+    border-radius: 8px;
     padding: 12px;
+    min-width: 0;
 }
 
 .ins-card h3 {
@@ -317,6 +323,47 @@ body {
     overflow-y: auto;
 }
 
+.ins-compare-hero {
+    background:
+        linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(34, 197, 94, 0.08)),
+        var(--bg-card);
+}
+
+.ins-compare-filter-card,
+.ins-compare-rank-card,
+.ins-graph-card {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+        var(--bg-card);
+}
+
+.ins-graph-card {
+    overflow: hidden;
+}
+
+.ins-graph-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.ins-graph-head h3 {
+    margin-bottom: 4px;
+}
+
+.ins-graph-pill {
+    flex-shrink: 0;
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    background: rgba(96, 165, 250, 0.12);
+    color: #93c5fd;
+    border-radius: 999px;
+    padding: 5px 9px;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
 .ins-compare-row,
 .ins-compare-metric {
     display: grid;
@@ -349,16 +396,25 @@ body {
 }
 
 .ins-trend-scroll {
-    overflow-x: auto;
+    overflow: hidden;
     overflow-y: hidden;
     max-width: 100%;
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    background: rgba(0, 0, 0, 0.12);
+    background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.32), rgba(15, 23, 42, 0.08)),
+        rgba(0, 0, 0, 0.12);
+    padding: 8px;
 }
 
 .ins-trend-scroll .ins-line-chart {
-    min-width: 880px;
+    min-width: 0;
+    width: 100%;
+    height: 300px;
+}
+
+.ins-trend-scroll.performance .ins-line-chart {
+    height: clamp(250px, 32vw, 360px);
 }
 
 .ins-radar-grid,
@@ -368,6 +424,10 @@ body {
     stroke: var(--border-color);
     stroke-width: 1;
     fill: none;
+}
+
+.ins-chart-grid {
+    opacity: 0.55;
 }
 
 .ins-radar-area {
@@ -396,8 +456,9 @@ body {
 }
 
 .ins-trend-series {
-    opacity: 0.72;
+    opacity: 0.78;
     transition: opacity 120ms ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
 }
 
 .ins-trend-series:hover {
@@ -410,9 +471,12 @@ body {
 
 .ins-trend-summary {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 6px 10px;
     margin-top: 10px;
+    max-height: 170px;
+    overflow-y: auto;
+    padding-right: 2px;
 }
 
 .ins-trend-summary-row {
@@ -422,7 +486,7 @@ body {
     align-items: center;
     border: 1px solid var(--border-color);
     background: var(--bg-input);
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 6px 8px;
     color: var(--text-muted);
     font-size: 0.73rem;
@@ -474,11 +538,14 @@ body {
 
 .ins-axis-key {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 6px 10px;
     margin-top: 10px;
     color: var(--text-muted);
     font-size: 0.74rem;
+    max-height: 150px;
+    overflow-y: auto;
+    padding-right: 2px;
 }
 
 .ins-axis-key span {
@@ -496,9 +563,9 @@ body {
 
 .ins-compare-picker {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 8px;
-    max-height: 180px;
+    max-height: 220px;
     overflow-y: auto;
     margin-top: 10px;
 }
@@ -517,7 +584,18 @@ body {
 
 .ins-compare-pick.active {
     border-color: var(--primary);
-    background: rgba(243, 112, 33, 0.12);
+    background:
+        linear-gradient(135deg, rgba(243, 112, 33, 0.16), rgba(96, 165, 250, 0.08)),
+        var(--bg-input);
+    box-shadow: inset 0 0 0 1px rgba(243, 112, 33, 0.18);
+}
+
+.ins-compare-pick span,
+.ins-compare-pick small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .ins-compare-pick input {
@@ -544,5 +622,33 @@ body {
 
     .ins-mini-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ins-graph-head {
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 720px) {
+    body {
+        padding: 6px;
+    }
+
+    .ins-dept-kpi-grid,
+    .ins-mini-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ins-trend-scroll {
+        padding: 4px;
+    }
+
+    .ins-trend-scroll .ins-line-chart,
+    .ins-trend-scroll.performance .ins-line-chart {
+        height: 250px;
+    }
+
+    .ins-compare-picker {
+        grid-template-columns: 1fr;
     }
 }

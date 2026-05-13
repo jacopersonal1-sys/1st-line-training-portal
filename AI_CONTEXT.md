@@ -491,6 +491,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.80 (Compare Viewer Responsive Graphs, 2026-05-13):** Insight Compare Viewer now renders the Assessment/Test Breakdown graph as a responsive in-card SVG instead of forcing a wide chart overflow. The Compare workspace also has cleaner graph headers, compact summaries, scroll-contained legends/axis keys, and modernized selection/ranking cards so the screen fits better inside the Insight webview.
 - **v2.6.79 (Progress Builder Test Engine Source, 2026-05-13):** Agent Progress Builder now presents Test Engine items as the visible progress checklist source instead of mixing `assessment-list`, `vetting-topics`, and `timeline` source buckets in the selector. Legacy assessment/vetting/timeline candidates are retained only as fallback/evidence matching so historical trainee submissions still satisfy the canonical Test Engine progress list.
 - **v2.6.78 (Insight Session Cache, 2026-05-13):** Insight now uses a full host-provided session snapshot when the tab opens, skips the module's own cloud bootstrap in session-cache mode, and ignores background fresh-pull re-renders while active. Leaving the Insight tab clears the in-session cache and isolated module mirrors so the next visit rebuilds from current BuildZone data without the active-tab lag.
 - **v2.6.77 (Insight Soft Refresh Performance, 2026-05-13):** Insight refreshes now use a debounced soft data sync instead of reloading the embedded webview during background pulls. After the first load, the host only pushes changed local-data keys into the isolated Insight partition before re-rendering, reducing UI stalls while keeping group filters, agent search, and stats current.
@@ -555,6 +556,12 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.80 - 2026-05-13
+
+- Improvement: Compare Viewer Assessment/Test Breakdown graph now scales within the visible card instead of forcing horizontal page overflow.
+- Improvement: Graph end labels were replaced with a compact summary/legend area to reduce clutter when many people or groups are selected.
+- Improvement: Compare Viewer cards, filter picker, graph headers, axis key, and responsive mobile behavior were visually tightened.
 
 ## v2.6.79 - 2026-05-13
 
