@@ -1440,15 +1440,25 @@ const App = {
     getCourseRequestConfig() {
         const defaults = {
             recipients: [],
-            acknowledgementMessage: 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material'
+            acknowledgementMessage: 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material',
+            smtp: { host: '', port: 587, secure: false, user: '', pass: '', from: '' }
         };
         try {
             const storage = ScheduleData.getStorage();
             const parsed = JSON.parse(storage.getItem('course_progress_request_config') || 'null');
             const recipients = Array.isArray(parsed?.recipients) ? parsed.recipients.map(item => String(item || '').trim()).filter(Boolean) : [];
+            const smtp = parsed?.smtp && typeof parsed.smtp === 'object' ? parsed.smtp : {};
             return {
                 recipients,
-                acknowledgementMessage: String(parsed?.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage
+                acknowledgementMessage: String(parsed?.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage,
+                smtp: {
+                    host: String(smtp.host || '').trim(),
+                    port: Number(smtp.port || 587),
+                    secure: smtp.secure === true,
+                    user: String(smtp.user || '').trim(),
+                    pass: String(smtp.pass || '').trim(),
+                    from: String(smtp.from || '').trim()
+                }
             };
         } catch (error) {
             return defaults;
@@ -1488,7 +1498,8 @@ const App = {
             return await bridge.invoke('send-course-request-email', {
                 to: config.recipients,
                 subject: payload.subject,
-                body: payload.body
+                body: payload.body,
+                smtp: config.smtp
             });
         } catch (error) {
             console.warn('[Schedule Studio] Automatic course request email failed:', error);
@@ -1511,6 +1522,46 @@ const App = {
         return true;
     },
 
+    async recordCourseRequestNotification(item, user, sentResult) {
+        const storage = ScheduleData.getStorage();
+        let notifications = [];
+        try {
+            const parsed = JSON.parse(storage.getItem('admin_notifications') || '[]');
+            notifications = Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            notifications = [];
+        }
+
+        const courseName = String(item?.courseName || 'Timeline Course').trim();
+        const traineeName = String(user?.user || user?.username || user?.name || 'Unknown trainee').trim();
+        const now = new Date().toISOString();
+        notifications.unshift({
+            id: `course_request_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            type: 'course_progress_request',
+            title: 'Course Move-On Request Sent',
+            message: `${traineeName} requested to move on from ${courseName}.`,
+            trainee: traineeName,
+            courseName,
+            sentMethod: sentResult?.method || 'mailto',
+            targetRoles: ['admin', 'super_admin'],
+            createdAt: now,
+            readBy: []
+        });
+        notifications = notifications.slice(0, 200);
+        storage.setItem('admin_notifications', JSON.stringify(notifications));
+
+        if (AppContext.host && typeof AppContext.host.emitDataChange === 'function') {
+            AppContext.host.emitDataChange('admin_notifications', 'course_request');
+        }
+        if (AppContext.host && typeof AppContext.host.saveToServer === 'function') {
+            try {
+                await AppContext.host.saveToServer(['admin_notifications'], true);
+            } catch (error) {
+                console.warn('[Schedule Studio] Admin notification sync failed:', error);
+            }
+        }
+    },
+
     async submitCourseRequest(index) {
         const item = this.getActiveSchedule().items[Number(index)];
         const user = ScheduleData.getCurrentUser();
@@ -1524,7 +1575,7 @@ const App = {
             return;
         }
 
-        const sent = await this.sendCourseRequestEmail(item, user);
+        let sent = await this.sendCourseRequestEmail(item, user);
         if (!sent || sent.success !== true) {
             const mailto = this.buildCourseRequestMailto(item, user);
             const opened = await this.openExternalUrl(mailto);
@@ -1532,8 +1583,10 @@ const App = {
                 alert('The email request could not be sent or opened on this device.');
                 return;
             }
+            sent = { success: true, method: 'mailto' };
         }
 
+        await this.recordCourseRequestNotification(item, user, sent);
         alert(config.acknowledgementMessage);
     },
 

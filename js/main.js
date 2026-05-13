@@ -3672,6 +3672,39 @@ function getLocalProblemReportCount() {
     }).length;
 }
 
+function getAdminCourseRequestNotifications() {
+    if (!CURRENT_USER || !['admin', 'super_admin'].includes(String(CURRENT_USER.role || '').toLowerCase())) return [];
+    let rows = [];
+    try {
+        rows = (typeof safeLocalParse === 'function')
+            ? safeLocalParse('admin_notifications', [])
+            : JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+    } catch (error) {
+        rows = [];
+    }
+    return (Array.isArray(rows) ? rows : [])
+        .filter(row => row && String(row.type || '') === 'course_progress_request')
+        .filter(row => {
+            const roles = Array.isArray(row.targetRoles) ? row.targetRoles.map(role => String(role || '').toLowerCase()) : ['admin', 'super_admin'];
+            return roles.includes(String(CURRENT_USER.role || '').toLowerCase());
+        })
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+function markAdminCourseRequestNotificationsSeen() {
+    const latest = getAdminCourseRequestNotifications()[0];
+    if (latest && latest.createdAt) {
+        localStorage.setItem('last_seen_course_request_notification_at', String(latest.createdAt));
+    }
+    updateNotifications();
+}
+
+function safeNotificationText(value) {
+    return (typeof escapeHTML === 'function')
+        ? escapeHTML(value)
+        : String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
+
 function updateNotifications() {
     const notifList = document.getElementById('notifList');
     const badge = document.getElementById('notifBadge');
@@ -3777,7 +3810,25 @@ function updateNotifications() {
         }
     }
 
-    // 5. EMPTY STATE
+    // 5. COURSE MOVE-ON REQUEST NOTIFICATIONS
+    if (CURRENT_USER && ['super_admin', 'admin'].includes(String(CURRENT_USER.role || '').toLowerCase())) {
+        const courseRequests = getAdminCourseRequestNotifications();
+        const lastSeenAt = String(localStorage.getItem('last_seen_course_request_notification_at') || '');
+        const newRequests = courseRequests.filter(row => !lastSeenAt || String(row.createdAt || '') > lastSeenAt);
+
+        if (newRequests.length > 0) {
+            count += newRequests.length;
+            const latest = newRequests[0];
+            notifList.innerHTML += `
+            <div class="notif-item" onclick="markAdminCourseRequestNotificationsSeen(); showTab('assessment-schedule');" style="border-left:3px solid #3498db;" aria-label="${newRequests.length} course move-on requests">
+                <i class="fas fa-arrow-right" style="color:#3498db;"></i>
+                <strong>${newRequests.length} Course Move-On Request${newRequests.length === 1 ? '' : 's'}</strong>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">${safeNotificationText(latest.message || 'A trainee submitted a course move-on request.')}</div>
+            </div>`;
+        }
+    }
+
+    // 6. EMPTY STATE
     if (notifList.innerHTML === '') {
         notifList.innerHTML = '<div style="padding:15px; text-align:center; color:#888;">No new notifications</div>';
     }
@@ -4068,6 +4119,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.87": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Course move-on requests now support synced SMTP settings and admin notification-bell alerts when a request is sent.</li>
+            </ul>`,
         "2.6.86": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Schedule Studio timeline items can now show a trainee move-on request button with configurable recipients, confirmation text, and per-trainee availability exceptions.</li>

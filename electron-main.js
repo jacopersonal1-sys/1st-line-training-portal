@@ -4,6 +4,7 @@ const path = require('path');
 const { exec } = require('child_process');
 const os = require('os');
 const fs = require('fs');
+const nodemailer = require('nodemailer');
 
 // Enable logging for the auto-updater (helps debug "nothing happening")
 autoUpdater.logger = console;
@@ -779,6 +780,33 @@ ipcMain.handle('send-course-request-email', async (event, payload) => {
         return { success: false, error: 'Missing email recipients, subject, or body.' };
     }
 
+    const smtp = payload && payload.smtp && typeof payload.smtp === 'object' ? payload.smtp : null;
+    const smtpHost = String((smtp && smtp.host) || '').trim();
+    const smtpUser = String((smtp && smtp.user) || '').trim();
+    const smtpPass = String((smtp && smtp.pass) || '').trim();
+    const smtpFrom = String((smtp && smtp.from) || smtpUser || '').trim();
+    const smtpPort = Math.max(1, Math.min(65535, Number((smtp && smtp.port) || 587)));
+
+    if (smtpHost && smtpUser && smtpPass && smtpFrom) {
+        try {
+            const transporter = nodemailer.createTransport({
+                host: smtpHost,
+                port: smtpPort,
+                secure: smtp && smtp.secure === true,
+                auth: { user: smtpUser, pass: smtpPass }
+            });
+            await transporter.sendMail({
+                from: smtpFrom,
+                to: recipients.join(', '),
+                subject,
+                text: body
+            });
+            return { success: true, method: 'smtp' };
+        } catch (error) {
+            return { success: false, error: error.message || 'SMTP send failed.' };
+        }
+    }
+
     if (os.platform() !== 'win32') {
         return { success: false, error: 'Automatic Outlook send is only available on Windows.' };
     }
@@ -802,7 +830,7 @@ ipcMain.handle('send-course-request-email', async (event, payload) => {
                 resolve({ success: false, error: error.message || 'Outlook send failed.' });
                 return;
             }
-            resolve({ success: true });
+            resolve({ success: true, method: 'outlook' });
         });
     });
 });

@@ -17,7 +17,8 @@ const DB_SCHEMA = {
     live_assessment_rules_config: { rules: [], rulesHtml: '', updatedAt: null, updatedBy: null },
     live_booking_rules_config: { rules: [], rulesHtml: '', updatedAt: null, updatedBy: null },
     training_rules_config: { rules: [], rulesHtml: '', showOnFirstLogin: true, showOnLogin: false, targetMode: 'all', targetUsers: [], targetGroups: [], officeOptions: [], updatedAt: null, updatedBy: null },
-    course_progress_request_config: { recipients: [], acknowledgementMessage: '', updatedAt: null, updatedBy: null },
+    course_progress_request_config: { recipients: [], acknowledgementMessage: '', smtp: { host: '', port: 587, secure: false, user: '', pass: '', from: '' }, updatedAt: null, updatedBy: null },
+    admin_notifications: [],
     test_integrity_overrides: { entries: {}, updatedAt: null, updatedBy: null },
     qa_data: { questions: [], submissions: [], updatedAt: null, updatedBy: null },
     system_tombstones: [],
@@ -120,6 +121,7 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'live_booking_rules_config',
     'training_rules_config',
     'course_progress_request_config',
+    'admin_notifications',
     'test_integrity_overrides',
     'qa_data'
 ]);
@@ -146,6 +148,7 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'violation_reports',
     'training_rules_config',
     'course_progress_request_config',
+    'admin_notifications',
     'qa_data',
     'live_booking_rules_config',
     'liveScheduleSettings',

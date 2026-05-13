@@ -251,6 +251,14 @@
         return {
             recipients: [],
             acknowledgementMessage: DEFAULT_COURSE_REQUEST_ACK,
+            smtp: {
+                host: '',
+                port: 587,
+                secure: false,
+                user: '',
+                pass: '',
+                from: ''
+            },
             updatedAt: null,
             updatedBy: null
         };
@@ -428,10 +436,20 @@
     function sanitizeCourseRequestConfig(rawConfig) {
         const defaults = getDefaultCourseRequestConfig();
         const raw = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+        const smtpRaw = raw.smtp && typeof raw.smtp === 'object' ? raw.smtp : {};
+        const port = Number(smtpRaw.port);
         const acknowledgementMessage = String(raw.acknowledgementMessage || '').trim() || defaults.acknowledgementMessage;
         return {
             recipients: parseRecipientList(raw.recipients),
             acknowledgementMessage,
+            smtp: {
+                host: String(smtpRaw.host || '').trim(),
+                port: Number.isFinite(port) ? Math.max(1, Math.min(65535, Math.round(port))) : defaults.smtp.port,
+                secure: smtpRaw.secure === true,
+                user: String(smtpRaw.user || '').trim(),
+                pass: String(smtpRaw.pass || '').trim(),
+                from: String(smtpRaw.from || '').trim()
+            },
             updatedAt: raw.updatedAt || defaults.updatedAt,
             updatedBy: raw.updatedBy || defaults.updatedBy
         };
@@ -859,12 +877,25 @@
     function renderCourseRequestControls(config) {
         const recipients = document.getElementById('courseRequestRecipients');
         const ack = document.getElementById('courseRequestAckMessage');
+        const smtpHost = document.getElementById('courseRequestSmtpHost');
+        const smtpPort = document.getElementById('courseRequestSmtpPort');
+        const smtpSecure = document.getElementById('courseRequestSmtpSecure');
+        const smtpUser = document.getElementById('courseRequestSmtpUser');
+        const smtpPass = document.getElementById('courseRequestSmtpPass');
+        const smtpFrom = document.getElementById('courseRequestSmtpFrom');
+        const smtp = config.smtp || {};
         if (recipients && document.activeElement !== recipients && !recipients.dataset.dirty) {
             recipients.value = (config.recipients || []).join('\n');
         }
         if (ack && document.activeElement !== ack && !ack.dataset.dirty) {
             ack.value = config.acknowledgementMessage || DEFAULT_COURSE_REQUEST_ACK;
         }
+        if (smtpHost && document.activeElement !== smtpHost && !smtpHost.dataset.dirty) smtpHost.value = smtp.host || '';
+        if (smtpPort && document.activeElement !== smtpPort && !smtpPort.dataset.dirty) smtpPort.value = String(smtp.port || 587);
+        if (smtpSecure) smtpSecure.checked = smtp.secure === true;
+        if (smtpUser && document.activeElement !== smtpUser && !smtpUser.dataset.dirty) smtpUser.value = smtp.user || '';
+        if (smtpPass && document.activeElement !== smtpPass && !smtpPass.dataset.dirty) smtpPass.value = smtp.pass || '';
+        if (smtpFrom && document.activeElement !== smtpFrom && !smtpFrom.dataset.dirty) smtpFrom.value = smtp.from || '';
     }
 
     function upsertPreset(name, severity, scoreThreshold) {
@@ -1370,6 +1401,14 @@
         const clean = sanitizeCourseRequestConfig({
             recipients,
             acknowledgementMessage: ackInput ? ackInput.value : DEFAULT_COURSE_REQUEST_ACK,
+            smtp: {
+                host: document.getElementById('courseRequestSmtpHost')?.value || '',
+                port: document.getElementById('courseRequestSmtpPort')?.value || 587,
+                secure: document.getElementById('courseRequestSmtpSecure')?.checked === true,
+                user: document.getElementById('courseRequestSmtpUser')?.value || '',
+                pass: document.getElementById('courseRequestSmtpPass')?.value || '',
+                from: document.getElementById('courseRequestSmtpFrom')?.value || ''
+            },
             updatedAt: stamp,
             updatedBy: actor
         });
@@ -1384,6 +1423,10 @@
             ackInput.value = clean.acknowledgementMessage;
             delete ackInput.dataset.dirty;
         }
+        ['courseRequestSmtpHost', 'courseRequestSmtpPort', 'courseRequestSmtpUser', 'courseRequestSmtpPass', 'courseRequestSmtpFrom'].forEach(id => {
+            const input = document.getElementById(id);
+            if (input) delete input.dataset.dirty;
+        });
 
         try {
             if (typeof saveToServer === 'function') {

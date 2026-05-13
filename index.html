@@ -1277,6 +1277,33 @@
                     </p>
                     <label for="courseRequestRecipients">Request Email Recipients</label>
                     <textarea id="courseRequestRecipients" oninput="markCourseRequestConfigDirty('courseRequestRecipients')" placeholder="One email per line" style="min-height:74px; margin-bottom:10px;"></textarea>
+                    <div class="grid-3" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:10px;">
+                        <div>
+                            <label for="courseRequestSmtpHost">SMTP Host</label>
+                            <input id="courseRequestSmtpHost" type="text" oninput="markCourseRequestConfigDirty('courseRequestSmtpHost')" placeholder="smtp.office365.com">
+                        </div>
+                        <div>
+                            <label for="courseRequestSmtpPort">SMTP Port</label>
+                            <input id="courseRequestSmtpPort" type="number" min="1" max="65535" oninput="markCourseRequestConfigDirty('courseRequestSmtpPort')" placeholder="587">
+                        </div>
+                        <label style="display:flex; align-items:center; gap:8px; margin:0; padding-top:22px;">
+                            <input type="checkbox" id="courseRequestSmtpSecure" onchange="markCourseRequestConfigDirty('courseRequestSmtpSecure')" style="width:auto;"> Use SSL/TLS
+                        </label>
+                    </div>
+                    <div class="grid-3" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:10px;">
+                        <div>
+                            <label for="courseRequestSmtpUser">SMTP Username</label>
+                            <input id="courseRequestSmtpUser" type="text" oninput="markCourseRequestConfigDirty('courseRequestSmtpUser')" placeholder="sender@example.com">
+                        </div>
+                        <div>
+                            <label for="courseRequestSmtpPass">SMTP Password</label>
+                            <input id="courseRequestSmtpPass" type="password" oninput="markCourseRequestConfigDirty('courseRequestSmtpPass')" autocomplete="new-password">
+                        </div>
+                        <div>
+                            <label for="courseRequestSmtpFrom">From Address</label>
+                            <input id="courseRequestSmtpFrom" type="text" oninput="markCourseRequestConfigDirty('courseRequestSmtpFrom')" placeholder="sender@example.com">
+                        </div>
+                    </div>
                     <label for="courseRequestAckMessage">Trainee Message After Request</label>
                     <textarea id="courseRequestAckMessage" oninput="markCourseRequestConfigDirty('courseRequestAckMessage')" style="min-height:92px; margin-bottom:10px;"></textarea>
                     <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
