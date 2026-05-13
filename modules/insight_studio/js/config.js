@@ -2,13 +2,15 @@
 
 const AppContext = {
     user: null,
-    supabase: null
+    supabase: null,
+    sessionCacheMode: false
 };
 
 (function hydrateContext() {
     const params = new URLSearchParams(window.location.search);
     const userStr = params.get('user');
     const credsStr = params.get('creds');
+    AppContext.sessionCacheMode = params.get('sessionCache') === '1';
 
     if (userStr) {
         try {

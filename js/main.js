@@ -3016,8 +3016,7 @@ function renderViewById(id, options = {}) {
             StudyNotesWorkspace.refresh(false);
             return;
         }
-        if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') {
-            InsightStudioLoader.refresh();
+        if (id === 'insight-studio') {
             return;
         }
         if (id === 'qa-hub' && window.QAHub && typeof window.QAHub.renderUI === 'function') {
@@ -3054,7 +3053,7 @@ function renderViewById(id, options = {}) {
         if (id === 'study-notes' && typeof StudyNotesWorkspace !== 'undefined' && typeof StudyNotesWorkspace.refresh === 'function') StudyNotesWorkspace.refresh(false);
         if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
         if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
-        if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh();
+        if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh({ force: true });
         if (id === 'qa-hub' && window.QAHub && typeof window.QAHub.renderUI === 'function') window.QAHub.renderUI();
         if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
         if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
@@ -3429,7 +3428,14 @@ function showTab(id, btn) {
   if (TAB_SWITCH_TIMEOUT) clearTimeout(TAB_SWITCH_TIMEOUT);
 
   const current = document.querySelector('section.active');
+  if (current && current.id === 'insight-studio' && id !== 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.clearSessionCache === 'function') {
+      InsightStudioLoader.clearSessionCache();
+  }
   if (current && current.id === id) {
+      if (id === 'insight-studio') {
+          if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
+          return;
+      }
       syncFreshDataForView(id);
       if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
       return;
@@ -4062,6 +4068,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.78": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight now opens from a full in-session host snapshot and skips background fresh-pull re-renders while you remain in the tab.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> The Insight session cache is cleared when you leave the tab, so the next visit rebuilds from current BuildZone data without carrying stale workspace state.</li>
+            </ul>`,
         "2.6.77": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight refreshes now use a debounced soft data sync instead of reloading the whole embedded webview during background pulls.</li>

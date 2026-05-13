@@ -7,6 +7,7 @@ const InsightStudioLoader = {
     _pendingRefresh: false,
     _refreshTimer: null,
     _snapshotSignatures: {},
+    _sessionSnapshot: null,
 
     createValueSignature: function(value) {
         if (typeof value !== 'string') return 'missing';
@@ -21,6 +22,9 @@ const InsightStudioLoader = {
 
     getLocalSnapshot: function(options = {}) {
         const changedOnly = !!options.changedOnly;
+        if (!changedOnly && this._sessionSnapshot) {
+            return this._sessionSnapshot;
+        }
         const keys = [
             'users',
             'rosters',
@@ -58,6 +62,7 @@ const InsightStudioLoader = {
                 console.warn(`[Insight Loader] Could not read local key "${key}"`, error);
             }
         });
+        if (!changedOnly) this._sessionSnapshot = snapshot;
         return snapshot;
     },
 
@@ -145,6 +150,7 @@ const InsightStudioLoader = {
         }
         this._webviewReady = false;
         this._snapshotSignatures = {};
+        this._sessionSnapshot = null;
         if (this._refreshTimer) {
             clearTimeout(this._refreshTimer);
             this._refreshTimer = null;
@@ -182,7 +188,7 @@ const InsightStudioLoader = {
         container.innerHTML = `
             <webview
                 id="insight-studio-webview"
-                src="${modulePath}?user=${userParam}&creds=${credsParam}"
+                src="${modulePath}?user=${userParam}&creds=${credsParam}&sessionCache=1"
                 style="width:100%; height:calc(100vh - 190px); border:none; background:transparent;"
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
                 partition="persist:insight_studio"
@@ -217,7 +223,61 @@ const InsightStudioLoader = {
         this.bindWindowMessageBridge();
     },
 
-    refresh: function() {
+    clearSessionCache: function() {
+        this._pendingRefresh = false;
+        this._webviewReady = false;
+        this._snapshotSignatures = {};
+        this._sessionSnapshot = null;
+        if (this._refreshTimer) {
+            clearTimeout(this._refreshTimer);
+            this._refreshTimer = null;
+        }
+        const webview = document.getElementById('insight-studio-webview');
+        if (webview && webview.isConnected && typeof webview.executeJavaScript === 'function') {
+            const keys = [
+                'insight_module_cache_v1',
+                'users',
+                'rosters',
+                'records',
+                'submissions',
+                'savedReports',
+                'insightReviews',
+                'exemptions',
+                'liveBookings',
+                'attendance_records',
+                'monitor_history',
+                'violation_reports',
+                'tl_agent_feedback',
+                'content_studio_data',
+                'content_studio_data_local',
+                'assessments',
+                'vettingTopics',
+                'tests',
+                'schedules',
+                'retrain_archives',
+                'insight_rule_config',
+                'insight_progress_config',
+                'insight_subject_reviews'
+            ];
+            const script = `
+                (() => {
+                    ${JSON.stringify(keys)}.forEach((key) => localStorage.removeItem(key));
+                    true;
+                })();
+            `;
+            webview.executeJavaScript(script, true).catch(error => {
+                console.warn('[Insight Loader] Session cache cleanup failed.', error);
+            });
+        }
+    },
+
+    refresh: function(options = {}) {
+        if (!options.force) return;
+        this.clearSessionCache();
+        this.renderUI();
+    },
+
+    softRefresh: function() {
         const webview = document.getElementById('insight-studio-webview');
         if (webview && webview.isConnected && typeof webview.executeJavaScript === 'function') {
             if (!this._webviewReady) {

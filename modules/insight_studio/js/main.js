@@ -40,6 +40,15 @@ const InsightApp = {
                 this.render();
             }
 
+            if (AppContext && AppContext.sessionCacheMode) {
+                if (typeof InsightDataService.hydrateFromLocalStorage === 'function') {
+                    InsightDataService.hydrateFromLocalStorage();
+                }
+                this.state.loading = false;
+                this.render();
+                return;
+            }
+
             const loadPromise = InsightDataService.loadInitialData();
             if (this.hasImmediateInsightData()) {
                 this.state.loading = false;
