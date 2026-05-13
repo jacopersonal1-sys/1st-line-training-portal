@@ -2321,7 +2321,7 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
     {
         label: 'Admin Workflow',
         items: [
-            { id: 'insight-studio', title: 'Insight', text: 'Insight', icon: 'fas fa-magnifying-glass-chart', classes: 'admin-only' },
+            { id: 'insight-studio', title: 'Insight', text: 'Insight', icon: 'fas fa-chart-line', classes: 'admin-only' },
             { id: 'report-card', title: 'Onboard Report', text: 'Onboard Report', icon: 'fas fa-file-invoice', classes: 'admin-only tl-access' },
             { id: 'opl-hub', title: 'OPL Hub', text: 'OPL Hub', icon: 'fas fa-book-open', classes: 'admin-only' },
             { id: 'qa-hub', title: 'Q&A Hub', text: 'Q&A Hub', icon: 'fas fa-circle-question', classes: 'admin-only' }
@@ -4068,6 +4068,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.83": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Insight Compare Viewer now has Single Graph and Two Graphs modes for the Assessment/Test Breakdown graph, allowing dense selections to be split into two readable chart panels.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> The Insight sidebar icon now uses the supported chart-line icon so the view is visually distinguishable in both classic and advanced navigation.</li>
+            </ul>`,
         "2.6.82": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Performance:</strong> Insight Compare Viewer now caches built comparison rows for the active session so changing selections, group filters, and compare scopes no longer rebuilds every trainee record from scratch.</li>

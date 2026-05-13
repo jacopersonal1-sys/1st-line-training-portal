@@ -404,6 +404,37 @@ body {
     font-weight: 800;
 }
 
+.ins-chart-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: -2px 0 10px 0;
+}
+
+.ins-split-graphs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.ins-split-graph {
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.ins-split-title {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 800;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0;
+}
+
 .ins-compare-row,
 .ins-compare-metric {
     display: grid;
@@ -666,6 +697,10 @@ body {
 
     .ins-graph-head {
         flex-direction: column;
+    }
+
+    .ins-split-graphs {
+        grid-template-columns: 1fr;
     }
 }
 

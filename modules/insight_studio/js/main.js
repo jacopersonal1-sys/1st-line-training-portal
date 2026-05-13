@@ -12,6 +12,7 @@ const InsightApp = {
         knowledgeMode: 'assessment',
         compareMode: 'person',
         compareAttemptScope: 'live',
+        compareGraphLayout: 'single',
         compareSelected: [],
         groupFilter: 'all',
         search: '',
@@ -200,6 +201,12 @@ const InsightApp = {
         const normalized = String(scope || '').trim().toLowerCase();
         this.state.compareAttemptScope = ['attempt_1', 'attempt_2', 'attempt_1_vs_live'].includes(normalized) ? normalized : 'live';
         this.state.compareSelected = [];
+        this.render();
+    },
+
+    setCompareGraphLayout: function(layout) {
+        const normalized = String(layout || '').trim().toLowerCase();
+        this.state.compareGraphLayout = normalized === 'split' ? 'split' : 'single';
         this.render();
     },
 
@@ -1710,12 +1717,37 @@ const InsightApp = {
         `;
     },
 
+    renderSplitPerformanceGraphs: function(rows, groupAggregateMode) {
+        const esc = this.escapeHtml;
+        const chartRows = Array.isArray(rows) ? rows : [];
+        if (chartRows.length <= 1) {
+            return this.renderComparisonTrend(chartRows, 'performance', 'assessment/test');
+        }
+        const midpoint = Math.ceil(chartRows.length / 2);
+        const groups = [
+            { title: `${groupAggregateMode ? 'Groups' : 'People'} 1-${midpoint}`, rows: chartRows.slice(0, midpoint) },
+            { title: `${groupAggregateMode ? 'Groups' : 'People'} ${midpoint + 1}-${chartRows.length}`, rows: chartRows.slice(midpoint) }
+        ].filter(group => group.rows.length);
+
+        return `
+            <div class="ins-split-graphs">
+                ${groups.map(group => `
+                    <div class="ins-split-graph">
+                        <div class="ins-split-title">${esc(group.title)}</div>
+                        ${this.renderComparisonTrend(group.rows, 'performance', 'assessment/test')}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    },
+
     renderComparisonViewer: function() {
         const esc = this.escapeHtml;
         const mode = this.state.compareMode || 'person';
         const attemptScope = this.state.compareAttemptScope || 'live';
         const attemptNumber = this.getCompareAttemptNumber();
         const pairMode = this.isAttemptVsLiveCompareScope();
+        const graphLayout = this.state.compareGraphLayout === 'split' ? 'split' : 'single';
         const scopeLabel = pairMode ? 'Attempt 1 vs Current Live' : (attemptNumber ? `Training Attempt ${attemptNumber} Archive` : 'Current Live Attempt');
         const rows = this.getComparisonRows();
         const selectableRows = this.getComparePickerRows();
@@ -1802,7 +1834,13 @@ const InsightApp = {
                         </div>
                         <span class="ins-graph-pill">${rows.length} ${groupAggregateMode ? 'groups' : 'people'}</span>
                     </div>
-                    ${rows.length ? this.renderComparisonTrend(rows, 'performance', 'assessment/test') : '<div class="ins-item">No data available for graphing.</div>'}
+                    <div class="ins-chart-controls">
+                        <button class="sub-tab-btn ${graphLayout === 'single' ? 'active' : ''}" onclick="InsightApp.setCompareGraphLayout('single')">Single Graph</button>
+                        <button class="sub-tab-btn ${graphLayout === 'split' ? 'active' : ''}" onclick="InsightApp.setCompareGraphLayout('split')">Two Graphs</button>
+                    </div>
+                    ${rows.length
+                        ? (graphLayout === 'split' ? this.renderSplitPerformanceGraphs(rows, groupAggregateMode) : this.renderComparisonTrend(rows, 'performance', 'assessment/test'))
+                        : '<div class="ins-item">No data available for graphing.</div>'}
                 </div>
 
                 <div class="ins-card ins-graph-card">
