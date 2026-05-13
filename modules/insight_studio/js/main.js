@@ -41,6 +41,10 @@ const InsightApp = {
             }
 
             const loadPromise = InsightDataService.loadInitialData();
+            if (this.hasImmediateInsightData()) {
+                this.state.loading = false;
+                this.render();
+            }
 
             const bootGuard = new Promise((resolve) => setTimeout(resolve, 8000));
             await Promise.race([loadPromise, bootGuard]);
@@ -63,6 +67,21 @@ const InsightApp = {
             console.warn('[Insight] Init failed:', error);
             this.state.loading = false;
             this.render();
+        }
+    },
+
+    hasImmediateInsightData: function() {
+        try {
+            const agents = InsightDataService.getAllAgents();
+            const groups = InsightDataService.getGroups();
+            const state = InsightDataService.state || {};
+            return (Array.isArray(agents) && agents.length > 0)
+                || (Array.isArray(groups) && groups.length > 0)
+                || (Array.isArray(state.records) && state.records.length > 0)
+                || (Array.isArray(state.submissions) && state.submissions.length > 0)
+                || (Array.isArray(state.attendance) && state.attendance.length > 0);
+        } catch (error) {
+            return false;
         }
     },
 

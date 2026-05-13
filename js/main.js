@@ -4040,6 +4040,10 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.74": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight now renders locally hydrated trainee records immediately across Agent Triggers, Agent Progress, Department Overview, Knowledge Gaps, and Compare Viewer instead of waiting for the cloud pull to finish.</li>
+            </ul>`,
         "2.6.73": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Insight Compare Viewer now hydrates people, groups, and comparison data from the local app cache before waiting for the slower cloud pull.</li>
