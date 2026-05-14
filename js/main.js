@@ -4131,6 +4131,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.91": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Admin Tools now includes Hosted HTML Tool management with separate Main and Export slots, Supabase Storage uploads, generated browser URLs, and usage tracking.</li>
+                <li style="margin-bottom: 8px;"><strong>Infrastructure:</strong> Added the hosted HTML Edge Function and Supabase setup script for rendering uploaded HTML files as browser pages.</li>
+            </ul>`,
         "2.6.90": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Course move-on emails now always add course and trainee details automatically while System Config controls only the request message text.</li>

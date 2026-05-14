@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.6.91 - 2026-05-14
+
+- Feature: Added Admin Tools > Tool Hosting for uploading and replacing two hosted HTML slots: Main HTML Tool and Exported HTML Tool.
+- Feature: Added generated hosted URLs, copy/open actions, and usage tracking for hosted HTML views.
+- Infrastructure: Added Supabase Storage setup SQL and an Edge Function that serves uploaded HTML with browser-renderable `text/html` responses.
+- Verification: Syntax checks and Jest suite passed.
+
+> Release target: stable main channel.
+
 ## 2.6.71 - 2026-05-12
 
 - Feature: Added the Q&A Hub admin workspace with editable FAQ entries, trainee question submissions, resource attachments, and in-app resource viewing.
