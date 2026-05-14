@@ -2634,13 +2634,18 @@ function updateSidebarVisibility() {
     });
 
     const updatesSubBtn = document.getElementById('btn-sub-updates');
+    const toolHostingSubBtn = document.getElementById('btn-sub-tool-hosting');
     const canUseUpdateCenter = ['admin', 'super_admin'].includes(role);
     if (updatesSubBtn) {
         updatesSubBtn.classList.toggle('hidden', !canUseUpdateCenter);
     }
+    if (toolHostingSubBtn) {
+        toolHostingSubBtn.classList.toggle('hidden', !canUseUpdateCenter);
+    }
 
     const updatesView = document.getElementById('admin-view-updates');
-    if (!canUseUpdateCenter && updatesView && updatesView.classList.contains('active')) {
+    const toolHostingView = document.getElementById('admin-view-tool-hosting');
+    if (!canUseUpdateCenter && ((updatesView && updatesView.classList.contains('active')) || (toolHostingView && toolHostingView.classList.contains('active')))) {
         const fallbackBtn = document.getElementById('btn-sub-users');
         showAdminSub('users', fallbackBtn || null);
     }
@@ -3506,6 +3511,10 @@ function showAdminSub(viewName, btn) {
       if (typeof showToast === 'function') showToast('Insight trigger presets are available to Admin and Super Admin only.', 'warning');
       return;
   }
+  if (viewName === 'tool-hosting' && CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role)) {
+      if (typeof showToast === 'function') showToast('Tool Hosting is available to Admin and Super Admin only.', 'warning');
+      return;
+  }
 
   document.querySelectorAll('.admin-view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
@@ -3521,6 +3530,9 @@ function showAdminSub(viewName, btn) {
   }
   if(viewName === 'updates' && typeof loadAdminUpdates === 'function') {
       loadAdminUpdates();
+  }
+  if(viewName === 'tool-hosting' && typeof loadHostedHtmlTool === 'function') {
+      loadHostedHtmlTool();
   }
   if(viewName === 'attendance' && typeof loadAttendanceDashboard === 'function') {
       loadAttendanceDashboard();

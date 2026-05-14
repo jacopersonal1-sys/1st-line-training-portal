@@ -992,6 +992,7 @@ function applyRolePermissions() {
   const subBtnInsightRules = document.getElementById('btn-sub-insight-rules');
   const subBtnVetting = document.getElementById('btn-sub-vetting');
   const subBtnData = document.getElementById('btn-sub-data');
+  const subBtnToolHosting = document.getElementById('btn-sub-tool-hosting');
   const subBtnAccess = document.getElementById('btn-sub-access');
   const subBtnStatus = document.getElementById('btn-sub-status');
   const subBtnUpdates = document.getElementById('btn-sub-updates');
@@ -1012,6 +1013,7 @@ function applyRolePermissions() {
     if(subBtnInsightRules) subBtnInsightRules.classList.remove('hidden');
     if(subBtnVetting) subBtnVetting.classList.remove('hidden');
     if(subBtnData) subBtnData.classList.remove('hidden');
+    if(subBtnToolHosting) subBtnToolHosting.classList.remove('hidden');
     if(subBtnAccess) subBtnAccess.classList.remove('hidden');
     if(subBtnStatus) subBtnStatus.classList.remove('hidden');
     if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');
@@ -1026,6 +1028,7 @@ function applyRolePermissions() {
     if (CURRENT_USER.role === 'special_viewer') {
         document.getElementById('admin-create-user-card')?.classList.add('hidden');
         if(subBtnInsightRules) subBtnInsightRules.classList.add('hidden');
+        if(subBtnToolHosting) subBtnToolHosting.classList.add('hidden');
         // Keep user controls visible for filtering, but actions will be hidden by admin_users.js
     } else {
         document.getElementById('admin-create-user-card')?.classList.remove('hidden');
@@ -1041,6 +1044,7 @@ function applyRolePermissions() {
     if(subBtnInsightRules) subBtnInsightRules.classList.add('hidden');
     if(subBtnVetting) subBtnVetting.classList.add('hidden');
     if(subBtnData) subBtnData.classList.add('hidden');
+    if(subBtnToolHosting) subBtnToolHosting.classList.add('hidden');
     if(subBtnAccess) subBtnAccess.classList.add('hidden');
     if(subBtnStatus) subBtnStatus.classList.add('hidden');
     if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');

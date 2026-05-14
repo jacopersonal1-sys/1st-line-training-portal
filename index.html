@@ -1048,6 +1048,7 @@
                 <button class="sub-tab-btn" id="btn-sub-assessments" onclick="showAdminSub('assessments', this)"><i class="fas fa-layer-group"></i><span>Training Topics</span></button>
                 <button class="sub-tab-btn" id="btn-sub-insight-rules" onclick="showAdminSub('insight-rules', this)"><i class="fas fa-sliders-h"></i><span>System Config</span></button>
                 <button class="sub-tab-btn" id="btn-sub-data" onclick="showAdminSub('data', this)"><i class="fas fa-database"></i><span>Database</span></button>
+                <button class="sub-tab-btn" id="btn-sub-tool-hosting" onclick="showAdminSub('tool-hosting', this)"><i class="fas fa-file-code"></i><span>Tool Hosting</span></button>
                 <button class="sub-tab-btn" id="btn-sub-access" onclick="showAdminSub('access', this)"><i class="fas fa-user-shield"></i><span>Access Control</span></button>
                 <button class="sub-tab-btn" id="btn-sub-status" onclick="showAdminSub('status', this)"><i class="fas fa-heart-pulse"></i><span>System Status</span></button>
                 <button class="sub-tab-btn" id="btn-sub-updates" onclick="showAdminSub('updates', this)"><i class="fas fa-cloud-arrow-up"></i><span>System Updates</span></button>
@@ -1418,6 +1419,25 @@
             </div>
             </div>
         </div>
+
+        <div id="admin-view-tool-hosting" class="admin-view">
+            <div class="card">
+                <div class="admin-users-header">
+                    <div>
+                        <h3 style="margin:0;">Hosted HTML Tool</h3>
+                        <p style="margin:6px 0 0 0; font-size:0.84rem; color:var(--text-muted);">Upload the current HTML export to Supabase Storage and share the generated browser URL.</p>
+                    </div>
+                    <span style="font-size:0.75rem; color:var(--text-muted); border:1px solid var(--border-color); border-radius:999px; padding:3px 10px; white-space:nowrap;">Supabase Storage</span>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+                    <button class="btn-secondary" style="width:auto;" onclick="loadHostedHtmlTool()"><i class="fas fa-rotate-right"></i> Refresh</button>
+                </div>
+                <div id="htmlToolHostingStatus" style="background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:14px; min-height:142px;">
+                    Loading hosted tool status...
+                </div>
+            </div>
+        </div>
         
         <div id="admin-view-access" class="admin-view">
             <div class="card grid-2">
@@ -1785,6 +1805,7 @@
 <script src="js/admin_updates.js"></script>
 
 <script src="js/admin_sys.js"></script>
+<script src="js/html_tool_hosting.js"></script>
 <script src="js/admin_insight_rules.js"></script>
 <script src="js/admin_users.js"></script>
 <script src="js/admin_builder.js"></script> 
