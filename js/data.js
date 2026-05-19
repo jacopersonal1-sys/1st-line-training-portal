@@ -14,6 +14,7 @@ const DB_SCHEMA = {
     violation_reports: [], // Mandatory trainee explanations for security/activity violations
     insight_rule_config: { defaultScoreThreshold: 60, triggerPresets: [], severityRules: [], scoreThreshold: 60, updatedAt: null, updatedBy: null },
     insight_progress_config: { requiredItems: [], updatedAt: null, updatedBy: null },
+    insight_hr_evidence: [],
     live_assessment_rules_config: { rules: [], rulesHtml: '', updatedAt: null, updatedBy: null },
     live_booking_rules_config: { rules: [], rulesHtml: '', updatedAt: null, updatedBy: null },
     training_rules_config: { rules: [], rulesHtml: '', showOnFirstLogin: true, showOnLogin: false, targetMode: 'all', targetUsers: [], targetGroups: [], officeOptions: [], updatedAt: null, updatedBy: null },
@@ -4238,6 +4239,32 @@ function executePendingSessionAction(rawAction) {
     }
     if (action.startsWith('vetting_force:')) {
         applyVettingSessionNudgeCommand(action);
+        return true;
+    }
+    if (action.startsWith('vetting_submit:')) {
+        const targetSessionId = (() => {
+            const raw = action.replace(/^vetting_submit:/, '');
+            try { return decodeURIComponent(raw); } catch (e) { return raw; }
+        })();
+        const local = safeLocalParse('vettingSession', {}) || {};
+        if (targetSessionId && local.sessionId && String(local.sessionId) !== String(targetSessionId)) return true;
+        if (typeof showToast === 'function') showToast('Admin requested final vetting submission. Saving your current answers now.', 'warning');
+        try {
+            if (
+                local.testId &&
+                (!window.CURRENT_TEST || String(window.CURRENT_TEST.id || '') !== String(local.testId)) &&
+                typeof openTestTaker === 'function'
+            ) {
+                const container = document.getElementById('vetting-arena-content');
+                if (container && !document.getElementById('arenaTestContainer')) {
+                    container.innerHTML = '<div id="arenaTestContainer"></div>';
+                }
+                openTestTaker(local.testId, true);
+            }
+        } catch (e) {
+            console.warn('Unable to reopen vetting test before forced submit:', e);
+        }
+        setTimeout(() => { if (typeof submitTest === 'function') submitTest(true); }, 1000);
         return true;
     }
     if (action === 'fix_submission') {

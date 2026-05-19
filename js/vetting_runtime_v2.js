@@ -536,17 +536,29 @@
         }
         if (timerStr) session.trainees[username].timer = timerStr;
 
-        if (typeof require !== 'undefined') {
+        let securitySnapshot = null;
+        let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+        if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
+            forbidden = window.DEFAULT_FORBIDDEN_APPS;
+        }
+        if (window.electronAPI && typeof window.electronAPI.getProcessList === 'function') {
+            const [screens, apps] = await Promise.all([
+                typeof window.electronAPI.getScreenCount === 'function' ? window.electronAPI.getScreenCount().catch(() => 0) : Promise.resolve(0),
+                window.electronAPI.getProcessList(forbidden).catch(() => [])
+            ]);
+            securitySnapshot = { screens, apps };
+        } else if (typeof require !== 'undefined') {
             const { ipcRenderer } = require('electron');
-            let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
-            if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
-                forbidden = window.DEFAULT_FORBIDDEN_APPS;
-            }
-
             const [screens, apps] = await Promise.all([
                 ipcRenderer.invoke('get-screen-count'),
                 ipcRenderer.invoke('get-process-list', forbidden)
             ]);
+            securitySnapshot = { screens, apps };
+        }
+
+        if (securitySnapshot) {
+            const screens = Number(securitySnapshot.screens || 0);
+            const apps = Array.isArray(securitySnapshot.apps) ? securitySnapshot.apps : [];
             session.trainees[username].security = { screens, apps };
 
             if (!isRelaxed && apps.length > 0 && statusToPersist === 'started') {

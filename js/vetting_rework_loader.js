@@ -69,18 +69,25 @@ const VettingReworkLoader = {
         console.log(`[Sandbox Loader] Injecting Webview mapped to: ${modulePath} (target=${activeCreds.target})`);
 
         container.innerHTML = `
-            <div style="background:var(--bg-input); padding:10px; border-radius:8px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; border:1px solid var(--primary);">
-                <div style="color:var(--primary); font-weight:bold;"><i class="fas ${badgeIcon}"></i> ${title}</div>
-                <button class="btn-secondary btn-sm" onclick="this.closest('section, div').querySelector('.vetting-rework-webview')?.openDevTools()"><i class="fas fa-bug"></i> Inspect Runtime</button>
+            <div class="embedded-program-shell">
+            <div class="embedded-program-header">
+                <div>
+                    <div class="embedded-program-title"><i class="fas ${badgeIcon}"></i> ${title}</div>
+                    <div class="embedded-program-subtitle">Vetting runtime hosted inside an isolated module.</div>
+                </div>
+                <div class="embedded-program-actions">
+                    <button class="btn-secondary btn-sm" onclick="this.closest('section, div').querySelector('.vetting-rework-webview')?.openDevTools()"><i class="fas fa-bug"></i> Inspect Runtime</button>
+                </div>
             </div>
             <webview 
-                class="vetting-rework-webview"
+                class="vetting-rework-webview embedded-program-frame"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}&mode=${encodeURIComponent(mode)}" 
-                style="width:100%; height:calc(100vh - 200px); border:none; background:var(--bg-card); box-shadow:0 0 15px rgba(0,0,0,0.5);"
+                style="height:calc(100vh - 230px);"
                 webpreferences="nodeIntegration=no, contextIsolation=yes"
                 preload="${preloadPath}"
                 partition="${partitionName}"
-                allowpopups></webview>`;
+                allowpopups></webview>
+            </div>`;
         const webview = container.querySelector('.vetting-rework-webview');
         if (webview) {
             webview.addEventListener('dom-ready', () => {

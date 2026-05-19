@@ -87,23 +87,30 @@ function loadMarkingQueue() {
         if (typeof saveToServer === 'function') saveToServer(['submissions'], false, true);
     }
 
-    // GHOST DATA CLEANUP:
-    const ghosts = [];
+    // STALE LINKED PENDING CLEANUP:
+    const linkedPending = [];
     const validPending = [];
 
     pending.forEach(s => {
-        // Only consider it a ghost if a record is EXPLICITLY linked to this specific submission ID
-        // This allows legitimate retakes to appear in the marking queue even if a prior record exists.
-        const isLinkedToRecord = records.some(r => r.submissionId === s.id);
-        if (isLinkedToRecord) ghosts.push(s);
+        // If a permanent record is already linked to this exact submission, the row is usually
+        // a completed submission whose status lagged during sync. Do not hide active marking work.
+        const linkedRecord = records.find(r => r.submissionId === s.id);
+        const activeLock = getActiveMarkingLock(s);
+        const isActiveModalSubmission = window.ACTIVE_MARKING_SUBMISSION_ID && String(window.ACTIVE_MARKING_SUBMISSION_ID) === String(s.id);
+        if (linkedRecord && !activeLock && !isActiveModalSubmission) linkedPending.push({ submission: s, record: linkedRecord });
         else validPending.push(s);
     });
 
-    if (ghosts.length > 0) {
-        console.log("Auto-archiving ghost submissions:", ghosts);
-        ghosts.forEach(g => { g.status = 'completed'; g.archived = true; });
+    if (linkedPending.length > 0) {
+        console.log("Auto-repairing linked pending submissions:", linkedPending.map(item => item.submission));
+        linkedPending.forEach(({ submission, record }) => {
+            submission.status = 'completed';
+            submission.archived = false;
+            if (record && typeof record.score !== 'undefined') submission.score = record.score;
+            submission.lastModified = submission.lastModified || record.lastModified || new Date().toISOString();
+        });
         localStorage.setItem('submissions', JSON.stringify(subs)); // Save updated state
-        if(typeof saveToServer === 'function') saveToServer(['submissions'], false);
+        if(typeof saveToServer === 'function') saveToServer(['submissions'], false, true);
     }
 
     // Update Badge
@@ -195,6 +202,40 @@ function getSubmissionEditTime(submission) {
 
 function buildRecordIdForSubmission(submission) {
     return submission?.id ? `record_${submission.id}` : `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+async function ensureMarkedAssessmentRowsOnServer(submission, record = null) {
+    if (!window.supabaseClient || !submission?.id) return;
+
+    const now = new Date().toISOString();
+    const submissionRow = {
+        id: submission.id,
+        data: submission,
+        trainee: submission.trainee || null,
+        updated_at: now
+    };
+
+    const { error: subError } = await window.supabaseClient
+        .from('submissions')
+        .upsert(submissionRow)
+        .select('id')
+        .single();
+    if (subError) throw subError;
+
+    if (record?.id) {
+        const recordRow = {
+            id: record.id,
+            data: record,
+            trainee: record.trainee || null,
+            updated_at: now
+        };
+        const { error: recError } = await window.supabaseClient
+            .from('records')
+            .upsert(recordRow)
+            .select('id')
+            .single();
+        if (recError) throw recError;
+    }
 }
 
 function applyServerSubmissionLocally(serverSubmission) {
@@ -572,9 +613,14 @@ async function approveSubmission(subId) {
     }
 
     localStorage.setItem('records', JSON.stringify(recs));
+    const savedRecord = existingIdx > -1 ? recs[existingIdx] : newRecord;
     
     try {
-        if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], true);
+        if (typeof saveToServer === 'function') {
+            const synced = await saveToServer(['submissions', 'records'], true);
+            if (synced === false) throw new Error('Critical approval sync failed.');
+        }
+        await ensureMarkedAssessmentRowsOnServer(sub, savedRecord);
     } catch (error) {
         console.error("Quick approve sync failed:", error);
         window._isApproving = null;
@@ -1006,9 +1052,14 @@ async function finalizeAdminMarking(subId) {
     }
     
     localStorage.setItem('records', JSON.stringify(records));
+    const savedRecord = existingIdx > -1 ? records[existingIdx] : newRecord;
 
     try {
-        if (typeof saveToServer === 'function') await saveToServer(['submissions', 'records'], true);
+        if (typeof saveToServer === 'function') {
+            const synced = await saveToServer(['submissions', 'records'], true);
+            if (synced === false) throw new Error('Critical marking sync failed.');
+        }
+        await ensureMarkedAssessmentRowsOnServer(sub, savedRecord);
     } catch (error) {
         console.error("Final marking sync failed:", error);
         alert("The marking was saved locally, but it could not sync to the server. Please check connection before closing this review.");

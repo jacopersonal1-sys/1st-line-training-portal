@@ -70,6 +70,7 @@ const InsightStudioLoader = {
             'retrain_archives',
             'insight_rule_config',
             'insight_progress_config',
+            'insight_hr_evidence',
             'insight_subject_reviews'
         ];
         const snapshot = {};
@@ -225,14 +226,27 @@ const InsightStudioLoader = {
     attachWebview: function(container, modulePath, userParam, credsParam) {
         if (!container || !container.isConnected) return;
         container.innerHTML = `
+            <div class="embedded-program-shell">
+            <div class="embedded-program-header">
+                <div>
+                    <div class="embedded-program-title"><i class="fas fa-chart-line"></i> Insight</div>
+                    <div class="embedded-program-subtitle">Analytics workspace running with the current portal theme.</div>
+                </div>
+                <div class="embedded-program-actions">
+                    <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                    <button class="btn-secondary btn-sm" onclick="InsightStudioLoader.refresh({ force: true })"><i class="fas fa-rotate-right"></i> Refresh</button>
+                </div>
+            </div>
             <webview
                 id="insight-studio-webview"
+                class="embedded-program-frame"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}&sessionCache=1"
-                style="width:100%; height:calc(100vh - 190px); border:none; background:transparent;"
+                style="height:calc(100vh - 230px);"
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
                 partition="persist:insight_studio"
                 allowpopups
             ></webview>
+            </div>
         `;
 
         const webview = document.getElementById('insight-studio-webview');

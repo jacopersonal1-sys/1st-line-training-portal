@@ -28,18 +28,26 @@ const SuperAdminDataStudioLoader = {
         const modulePath = basePath + '/modules/superadmin_data_studio/index.html';
 
         container.innerHTML = `
-            <div style="background:var(--bg-input); padding:10px; border-radius:8px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; border:1px solid var(--primary);">
-                <div style="color:var(--primary); font-weight:bold;"><i class="fas fa-satellite-dish"></i> Live Supabase Studio</div>
-                <button class="btn-secondary btn-sm" onclick="document.getElementById('superadmin-data-studio-webview').openDevTools()"><i class="fas fa-bug"></i> Inspect Studio</button>
+            <div class="embedded-program-shell">
+            <div class="embedded-program-header">
+                <div>
+                    <div class="embedded-program-title"><i class="fas fa-satellite-dish"></i> Live Supabase Studio</div>
+                    <div class="embedded-program-subtitle">Direct data studio hosted as an isolated admin program.</div>
+                </div>
+                <div class="embedded-program-actions">
+                    <button class="btn-secondary btn-sm" onclick="document.getElementById('superadmin-data-studio-webview').openDevTools()"><i class="fas fa-bug"></i> Inspect Studio</button>
+                </div>
             </div>
             <webview
                 id="superadmin-data-studio-webview"
+                class="embedded-program-frame"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}"
-                style="width:100%; height:calc(100vh - 210px); border:none; background:var(--bg-card); box-shadow:0 0 15px rgba(0,0,0,0.45); border-radius:12px;"
+                style="height:calc(100vh - 230px);"
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
                 partition="persist:superadmin_data_studio"
                 allowpopups
             ></webview>
+            </div>
         `;
         const webview = document.getElementById('superadmin-data-studio-webview');
         if (webview) {

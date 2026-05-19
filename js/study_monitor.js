@@ -1181,6 +1181,91 @@ const StudyMonitor = {
         return (segments || []).filter(seg => this.getSegmentDateString(seg) === dateStr);
     },
 
+    namesMatch: function(left, right) {
+        const clean = (value) => String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[._-]+/g, ' ')
+            .replace(/\s+/g, ' ');
+        return !!clean(left) && clean(left) === clean(right);
+    },
+
+    getLocalArchivedDay: function(agentName, dateStr) {
+        const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        return (Array.isArray(historyLog) ? historyLog : []).find(row =>
+            this.namesMatch(row && (row.user || row.user_id || row.trainee), agentName)
+            && String(row && row.date || '') === dateStr
+        ) || null;
+    },
+
+    cacheArchivedDay: function(day) {
+        if (!day || !day.user || !day.date) return;
+        let historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        if (!Array.isArray(historyLog)) historyLog = [];
+        const exists = historyLog.some(row =>
+            this.namesMatch(row && (row.user || row.user_id || row.trainee), day.user)
+            && String(row && row.date || '') === String(day.date || '')
+        );
+        if (!exists) {
+            historyLog.push(day);
+            try {
+                localStorage.setItem('monitor_history', JSON.stringify(historyLog));
+            } catch (error) {
+                console.warn('Unable to cache archived monitor day locally.', error);
+            }
+        }
+    },
+
+    fetchArchivedDayFromServer: async function(agentName, dateStr) {
+        const client = window.supabaseClient || (typeof window.initSupabaseClient === 'function' ? window.initSupabaseClient() : null);
+        if (!client || !client.from) return null;
+        const normalizeRow = (row) => {
+            const base = row && row.data && typeof row.data === 'object' ? row.data : (row || {});
+            return {
+                id: String(row.id || base.id || ''),
+                user: String(base.user || base.trainee || base.username || row.user_id || '').trim(),
+                date: String(base.date || '').trim(),
+                summary: base.summary && typeof base.summary === 'object' ? base.summary : (base.stats && typeof base.stats === 'object' ? base.stats : {}),
+                details: Array.isArray(base.details) ? base.details : (Array.isArray(base.history) ? base.history : []),
+                raw: base
+            };
+        };
+
+        try {
+            let response = await client
+                .from('monitor_history')
+                .select('id,user_id,updated_at,data')
+                .ilike('user_id', agentName)
+                .eq('data->>date', dateStr)
+                .order('updated_at', { ascending: false })
+                .limit(5);
+
+            if (response.error) {
+                console.warn('Archived monitor direct lookup failed, trying date fallback.', response.error);
+                response = await client
+                    .from('monitor_history')
+                    .select('id,user_id,updated_at,data')
+                    .eq('data->>date', dateStr)
+                    .order('updated_at', { ascending: false })
+                    .limit(100);
+            }
+
+            const rows = Array.isArray(response.data) ? response.data.map(normalizeRow) : [];
+            const match = rows.find(row => this.namesMatch(row.user, agentName) && row.date === dateStr) || null;
+            if (match) this.cacheArchivedDay(match);
+            return match;
+        } catch (error) {
+            console.warn('Unable to fetch archived monitor day from server.', error);
+            return null;
+        }
+    },
+
+    getArchivedSegmentsForDate: async function(agentName, dateStr) {
+        const localDay = this.getLocalArchivedDay(agentName, dateStr);
+        const day = localDay || await this.fetchArchivedDayFromServer(agentName, dateStr);
+        return day && Array.isArray(day.details) ? this.filterSegmentsByDate(day.details, dateStr) : [];
+    },
+
     getWorkingWindowBounds: function(dateStr) {
         return {
             workStart: new Date(`${dateStr}T08:00:00`).getTime(),
@@ -3335,7 +3420,7 @@ StudyMonitor.toggleReviewQueue = function() {
     renderActivityMonitorContent();
 };
 
-StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
+StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
     const todayStr = this.getLocalDateString();
     const queryDate = targetDateStr || todayStr;
 
@@ -3400,7 +3485,7 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
     const tableContainer = document.getElementById('tlDetailTable');
     
     visualContainer.innerHTML = '';
-    tableContainer.innerHTML = '';
+    tableContainer.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:18px; color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin"></i> Loading activity timeline...</td></tr>';
 
     // --- RECALCULATE SEGMENTS ---
     let allSegments = [];
@@ -3412,13 +3497,10 @@ StudyMonitor.expandTimeline = function(agentName, targetDateStr = null) {
             allSegments = StudyMonitor.getLiveSegmentsForDate(activity, queryDate);
         }
     } else {
-        const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
-        const pastDay = historyLog.find(h => h.user === agentName && h.date === queryDate);
-        if (pastDay && pastDay.details) {
-            allSegments = StudyMonitor.filterSegmentsByDate(pastDay.details, queryDate);
-        }
+        allSegments = await StudyMonitor.getArchivedSegmentsForDate(agentName, queryDate);
     }
 
+    tableContainer.innerHTML = '';
     allSegments.sort((a, b) => (a.start || 0) - (b.start || 0));
 
     let totalMs = 0;
@@ -3540,9 +3622,7 @@ StudyMonitor.analyzeWithAI = async function(agentName, dateStr) {
             allSegments = this.getLiveSegmentsForDate(activity, dateStr);
         }
     } else {
-        const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
-        const pastDay = historyLog.find(h => h.user === agentName && h.date === dateStr);
-        if (pastDay && pastDay.details) allSegments = this.filterSegmentsByDate(pastDay.details, dateStr);
+        allSegments = await this.getArchivedSegmentsForDate(agentName, dateStr);
     }
 
     if (allSegments.length === 0) {

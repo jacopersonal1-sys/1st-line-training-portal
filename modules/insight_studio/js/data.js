@@ -5,6 +5,7 @@ const INSIGHT_FETCH_TIMEOUT_MS = 9000;
 const INSIGHT_BOOT_TIMEOUT_MS = 7000;
 const INSIGHT_SUBJECT_REVIEW_KEY = 'insight_subject_reviews';
 const INSIGHT_PROGRESS_CONFIG_KEY = 'insight_progress_config';
+const INSIGHT_HR_EVIDENCE_KEY = 'insight_hr_evidence';
 const INSIGHT_CACHE_MAX_BYTES = 900000;
 
 const INSIGHT_AUTO_PROGRESS_ITEMS = [
@@ -184,6 +185,7 @@ const InsightDataService = {
         exemptions: [],
         liveBookings: [],
         attendance: [],
+        monitorData: {},
         monitorHistory: [],
         violationReports: [],
         tlFeedback: [],
@@ -193,6 +195,7 @@ const InsightDataService = {
         tests: [],
         schedules: {},
         retrainArchives: [],
+        hrEvidence: [],
         ruleConfig: null,
         progressConfig: null,
         subjectReviews: []
@@ -225,6 +228,7 @@ const InsightDataService = {
             ruleConfig: this.state.ruleConfig || null,
             progressConfig: this.state.progressConfig || null,
             subjectReviews: this.state.subjectReviews || [],
+            hrEvidence: this.state.hrEvidence || [],
             savedReports: this.state.savedReports || [],
             insightReviews: this.state.insightReviews || [],
             exemptions: this.state.exemptions || []
@@ -355,6 +359,7 @@ const InsightDataService = {
         const localExemptions = insParseJson('exemptions', []);
         const localLiveBookings = insParseJson('liveBookings', []);
         const localAttendance = insParseJson('attendance_records', []);
+        const localMonitorData = insParseJson('monitor_data', {});
         const localMonitorHistory = insParseJson('monitor_history', []);
         const localViolationReports = insParseJson('violation_reports', []);
         const localFeedback = insParseJson('tl_agent_feedback', []);
@@ -365,6 +370,7 @@ const InsightDataService = {
         const localTests = insParseJson('tests', []);
         const localSchedules = insParseJson('schedules', {});
         const localRetrainArchives = insParseJson('retrain_archives', []);
+        const localHrEvidence = insParseJson(INSIGHT_HR_EVIDENCE_KEY, []);
         const localRuleConfig = insParseJson('insight_rule_config', null);
         const localProgressConfig = insParseJson(INSIGHT_PROGRESS_CONFIG_KEY, null);
         const localSubjectReviews = insParseJson(INSIGHT_SUBJECT_REVIEW_KEY, []);
@@ -381,6 +387,7 @@ const InsightDataService = {
         this.state.exemptions = this.normalizeExemptions(localExemptions);
         this.state.liveBookings = this.normalizeLiveBookings(localLiveBookings);
         this.state.attendance = this.normalizeAttendance(localAttendance);
+        this.state.monitorData = localMonitorData && typeof localMonitorData === 'object' ? localMonitorData : {};
         this.state.monitorHistory = this.normalizeMonitorHistory(localMonitorHistory);
         this.state.violationReports = this.normalizeViolationReports(localViolationReports);
         this.state.tlFeedback = Array.isArray(localFeedback) ? localFeedback : [];
@@ -396,6 +403,7 @@ const InsightDataService = {
         this.state.tests = Array.isArray(localTests) ? localTests : [];
         this.state.schedules = localSchedules && typeof localSchedules === 'object' ? localSchedules : {};
         this.state.retrainArchives = Array.isArray(localRetrainArchives) ? localRetrainArchives : [];
+        this.state.hrEvidence = this.normalizeHrEvidence(localHrEvidence);
         this.state.ruleConfig = this.normalizeRuleConfig(localRuleConfig);
         this.state.progressConfig = this.normalizeProgressConfig(localProgressConfig);
         this.state.subjectReviews = this.normalizeSubjectReviews(Array.isArray(localSubjectReviews) ? localSubjectReviews : []);
@@ -476,6 +484,109 @@ const InsightDataService = {
         }
     },
 
+    loadCompileData: async function() {
+        if (!AppContext.supabase) {
+            this.hydrateFromLocalStorage();
+            return this.state;
+        }
+        const [
+            recordRows,
+            submissionRows,
+            liveBookingRows,
+            attendanceRows,
+            monitorRows,
+            monitorDataDoc,
+            exemptionRows,
+            retrainArchivesDoc,
+            hrEvidenceDoc
+        ] = await Promise.all([
+            this.fetchAllRows('records'),
+            this.fetchAllRows('submissions'),
+            this.fetchAllRows('live_bookings'),
+            this.fetchAllRows('attendance'),
+            this.fetchAllRows('monitor_history'),
+            this.fetchDocument('monitor_data'),
+            this.fetchAllRows('exemptions'),
+            this.fetchDocument('retrain_archives'),
+            this.fetchDocument(INSIGHT_HR_EVIDENCE_KEY)
+        ]);
+
+        const localRecords = insParseJson('records', []);
+        const localSubmissions = insParseJson('submissions', []);
+        const localLiveBookings = insParseJson('liveBookings', []);
+        const localAttendance = insParseJson('attendance_records', []);
+        const localMonitorHistory = insParseJson('monitor_history', []);
+        const localMonitorData = insParseJson('monitor_data', {});
+        const localExemptions = insParseJson('exemptions', []);
+        const localRetrainArchives = insParseJson('retrain_archives', []);
+        const localHrEvidence = insParseJson(INSIGHT_HR_EVIDENCE_KEY, []);
+
+        this.state.records = this.normalizeRecords((Array.isArray(recordRows) && recordRows.length) ? recordRows : localRecords);
+        this.state.submissions = this.normalizeSubmissions((Array.isArray(submissionRows) && submissionRows.length) ? submissionRows : localSubmissions);
+        this.state.liveBookings = this.normalizeLiveBookings((Array.isArray(liveBookingRows) && liveBookingRows.length) ? liveBookingRows : localLiveBookings);
+        this.state.attendance = this.normalizeAttendance((Array.isArray(attendanceRows) && attendanceRows.length) ? attendanceRows : localAttendance);
+        this.state.monitorHistory = this.normalizeMonitorHistory((Array.isArray(monitorRows) && monitorRows.length) ? monitorRows : localMonitorHistory);
+        this.state.monitorData = (monitorDataDoc && typeof monitorDataDoc === 'object') ? monitorDataDoc : (localMonitorData && typeof localMonitorData === 'object' ? localMonitorData : {});
+        this.state.exemptions = this.normalizeExemptions((Array.isArray(exemptionRows) && exemptionRows.length) ? exemptionRows : localExemptions);
+        this.state.retrainArchives = Array.isArray(retrainArchivesDoc) ? retrainArchivesDoc : localRetrainArchives;
+        this.state.hrEvidence = this.normalizeHrEvidence(Array.isArray(hrEvidenceDoc) ? hrEvidenceDoc : localHrEvidence);
+        this.resetIndexes();
+        return this.state;
+    },
+
+    fetchMonitorHistoryForAgents: async function(agentNames) {
+        if (!AppContext.supabase) return [];
+        const names = (Array.isArray(agentNames) ? agentNames : [])
+            .map(name => String(name || '').trim())
+            .filter(Boolean);
+        if (!names.length) return [];
+
+        const fetched = [];
+        for (const name of names) {
+            const response = await this.withTimeout(
+                AppContext.supabase
+                    .from('monitor_history')
+                    .select('*')
+                    .ilike('user_id', name)
+                    .order('updated_at', { ascending: false })
+                    .limit(160),
+                INSIGHT_FETCH_TIMEOUT_MS,
+                { data: null, error: new Error('timeout') },
+                `monitor_history:${name}`
+            );
+            if (response && response.error) {
+                console.warn(`[Insight] Failed loading monitor history for ${name}:`, response.error);
+                continue;
+            }
+            if (Array.isArray(response && response.data)) fetched.push(...response.data);
+        }
+        return this.normalizeMonitorHistory(fetched);
+    },
+
+    mergeMonitorHistoryRows: function(rows) {
+        const incoming = this.normalizeMonitorHistory(rows || []);
+        if (!incoming.length) return this.state.monitorHistory || [];
+        const byKey = {};
+        [...(this.state.monitorHistory || []), ...incoming].forEach((row) => {
+            const key = `${insToken(row.user)}::${String(row.date || '').slice(0, 10)}`;
+            if (!key.includes('::') || !row.user || !row.date) return;
+            const existing = byKey[key];
+            if (!existing || (Array.isArray(row.details) && row.details.length > (existing.details || []).length)) {
+                byKey[key] = row;
+            }
+        });
+        this.state.monitorHistory = Object.values(byKey);
+        this.resetIndexes();
+        return this.state.monitorHistory;
+    },
+
+    loadCompileDataForAgents: async function(agentNames) {
+        await this.loadCompileData();
+        const focusedHistory = await this.fetchMonitorHistoryForAgents(agentNames);
+        this.mergeMonitorHistoryRows(focusedHistory);
+        return this.state;
+    },
+
     normalizeUsers: function(rows) {
         return (rows || []).map((row) => {
             const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
@@ -523,8 +634,9 @@ const InsightDataService = {
 
             return {
                 id: String(base.id || row.id || ''),
+                testId: String(base.testId || base.assessmentId || '').trim(),
                 trainee: String(base.trainee || base.user || base.user_id || '').trim(),
-                testTitle: String(base.testTitle || base.title || '').trim(),
+                testTitle: String(base.testTitle || base.title || base.assessment || (base.testSnapshot && base.testSnapshot.title) || '').trim(),
                 score: insToNumber(base.score, 0),
                 status: String(base.status || '').trim().toLowerCase(),
                 date: String(base.date || base.createdAt || row.updated_at || '').trim(),
@@ -562,6 +674,47 @@ const InsightDataService = {
                 comment: String(base.comment || '').trim()
             };
         }).filter(item => !!item.trainee);
+    },
+
+    normalizeHrEvidence: function(rows) {
+        return (rows || []).map((row) => {
+            const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
+            const trainee = String(base.trainee || base.user || base.agent || base.name || row.user_id || '').trim();
+            return {
+                id: String(base.id || row.id || `hr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`).trim(),
+                trainee,
+                traineeKey: String(base.traineeKey || base.trainee_key || insToken(trainee)).trim(),
+                groupID: String(base.groupID || base.groupId || base.group || '').trim(),
+                trigger: String(base.trigger || base.area || '').trim(),
+                description: String(base.description || base.comment || '').trim(),
+                proofUrl: String(base.proofUrl || base.proof || base.link || '').trim(),
+                proofName: String(base.proofName || '').trim(),
+                proofDataUrl: String(base.proofDataUrl || '').trim(),
+                createdAt: String(base.createdAt || base.date || row.updated_at || new Date().toISOString()).trim(),
+                createdBy: String(base.createdBy || '').trim()
+            };
+        }).filter(item => !!item.trainee && !!item.trigger);
+    },
+
+    resolveHrEvidenceTrainee: function(traineeName) {
+        const requested = String(traineeName || '').trim();
+        if (!requested) return null;
+        const agents = this.getAllAgents();
+        const direct = agents.find(agent => insMatch(agent.name, requested));
+        const fallback = agents.find(agent => insToken(agent.name) === insToken(requested));
+        const match = direct || fallback;
+        if (!match) {
+            return {
+                name: requested,
+                key: insToken(requested),
+                group: this.getAgentGroup(requested)
+            };
+        }
+        return {
+            name: String(match.name || requested).trim(),
+            key: insToken(match.name || requested),
+            group: String(match.group || this.getAgentGroup(match.name) || 'Ungrouped').trim()
+        };
     },
 
     normalizeExemptions: function(rows) {
@@ -614,10 +767,10 @@ const InsightDataService = {
             const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
             return {
                 id: String(row.id || base.id || ''),
-                user: String(base.user || row.user_id || '').trim(),
-                date: String(base.date || '').trim(),
-                summary: base.summary && typeof base.summary === 'object' ? base.summary : {},
-                details: Array.isArray(base.details) ? base.details : [],
+                user: String(base.user || base.trainee || base.username || row.user_id || row.user || '').trim(),
+                date: String(base.date || row.date || base.lastDate || row.updated_at || row.created_at || '').trim(),
+                summary: base.summary && typeof base.summary === 'object' ? base.summary : (base.stats && typeof base.stats === 'object' ? base.stats : {}),
+                details: Array.isArray(base.details) ? base.details : (Array.isArray(base.history) ? base.history : []),
                 raw: base
             };
         }).filter(entry => !!entry.user && !!entry.date);
@@ -833,6 +986,7 @@ const InsightDataService = {
                 this.fetchAllRows('live_bookings'),
                 this.fetchAllRows('attendance'),
                 this.fetchAllRows('monitor_history'),
+                this.fetchDocument('monitor_data'),
                 this.fetchDocument('violation_reports'),
                 this.fetchDocument('rosters'),
                 this.fetchDocument('tl_agent_feedback'),
@@ -842,6 +996,7 @@ const InsightDataService = {
                 this.fetchDocument('tests'),
                 this.fetchDocument('schedules'),
                 this.fetchDocument('retrain_archives'),
+                this.fetchDocument(INSIGHT_HR_EVIDENCE_KEY),
                 this.fetchDocument('insight_rule_config'),
                 this.fetchDocument(INSIGHT_PROGRESS_CONFIG_KEY),
                 this.fetchDocument(INSIGHT_SUBJECT_REVIEW_KEY)
@@ -865,6 +1020,7 @@ const InsightDataService = {
             liveBookingRows,
             attendanceRows,
             monitorRows,
+            monitorDataDoc,
             violationRows,
             rostersDoc,
             feedbackDoc,
@@ -874,6 +1030,7 @@ const InsightDataService = {
             testsDoc,
             schedulesDoc,
             retrainArchivesDoc,
+            hrEvidenceDoc,
             ruleConfigDoc,
             progressConfigDoc,
             subjectReviewsDoc
@@ -915,6 +1072,10 @@ const InsightDataService = {
         this.state.monitorHistory = this.normalizeMonitorHistory(
             (Array.isArray(monitorRows) && monitorRows.length) ? monitorRows : localMonitorHistory
         );
+        const localMonitorData = insParseJson('monitor_data', {});
+        this.state.monitorData = (monitorDataDoc && typeof monitorDataDoc === 'object')
+            ? monitorDataDoc
+            : (localMonitorData && typeof localMonitorData === 'object' ? localMonitorData : {});
         const localViolationReports = insParseJson('violation_reports', []);
         this.state.violationReports = this.normalizeViolationReports(
             violationRows ? violationRows : localViolationReports
@@ -956,6 +1117,10 @@ const InsightDataService = {
         this.state.retrainArchives = Array.isArray(retrainArchivesDoc)
             ? retrainArchivesDoc
             : (Array.isArray(localRetrainArchives) ? localRetrainArchives : []);
+        const localHrEvidence = insParseJson(INSIGHT_HR_EVIDENCE_KEY, []);
+        this.state.hrEvidence = this.normalizeHrEvidence(
+            Array.isArray(hrEvidenceDoc) ? hrEvidenceDoc : localHrEvidence
+        );
 
         const localRuleConfig = insParseJson('insight_rule_config', null);
         const resolvedRuleConfig = (ruleConfigDoc && typeof ruleConfigDoc === 'object')
@@ -983,6 +1148,7 @@ const InsightDataService = {
         localStorage.setItem('liveBookings', JSON.stringify(this.state.liveBookings));
         localStorage.setItem('violation_reports', JSON.stringify(this.state.violationReports));
         localStorage.setItem('retrain_archives', JSON.stringify(this.state.retrainArchives));
+        localStorage.setItem(INSIGHT_HR_EVIDENCE_KEY, JSON.stringify(this.state.hrEvidence));
         localStorage.setItem(INSIGHT_SUBJECT_REVIEW_KEY, JSON.stringify(this.state.subjectReviews));
 
         this.saveCache();
@@ -1323,6 +1489,13 @@ const InsightDataService = {
         };
     },
 
+    getAgentLiveMonitorData: function(agentName) {
+        const target = insToken(agentName);
+        if (!target || !this.state.monitorData || typeof this.state.monitorData !== 'object') return null;
+        const directKey = Object.keys(this.state.monitorData).find(key => insToken(key) === target);
+        return directKey ? this.state.monitorData[directKey] : null;
+    },
+
     getAgentFeedback: function(agentName) {
         return (this.getIndexes().feedbackByToken[insToken(agentName)] || [])
             .map(item => ({
@@ -1339,15 +1512,82 @@ const InsightDataService = {
 
     extractQuestionRows: function(source) {
         const base = source && source.raw && typeof source.raw === 'object' ? source.raw : (source || {});
+        const questionDefs = [
+            base.testSnapshot && base.testSnapshot.questions,
+            base.assessmentSnapshot && base.assessmentSnapshot.questions,
+            base.quizMeta && base.quizMeta.questions,
+            base.test && base.test.questions
+        ].find(Array.isArray) || [];
+
+        const normalizeScoreValue = (value) => {
+            if (value && typeof value === 'object') {
+                return insToNumber(
+                    value.score,
+                    insToNumber(value.awarded, insToNumber(value.earned, insToNumber(value.pointsAwarded, insToNumber(value.mark, 0))))
+                );
+            }
+            return insToNumber(value, 0);
+        };
+
+        const questionTextFromDef = (question, idx) => {
+            const row = question && typeof question === 'object' ? question : {};
+            return String(
+                row.question ||
+                row.questionText ||
+                row.prompt ||
+                row.text ||
+                row.title ||
+                row.label ||
+                `Question ${idx + 1}`
+            ).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        };
+
+        const maxFromDef = (question) => {
+            const row = question && typeof question === 'object' ? question : {};
+            return Math.max(1, insToNumber(
+                row.maxScore,
+                insToNumber(row.maxMarks, insToNumber(row.max, insToNumber(row.total, insToNumber(row.outOf, insToNumber(row.points, 1)))))
+            ));
+        };
+
+        const scoreRows = (() => {
+            const scoreSources = [base.scores, base.questionScores, base.marks, base.manualScores]
+                .filter(value => value && typeof value === 'object' && !Array.isArray(value));
+            if (!scoreSources.length) return [];
+            const mergedScores = Object.assign({}, ...scoreSources);
+            return Object.keys(mergedScores)
+                .sort((a, b) => insToNumber(a, 0) - insToNumber(b, 0))
+                .map((key, rowIdx) => {
+                    const questionIndex = Number.isFinite(Number(key)) ? Number(key) : rowIdx;
+                    const question = questionDefs[questionIndex] || {};
+                    return {
+                        text: questionTextFromDef(question, questionIndex),
+                        earned: normalizeScoreValue(mergedScores[key]),
+                        max: maxFromDef(question),
+                        index: questionIndex + 1
+                    };
+                })
+                .filter(row => !!row.text);
+        })();
+        if (scoreRows.length) return scoreRows;
+
+        const hasQuestionMarks = (items) => Array.isArray(items) && items.some((item) => {
+            if (typeof item === 'string') return true;
+            if (!item || typeof item !== 'object') return false;
+            return ['score', 'awarded', 'earned', 'pointsAwarded', 'obtained', 'mark', 'correct'].some(key =>
+                Object.prototype.hasOwnProperty.call(item, key)
+            );
+        });
+
         const candidates = [
             base.questionResults,
-            base.questions,
-            base.answers,
+            hasQuestionMarks(base.questions) ? base.questions : null,
+            hasQuestionMarks(base.answers) ? base.answers : null,
             base.markedAnswers,
             base.results,
             base.quizResults,
-            base.quizMeta && base.quizMeta.questions,
-            base.quizMeta && base.quizMeta.answers,
+            hasQuestionMarks(base.quizMeta && base.quizMeta.questions) ? base.quizMeta.questions : null,
+            hasQuestionMarks(base.quizMeta && base.quizMeta.answers) ? base.quizMeta.answers : null,
             base.quizMeta && base.quizMeta.failedQuestions
         ].filter(Array.isArray);
 
@@ -1882,15 +2122,18 @@ const InsightDataService = {
             if (mode === 'individual' && agentFilter && !insMatch(agent, agentFilter)) return;
             if (searchText && !insNormalize(`${agent} ${group} ${assessment}`).includes(searchText)) return;
 
-            const failed = this.extractQuestionRows(submission)
-                .filter(row => insToNumber(row.earned, 0) < insToNumber(row.max, 1));
-            if (!failed.length) return;
-
             const assessmentKey = insNormalize(assessment);
             if (!assessmentMap[assessmentKey]) {
                 assessmentMap[assessmentKey] = { assessment, failedCount: 0, attempts: 0, agents: new Set(), questions: {} };
             }
+
+            const questionRows = this.extractQuestionRows(submission);
+            if (!questionRows.length) return;
             assessmentMap[assessmentKey].attempts += 1;
+
+            const failed = questionRows
+                .filter(row => insToNumber(row.earned, 0) < insToNumber(row.max, 1));
+            if (!failed.length) return;
 
             const groupKey = insNormalize(group);
             if (!groupMap[groupKey]) {
@@ -1942,9 +2185,15 @@ const InsightDataService = {
             });
         });
 
-        const normalizeQuestionRows = (questions) => Object.values(questions || {})
-            .map(row => ({ ...row, agentCount: row.agents ? row.agents.size : 0 }))
+        const normalizeQuestionRows = (questions, totalAttempts = 0) => Object.values(questions || {})
+            .map(row => ({
+                ...row,
+                agentCount: row.agents ? row.agents.size : 0,
+                failRate: totalAttempts > 0 ? Math.round((insToNumber(row.failCount, 0) / totalAttempts) * 100) : 0
+            }))
             .sort((a, b) => {
+                const rateDiff = insToNumber(b.failRate, 0) - insToNumber(a.failRate, 0);
+                if (rateDiff !== 0) return rateDiff;
                 const diff = insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0);
                 if (diff !== 0) return diff;
                 return String(a.question || '').localeCompare(String(b.question || ''), undefined, { numeric: true, sensitivity: 'base' });
@@ -1956,7 +2205,7 @@ const InsightDataService = {
                 failedCount: row.failedCount,
                 attempts: row.attempts,
                 agentCount: row.agents.size,
-                questions: normalizeQuestionRows(row.questions)
+                questions: normalizeQuestionRows(row.questions, row.attempts)
             }))
             .sort((a, b) => insToNumber(b.failedCount, 0) - insToNumber(a.failedCount, 0));
 
@@ -2169,7 +2418,59 @@ const InsightDataService = {
         this.resetIndexes();
         this.saveCache();
         return { ok: true };
+    },
+
+    getHrEvidenceForAgent: function(agentName) {
+        const target = insToken(agentName);
+        return (this.state.hrEvidence || [])
+            .filter(row => insToken(row.trainee) === target || String(row.traineeKey || '') === target)
+            .sort((a, b) => insToTs(b.createdAt) - insToTs(a.createdAt));
+    },
+
+    saveHrEvidenceEntry: async function(entry) {
+        const nowIso = new Date().toISOString();
+        const currentUser = AppContext.user && (AppContext.user.user || AppContext.user.username || AppContext.user.email);
+        const traineeIdentity = this.resolveHrEvidenceTrainee(entry && entry.trainee);
+        const payload = this.normalizeHrEvidence([{
+            id: entry && entry.id ? entry.id : `hr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            trainee: traineeIdentity && traineeIdentity.name,
+            traineeKey: traineeIdentity && traineeIdentity.key,
+            groupID: traineeIdentity && traineeIdentity.group,
+            trigger: entry && entry.trigger,
+            description: entry && entry.description,
+            proofUrl: entry && entry.proofUrl,
+            proofName: entry && entry.proofName,
+            proofDataUrl: entry && entry.proofDataUrl,
+            createdAt: entry && entry.createdAt ? entry.createdAt : nowIso,
+            createdBy: currentUser || ''
+        }])[0];
+        if (!payload) return { ok: false, message: 'Choose a trainee and trigger before capturing evidence.' };
+        if (!payload.description && !payload.proofUrl && !payload.proofDataUrl) {
+            return { ok: false, message: 'Add a description, proof link, or screenshot before capturing evidence.' };
+        }
+
+        const nextRows = [payload, ...(this.state.hrEvidence || [])];
+        if (AppContext.supabase) {
+            const { error } = await AppContext.supabase
+                .from('app_documents')
+                .upsert({
+                    key: INSIGHT_HR_EVIDENCE_KEY,
+                    content: nextRows,
+                    updated_at: nowIso
+                }, { onConflict: 'key' });
+            if (error) {
+                console.warn('[Insight] Failed saving HR evidence:', error);
+                return { ok: false, message: 'Failed to save HR evidence to the server.' };
+            }
+        }
+
+        this.state.hrEvidence = nextRows;
+        localStorage.setItem(INSIGHT_HR_EVIDENCE_KEY, JSON.stringify(nextRows));
+        this.resetIndexes();
+        this.saveCache();
+        return { ok: true, entry: payload };
     }
 };
 
-window.InsightDataService = InsightDataService;
+if (typeof window !== 'undefined') window.InsightDataService = InsightDataService;
+if (typeof module !== 'undefined') module.exports = InsightDataService;

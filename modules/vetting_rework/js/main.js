@@ -694,7 +694,22 @@ const App = {
 
     forceSubmitTrainee: async function(sessionId, username) {
         if(!confirm(`Force submit and kick ${username}?`)) return;
-        await this.patchUser(sessionId, username, { status: 'completed' });
+        await this.patchUser(sessionId, username, {
+            status: 'submitting',
+            forcedSubmitAt: Date.now(),
+            completionGate: {
+                pending: true,
+                reason: 'Admin forced submit. Waiting for trainee app to upload submission evidence.',
+                checkedAt: Date.now()
+            }
+        });
+        if (typeof DataService.nudgeTrainee === 'function') {
+            try {
+                await DataService.nudgeTrainee(username, `vetting_submit:${encodeURIComponent(sessionId)}`);
+            } catch (e) {
+                console.warn('Force-submit nudge failed:', e);
+            }
+        }
     },
 
     overrideSecurity: async function(sessionId, username) {

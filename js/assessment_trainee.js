@@ -56,6 +56,61 @@ function isLegacySubmissionForCurrentAttempt(submission, currentGroupId, latestM
     return false;
 }
 
+function buildAssessmentSubmissionId(testId, trainee) {
+    const cleanTest = String(testId || 'test').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+    const cleanUser = String(trainee || 'trainee').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+    const rand = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+        : Math.random().toString(36).slice(2, 14);
+    return `sub_${Date.now()}_${cleanUser}_${cleanTest}_${rand}`;
+}
+
+async function ensureSubmissionRowsOnServer(submission, record = null) {
+    if (!window.supabaseClient || !submission || !submission.id) return false;
+
+    const nowIso = new Date().toISOString();
+    const upsertExactRow = async (table, item) => {
+        if (!item || !item.id) return false;
+        const row = {
+            id: item.id,
+            data: item,
+            updated_at: nowIso,
+            trainee: item.trainee || item.user || null
+        };
+        const { error } = await window.supabaseClient.from(table).upsert(row);
+        if (error) throw error;
+        return true;
+    };
+
+    const verifyOrWrite = async (table, item) => {
+        if (!item || !item.id) return true;
+        try {
+            const { data, error } = await window.supabaseClient
+                .from(table)
+                .select('id,data')
+                .eq('id', item.id)
+                .maybeSingle();
+            if (error) throw error;
+            const serverItem = data && data.data;
+            const serverOwner = String(serverItem && (serverItem.trainee || serverItem.user) || '').trim().toLowerCase();
+            const localOwner = String(item.trainee || item.user || '').trim().toLowerCase();
+            const serverLink = String(serverItem && (serverItem.testId || serverItem.assessmentId || serverItem.submissionId) || '');
+            const localLink = String(item.testId || item.assessmentId || item.submissionId || '');
+            if (!serverItem || (localOwner && serverOwner && serverOwner !== localOwner) || (localLink && serverLink && serverLink !== localLink)) {
+                await upsertExactRow(table, item);
+            }
+            return true;
+        } catch (error) {
+            await upsertExactRow(table, item);
+            return true;
+        }
+    };
+
+    await verifyOrWrite('submissions', submission);
+    if (record && record.id) await verifyOrWrite('records', record);
+    return true;
+}
+
 const ASSESSMENT_POPUP_MODAL_ID = 'assessmentQuizPopupModal';
 const ASSESSMENT_POPUP_CONTAINER_ID = 'assessmentQuizPopupContainer';
 
@@ -699,6 +754,10 @@ async function submitTest(forceSubmit = false, options = {}) {
     const records = JSON.parse(localStorage.getItem('records') || '[]');
     const myGroupId = getCurrentTraineeGroupId();
     const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
+    let localSubmissionSaved = false;
+    let localSubmissionWasVettingArena = false;
+    let savedSubmissionForVerification = null;
+    let savedRecordForVerification = null;
     
     try {
     // FIX: Strict check to prevent false positives ("Already Submitted" error)
@@ -785,7 +844,7 @@ async function submitTest(forceSubmit = false, options = {}) {
 
     const submissionTime = new Date().toISOString();
     const submission = {
-        id: Date.now().toString(),
+        id: buildAssessmentSubmissionId(window.CURRENT_TEST.id, CURRENT_USER.user),
         testId: window.CURRENT_TEST.id,
         testTitle: window.CURRENT_TEST.title,
         trainee: CURRENT_USER.user,
@@ -800,9 +859,12 @@ async function submitTest(forceSubmit = false, options = {}) {
         lastModified: submissionTime,
         modifiedBy: CURRENT_USER.user
     };
+    localSubmissionWasVettingArena = !!window.IS_LIVE_ARENA && String(window.CURRENT_TEST?.type || '').toLowerCase() === 'vetting';
 
     subs.push(submission);
     localStorage.setItem('submissions', JSON.stringify(subs));
+    localSubmissionSaved = true;
+    savedSubmissionForVerification = submission;
 
     localStorage.removeItem('draft_assessment');
 
@@ -849,8 +911,10 @@ async function submitTest(forceSubmit = false, options = {}) {
                  id: records[existingIdx].id,
                  createdAt: records[existingIdx].createdAt || newRecord.createdAt
              };
+             savedRecordForVerification = records[existingIdx];
         } else {
              records.push(newRecord);
+             savedRecordForVerification = newRecord;
         }
 
         localStorage.setItem('records', JSON.stringify(records));
@@ -858,8 +922,10 @@ async function submitTest(forceSubmit = false, options = {}) {
 
     if (typeof saveToServer === 'function') {
         // Final submissions are business-critical, so do not leave them on the debounced queue.
-        await saveToServer(['submissions', 'records'], true);
+        const synced = await saveToServer(['submissions', 'records'], true);
+        if (synced === false) throw new Error('Critical submission sync failed.');
     }
+    await ensureSubmissionRowsOnServer(savedSubmissionForVerification, savedRecordForVerification);
 
     if (typeof exitArena === 'function') {
         try {
@@ -907,6 +973,20 @@ async function submitTest(forceSubmit = false, options = {}) {
     
     } catch (error) {
         console.error("Submission UI Error:", error);
+        if (localSubmissionSaved && localSubmissionWasVettingArena && typeof exitArena === 'function') {
+            try {
+                await exitArena(true);
+                if (typeof showToast === 'function') {
+                    showToast("Your vetting answers were saved locally. The arena is holding you in sync mode until the server confirms the submission.", "warning");
+                }
+                if (window.VettingRuntimeV2 && typeof window.VettingRuntimeV2.renderTraineeArena === 'function') {
+                    window.VettingRuntimeV2.renderTraineeArena();
+                }
+                return;
+            } catch (arenaErr) {
+                console.warn("Failed to move vetting arena into sync-hold state:", arenaErr);
+            }
+        }
         if (window.TEST_POPUP_MODE) {
             alert("Your assessment was saved locally, but the popup encountered an error. Please reopen the questionnaire and submit.");
             closeAssessmentQuizPopup({ force: true, persistDraft: true });

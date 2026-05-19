@@ -20,13 +20,26 @@ const TLTasks = {
 
         // Load the isolated module
         container.innerHTML = `
+            <div class="embedded-program-shell">
+            <div class="embedded-program-header">
+                <div>
+                    <div class="embedded-program-title"><i class="fas fa-users-cog"></i> Teamleader Hub</div>
+                    <div class="embedded-program-subtitle">Team project tools running in their own workspace.</div>
+                </div>
+                <div class="embedded-program-actions">
+                    <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                    <button class="btn-secondary btn-sm" onclick="TLTasks.renderUI()"><i class="fas fa-rotate-right"></i> Refresh</button>
+                </div>
+            </div>
             <webview 
                 id="tl-hub-webview" 
+                class="embedded-program-frame"
                 src="modules/team_projects/index.html?user=${userParam}&creds=${credsParam}" 
-                style="width:100%; height:calc(100vh - 150px); border:none; background:transparent;"
+                style="height:calc(100vh - 230px);"
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
                 allowpopups
             ></webview>
+            </div>
         `;
         const webview = document.getElementById('tl-hub-webview');
         if (webview) {

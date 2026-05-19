@@ -60,4 +60,38 @@ describe('E2E: Trainee submit -> save flow', () => {
         expect(calls.some(c => Array.isArray(c.keys) && c.keys.includes('submissions') && c.force === true)).toBe(true);
 
     }, 20000);
+
+    test('vetting arena enters sync-hold if cloud save fails after local submission', async () => {
+        const dataSrc = fs.readFileSync(path.resolve(__dirname, '../js/data.js'), 'utf8');
+        const assessmentSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+
+        eval(dataSrc);
+        eval(assessmentSrc);
+
+        window.CURRENT_USER = { user: 'alice', role: 'trainee' };
+        global.CURRENT_USER = window.CURRENT_USER;
+        localStorage.setItem('tests', JSON.stringify([{ id: 'V1', title: 'Final Vetting', questions: [], type: 'vetting' }]));
+        localStorage.setItem('rosters', JSON.stringify({ 'G1': ['alice'] }));
+
+        window.CURRENT_TEST = { id: 'V1', title: 'Final Vetting', questions: [], type: 'vetting', remainingSeconds: 0 };
+        window.USER_ANSWERS = {};
+        window.IS_LIVE_ARENA = true;
+        window.calculateAssessmentAutoResult = () => ({ autoPoints: 0, maxPoints: 0, percent: 88, needsManual: false });
+        window.saveToServer = jest.fn(async () => { throw new Error('network down'); });
+        global.saveToServer = window.saveToServer;
+        saveToServer = window.saveToServer;
+        window.exitArena = jest.fn(async () => true);
+        global.exitArena = window.exitArena;
+        exitArena = window.exitArena;
+        window.VettingRuntimeV2 = { renderTraineeArena: jest.fn() };
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        await submitTest(true);
+
+        const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        expect(subs).toHaveLength(1);
+        expect(subs[0].testId).toBe('V1');
+        expect(window.exitArena).toHaveBeenCalledWith(true);
+        expect(window.VettingRuntimeV2.renderTraineeArena).toHaveBeenCalled();
+    }, 20000);
 });

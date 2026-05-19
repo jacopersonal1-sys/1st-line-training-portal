@@ -161,4 +161,42 @@ describe('Live assessment record finalization', () => {
         expect(session.comments[8]).toBe('Observed practical step');
         expect(updateStub).toHaveBeenCalled();
     });
+
+    test('question chat messages are scoped to the current live question', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/live_execution.js'), 'utf8');
+        eval(src);
+
+        const updateStub = jest.fn(async () => true);
+        window.updateGlobalSessionArray = updateStub;
+        updateGlobalSessionArray = updateStub;
+        document.getElementById = jest.fn((id) => {
+            if (id === 'liveQuestionMessageInput') return { value: 'Check the ONT light before you answer.' };
+            if (id === 'live-admin-question-message-display') return { innerHTML: '' };
+            if (id === 'trainee-live-question-message-display') return { innerHTML: '' };
+            return null;
+        });
+
+        localStorage.setItem('liveSession', JSON.stringify({
+            sessionId: 'chat_session',
+            active: true,
+            currentQ: 2,
+            trainee: 'Alice',
+            trainer: 'trainer',
+            answers: {},
+            scores: {},
+            comments: {}
+        }));
+
+        await sendLiveQuestionMessage(2);
+
+        let session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        expect(session.questionMessages['2'].text).toBe('Check the ONT light before you answer.');
+        expect(session.questionMessages['0']).toBeUndefined();
+        expect(updateStub).toHaveBeenCalled();
+
+        await clearLiveQuestionMessage(2);
+
+        session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        expect(session.questionMessages['2']).toBeUndefined();
+    });
 });

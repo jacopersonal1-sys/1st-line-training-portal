@@ -500,11 +500,13 @@ function validateEnterprisePassword(password) {
 
 window.openUnifiedProfileSettings = function() {
     const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
-    const expTheme = localStorage.getItem('experimental_theme') || '';
+    const storedExpTheme = localStorage.getItem('experimental_theme') || '';
+    const expTheme = storedExpTheme || ((typeof getEffectiveExperimentalTheme === 'function') ? getEffectiveExperimentalTheme() : '');
     const selectedChannel = (localStorage.getItem('profile_update_channel') || 'main') === 'beta' ? 'beta' : 'main';
     const expLabels = {
         '': 'Original',
         'theme-custom-lab': 'Custom Lab',
+        'theme-one-ui': 'One UI Clean',
         'theme-cyberpunk': 'Neon Nights',
         'theme-ocean': 'Deep Sea',
         'theme-forest': 'Enchanted Forest',
@@ -588,7 +590,7 @@ window.openUnifiedProfileSettings = function() {
                         <div><strong>User:</strong> ${safeAttr(profileUser.user || CURRENT_USER?.user || 'Unknown')}</div>
                         <div><strong>Role:</strong> ${safeAttr(role || 'Unknown')}</div>
                         <div><strong>Group:</strong> ${safeAttr(myGroup)}</div>
-                        <div><strong>Theme:</strong> ${safeAttr(expLabels[expTheme] || 'Original')}</div>
+                        <div><strong>Theme:</strong> ${safeAttr(expLabels[expTheme] || 'Original')}${expTheme === 'theme-one-ui' && !storedExpTheme ? ' (Default)' : ''}</div>
                         <div><strong>Account Status:</strong> ${safeAttr(accountStatus)}</div>
                         <div><strong>Password State:</strong> ${safeAttr(passwordState)}</div>
                         <div><strong>Device ID:</strong> <code>${safeAttr(clientId)}</code></div>
@@ -666,6 +668,7 @@ window.openUnifiedProfileSettings = function() {
                         <select id="profExperimentalTheme" onchange="updateProfileExperimentalThemeUI()" style="margin-bottom:8px;">
                             <option value="" ${expTheme === '' ? 'selected' : ''}>Original</option>
                             <option value="theme-custom-lab" ${expTheme === 'theme-custom-lab' ? 'selected' : ''}>Custom Lab</option>
+                            <option value="theme-one-ui" ${expTheme === 'theme-one-ui' ? 'selected' : ''}>One UI Clean</option>
                             <option value="theme-cyberpunk" ${expTheme === 'theme-cyberpunk' ? 'selected' : ''}>Neon Nights</option>
                             <option value="theme-ocean" ${expTheme === 'theme-ocean' ? 'selected' : ''}>Deep Sea</option>
                             <option value="theme-forest" ${expTheme === 'theme-forest' ? 'selected' : ''}>Enchanted Forest</option>
@@ -786,6 +789,7 @@ window.updateProfileExperimentalThemeUI = function() {
     if (hint) {
         if (!selected) hint.textContent = 'Original theme selected. Standard personalization still applies.';
         else if (selected === 'theme-custom-lab') hint.textContent = 'Custom Lab selected. Tune your draft below.';
+        else if (selected === 'theme-one-ui') hint.textContent = 'One UI Clean selected. This is the default for profiles without a custom visual theme.';
         else hint.textContent = 'Preset selected. Save Changes to apply globally for your profile.';
     }
 };

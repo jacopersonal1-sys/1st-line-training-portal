@@ -41,6 +41,7 @@
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
 | `violation_reports` | Array | Blob (`app_documents`) | Mandatory trainee explanations for external-app training-scope violations. Stores trigger, reason, platform, person informed, status, and review metadata. |
+| `insight_hr_evidence` | Array | Blob (`app_documents`) | HR Evidence captured for trainees from Insight, stored by canonical trainee name plus normalized trainee key and group for Insight Build evidence grids. |
 | `insight_progress_config` | Object | Blob (`app_documents`) | Agent Progress Builder checklist configuration. This is the canonical progress/scoring list for Insight Compare Viewer and Agent Search archive progress, including checklist type and Onboard Report section flags. |
 | `insight_rule_config` | Object | Blob (`app_documents`) | Insight severity/threshold trigger mapping. |
 | `live_assessment_rules_config` | Object | Blob (`app_documents`) | Rich-text Live Assessment pre-question rules shown in the arena. |
@@ -495,6 +496,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.94 (One UI Default + Navigation Performance, 2026-05-19):** One UI Clean is now the effective default workspace theme when a user/PC has no custom visual theme configured, while explicit experimental themes and custom accent/background/wallpaper settings remain respected. The One UI layer now reaches deeper into shell headers, cards, bottom-sheet style modals, status chips, segmented controls, tables, toasts, embedded module title bars, and shared iframe/webview chrome. Navigation avoids rebuilding heavy embedded workspaces on return, defers responsive table labelling and fresh server sync until after tab paint, and debounces repeated tab clicks. The marking queue now keeps actively marked linked pending submissions visible and repairs stale linked pending rows without archiving them; admin connectivity testing also guards missing local-server inputs.
+- **v2.6.93 (Insight Evidence + Vetting Save Hardening, 2026-05-19):** Knowledge Gaps now reads Test Engine `scores` maps with `testSnapshot.questions`, calculates failure rates against all marked attempts, and exports the Insight data service for focused tests. HR Evidence now resolves saved rows to the canonical trainee name, normalized trainee key, and group so Insight Build can find captured proof reliably. Vetting submit/force-submit and admin marking paths now treat failed critical sync as a blocking condition and verify exact submission/record rows. Added the reversible One UI Clean experimental theme and `ops/insight_hr_evidence_setup_20260519.sql` for Supabase SQL Editor setup.
 - **v2.6.90 (Course Request Email Body Clarification, 2026-05-13):** Course move-on request emails now always prepend Timeline Course name and User automatically. `course_progress_request_config.emailBodyTemplate` stores only the editable request-message portion from Admin Tools > System Config.
 - **v2.6.89 (Editable Course Request Email Body, 2026-05-13):** Course move-on request emails now use `course_progress_request_config.emailBodyTemplate`, edited from Admin Tools > System Config.
 - **v2.6.88 (Editable Course Request Message, 2026-05-13):** The course move-on request sentence is now stored as `course_progress_request_config.requestMessage`, edited from Admin Tools > System Config, and reused for the trainee button label and default email body.
@@ -570,6 +573,24 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.94 - 2026-05-19
+
+- Feature: One UI Clean is now the default theme when no custom visual theme is configured.
+- Improvement: One UI styling now reaches deeper into shell headers, cards, modals, status chips, segmented controls, tables, toasts, and embedded app title bars.
+- Performance: Tab navigation now defers non-critical work, skips rebuilding already-loaded embedded modules, and debounces repeated clicks.
+- Fix: Marking queue cleanup no longer hides actively marked linked pending submissions and repairs stale linked pending rows without archiving them.
+- Fix: Connectivity testing handles missing local server inputs without throwing.
+- Verification: Focused syntax checks and Jest suites passed.
+
+## v2.6.93 - 2026-05-19
+
+- Fix: Insight Knowledge Gaps now reads saved Test Engine question marks from `scores` plus `testSnapshot.questions` and reports failure rates against all marked attempts.
+- Improvement: HR Evidence captures are stored against canonical trainee identity (`trainee`, `traineeKey`, `groupID`) so Insight Build evidence grids can reliably find them.
+- Hardening: Vetting submission, admin force-submit, quick approve, and detailed marking paths now verify critical server saves instead of silently accepting interrupted sync.
+- Feature: Added the reversible One UI Clean experimental theme with bright mobile-inspired surfaces and calmer motion.
+- Ops: Added `ops/insight_hr_evidence_setup_20260519.sql` for Supabase SQL Editor setup.
+- Verification: Focused syntax checks and Jest suites passed.
 
 ## v2.6.90 - 2026-05-13
 

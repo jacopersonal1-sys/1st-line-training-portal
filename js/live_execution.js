@@ -74,7 +74,7 @@ async function closeLiveSessionAuthoritatively(session) {
     if (!session || !session.sessionId) return;
 
     // Mark inactive in local proxy immediately.
-    const closedSession = { ...session, active: false, endedAt: Date.now() };
+    const closedSession = { ...session, active: false, endedAt: Date.now(), questionMessages: {} };
     localStorage.setItem('liveSession', JSON.stringify(closedSession));
 
     // First write inactive state (for realtime listeners), then hard-delete row.
@@ -165,8 +165,94 @@ function getLiveSessionUpdateStamp(session) {
         timer.duration || 0,
         JSON.stringify(session.answers || {}),
         JSON.stringify(session.scores || {}),
-        JSON.stringify(session.comments || {})
+        JSON.stringify(session.comments || {}),
+        JSON.stringify(session.questionMessages || {})
     ].join('|');
+}
+
+function liveEscapeHtml(value) {
+    if (typeof escapeHTML === 'function') return escapeHTML(value);
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function getLiveQuestionMessage(session, qIdx) {
+    if (!session || !session.questionMessages || qIdx === undefined || qIdx === null) return null;
+    const messages = session.questionMessages;
+    return messages[String(qIdx)] || messages[qIdx] || null;
+}
+
+function renderLiveQuestionMessageBubble(session, qIdx, mode = 'trainee') {
+    const msg = getLiveQuestionMessage(session, qIdx);
+    const isAdmin = mode === 'admin';
+    const emptyText = isAdmin
+        ? 'No message sent for this question yet.'
+        : 'No trainer message for this question yet.';
+    const baseStyle = isAdmin
+        ? 'background:rgba(52,152,219,0.10); border:1px solid rgba(52,152,219,0.35);'
+        : 'background:rgba(241,196,15,0.12); border:1px solid rgba(241,196,15,0.38);';
+    if (!msg || !String(msg.text || '').trim()) {
+        return `<div class="live-question-message-empty" style="font-size:0.85rem; color:var(--text-muted); font-style:italic;">${emptyText}</div>`;
+    }
+    const timeLabel = msg.ts ? new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    return `
+        <div class="live-question-message-bubble" style="${baseStyle} border-radius:8px; padding:10px; color:var(--text-main);">
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:6px;">
+                <strong style="font-size:0.8rem; color:${isAdmin ? 'var(--primary)' : '#f1c40f'};"><i class="fas fa-comment-dots"></i> Trainer message</strong>
+                <span style="font-size:0.75rem; color:var(--text-muted);">${liveEscapeHtml(timeLabel)}</span>
+            </div>
+            <div style="white-space:pre-wrap; line-height:1.4;">${liveEscapeHtml(msg.text)}</div>
+        </div>`;
+}
+
+function renderAdminQuestionMessagePanel(session, qIdx) {
+    const existing = getLiveQuestionMessage(session, qIdx);
+    const value = existing && existing.text ? existing.text : '';
+    return `
+        <div id="live-admin-question-message-panel" style="margin-top:15px; padding:12px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border-color);">
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:8px;">
+                <strong style="font-size:0.9rem;"><i class="fas fa-message"></i> Question Chat Bubble</strong>
+                <span style="font-size:0.75rem; color:var(--text-muted);">Clears when this live assessment ends</span>
+            </div>
+            <div id="live-admin-question-message-display" style="margin-bottom:8px;">
+                ${renderLiveQuestionMessageBubble(session, qIdx, 'admin')}
+            </div>
+            <textarea id="liveQuestionMessageInput" rows="3" spellcheck="true" placeholder="Send a short hint, clarification, or instruction for this question only." style="margin-bottom:8px;">${liveEscapeHtml(value)}</textarea>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button class="btn-secondary btn-sm" onclick="clearLiveQuestionMessage(${qIdx})"><i class="fas fa-eraser"></i> Clear</button>
+                <button class="btn-primary btn-sm" onclick="sendLiveQuestionMessage(${qIdx})"><i class="fas fa-paper-plane"></i> Send to Trainee</button>
+            </div>
+        </div>`;
+}
+
+function renderTraineeQuestionMessagePanel(session, qIdx) {
+    return `
+        <div id="trainee-live-question-message-panel" style="margin-top:16px; padding:12px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border-color);">
+            <div style="font-size:0.8rem; font-weight:700; color:#f1c40f; margin-bottom:8px;"><i class="fas fa-comment-dots"></i> Trainer Message</div>
+            <div id="trainee-live-question-message-display">${renderLiveQuestionMessageBubble(session, qIdx, 'trainee')}</div>
+        </div>`;
+}
+
+function updateLiveQuestionMessageViews(session) {
+    const activeSession = session || JSON.parse(localStorage.getItem('liveSession') || '{}');
+    if (!activeSession || activeSession.currentQ === undefined || activeSession.currentQ === -1) return;
+    const qIdx = activeSession.currentQ;
+
+    const adminDisplay = document.getElementById('live-admin-question-message-display');
+    if (adminDisplay) adminDisplay.innerHTML = renderLiveQuestionMessageBubble(activeSession, qIdx, 'admin');
+
+    const adminInput = document.getElementById('liveQuestionMessageInput');
+    if (adminInput && document.activeElement !== adminInput) {
+        const msg = getLiveQuestionMessage(activeSession, qIdx);
+        adminInput.value = msg && msg.text ? msg.text : '';
+    }
+
+    const traineeDisplay = document.getElementById('trainee-live-question-message-display');
+    if (traineeDisplay) traineeDisplay.innerHTML = renderLiveQuestionMessageBubble(activeSession, qIdx, 'trainee');
 }
 
 function bindLiveExecutionRealtimeHooks() {
@@ -436,6 +522,7 @@ function processLiveSessionState(allSessions) {
                 const questionMoved = myServerSession.currentQ !== LAST_RENDERED_Q;
                 const activeStateChanged = myServerSession.active !== localSession.active;
                 const pushedRefresh = (myServerSession.lastQuestionPushTs || 0) !== (localSession.lastQuestionPushTs || 0);
+                const questionMessageChanged = JSON.stringify(myServerSession.questionMessages || {}) !== JSON.stringify(localSession.questionMessages || {});
                 if (questionMoved || activeStateChanged || pushedRefresh) {
                      
                     // ARCHITECTURAL FIX: FLUSH PENDING KEYSTROKES BEFORE DOM WIPE
@@ -449,6 +536,8 @@ function processLiveSessionState(allSessions) {
                     const success = renderTraineeLivePanel(container);
                     if (success !== false) LAST_RENDERED_Q = myServerSession.currentQ;
                     else LAST_RENDERED_Q = -2; // Force retry on next tick
+                } else if (questionMessageChanged) {
+                    updateLiveQuestionMessageViews(myServerSession);
                 }
             }
         }
@@ -1090,6 +1179,7 @@ function renderAdminLivePanel(container) {
                         <small>Type: ${q.type}</small><br>
                         <small>Points: ${q.points || 1}</small>
                     </div>
+                    ${renderAdminQuestionMessagePanel(session, currentQ)}
                 </div>
                 
                 <div class="card admin-interaction-active" style="display:flex; flex-direction:column; gap:15px;">
@@ -1236,6 +1326,8 @@ function updateAdminLiveView() {
             else { itemIcon.className = "far fa-circle"; itemIcon.style.color = ""; }
         }
     });
+
+    updateLiveQuestionMessageViews(session);
 }
 
 // --- CONNECTION HEALTH (ADMIN & TRAINEE VIEW) ---
@@ -1464,7 +1556,10 @@ function renderTraineeLivePanel(container) {
         mainContent = `
         <div class="card" style="padding:40px;">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start;">
-                <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">${session.currentQ + 1}. ${q.text} ${refBtn} <span style="font-size:1rem; color:var(--text-muted); font-weight:normal; margin-left:10px;">(${q.points || 1} pts)</span></div>
+                <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
+                    <div>${session.currentQ + 1}. ${q.text} ${refBtn} <span style="font-size:1rem; color:var(--text-muted); font-weight:normal; margin-left:10px;">(${q.points || 1} pts)</span></div>
+                    ${renderTraineeQuestionMessagePanel(session, session.currentQ)}
+                </div>
                 <div class="live-input-area" style="font-size:1.2rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
                     ${inputHtml}
                 </div>
@@ -1620,7 +1715,8 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
         lastQuestionPushTs: 0,
         answers: {},
         scores: {},
-        comments: {}
+        comments: {},
+        questionMessages: {}
     };
 
     // 1. Update Local Proxy
@@ -1647,6 +1743,7 @@ async function adminPushQuestion(idx) {
     if (!session) return;
     session.currentQ = idx;
     session.lastQuestionPushTs = Date.now();
+    if (!session.questionMessages || typeof session.questionMessages !== 'object') session.questionMessages = {};
     
     // Reset Timer on new question
     if (session.timer) {
@@ -1684,6 +1781,54 @@ async function saveLiveComment(idx, val) {
     localStorage.setItem('liveSession', JSON.stringify(session));
     
     updateGlobalSessionArray(session, false); // Background save
+}
+
+async function sendLiveQuestionMessage(idx) {
+    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    if (!session || !session.sessionId) return;
+    if (session.currentQ !== idx) {
+        if (typeof showToast === 'function') showToast('Open the question before sending its trainee message.', 'warning');
+        return;
+    }
+
+    const input = document.getElementById('liveQuestionMessageInput');
+    const text = String((input && input.value) || '').trim();
+    if (!text) {
+        if (typeof showToast === 'function') showToast('Type a message before sending it to the trainee.', 'warning');
+        return;
+    }
+
+    if (!session.questionMessages || typeof session.questionMessages !== 'object') session.questionMessages = {};
+    session.questionMessages[String(idx)] = {
+        text,
+        from: CURRENT_USER && CURRENT_USER.user ? CURRENT_USER.user : 'trainer',
+        ts: Date.now()
+    };
+
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    updateLiveQuestionMessageViews(session);
+
+    await updateGlobalSessionArray(session, true);
+    sendLiveSyncNudge(session, 'question_message').catch(()=>{});
+    if (typeof showToast === 'function') showToast('Message sent to trainee.', 'success');
+}
+
+async function clearLiveQuestionMessage(idx) {
+    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    if (!session || !session.sessionId) return;
+    if (!session.questionMessages || typeof session.questionMessages !== 'object') session.questionMessages = {};
+    delete session.questionMessages[String(idx)];
+    delete session.questionMessages[idx];
+
+    const input = document.getElementById('liveQuestionMessageInput');
+    if (input) input.value = '';
+
+    localStorage.setItem('liveSession', JSON.stringify(session));
+    updateLiveQuestionMessageViews(session);
+
+    await updateGlobalSessionArray(session, true);
+    sendLiveSyncNudge(session, 'question_message_clear').catch(()=>{});
+    if (typeof showToast === 'function') showToast('Question message cleared.', 'info');
 }
 
 async function submitLiveAnswer(qIdx) {

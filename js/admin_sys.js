@@ -2932,8 +2932,8 @@ window.testServerConnections = async function() {
 
     // 2. Test Local
     updateStatus('status_local', 'checking');
-    const localUrl = document.getElementById('sa_srv_url').value.trim();
-    const localKey = document.getElementById('sa_srv_key').value.trim();
+    const localUrl = (document.getElementById('sa_srv_url')?.value || '').trim();
+    const localKey = (document.getElementById('sa_srv_key')?.value || '').trim();
     if(localUrl && localKey) {
         const start = Date.now();
         try { const client = window.supabase.createClient(localUrl, localKey, { auth: { persistSession: false, storageKey: 'test-local-' + Date.now() } }); await checkWithTimeout(client); updateStatus('status_local', 'online', Date.now() - start); } catch(e) { updateStatus('status_local', 'offline'); }

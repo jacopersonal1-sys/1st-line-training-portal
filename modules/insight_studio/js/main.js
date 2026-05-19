@@ -6,6 +6,22 @@ const InsightApp = {
         groupRows: {}
     },
 
+    hrEvidenceTriggers: [
+        'Works to full potential',
+        'Quality of work',
+        'Work Consistency',
+        'Communication',
+        'Takes Initiative',
+        'Group work',
+        'Productivity',
+        'Honesty',
+        'Integrity',
+        'Technical Skills',
+        'Dependability',
+        'Punctuality',
+        'Attendance'
+    ],
+
     state: {
         loading: true,
         viewMode: 'triggers',
@@ -16,6 +32,11 @@ const InsightApp = {
         compareSplitLeftGroup: '',
         compareSplitRightGroup: '',
         compareSelected: [],
+        insightPrimary: '',
+        insightPeers: [],
+        insightAttemptScope: 'current',
+        compiledViews: {},
+        compilingView: '',
         groupFilter: 'all',
         search: '',
         selectedAgent: '',
@@ -163,11 +184,13 @@ const InsightApp = {
 
     setGroupFilter: function(value) {
         this.state.groupFilter = String(value || 'all');
+        this.invalidateCompiledViews();
         this.render();
     },
 
     setSearch: function(value) {
         this.state.search = String(value || '');
+        this.invalidateCompiledViews();
         this.render();
     },
 
@@ -177,6 +200,8 @@ const InsightApp = {
         else if (normalized === 'department' || normalized === 'dept') this.state.viewMode = 'department';
         else if (normalized === 'knowledge' || normalized === 'knowledge-gaps') this.state.viewMode = 'knowledge';
         else if (normalized === 'compare' || normalized === 'comparison') this.state.viewMode = 'compare';
+        else if (normalized === 'build' || normalized === 'insight-build' || normalized === 'probation') this.state.viewMode = 'build';
+        else if (normalized === 'hr-evidence' || normalized === 'hr' || normalized === 'evidence') this.state.viewMode = 'hr-evidence';
         else this.state.viewMode = 'triggers';
         this.state.drawerOpen = false;
         this.state.selectedAgent = '';
@@ -196,6 +221,7 @@ const InsightApp = {
         const normalized = String(mode || '').trim().toLowerCase();
         this.state.compareMode = normalized === 'group' && this.state.compareMode !== 'group' ? 'group' : 'person';
         this.state.compareSelected = [];
+        this.invalidateCompiledViews('compare');
         this.render();
     },
 
@@ -203,6 +229,7 @@ const InsightApp = {
         const normalized = String(scope || '').trim().toLowerCase();
         this.state.compareAttemptScope = ['attempt_1', 'attempt_2', 'attempt_1_vs_live'].includes(normalized) ? normalized : 'live';
         this.state.compareSelected = [];
+        this.invalidateCompiledViews('compare');
         this.render();
     },
 
@@ -217,6 +244,7 @@ const InsightApp = {
         const group = String(value || '').trim();
         if (normalizedSide === 'right') this.state.compareSplitRightGroup = group;
         else this.state.compareSplitLeftGroup = group;
+        this.invalidateCompiledViews('compare');
         this.render();
     },
 
@@ -227,19 +255,183 @@ const InsightApp = {
         this.state.compareSelected = current.includes(key)
             ? current.filter(item => item !== key)
             : [...current, key];
+        this.invalidateCompiledViews('compare');
         this.render();
     },
 
     clearCompareSelection: function() {
         this.state.compareSelected = [];
+        this.invalidateCompiledViews('compare');
+        this.render();
+    },
+
+    setInsightPrimary: function(value) {
+        const agentName = decodeURIComponent(String(value || '')).trim();
+        this.state.insightPrimary = agentName;
+        this.state.insightPeers = [];
+        this.state.insightAttemptScope = 'current';
+        const agent = InsightDataService.getAllAgents().find(item => insMatch(item.name, agentName));
+        if (agent && agent.group && agent.group !== 'Ungrouped') {
+            this.state.groupFilter = agent.group;
+        }
+        this.invalidateCompiledViews('build');
+        this.render();
+    },
+
+    setInsightAttemptScope: function(value) {
+        this.state.insightAttemptScope = String(value || 'current').trim() || 'current';
+        this.invalidateCompiledViews('build');
+        this.render();
+    },
+
+    toggleInsightPeer: function(encodedName) {
+        const agentName = decodeURIComponent(String(encodedName || '')).trim();
+        if (!agentName || insMatch(agentName, this.state.insightPrimary)) return;
+        const current = Array.isArray(this.state.insightPeers) ? this.state.insightPeers : [];
+        const exists = current.some(item => insMatch(item, agentName));
+        this.state.insightPeers = exists
+            ? current.filter(item => !insMatch(item, agentName))
+            : [...current, agentName];
+        this.invalidateCompiledViews('build');
+        this.render();
+    },
+
+    clearInsightPeers: function() {
+        this.state.insightPeers = [];
+        this.invalidateCompiledViews('build');
+        this.render();
+    },
+
+    readHrEvidenceFile: function(file) {
+        return new Promise((resolve) => {
+            if (!file) return resolve({ name: '', dataUrl: '' });
+            if (!String(file.type || '').startsWith('image/')) return resolve({ name: file.name || '', dataUrl: '' });
+            const reader = new FileReader();
+            reader.onload = () => resolve({ name: file.name || 'screenshot', dataUrl: String(reader.result || '') });
+            reader.onerror = () => resolve({ name: file.name || '', dataUrl: '' });
+            reader.readAsDataURL(file);
+        });
+    },
+
+    captureHrEvidence: async function() {
+        const trainee = document.getElementById('hrEvidenceTrainee')?.value || '';
+        const trigger = document.getElementById('hrEvidenceTrigger')?.value || '';
+        const description = document.getElementById('hrEvidenceDescription')?.value || '';
+        const proofUrl = document.getElementById('hrEvidenceProofUrl')?.value || '';
+        const file = document.getElementById('hrEvidenceScreenshot')?.files?.[0] || null;
+        const proof = await this.readHrEvidenceFile(file);
+        const result = await InsightDataService.saveHrEvidenceEntry({
+            trainee,
+            trigger,
+            description,
+            proofUrl,
+            proofName: proof.name,
+            proofDataUrl: proof.dataUrl
+        });
+        if (!result.ok) {
+            alert(result.message || 'Could not capture HR evidence.');
+            return;
+        }
+        this.invalidateCompiledViews('build');
         this.render();
     },
 
     selectVisibleCompareRows: function() {
-        this.state.compareSelected = this.isAttemptVsLiveCompareScope()
-            ? this.getComparePickerRows().map(row => row.key)
-            : this.getComparisonRows({ ignoreSelection: true }).map(row => row.key);
+        this.state.compareSelected = this.getCompareCompileCandidates().map(row => row.key);
+        this.invalidateCompiledViews('compare');
         this.render();
+    },
+
+    invalidateCompiledViews: function(view) {
+        const current = this.state.compiledViews && typeof this.state.compiledViews === 'object' ? this.state.compiledViews : {};
+        if (view) {
+            this.state.compiledViews = { ...current };
+            delete this.state.compiledViews[view];
+            return;
+        }
+        this.state.compiledViews = {};
+    },
+
+    getCompileKey: function(view) {
+        const normalized = String(view || this.state.viewMode || '').trim().toLowerCase();
+        if (normalized === 'compare') {
+            return [
+                'compare',
+                this.state.groupFilter || 'all',
+                String(this.state.search || '').trim().toLowerCase(),
+                this.state.compareMode || 'person',
+                this.state.compareAttemptScope || 'live',
+                this.state.compareGraphLayout || 'single',
+                this.state.compareSplitLeftGroup || '',
+                this.state.compareSplitRightGroup || '',
+                (this.state.compareSelected || []).slice().sort().join('|')
+            ].join('::');
+        }
+        if (normalized === 'build') {
+            return [
+                'build',
+                this.state.groupFilter || 'all',
+                String(this.state.search || '').trim().toLowerCase(),
+                this.state.insightPrimary || '',
+                this.state.insightAttemptScope || 'current',
+                (this.state.insightPeers || []).slice().sort().join('|')
+            ].join('::');
+        }
+        if (normalized === 'department') {
+            return ['department', this.state.groupFilter || 'all', String(this.state.search || '').trim().toLowerCase()].join('::');
+        }
+        return normalized;
+    },
+
+    isCompiledView: function(view) {
+        const key = this.getCompileKey(view);
+        return !!(this.state.compiledViews && this.state.compiledViews[view] === key);
+    },
+
+    compileCurrentView: async function(view) {
+        const target = String(view || this.state.viewMode || '').trim().toLowerCase();
+        if (!['compare', 'build', 'department'].includes(target)) return;
+        this.state.compilingView = target;
+        this.render();
+        try {
+            if (target === 'build') {
+                await InsightDataService.loadCompileDataForAgents(this.getInsightBuildAgentNames());
+            } else if (target === 'compare') {
+                await InsightDataService.loadCompileDataForAgents(this.getSelectedCompareAgentNames());
+            } else {
+                await InsightDataService.loadCompileData();
+            }
+            this.resetCompareCache();
+            this.state.compiledViews = {
+                ...(this.state.compiledViews || {}),
+                [target]: this.getCompileKey(target)
+            };
+        } catch (error) {
+            console.warn('[Insight] Compile failed:', error);
+        } finally {
+            this.state.compilingView = '';
+            this.render();
+        }
+    },
+
+    getInsightBuildAgentNames: function() {
+        const primaryAgent = this.getInsightPrimaryAgent();
+        const names = primaryAgent ? [primaryAgent.name] : [];
+        (Array.isArray(this.state.insightPeers) ? this.state.insightPeers : []).forEach((name) => {
+            if (name && !names.some(item => insMatch(item, name))) names.push(name);
+        });
+        return names;
+    },
+
+    getSelectedCompareAgentNames: function() {
+        const candidates = this.getCompareCompileCandidates();
+        const selected = Array.isArray(this.state.compareSelected) ? this.state.compareSelected : [];
+        const selectedSet = new Set(selected);
+        return candidates
+            .filter(row => !selected.length || selectedSet.has(row.key))
+            .filter(row => row.group && !row.memberCount)
+            .map(row => row.label || row.key)
+            .filter(Boolean);
     },
 
     isTraineeRole: function(role) {
@@ -774,11 +966,12 @@ const InsightApp = {
                 </div>
                 <div class="table-responsive" style="max-height:260px; overflow-y:auto; margin-top:10px;">
                     <table class="ins-table ins-table-compact">
-                        <thead><tr><th>Question</th><th>Fails</th><th>Agents</th><th>Lowest</th></tr></thead>
+                        <thead><tr><th>Question</th><th>Fail Rate</th><th>Fails</th><th>Agents</th><th>Lowest</th></tr></thead>
                         <tbody>
                             ${(row.questions || []).slice(0, 25).map(question => `
                                 <tr>
                                     <td>${esc(question.question)}</td>
+                                    <td class="ins-metric">${question.failRate || 0}%</td>
                                     <td class="ins-metric">${question.failCount}</td>
                                     <td class="ins-metric">${question.agentCount}</td>
                                     <td class="ins-metric">${question.lowestScore}</td>
@@ -940,12 +1133,13 @@ const InsightApp = {
         return Number.isFinite(ts) ? ts : 0;
     },
 
-    getRetrainArchivesForAgent: function(agentName) {
+    getRetrainArchivesForAgent: function(agentName, options = {}) {
         const target = this.normalizeLookup(agentName).replace(/\s+/g, '');
+        const maxAttempts = Number.isFinite(Number(options.maxAttempts)) ? Number(options.maxAttempts) : 2;
         const archives = Array.isArray(InsightDataService.state.retrainArchives)
             ? InsightDataService.state.retrainArchives
             : [];
-        return archives
+        const rows = archives
             .filter((entry) => {
                 if (!entry || typeof entry !== 'object') return false;
                 const archiveUser = this.normalizeLookup(this.getArchiveUserName(entry)).replace(/\s+/g, '');
@@ -962,12 +1156,12 @@ const InsightApp = {
             .map((entry, index) => ({
                 ...entry,
                 _safeAttemptNumber: index + 1
-            }))
-            .filter(entry => entry._safeAttemptNumber <= 2);
+            }));
+        return maxAttempts > 0 ? rows.filter(entry => entry._safeAttemptNumber <= maxAttempts) : rows;
     },
 
-    getRetrainArchiveAttempt: function(agentName, attemptNumber) {
-        return this.getRetrainArchivesForAgent(agentName)
+    getRetrainArchiveAttempt: function(agentName, attemptNumber, options = {}) {
+        return this.getRetrainArchivesForAgent(agentName, options)
             .find(entry => Number(entry._safeAttemptNumber || 0) === Number(attemptNumber || 0)) || null;
     },
 
@@ -1002,14 +1196,24 @@ const InsightApp = {
             if (!Number.isFinite(num) || num <= 0) return 0;
             return num < 100000 ? num * 1000 : num;
         };
+        const firstMs = (...values) => {
+            for (const value of values) {
+                const ms = toMs(value);
+                if (ms > 0) return ms;
+            }
+            return 0;
+        };
 
         history.forEach((entry) => {
             const summary = entry.summary || {};
             const breakdown = summary.breakdown || summary.activityBreakdown || {};
-            const idle = toMs(summary.idle || summary.idleMs || summary.idleSeconds || breakdown.idle);
-            const external = toMs(summary.external || summary.externalMs || summary.externalSeconds || breakdown.external);
-            const study = toMs(summary.study || summary.studyMs || summary.studySeconds || summary.focused || breakdown.study || breakdown.focus);
-            let total = toMs(summary.total || summary.totalMs || summary.totalSeconds || summary.activeMs);
+            const idle = firstMs(summary.idle, summary.idleMs, summary.idleSeconds, breakdown.idle);
+            const external = firstMs(summary.external, summary.externalMs, summary.externalSeconds, breakdown.external);
+            const explicitStudy = firstMs(summary.study, summary.studyMs, summary.studySeconds, summary.focused, breakdown.study, breakdown.focus);
+            const material = firstMs(summary.material, summary.materialMs, summary.materialSeconds, breakdown.material);
+            const tool = firstMs(summary.tool, summary.toolMs, summary.toolSeconds, breakdown.tool);
+            const study = explicitStudy || (material + tool);
+            let total = firstMs(summary.total, summary.totalMs, summary.totalSeconds, summary.activeMs);
             if (total <= 0) total = idle + external + study;
             idleMs += idle;
             externalMs += external;
@@ -1027,6 +1231,26 @@ const InsightApp = {
             focusScore: totalMs > 0 ? Math.round((studyMs / totalMs) * 100) : 0,
             history: history.sort((a, b) => Date.parse(b.date || '') - Date.parse(a.date || ''))
         };
+    },
+
+    getSourceStartTs: function(source = {}) {
+        const candidates = [];
+        const add = (value) => {
+            const ts = this.safeDateTs(value);
+            if (ts) candidates.push(ts);
+        };
+        (source.attendance || []).forEach(row => add(row && (row.date || row.createdAt || row.updatedAt)));
+        (source.activityHistory || []).forEach(row => add(row && (row.date || row.createdAt || row.updatedAt)));
+        (source.records || []).forEach(row => add(row && (row.date || row.createdAt || row.updatedAt)));
+        (source.submissions || []).forEach(row => add(row && (row.date || row.submittedAt || row.createdAt || row.updatedAt)));
+        if (!candidates.length && source.fallbackName && typeof InsightDataService !== 'undefined') {
+            const scheduleTs = this.getAgentScheduleStartTs(source.fallbackName);
+            if (scheduleTs) candidates.push(scheduleTs);
+        }
+        if (!candidates.length) return 0;
+        const start = new Date(Math.min(...candidates));
+        start.setHours(0, 0, 0, 0);
+        return start.getTime();
     },
 
     buildComparisonRowFromData: function(agent, source) {
@@ -1114,7 +1338,7 @@ const InsightApp = {
             progressScoreFinal
         ]);
 
-        return {
+        const row = {
             key: source.key || agent.name,
             personKey: source.personKey || agent.name,
             label: agent.name,
@@ -1139,10 +1363,21 @@ const InsightApp = {
             watchSeconds: Number(engagement.totals && engagement.totals.totalWatchSeconds || 0),
             dataStatus: activity.dataStatus || 'no_data'
         };
+        row.attendanceRows = attendance.slice();
+        row.activityHistory = Array.isArray(activity.history) ? activity.history.slice() : [];
+        row.activitySummary = activity;
+        row.sourceStartTs = this.getSourceStartTs({
+            records,
+            submissions,
+            attendance,
+            activityHistory: row.activityHistory,
+            fallbackName: agent.name
+        });
+        return row;
     },
 
-    buildArchiveComparisonRow: function(agent, attemptNumber, currentGroup) {
-        const archive = this.getRetrainArchiveAttempt(agent.name, attemptNumber);
+    buildArchiveComparisonRow: function(agent, attemptNumber, currentGroup, options = {}) {
+        const archive = this.getRetrainArchiveAttempt(agent.name, attemptNumber, options);
         if (!archive) return null;
         const archiveRecords = InsightDataService.normalizeRecords(Array.isArray(archive.records) ? archive.records : [])
             .filter(row => this.isArchiveAttemptRecord(row, agent.name));
@@ -1240,6 +1475,21 @@ const InsightApp = {
         return new Date(ts).toISOString().slice(0, 10);
     },
 
+    getLocalDateKey: function(date) {
+        const value = date instanceof Date ? date : new Date(date);
+        if (!Number.isFinite(value.getTime())) return '';
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    },
+
+    getWeekdayShortLabel: function(dateKey) {
+        const date = new Date(`${dateKey}T00:00:00`);
+        if (!Number.isFinite(date.getTime())) return '';
+        return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()] || '';
+    },
+
     getActivityEntryFocusScore: function(entry) {
         if (!entry || typeof entry !== 'object') return null;
         const summary = entry.summary || {};
@@ -1250,10 +1500,20 @@ const InsightApp = {
             if (!Number.isFinite(num) || num <= 0) return 0;
             return num < 100000 ? num * 1000 : num;
         };
-        const idle = toMs(summary.idle || summary.idleMs || summary.idleSeconds || breakdown.idle);
-        const external = toMs(summary.external || summary.externalMs || summary.externalSeconds || breakdown.external);
-        const study = toMs(summary.study || summary.studyMs || summary.studySeconds || summary.focused || breakdown.study || breakdown.focus);
-        let total = toMs(summary.total || summary.totalMs || summary.totalSeconds || summary.activeMs);
+        const firstMs = (...values) => {
+            for (const value of values) {
+                const ms = toMs(value);
+                if (ms > 0) return ms;
+            }
+            return 0;
+        };
+        const idle = firstMs(summary.idle, summary.idleMs, summary.idleSeconds, breakdown.idle);
+        const external = firstMs(summary.external, summary.externalMs, summary.externalSeconds, breakdown.external);
+        const explicitStudy = firstMs(summary.study, summary.studyMs, summary.studySeconds, summary.focused, breakdown.study, breakdown.focus);
+        const material = firstMs(summary.material, summary.materialMs, summary.materialSeconds, breakdown.material);
+        const tool = firstMs(summary.tool, summary.toolMs, summary.toolSeconds, breakdown.tool);
+        const study = explicitStudy || (material + tool);
+        let total = firstMs(summary.total, summary.totalMs, summary.totalSeconds, summary.activeMs);
 
         if (Array.isArray(entry.details)) {
             let detailTotal = 0;
@@ -1345,6 +1605,39 @@ const InsightApp = {
         }).flat().filter(Boolean);
         this._compareCache.personRows[cacheKey] = rows;
         return rows.slice();
+    },
+
+    getCompareCompileCandidates: function() {
+        const selectedGroup = String(this.state.groupFilter || 'all');
+        const search = String(this.state.search || '').trim().toLowerCase();
+        const pairMode = this.isAttemptVsLiveCompareScope();
+        if (!pairMode && this.state.compareMode === 'group' && selectedGroup === 'all') {
+            return InsightDataService.getGroups()
+                .filter(group => group && group !== 'Ungrouped')
+                .filter(group => !search || String(group).toLowerCase().includes(search))
+                .map(group => {
+                    const members = (InsightDataService.state.rosters && Array.isArray(InsightDataService.state.rosters[group]))
+                        ? InsightDataService.state.rosters[group].length
+                        : 0;
+                    return { key: group, label: group, group, memberCount: members };
+                });
+        }
+        return InsightDataService.getAllAgents()
+            .filter((agent) => {
+                if (!this.isTraineeRole(agent.role)) return false;
+                if (agent.blocked) return false;
+                if (!agent.group || agent.group === 'Ungrouped') return false;
+                if (selectedGroup !== 'all' && String(agent.group || '') !== selectedGroup) return false;
+                if (search && !String(agent.name || '').toLowerCase().includes(search)) return false;
+                return true;
+            })
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }))
+            .map(agent => ({
+                key: pairMode ? agent.name : agent.name,
+                label: agent.name,
+                group: agent.group || 'Ungrouped',
+                attemptLabel: pairMode ? 'Attempt 1 vs Current' : ''
+            }));
     },
 
     getComparisonRows: function(options = {}) {
@@ -1605,6 +1898,14 @@ const InsightApp = {
         const xFor = (idx) => axisCount <= 1 ? pad : pad + (idx * (rightEdge - pad) / (axisCount - 1));
         const yFor = (value) => height - pad - ((this.clampPercent(value) || 0) * (height - pad * 2) / 100);
         const esc = this.escapeHtml;
+        const ruleState = (typeof InsightDataService !== 'undefined' && InsightDataService.state) ? InsightDataService.state : {};
+        const improveThreshold = this.clampPercent(ruleState.ruleConfig && ruleState.ruleConfig.defaultScoreThreshold) || 60;
+        const passThreshold = Math.max(80, improveThreshold);
+        const performanceBands = compactPerformance ? [
+            { label: 'Fail', from: 0, to: improveThreshold, color: 'rgba(239, 68, 68, 0.10)' },
+            { label: 'Improve', from: improveThreshold, to: passThreshold, color: 'rgba(245, 158, 11, 0.11)' },
+            { label: 'Pass', from: passThreshold, to: 100, color: 'rgba(34, 197, 94, 0.10)' }
+        ].filter(band => band.to > band.from) : [];
 
         if (!chartRows.length || !metricLabels.length) {
             return `<div class="ins-item">No ${esc(title || 'comparison')} percentages are available for this graph yet.</div>`;
@@ -1639,6 +1940,14 @@ const InsightApp = {
                         </linearGradient>
                     </defs>
                     <rect x="${pad}" y="${pad}" width="${rightEdge - pad}" height="${height - pad * 2}" rx="10" fill="url(#insChartWash)"></rect>
+                    ${performanceBands.map((band) => {
+                        const yTop = yFor(band.to);
+                        const yBottom = yFor(band.from);
+                        return `<g class="ins-score-band">
+                            <rect x="${pad}" y="${yTop}" width="${rightEdge - pad}" height="${Math.max(1, yBottom - yTop)}" fill="${band.color}"></rect>
+                            <text x="${rightEdge - 8}" y="${yTop + 16}" text-anchor="end" class="ins-chart-label">${esc(band.label)}</text>
+                        </g>`;
+                    }).join('')}
                     <line x1="${pad}" y1="${height - pad}" x2="${rightEdge}" y2="${height - pad}" class="ins-chart-axis"></line>
                     <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="ins-chart-axis"></line>
                     ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${rightEdge}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="10" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
@@ -1727,6 +2036,1022 @@ const InsightApp = {
         `;
     },
 
+    getInsightEligibleAgents: function() {
+        const selectedGroup = String(this.state.groupFilter || 'all');
+        const search = String(this.state.search || '').trim().toLowerCase();
+        return InsightDataService.getAllAgents().filter((agent) => {
+            if (!this.isTraineeRole(agent.role)) return false;
+            if (agent.blocked) return false;
+            if (!agent.group || agent.group === 'Ungrouped') return false;
+            if (selectedGroup !== 'all' && String(agent.group || '') !== selectedGroup) return false;
+            if (search && !String(agent.name || '').toLowerCase().includes(search)) return false;
+            return true;
+        }).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+    },
+
+    getInsightPrimaryAgent: function() {
+        const selected = String(this.state.insightPrimary || '').trim();
+        const agents = InsightDataService.getAllAgents().filter((agent) => this.isTraineeRole(agent.role) && !agent.blocked);
+        const direct = selected ? agents.find(agent => insMatch(agent.name, selected)) : null;
+        if (direct) return direct;
+        const visible = this.getInsightEligibleAgents();
+        return visible[0] || agents.find(agent => agent.group && agent.group !== 'Ungrouped') || null;
+    },
+
+    getInsightPeerCandidates: function(primaryAgent) {
+        if (!primaryAgent) return [];
+        const group = String(primaryAgent.group || '').trim();
+        if (!group || group === 'Ungrouped') return [];
+        return InsightDataService.getAllAgents()
+            .filter(agent => this.isTraineeRole(agent.role) && !agent.blocked)
+            .filter(agent => String(agent.group || '') === group && !insMatch(agent.name, primaryAgent.name))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+    },
+
+    getInsightAttemptOptions: function(primaryAgent) {
+        const options = [{ value: 'current', label: 'Current / Live Training' }];
+        if (!primaryAgent) return options;
+        this.getRetrainArchivesForAgent(primaryAgent.name, { maxAttempts: 0 }).forEach((archive) => {
+            const attempt = Number(archive._safeAttemptNumber || archive.attemptNumber || 0);
+            if (!attempt) return;
+            const movedDate = this.getComparisonDateKey(archive.movedDate || archive.archivedAt || archive.graduatedDate || archive.createdAt || archive.date);
+            const label = archive.attemptLabel || `Retrain ${attempt}`;
+            options.push({
+                value: `attempt_${attempt}`,
+                label: `${label}${movedDate ? ` (${movedDate})` : ''}`
+            });
+        });
+        return options;
+    },
+
+    getInsightAttemptNumber: function() {
+        const match = String(this.state.insightAttemptScope || 'current').match(/^attempt_(\d+)$/);
+        return match ? Number(match[1]) : null;
+    },
+
+    getInsightBuildRows: function(primaryAgent) {
+        if (!primaryAgent) return [];
+        const peerNames = Array.isArray(this.state.insightPeers) ? this.state.insightPeers : [];
+        const attemptNumber = this.getInsightAttemptNumber();
+        const agents = [primaryAgent];
+        peerNames.forEach((name) => {
+            const peer = InsightDataService.getAllAgents().find(agent => insMatch(agent.name, name));
+            if (peer && !agents.some(item => insMatch(item.name, peer.name))) agents.push(peer);
+        });
+        return agents.map((agent, idx) => {
+            const currentGroup = agent.group || '';
+            const row = attemptNumber
+                ? this.buildArchiveComparisonRow(agent, attemptNumber, currentGroup, { maxAttempts: 0 })
+                : this.buildCurrentLiveComparisonRow(agent, currentGroup);
+            if (!row) return null;
+            if (idx === 0) row.label = `${agent.name} - ${attemptNumber ? `Retrain ${attemptNumber}` : 'Review'}`;
+            else if (attemptNumber) row.label = `${agent.name} - Retrain ${attemptNumber}`;
+            return row;
+        }).filter(Boolean);
+    },
+
+    getConfiguredPublicHolidayMap: function() {
+        const defaults = [
+            '2026-01-01',
+            '2026-03-21',
+            '2026-04-03',
+            '2026-04-06',
+            '2026-04-27',
+            '2026-05-01',
+            '2026-06-16',
+            '2026-08-09',
+            '2026-08-10',
+            '2026-09-24',
+            '2026-12-16',
+            '2026-12-25',
+            '2026-12-26'
+        ];
+        const map = {};
+        defaults.forEach(dateKey => { map[dateKey] = 'Public holiday'; });
+        const addHoliday = (item) => {
+            if (!item) return;
+            if (typeof item === 'string') {
+                const key = this.getComparisonDateKey(item.replace(/\//g, '-'));
+                if (key) map[key] = map[key] || 'Public holiday';
+                return;
+            }
+            if (typeof item === 'object') {
+                const key = this.getComparisonDateKey(String(item.date || item.day || item.key || '').replace(/\//g, '-'));
+                if (key) map[key] = item.name || item.title || item.label || map[key] || 'Public holiday';
+            }
+        };
+        const configured = typeof insParseJson === 'function' ? insParseJson('scheduleHolidays', []) : [];
+        if (Array.isArray(configured)) configured.forEach(addHoliday);
+        else if (configured && typeof configured === 'object') Object.entries(configured).forEach(([dateKey, label]) => addHoliday({ date: dateKey, name: label }));
+        return map;
+    },
+
+    getPublicHolidayName: function(dateKey) {
+        return this.getConfiguredPublicHolidayMap()[dateKey] || '';
+    },
+
+    parseScheduleStartDate: function(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return 0;
+        const match = raw.match(/\d{4}[/-]\d{1,2}[/-]\d{1,2}/);
+        const clean = (match ? match[0] : raw).replace(/\//g, '-');
+        return insToTs(clean);
+    },
+
+    safeDateTs: function(value) {
+        if (typeof insToTs === 'function') return insToTs(value);
+        const ts = Date.parse(value || '');
+        return Number.isFinite(ts) ? ts : 0;
+    },
+
+    getAgentScheduleStartTs: function(agentName) {
+        const agent = InsightDataService.getAllAgents().find(item => insMatch(item.name, agentName));
+        const group = String(agent && agent.group || InsightDataService.getAgentGroup(agentName) || '').trim();
+        let earliest = 0;
+        Object.values(InsightDataService.state.schedules || {}).forEach((schedule) => {
+            if (!schedule || typeof schedule !== 'object') return;
+            const assigned = Array.isArray(schedule.assigned) ? schedule.assigned : [schedule.assigned];
+            const assignedToGroup = group && assigned.some(item => insMatch(item, group));
+            const assignedToAgent = assigned.some(item => insMatch(item, agentName));
+            if (!assignedToGroup && !assignedToAgent) return;
+            (Array.isArray(schedule.items) ? schedule.items : []).forEach((item) => {
+                const ts = this.parseScheduleStartDate(item && (item.dateRange || item.startDate || item.date || item.dueDate));
+                if (ts && (!earliest || ts < earliest)) earliest = ts;
+            });
+        });
+        return earliest;
+    },
+
+    getTraineeStartTs: function(agentName) {
+        const activityCandidates = [];
+        InsightDataService.getAgentAttendance(agentName).forEach(row => {
+            const ts = insToTs(row.date || row.createdAt || row.updatedAt);
+            if (ts) activityCandidates.push(ts);
+        });
+        InsightDataService.getAgentActivityBreakdown(agentName).history.forEach(row => {
+            const ts = insToTs(row.date || row.createdAt || row.updatedAt);
+            if (ts) activityCandidates.push(ts);
+        });
+        const live = InsightDataService.getAgentLiveMonitorData(agentName);
+        if (live) {
+            const liveTs = insToTs(live.date) || insToTs(live.lastDate) || Number(live.since || 0);
+            if (liveTs) activityCandidates.push(liveTs);
+        }
+        const candidates = activityCandidates.length ? activityCandidates : [];
+        const scheduleTs = this.getAgentScheduleStartTs(agentName);
+        if (!activityCandidates.length && scheduleTs) candidates.push(scheduleTs);
+        if (!candidates.length) return 0;
+        const start = new Date(Math.min(...candidates));
+        start.setHours(0, 0, 0, 0);
+        return start.getTime();
+    },
+
+    getProbationDateWindow: function(agentNames) {
+        const names = Array.isArray(agentNames) ? agentNames : [];
+        let latest = 0;
+        let earliestStart = 0;
+        names.forEach((name) => {
+            InsightDataService.getAgentAttendance(name).forEach(row => { latest = Math.max(latest, insToTs(row.date)); });
+            InsightDataService.getAgentActivityBreakdown(name).history.forEach(row => { latest = Math.max(latest, insToTs(row.date)); });
+            InsightDataService.getAgentRecords(name).forEach(row => { latest = Math.max(latest, insToTs(row.date)); });
+            const startTs = this.getTraineeStartTs(name);
+            if (startTs && (!earliestStart || startTs < earliestStart)) earliestStart = startTs;
+        });
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const end = latest ? new Date(Math.max(latest, today.getTime())) : today;
+        end.setHours(0, 0, 0, 0);
+        const rollingStart = new Date(end);
+        rollingStart.setDate(rollingStart.getDate() - 89);
+        const start = earliestStart ? new Date(Math.max(earliestStart, rollingStart.getTime())) : rollingStart;
+        start.setHours(0, 0, 0, 0);
+        const days = [];
+        for (let cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
+            if (cur.getDay() === 0 || cur.getDay() === 6) continue;
+            days.push(this.getLocalDateKey(cur));
+        }
+        return { start: this.getLocalDateKey(start), end: this.getLocalDateKey(end), days };
+    },
+
+    getProbationDateWindowForRows: function(rows) {
+        const chartRows = Array.isArray(rows) ? rows : [];
+        if (!chartRows.length) return this.getProbationDateWindow([]);
+        let latest = 0;
+        let earliestStart = 0;
+        chartRows.forEach((row) => {
+            (row.attendanceRows || []).forEach(item => { latest = Math.max(latest, this.safeDateTs(item.date)); });
+            (row.activityHistory || []).forEach(item => { latest = Math.max(latest, this.safeDateTs(item.date)); });
+            Object.keys(row.metricMap || {}).forEach((label) => {
+                const match = String(label || '').match(/(?:Attendance|Focus):\s*(\d{4}-\d{2}-\d{2})/i);
+                if (match) latest = Math.max(latest, this.safeDateTs(match[1]));
+            });
+            const startTs = Number(row.sourceStartTs || 0) || this.getTraineeStartTs(row.personKey || row.label);
+            if (startTs && (!earliestStart || startTs < earliestStart)) earliestStart = startTs;
+        });
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const end = latest ? new Date(latest) : today;
+        end.setHours(0, 0, 0, 0);
+        const rollingStart = new Date(end);
+        rollingStart.setDate(rollingStart.getDate() - 89);
+        const start = earliestStart ? new Date(Math.max(earliestStart, rollingStart.getTime())) : rollingStart;
+        start.setHours(0, 0, 0, 0);
+        const days = [];
+        for (let cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
+            if (cur.getDay() === 0 || cur.getDay() === 6) continue;
+            days.push(this.getLocalDateKey(cur));
+        }
+        return { start: this.getLocalDateKey(start), end: this.getLocalDateKey(end), days };
+    },
+
+    getRowAttendanceRows: function(row) {
+        if (row && Array.isArray(row.attendanceRows)) return row.attendanceRows;
+        return InsightDataService.getAgentAttendance(row && (row.personKey || row.label));
+    },
+
+    getAttendanceStatusForRowDate: function(row, dateKey) {
+        const name = row && (row.personKey || row.label);
+        const startTs = Number(row && row.sourceStartTs || 0) || this.getTraineeStartTs(name);
+        const dayTs = this.safeDateTs(dateKey);
+        if (startTs && dayTs && dayTs < startTs) return { status: 'ignored', label: 'Before start date', detail: 'No attendance expected before this training attempt' };
+        const holidayName = this.getPublicHolidayName(dateKey);
+        const rows = this.getRowAttendanceRows(row)
+            .filter(item => this.getComparisonDateKey(item.date) === dateKey);
+        if (!rows.length && holidayName) return { status: 'holiday', label: 'Public Holiday', detail: holidayName };
+        if (!rows.length) return { status: 'absent', label: 'Absent', detail: 'No attendance captured for this training attempt' };
+        if (rows.some(item => item.isIgnored)) return { status: 'ignored', label: 'Ignored', detail: 'Attendance row ignored' };
+        if (rows.some(item => item.isLate)) {
+            const item = rows.find(entry => entry.isLate) || rows[0];
+            return { status: 'late', label: holidayName ? 'Late on public holiday' : 'Late', detail: `${item.clockIn || '-'} to ${item.clockOut || '-'}${holidayName ? ` | ${holidayName}` : ''}` };
+        }
+        const item = rows[0];
+        return { status: 'present', label: holidayName ? 'Present on public holiday' : 'Present', detail: `${item.clockIn || '-'} to ${item.clockOut || '-'}${holidayName ? ` | ${holidayName}` : ''}` };
+    },
+
+    getAttendanceStatusForDate: function(agentName, dateKey) {
+        const startTs = this.getTraineeStartTs(agentName);
+        const dayTs = insToTs(dateKey);
+        if (startTs && dayTs && dayTs < startTs) return { status: 'ignored', label: 'Before start date', detail: 'No attendance expected before trainee first activity' };
+        const holidayName = this.getPublicHolidayName(dateKey);
+        const rows = InsightDataService.getAgentAttendance(agentName)
+            .filter(row => this.getComparisonDateKey(row.date) === dateKey);
+        if (!rows.length && holidayName) return { status: 'holiday', label: 'Public Holiday', detail: holidayName };
+        if (!rows.length) return { status: 'absent', label: 'Absent', detail: 'No attendance captured' };
+        if (rows.some(row => row.isIgnored)) return { status: 'ignored', label: 'Ignored', detail: 'Attendance row ignored' };
+        if (rows.some(row => row.isLate)) {
+            const row = rows.find(item => item.isLate) || rows[0];
+            return { status: 'late', label: holidayName ? 'Late on public holiday' : 'Late', detail: `${row.clockIn || '-'} to ${row.clockOut || '-'}${holidayName ? ` | ${holidayName}` : ''}` };
+        }
+        const row = rows[0];
+        return { status: 'present', label: holidayName ? 'Present on public holiday' : 'Present', detail: `${row.clockIn || '-'} to ${row.clockOut || '-'}${holidayName ? ` | ${holidayName}` : ''}` };
+    },
+
+    getLiveMonitorEntryForDate: function(agentName, dateKey) {
+        const live = InsightDataService.getAgentLiveMonitorData(agentName);
+        if (!live || typeof live !== 'object') return null;
+        const segments = Array.isArray(live.history) ? live.history.slice() : [];
+        const liveDateKey = this.getComparisonDateKey(live.date) || this.getLocalDateKey(live.since ? new Date(live.since) : new Date());
+        if (live.current && live.since && liveDateKey === dateKey) {
+            segments.push({
+                activity: live.current,
+                start: live.since,
+                end: Date.now(),
+                duration: Math.max(0, Date.now() - Number(live.since || Date.now()))
+            });
+        }
+        const daySegments = segments.filter((segment) => {
+            const ts = Number(segment && (segment.start || segment.since || segment.end || segment.timestamp || 0));
+            return ts && this.getLocalDateKey(new Date(ts)) === dateKey;
+        });
+        if (!daySegments.length) return null;
+        let study = 0;
+        let idle = 0;
+        let external = 0;
+        daySegments.forEach((segment) => {
+            const activity = String(segment.activity || '').toLowerCase();
+            let duration = insDurationMs(segment.duration, insDurationMs(segment.durationMs, insDurationMs(segment.effectiveDuration, insDurationMs(segment.ms, insDurationMs(segment.seconds, 0)))));
+            if (duration <= 0 && segment.start && segment.end) duration = Math.max(0, Number(segment.end) - Number(segment.start));
+            if (duration <= 0) return;
+            if (activity.includes('idle') || activity.includes('away')) idle += duration;
+            else if (activity.includes('external') || activity.includes('violation') || activity.includes('background')) external += duration;
+            else study += duration;
+        });
+        const total = study + idle + external;
+        if (total <= 0) return null;
+        return { date: dateKey, user: agentName, summary: { study, idle, external, total }, details: daySegments };
+    },
+
+    getDailyFocusForDate: function(agentName, dateKey) {
+        const rows = InsightDataService.getAgentActivityBreakdown(agentName).history
+            .filter(row => this.getComparisonDateKey(row.date) === dateKey);
+        const liveEntry = this.getLiveMonitorEntryForDate(agentName, dateKey);
+        if (liveEntry) rows.push(liveEntry);
+        const scores = rows
+            .map(row => this.getActivityEntryFocusScore(row))
+            .filter(score => score !== null);
+        return this.averagePercent(scores);
+    },
+
+    getDailyFocusForRowDate: function(row, dateKey) {
+        const name = row && (row.personKey || row.label);
+        const rows = row && Array.isArray(row.activityHistory)
+            ? row.activityHistory.filter(item => this.getComparisonDateKey(item.date) === dateKey)
+            : InsightDataService.getAgentActivityBreakdown(name).history.filter(item => this.getComparisonDateKey(item.date) === dateKey);
+        if ((!row || !Array.isArray(row.activityHistory)) && !this.getInsightAttemptNumber()) {
+            const liveEntry = this.getLiveMonitorEntryForDate(name, dateKey);
+            if (liveEntry) rows.push(liveEntry);
+        }
+        const scores = rows
+            .map(item => this.getActivityEntryFocusScore(item))
+            .filter(score => score !== null);
+        return this.averagePercent(scores);
+    },
+
+    getInsightScoreBreakdownItems: function(row) {
+        const order = { Assessment: 1, Vetting: 2, Live: 3, Test: 4 };
+        return Object.entries((row && row.metricMap) || {})
+            .map(([label, value]) => {
+                const match = String(label || '').match(/^(Assessment|Vetting|Live|Test):\s*(.+)$/i);
+                if (!match) return null;
+                const rawType = match[1].toLowerCase();
+                const type = rawType === 'vetting'
+                    ? 'Vetting'
+                    : (rawType === 'live' ? 'Live' : (rawType === 'test' ? 'Test' : 'Assessment'));
+                const score = this.clampPercent(value);
+                if (score === null) return null;
+                return {
+                    type,
+                    name: String(match[2] || '').trim(),
+                    score,
+                    sortType: order[type] || 99
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => {
+                if (a.sortType !== b.sortType) return a.sortType - b.sortType;
+                return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+            });
+    },
+
+    getFocusTimelineCoverage: function(agentNames, days) {
+        const names = Array.isArray(agentNames) ? agentNames : [];
+        const daySet = new Set(days || []);
+        const counts = {};
+        names.forEach(name => {
+            counts[name] = InsightDataService.getAgentActivityBreakdown(name).history
+                .filter(row => daySet.has(this.getComparisonDateKey(row.date)))
+                .filter(row => this.getActivityEntryFocusScore(row) !== null)
+                .length;
+        });
+        return counts;
+    },
+
+    getFocusTimelineCoverageForRows: function(rows, days) {
+        const daySet = new Set(days || []);
+        const counts = {};
+        (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const key = row.personKey || row.label;
+            counts[key] = (Array.isArray(row.activityHistory) ? row.activityHistory : [])
+                .filter(item => daySet.has(this.getComparisonDateKey(item.date)))
+                .filter(item => this.getActivityEntryFocusScore(item) !== null)
+                .length;
+        });
+        return counts;
+    },
+
+    getProbationAttendanceStats: function(agentName, days) {
+        return (days || []).reduce((acc, dateKey) => {
+            const item = this.getAttendanceStatusForDate(agentName, dateKey);
+            acc[item.status] = (acc[item.status] || 0) + 1;
+            return acc;
+        }, { present: 0, late: 0, absent: 0, ignored: 0, holiday: 0 });
+    },
+
+    getProbationAttendanceStatsForRow: function(row, days) {
+        return (days || []).reduce((acc, dateKey) => {
+            const item = this.getAttendanceStatusForRowDate(row, dateKey);
+            acc[item.status] = (acc[item.status] || 0) + 1;
+            return acc;
+        }, { present: 0, late: 0, absent: 0, ignored: 0, holiday: 0 });
+    },
+
+    getLateAttendanceReviewRows: function(rows, days) {
+        const daySet = new Set(days || []);
+        return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+            const name = row.personKey || row.label;
+            return this.getRowAttendanceRows(row)
+                .filter(item => item && item.isLate && !item.isIgnored && daySet.has(this.getComparisonDateKey(item.date)))
+                .map(item => ({
+                    trainee: row.label || name,
+                    date: this.getComparisonDateKey(item.date),
+                    clockIn: item.clockIn || '-',
+                    clockOut: item.clockOut || '-',
+                    confirmed: item.lateConfirmed ? 'Confirmed' : 'Pending',
+                    note: (item.lateData && (item.lateData.reason || item.lateData.comment || item.lateData.note))
+                        || item.adminComment
+                        || '-'
+                }));
+        }).sort((a, b) => {
+            const dateDiff = String(b.date).localeCompare(String(a.date));
+            if (dateDiff !== 0) return dateDiff;
+            return String(a.trainee).localeCompare(String(b.trainee), undefined, { sensitivity: 'base' });
+        });
+    },
+
+    getHrReviewCoverageRows: function(primaryAgent, primaryRow, days) {
+        if (!primaryAgent || !primaryRow) return [];
+        const progress = InsightDataService.getAgentProgress(primaryAgent.name, primaryAgent.group || '');
+        const activity = primaryRow.activitySummary || InsightDataService.getAgentActivityBreakdown(primaryAgent.name);
+        const engagement = InsightDataService.getAgentContentEngagement(primaryAgent.name);
+        const feedback = InsightDataService.getAgentFeedback(primaryAgent.name);
+        const status = InsightDataService.getAgentStatus(primaryAgent.name);
+        const attendance = this.getProbationAttendanceStatsForRow(primaryRow, days);
+        const scoreItems = this.getInsightScoreBreakdownItems(primaryRow);
+        const lowScores = scoreItems.filter(item => item.score < 60);
+        const startTs = Number(primaryRow.sourceStartTs || 0) || this.getTraineeStartTs(primaryAgent.name);
+        const startDate = startTs ? this.getLocalDateKey(new Date(startTs)) : 'Not found';
+        const latestFeedback = feedback[0] || null;
+        return [
+            {
+                area: 'Employee / Start Date',
+                evidence: `${primaryAgent.name} | ${primaryAgent.group || 'Ungrouped'} | Start ${startDate}`,
+                use: 'Auto-populates review identity and probation window.'
+            },
+            {
+                area: 'Training Requirements',
+                evidence: `${progress.completedCount}/${progress.totalRequired} complete (${progress.progress}%)`,
+                use: progress.progress >= 80 ? 'Supports move-on readiness.' : 'Flags incomplete training requirements.'
+            },
+            {
+                area: 'Technical Skills',
+                evidence: `${scoreItems.length} scored items | ${lowScores.length} below 60% | Avg ${primaryRow.overallScore === null ? 'No data' : `${primaryRow.overallScore}%`}`,
+                use: lowScores.length ? 'Supports manager comments on technical gaps.' : 'Supports satisfactory technical progress.'
+            },
+            {
+                area: 'Punctuality / Attendance',
+                evidence: `${attendance.present} present / ${attendance.late} late / ${attendance.absent} absent / ${attendance.holiday} holiday`,
+                use: attendance.late || attendance.absent ? 'Supports punctuality and attendance review.' : 'Supports stable attendance.'
+            },
+            {
+                area: 'Productivity / Work Consistency',
+                evidence: activity.hasData ? `Focus ${primaryRow.focusScore}% over ${activity.daysTracked} tracked days | Idle ${activity.idleMinutes}m | External ${activity.externalMinutes}m` : 'No activity monitor data',
+                use: activity.hasData ? 'Supports productivity and consistency rating.' : 'Needs manual comment.'
+            },
+            {
+                area: 'Integrity / Conduct',
+                evidence: `${primaryRow.violationCount || 0} activity violation${Number(primaryRow.violationCount || 0) === 1 ? '' : 's'}`,
+                use: primaryRow.violationCount > 0 ? 'Review conduct context before rating.' : 'No monitor flags found.'
+            },
+            {
+                area: 'Manager Progress Comments',
+                evidence: latestFeedback ? `${latestFeedback.selectedMedium || 'Feedback'}: ${latestFeedback.problemStatement || '-'}` : 'No recent TL feedback captured',
+                use: feedback.length ? 'Can support manager comment narrative.' : 'Manual manager comment still needed.'
+            },
+            {
+                area: 'Content / Resource Engagement',
+                evidence: `${engagement.totals.totalQuizAttempts || 0} quiz attempts | ${this.formatDurationCompact(engagement.totals.totalWatchSeconds || 0)} watch time`,
+                use: 'Supports resources/training engagement discussion.'
+            },
+            {
+                area: 'Action Status',
+                evidence: `${status.status}${Array.isArray(status.failedItems) && status.failedItems.length ? ` | ${status.failedItems.length} failed item(s)` : ''}`,
+                use: 'Summarises whether review should be pass, improve, or critical.'
+            },
+            {
+                area: 'Manual PDF Fields',
+                evidence: 'Role clarity answers, employee comments, HR representative, goals, and signatures are not structured app data.',
+                use: 'Keep these as manual review form fields unless we add a dedicated HR review capture form.'
+            }
+        ];
+    },
+
+    getPerformanceEvaluationEvidenceRows: function(primaryAgent, primaryRow, days) {
+        if (!primaryAgent || !primaryRow) return [];
+        const progress = InsightDataService.getAgentProgress(primaryAgent.name, primaryAgent.group || '');
+        const activity = primaryRow.activitySummary || InsightDataService.getAgentActivityBreakdown(primaryAgent.name);
+        const attendance = this.getProbationAttendanceStatsForRow(primaryRow, days);
+        const scoreItems = this.getInsightScoreBreakdownItems(primaryRow);
+        const lowScores = scoreItems.filter(item => item.score < 60);
+        const totalAttendanceDays = Math.max(0, (days || []).length - attendance.holiday - attendance.ignored);
+        const presentRate = totalAttendanceDays > 0
+            ? Math.round(((attendance.present + attendance.late) / totalAttendanceDays) * 100)
+            : null;
+        const focusSignal = primaryRow.focusScore === null
+            ? 'No focus data'
+            : (primaryRow.focusScore < 60 ? 'Needs review' : (primaryRow.focusScore < 80 ? 'Improvement' : 'On track'));
+        const scoreSignal = primaryRow.overallScore === null
+            ? 'No score data'
+            : (primaryRow.overallScore < 60 ? 'Needs review' : (primaryRow.overallScore < 75 ? 'Improvement' : 'On track'));
+
+        return [
+            {
+                area: 'Quality of Work',
+                evidence: scoreItems.length ? `${scoreItems.length} scored items | Overall ${primaryRow.overallScore === null ? 'No data' : `${primaryRow.overallScore}%`} | ${lowScores.length} below 60%` : 'No assessment/test score data',
+                signal: scoreSignal
+            },
+            {
+                area: 'Work Consistency',
+                evidence: activity.hasData ? `Focus ${primaryRow.focusScore}% across ${activity.daysTracked} archived monitor day(s)` : 'No activity monitor history found',
+                signal: focusSignal
+            },
+            {
+                area: 'Productivity',
+                evidence: activity.hasData ? `Idle ${activity.idleMinutes}m | External ${activity.externalMinutes}m | Focus ${primaryRow.focusScore}%` : 'No productivity monitor data',
+                signal: focusSignal
+            },
+            {
+                area: 'Technical Skills',
+                evidence: [
+                    primaryRow.assessmentScore === null ? null : `Assessment ${primaryRow.assessmentScore}%`,
+                    primaryRow.vettingScore === null ? null : `Vetting ${primaryRow.vettingScore}%`,
+                    primaryRow.liveScore === null ? null : `Live ${primaryRow.liveScore}%`,
+                    primaryRow.testScore === null ? null : `Test ${primaryRow.testScore}%`
+                ].filter(Boolean).join(' | ') || 'No technical score data',
+                signal: scoreSignal
+            },
+            {
+                area: 'Dependability',
+                evidence: `${progress.completedCount}/${progress.totalRequired} training items complete (${progress.progress}%) | Attendance ${presentRate === null ? 'No data' : `${presentRate}%`}`,
+                signal: progress.progress >= 80 && (presentRate === null || presentRate >= 90) ? 'On track' : 'Improvement'
+            },
+            {
+                area: 'Punctuality',
+                evidence: `${attendance.late} late day(s) in the review window`,
+                signal: attendance.late > 3 ? 'Needs review' : (attendance.late > 0 ? 'Improvement' : 'On track')
+            },
+            {
+                area: 'Attendance',
+                evidence: `${attendance.present} present / ${attendance.late} late / ${attendance.absent} absent / ${attendance.holiday} public holiday`,
+                signal: attendance.absent > 2 ? 'Needs review' : (attendance.absent > 0 ? 'Improvement' : 'On track')
+            },
+            {
+                area: 'Activity Flags',
+                evidence: `${primaryRow.violationCount || 0} activity violation${Number(primaryRow.violationCount || 0) === 1 ? '' : 's'} captured`,
+                signal: primaryRow.violationCount > 0 ? 'Needs review' : 'No app flags'
+            }
+        ];
+    },
+
+    getManualPerformanceEvidenceRows: function(primaryAgent) {
+        if (!primaryAgent) return [];
+        return InsightDataService.getHrEvidenceForAgent(primaryAgent.name).map(row => ({
+            area: row.trigger,
+            evidence: row.description || row.proofUrl || row.proofName || 'Captured HR evidence',
+            signal: 'Manual HR evidence',
+            proofUrl: row.proofUrl,
+            proofName: row.proofName,
+            proofDataUrl: row.proofDataUrl,
+            date: row.createdAt,
+            createdBy: row.createdBy
+        }));
+    },
+
+    getTrainingResourceEngagementRows: function(primaryAgent) {
+        if (!primaryAgent) return [];
+        const engagement = InsightDataService.getAgentContentEngagement(primaryAgent.name);
+        const subjects = Array.isArray(engagement.subjects) ? engagement.subjects : [];
+        const totals = engagement.totals || {};
+        const rows = [
+            {
+                area: 'Tracked Resource Coverage',
+                evidence: `${totals.subjectCount || 0} subject(s) with captured engagement`,
+                signal: totals.subjectCount > 0 ? 'Captured' : 'No app data'
+            },
+            {
+                area: 'Study Watch Time',
+                evidence: this.formatDurationCompact(totals.totalWatchSeconds || 0),
+                signal: totals.totalWatchSeconds > 0 ? 'Captured' : 'No app data'
+            },
+            {
+                area: 'Quiz Attempts',
+                evidence: `${totals.totalQuizAttempts || 0} attempt(s) | ${totals.failedQuestions || 0} failed question(s)`,
+                signal: totals.totalQuizAttempts > 0 ? 'Captured' : 'No app data'
+            }
+        ];
+        subjects.slice(0, 5).forEach(subject => {
+            const bestScore = subject.quizBestScore === null || subject.quizBestScore === undefined
+                ? '-'
+                : `${Math.round(subject.quizBestScore)}%`;
+            rows.push({
+                area: subject.title || subject.code || 'Training Subject',
+                evidence: `${subject.quizAttempts || 0} quiz attempt(s) | Best ${bestScore} | ${this.formatDurationCompact(subject.watchSeconds || 0)} watch time`,
+                signal: subject.failedQuestions > 0 ? `${subject.failedQuestions} failed question(s)` : 'No failed questions'
+            });
+        });
+        return rows;
+    },
+
+    renderPerformanceEvaluationEvidenceGrid: function(primaryAgent, primaryRow, days) {
+        const esc = this.escapeHtml;
+        const performanceRows = this.getPerformanceEvaluationEvidenceRows(primaryAgent, primaryRow, days);
+        const manualRows = this.getManualPerformanceEvidenceRows(primaryAgent);
+        const engagementRows = this.getTrainingResourceEngagementRows(primaryAgent);
+        if (!performanceRows.length && !manualRows.length && !engagementRows.length) return '';
+        return `
+            <div class="ins-card full">
+                <h3>Performance Evaluation Evidence Grid</h3>
+                <p class="ins-subtle">Test view: only PDF performance areas with app-backed evidence are populated here. Manager-only fields stay out of this grid until they are captured in the app.</p>
+                <div class="table-responsive" style="max-height:360px; overflow-y:auto;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>PDF Area</th><th>Auto Evidence</th><th>Signal</th></tr></thead>
+                        <tbody>
+                            ${performanceRows.map(item => `
+                                <tr>
+                                    <td><strong>${esc(item.area)}</strong></td>
+                                    <td>${esc(item.evidence)}</td>
+                                    <td><span class="ins-badge">${esc(item.signal)}</span></td>
+                                </tr>
+                            `).join('')}
+                            ${manualRows.map(item => `
+                                <tr>
+                                    <td><strong>${esc(item.area)}</strong><div class="ins-subtle">${esc(String(item.date || '').slice(0, 10))}${item.createdBy ? ` | ${esc(item.createdBy)}` : ''}</div></td>
+                                    <td>
+                                        ${esc(item.evidence)}
+                                        ${item.proofUrl || item.proofDataUrl ? `<div class="ins-subtle" style="margin-top:4px;">
+                                            ${item.proofUrl ? `<a href="${esc(item.proofUrl)}" target="_blank" rel="noopener">Proof link</a>` : ''}
+                                            ${item.proofDataUrl ? `${item.proofUrl ? ' | ' : ''}<a href="${esc(item.proofDataUrl)}" target="_blank" rel="noopener">${esc(item.proofName || 'Screenshot')}</a>` : ''}
+                                        </div>` : ''}
+                                    </td>
+                                    <td><span class="ins-badge">${esc(item.signal)}</span></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="ins-review-table">
+                    <h4>Training / Resource Engagement</h4>
+                    <div class="table-responsive" style="max-height:280px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Area</th><th>Tracked Evidence</th><th>Signal</th></tr></thead>
+                            <tbody>
+                                ${engagementRows.map(item => `
+                                    <tr>
+                                        <td><strong>${esc(item.area)}</strong></td>
+                                        <td>${esc(item.evidence)}</td>
+                                        <td>${esc(item.signal)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="ins-subtle" style="padding:10px 12px; margin:0; border-top:1px solid var(--border-color);">Note: OPL Hub is not in production yet, so OPL Hub stats are not used in these calculations. The section is ready to include those stats once that system is live.</p>
+                </div>
+            </div>
+        `;
+    },
+
+    renderAttendanceTimelineGraph: function(rows, days) {
+        const esc = this.escapeHtml;
+        const chartRows = Array.isArray(rows) ? rows : [];
+        if (!chartRows.length || !days.length) return '<div class="ins-item">No attendance window available yet.</div>';
+        const lateRows = this.getLateAttendanceReviewRows(chartRows, days);
+        return `
+            <div class="ins-probation-scroll">
+                <div class="ins-attendance-timeline" style="--day-count:${days.length};">
+                    <div class="ins-probation-row ins-probation-head">
+                        <div class="ins-probation-name">Trainee</div>
+                        <div class="ins-probation-days">
+                            ${days.map((dateKey) => `<span class="ins-day-label" title="${esc(dateKey)}"><strong>${esc(this.getWeekdayShortLabel(dateKey))}</strong><small>${esc(dateKey.slice(5))}</small></span>`).join('')}
+                        </div>
+                    </div>
+                    ${chartRows.map((row) => {
+                        const name = row.personKey || row.label;
+                        return `
+                            <div class="ins-probation-row">
+                                <div class="ins-probation-name" title="${esc(name)}">${esc(row.label)}</div>
+                                <div class="ins-probation-days">
+                                    ${days.map((dateKey) => {
+                                        const item = this.getAttendanceStatusForRowDate(row, dateKey);
+                                        return `<span class="ins-att-dot ${esc(item.status)}" title="${esc(name)} | ${esc(dateKey)} | ${esc(item.label)} | ${esc(item.detail)}"></span>`;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+            <div class="ins-chart-legend">
+                <span><i class="ins-att-dot present"></i>Present</span>
+                <span><i class="ins-att-dot late"></i>Late</span>
+                <span><i class="ins-att-dot absent"></i>Absent</span>
+                <span><i class="ins-att-dot holiday"></i>Public holiday</span>
+                <span><i class="ins-att-dot ignored"></i>Ignored</span>
+            </div>
+            <div class="ins-review-table">
+                <h4>Late Entry Review</h4>
+                <div class="table-responsive" style="max-height:260px; overflow-y:auto;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>Date</th><th>Day</th><th>Trainee</th><th>Clock In</th><th>Clock Out</th><th>Review</th><th>Note</th></tr></thead>
+                        <tbody>
+                            ${lateRows.length ? lateRows.map(item => `
+                                <tr>
+                                    <td>${esc(item.date)}</td>
+                                    <td>${esc(this.getWeekdayShortLabel(item.date))}</td>
+                                    <td>${esc(item.trainee)}</td>
+                                    <td class="ins-metric">${esc(item.clockIn)}</td>
+                                    <td class="ins-metric">${esc(item.clockOut)}</td>
+                                    <td>${esc(item.confirmed)}</td>
+                                    <td>${esc(item.note)}</td>
+                                </tr>
+                            `).join('') : '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No late entries found in this probation window.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    },
+
+    renderFocusTimelineGraph: function(rows, days) {
+        const esc = this.escapeHtml;
+        const chartRows = Array.isArray(rows) ? rows : [];
+        if (!chartRows.length || !days.length) return '<div class="ins-item">No focus window available yet.</div>';
+        const width = Math.max(1180, days.length * 24);
+        const height = 330;
+        const pad = 50;
+        const xFor = (idx) => days.length <= 1 ? pad : pad + (idx * (width - pad * 2) / (days.length - 1));
+        const yFor = (value) => height - pad - ((this.clampPercent(value) || 0) * (height - pad * 2) / 100);
+        const pathRows = chartRows.map((row, idx) => {
+            const name = row.personKey || row.label;
+            const points = days.map((dateKey, dayIdx) => {
+                const score = this.getDailyFocusForRowDate(row, dateKey);
+                return score === null ? null : { dateKey, score, x: xFor(dayIdx), y: yFor(score) };
+            }).filter(Boolean);
+            return { row, name, points, color: this.getComparisonLineColor(idx) };
+        }).filter(item => item.points.length);
+
+        if (!pathRows.length) return '<div class="ins-item">No day-by-day focus scores are available for the selected trainee window.</div>';
+        const focusRows = pathRows.flatMap(item => item.points.map(point => ({
+            trainee: item.row.label,
+            date: point.dateKey,
+            score: point.score,
+            signal: point.score < 60 ? 'Needs review' : (point.score < 80 ? 'Improvement' : 'On track')
+        }))).sort((a, b) => {
+            const dateDiff = String(b.date).localeCompare(String(a.date));
+            if (dateDiff !== 0) return dateDiff;
+            return String(a.trainee).localeCompare(String(b.trainee), undefined, { sensitivity: 'base' });
+        });
+
+        return `
+            <div class="ins-probation-scroll">
+                <svg class="ins-focus-timeline-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Day by day focus score">
+                    <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" class="ins-chart-axis"></line>
+                    <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="ins-chart-axis"></line>
+                    ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${width - pad}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="8" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
+                    ${days.map((dateKey, idx) => idx % 5 === 0 ? `<text x="${xFor(idx)}" y="${height - 14}" text-anchor="middle" class="ins-chart-label">${esc(dateKey.slice(5))}</text>` : '').join('')}
+                    ${pathRows.map((item) => {
+                        const points = item.points.map(point => `${point.x},${point.y}`).join(' ');
+                        return `<g class="ins-trend-series">
+                            <title>${esc(item.row.label)}</title>
+                            <polyline points="${points}" fill="none" stroke="${item.color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                            ${item.points.map(point => `<circle cx="${point.x}" cy="${point.y}" r="3.2" fill="${item.color}" stroke="rgba(8,13,22,0.86)" stroke-width="1.3"><title>${esc(item.row.label)} | ${esc(point.dateKey)} | ${point.score}%</title></circle>`).join('')}
+                        </g>`;
+                    }).join('')}
+                </svg>
+            </div>
+            <div class="ins-trend-summary">
+                ${pathRows.map((item) => {
+                    const avg = this.averagePercent(item.points.map(point => point.score));
+                    const low = Math.min(...item.points.map(point => point.score));
+                    const high = Math.max(...item.points.map(point => point.score));
+                    return `<div class="ins-trend-summary-row">
+                        <span><i style="background:${item.color};"></i>${esc(item.row.label)}</span>
+                        <strong>Avg ${avg === null ? '-' : `${avg}%`}</strong>
+                        <small>Low ${low}% | High ${high}% | Days ${item.points.length}</small>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="ins-review-table">
+                <h4>Focus Level Day Review</h4>
+                <div class="table-responsive" style="max-height:260px; overflow-y:auto;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>Date</th><th>Day</th><th>Trainee</th><th>Focus</th><th>Signal</th></tr></thead>
+                        <tbody>
+                            ${focusRows.map(item => `
+                                <tr>
+                                    <td>${esc(item.date)}</td>
+                                    <td>${esc(this.getWeekdayShortLabel(item.date))}</td>
+                                    <td>${esc(item.trainee)}</td>
+                                    <td class="ins-metric">${item.score}%</td>
+                                    <td>${esc(item.signal)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    },
+
+    renderProbationSignals: function(primaryAgent, primaryRow, days) {
+        const esc = this.escapeHtml;
+        if (!primaryAgent || !primaryRow) return '<div class="ins-item">Select a trainee to build the probation review.</div>';
+        const progress = InsightDataService.getAgentProgress(primaryAgent.name, primaryAgent.group || '');
+        const activity = primaryRow.activitySummary || InsightDataService.getAgentActivityBreakdown(primaryAgent.name);
+        const scoreItems = this.getInsightScoreBreakdownItems(primaryRow);
+        const stats = this.getProbationAttendanceStatsForRow(primaryRow, days);
+        const reviewRows = [
+            ['Assessment Average', primaryRow.assessmentScore === null ? 'No data' : `${primaryRow.assessmentScore}%`, primaryRow.assessmentScore !== null && primaryRow.assessmentScore < 70 ? 'Needs review' : 'On track'],
+            ['Vetting Test Average', primaryRow.vettingScore === null ? 'No data' : `${primaryRow.vettingScore}%`, primaryRow.vettingScore !== null && primaryRow.vettingScore < 70 ? 'Needs review' : 'On track'],
+            ['Live Assessment Average', primaryRow.liveScore === null ? 'No data' : `${primaryRow.liveScore}%`, primaryRow.liveScore !== null && primaryRow.liveScore < 70 ? 'Needs review' : 'On track'],
+            ['Test Average', primaryRow.testScore === null ? 'No data' : `${primaryRow.testScore}%`, primaryRow.testScore !== null && primaryRow.testScore < 70 ? 'Needs review' : 'On track'],
+            ['Attendance', `${stats.present} present / ${stats.late} late / ${stats.absent} absent / ${stats.holiday} holiday`, stats.absent || stats.late > 3 ? 'Attendance concern' : 'Stable'],
+            ['Focus Level', activity.hasData ? `${primaryRow.focusScore}% over ${activity.daysTracked} tracked days` : 'No data', primaryRow.focusScore !== null && primaryRow.focusScore < 70 ? 'Needs coaching' : 'Stable'],
+            ['Progress Builder', `${progress.completedCount}/${progress.totalRequired} complete (${progress.progress}%)`, progress.progress < 80 ? 'Incomplete checklist' : 'On track'],
+            ['Activity Flags', `${primaryRow.violationCount || 0} violations`, primaryRow.violationCount > 0 ? 'Review activity' : 'No major flags']
+        ];
+
+        return `
+            <div class="ins-card">
+                <h3>Probation Review Signals</h3>
+                <div class="table-responsive" style="max-height:320px; overflow-y:auto;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>Area</th><th>Evidence</th><th>Signal</th></tr></thead>
+                        <tbody>
+                            ${reviewRows.map(([area, evidence, signal]) => `
+                                <tr>
+                                    <td><strong>${esc(area)}</strong></td>
+                                    <td class="ins-metric">${esc(evidence)}</td>
+                                    <td>${esc(signal)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="ins-card">
+                <h3>Assessment & Test Scores</h3>
+                <div class="table-responsive" style="max-height:320px; overflow-y:auto;">
+                    <table class="ins-table ins-table-compact">
+                        <thead><tr><th>Type</th><th>Name</th><th>Percentage</th></tr></thead>
+                        <tbody>
+                            ${scoreItems.length ? scoreItems.map(item => `
+                                <tr>
+                                    <td><span class="ins-badge">${esc(item.type)}</span></td>
+                                    <td>${esc(item.name)}</td>
+                                    <td class="ins-metric">${item.score}%</td>
+                                </tr>
+                            `).join('') : '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No assessment, vetting, live assessment, or test scores found for this trainee.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            ${this.renderPerformanceEvaluationEvidenceGrid(primaryAgent, primaryRow, days)}
+        `;
+    },
+
+    renderCompileGate: function(view, title, detail, innerHtml = '') {
+        const esc = this.escapeHtml;
+        const isBusy = this.state.compilingView === view;
+        return `
+            <div class="ins-card full ins-compare-hero">
+                    <div class="ins-item-top" style="align-items:flex-start;">
+                        <div>
+                            <h3 style="margin:0 0 4px 0;">${esc(title)}</h3>
+                            <p class="ins-subtle">${esc(detail)}</p>
+                        </div>
+                        <button class="btn-primary btn-sm" onclick="InsightApp.compileCurrentView('${esc(view)}')" ${isBusy ? 'disabled' : ''}>
+                            <i class="fas ${isBusy ? 'fa-circle-notch fa-spin' : 'fa-play'}"></i> ${isBusy ? 'Compiling...' : 'Compile View'}
+                        </button>
+                    </div>
+                    ${view === 'build' ? '<p class="ins-subtle" style="margin-top:8px;">Compile fetches archived monitor history for the selected trainee and peers directly, so the Focus Level Timeline uses the server archive instead of the trimmed local cache.</p>' : ''}
+                ${innerHtml}
+                ${isBusy ? '<div class="ins-item" style="margin-top:12px;">Loading latest attendance, assessment, and archived monitor data...</div>' : ''}
+            </div>
+        `;
+    },
+
+    renderInsightBuild: function() {
+        const esc = this.escapeHtml;
+        const primaryAgent = this.getInsightPrimaryAgent();
+        const visibleAgents = this.getInsightEligibleAgents();
+        const peerCandidates = this.getInsightPeerCandidates(primaryAgent);
+        const attemptOptions = this.getInsightAttemptOptions(primaryAgent);
+        const selectedAttemptScope = attemptOptions.some(option => option.value === this.state.insightAttemptScope)
+            ? this.state.insightAttemptScope
+            : 'current';
+        if (selectedAttemptScope !== this.state.insightAttemptScope) this.state.insightAttemptScope = selectedAttemptScope;
+        const selectedPeers = new Set((Array.isArray(this.state.insightPeers) ? this.state.insightPeers : []).map(name => insToken(name)));
+        if (!this.isCompiledView('build')) {
+            return `
+                <div class="ins-dept-grid">
+                    ${this.renderCompileGate('build', 'Insight Build', 'Select the trainee and optional same-group peers, then compile the probation review from the latest archived data.', `
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+                            <select onchange="InsightApp.setInsightPrimary(this.value)" style="margin:0; min-width:260px;">
+                                ${visibleAgents.length ? visibleAgents.map(agent => `<option value="${encodeURIComponent(agent.name)}" ${primaryAgent && insMatch(agent.name, primaryAgent.name) ? 'selected' : ''}>${esc(agent.name)} (${esc(agent.group || 'Ungrouped')})</option>`).join('') : '<option value="">No trainees found</option>'}
+                            </select>
+                            <select onchange="InsightApp.setInsightAttemptScope(this.value)" style="margin:0; min-width:220px;">
+                                ${attemptOptions.map(option => `<option value="${esc(option.value)}" ${option.value === selectedAttemptScope ? 'selected' : ''}>${esc(option.label)}</option>`).join('')}
+                            </select>
+                            <button class="btn-secondary btn-sm" onclick="InsightApp.clearInsightPeers()">Clear Peers</button>
+                        </div>
+                    `)}
+                    <div class="ins-card full ins-compare-filter-card">
+                        <h3>Add Same-Group Context</h3>
+                        <div class="ins-compare-picker">
+                            ${peerCandidates.length ? peerCandidates.map(agent => `
+                                <label class="ins-compare-pick ${selectedPeers.has(insToken(agent.name)) ? 'active' : ''}">
+                                    <input type="checkbox" ${selectedPeers.has(insToken(agent.name)) ? 'checked' : ''} onchange="InsightApp.toggleInsightPeer('${encodeURIComponent(agent.name)}')">
+                                    <span>${esc(agent.name)}</span>
+                                    <small>${esc(agent.group || 'Ungrouped')}</small>
+                                </label>
+                            `).join('') : '<div class="ins-item">No same-group trainees available for comparison.</div>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        const rows = this.getInsightBuildRows(primaryAgent);
+        const primaryRow = rows[0] || null;
+        const window = this.getProbationDateWindowForRows(rows);
+        const stats = primaryRow ? this.getProbationAttendanceStatsForRow(primaryRow, window.days) : { present: 0, late: 0, absent: 0 };
+        const focusCoverage = this.getFocusTimelineCoverageForRows(rows, window.days);
+        const primaryFocusDays = primaryRow ? (focusCoverage[primaryRow.personKey || primaryRow.label] || 0) : 0;
+
+        return `
+            <div class="ins-dept-grid">
+                <div class="ins-card full ins-compare-hero">
+                    <div class="ins-item-top" style="align-items:flex-start;">
+                        <div>
+                            <h3 style="margin:0 0 4px 0;">Insight Build</h3>
+                            <p class="ins-subtle">3 month probation review workspace for one trainee, with optional same-group comparison lines for context.</p>
+                        </div>
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <select onchange="InsightApp.setInsightPrimary(this.value)" style="margin:0; min-width:240px;">
+                                ${visibleAgents.length ? visibleAgents.map(agent => `<option value="${encodeURIComponent(agent.name)}" ${primaryAgent && insMatch(agent.name, primaryAgent.name) ? 'selected' : ''}>${esc(agent.name)} (${esc(agent.group || 'Ungrouped')})</option>`).join('') : '<option value="">No trainees found</option>'}
+                            </select>
+                            <select onchange="InsightApp.setInsightAttemptScope(this.value)" style="margin:0; min-width:220px;">
+                                ${attemptOptions.map(option => `<option value="${esc(option.value)}" ${option.value === selectedAttemptScope ? 'selected' : ''}>${esc(option.label)}</option>`).join('')}
+                            </select>
+                            <button class="btn-secondary btn-sm" onclick="InsightApp.clearInsightPeers()">Clear Peers</button>
+                        </div>
+                    </div>
+                    <div class="ins-mini-grid ins-dept-kpi-grid" style="margin-top:12px;">
+                        <div class="ins-mini"><strong>${primaryAgent ? esc(primaryAgent.name) : '-'}</strong><span class="ins-subtle">Review Trainee</span></div>
+                        <div class="ins-mini"><strong>${primaryAgent ? esc(primaryAgent.group || 'Ungrouped') : '-'}</strong><span class="ins-subtle">Group</span></div>
+                        <div class="ins-mini"><strong>${primaryRow ? esc(primaryRow.attemptLabel || 'Current') : '-'}</strong><span class="ins-subtle">Attempt Scope</span></div>
+                        <div class="ins-mini"><strong>${primaryRow && primaryRow.overallScore !== null ? `${primaryRow.overallScore}%` : 'No data'}</strong><span class="ins-subtle">Overall</span></div>
+                        <div class="ins-mini"><strong>${primaryRow && primaryRow.progressScore !== null ? `${primaryRow.progressScore}%` : 'No data'}</strong><span class="ins-subtle">Progress</span></div>
+                        <div class="ins-mini"><strong>${stats.present}/${window.days.length}</strong><span class="ins-subtle">Present Days</span></div>
+                        <div class="ins-mini"><strong>${stats.late}</strong><span class="ins-subtle">Late Days</span></div>
+                        <div class="ins-mini"><strong>${stats.absent}</strong><span class="ins-subtle">Absent Days</span></div>
+                        <div class="ins-mini"><strong>${primaryFocusDays}</strong><span class="ins-subtle">Archived Focus Days</span></div>
+                    </div>
+                </div>
+
+                <div class="ins-card full ins-compare-filter-card">
+                    <div class="ins-item-top" style="align-items:flex-start;">
+                        <div>
+                            <h3 style="margin:0 0 4px 0;">Add Same-Group Context</h3>
+                            <p class="ins-subtle">Add another trainee from ${primaryAgent ? esc(primaryAgent.group || 'this group') : 'this group'} to compare score movement, attendance days, and daily focus.</p>
+                        </div>
+                    </div>
+                    <div class="ins-compare-picker">
+                        ${peerCandidates.length ? peerCandidates.map(agent => `
+                            <label class="ins-compare-pick ${selectedPeers.has(insToken(agent.name)) ? 'active' : ''}">
+                                <input type="checkbox" ${selectedPeers.has(insToken(agent.name)) ? 'checked' : ''} onchange="InsightApp.toggleInsightPeer('${encodeURIComponent(agent.name)}')">
+                                <span>${esc(agent.name)}</span>
+                                <small>${esc(agent.group || 'Ungrouped')}</small>
+                            </label>
+                        `).join('') : '<div class="ins-item">No same-group trainees available for comparison.</div>'}
+                    </div>
+                </div>
+
+                <div class="ins-card full ins-graph-card">
+                    <div class="ins-graph-head">
+                        <div>
+                            <h3>Assessment / Test Breakdown Graph</h3>
+                            <p class="ins-subtle">Uses the same official Test Engine progress source as Compare Viewer for Assessment, Live Assessment, Vetting Test, and Test scores.</p>
+                        </div>
+                        <span class="ins-graph-pill">${rows.length} selected</span>
+                    </div>
+                    ${rows.length ? this.renderComparisonTrend(rows, 'performance', 'assessment/test') : '<div class="ins-item">Select a trainee to build the graph.</div>'}
+                </div>
+
+                <div class="ins-card full ins-graph-card">
+                    <div class="ins-graph-head">
+                        <div>
+                            <h3>Attendance Timeline</h3>
+                            <p class="ins-subtle">Weekday timeline from ${esc(window.start)} to ${esc(window.end)} anchored to trainee start dates, with public holidays separated from absences.</p>
+                        </div>
+                    </div>
+                    ${this.renderAttendanceTimelineGraph(rows, window.days)}
+                </div>
+
+                <div class="ins-card full ins-graph-card">
+                    <div class="ins-graph-head">
+                        <div>
+                            <h3>Focus Level Timeline</h3>
+                            <p class="ins-subtle">Day-by-day focus score from activity monitor history. Missing days are skipped instead of forced to zero.</p>
+                        </div>
+                    </div>
+                    ${this.renderFocusTimelineGraph(rows, window.days)}
+                </div>
+
+                ${this.renderProbationSignals(primaryAgent, primaryRow, window.days)}
+            </div>
+        `;
+    },
+
     sortComparisonRows: function(rows) {
         return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
             const scoreDiff = Number(b.overallScore || 0) - Number(a.overallScore || 0);
@@ -1782,11 +3107,44 @@ const InsightApp = {
         const splitLeftGroup = this.state.compareSplitLeftGroup || compareGroups[0] || '';
         const splitRightGroup = this.state.compareSplitRightGroup || compareGroups.find(group => group !== splitLeftGroup) || splitLeftGroup || '';
         const scopeLabel = pairMode ? 'Attempt 1 vs Current Live' : (attemptNumber ? `Training Attempt ${attemptNumber} Archive` : 'Current Live Attempt');
-        const rows = this.getComparisonRows();
-        const selectableRows = this.getComparePickerRows();
-        const groupAggregateMode = !pairMode && mode === 'group' && String(this.state.groupFilter || 'all') === 'all';
+        const selectableRows = this.isCompiledView('compare') ? this.getComparePickerRows() : this.getCompareCompileCandidates();
         const selected = Array.isArray(this.state.compareSelected) ? this.state.compareSelected : [];
         const selectedSet = new Set(selected);
+        const groupAggregateMode = !pairMode && mode === 'group' && String(this.state.groupFilter || 'all') === 'all';
+        if (!this.isCompiledView('compare')) {
+            return `
+                <div class="ins-dept-grid">
+                    ${this.renderCompileGate('compare', 'Compare Viewer', 'Choose the group, trainee set, attempt scope, and graph layout first. Compile only when you are ready to build the comparison graphs.', `
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px;">
+                            <select onchange="InsightApp.setCompareAttemptScope(this.value)" style="margin:0; min-width:210px;">
+                                <option value="live" ${attemptScope === 'live' ? 'selected' : ''}>Current Live Attempt</option>
+                                <option value="attempt_1" ${attemptScope === 'attempt_1' ? 'selected' : ''}>Training Attempt 1 Archive</option>
+                                <option value="attempt_2" ${attemptScope === 'attempt_2' ? 'selected' : ''}>Training Attempt 2 Archive</option>
+                                <option value="attempt_1_vs_live" ${attemptScope === 'attempt_1_vs_live' ? 'selected' : ''}>Attempt 1 vs Current Live</option>
+                            </select>
+                            ${pairMode ? '' : `<button class="sub-tab-btn ${mode === 'group' ? 'active' : ''}" onclick="InsightApp.setCompareMode('group')">Per Group</button>`}
+                            ${pairMode ? '' : `<button class="sub-tab-btn ${mode !== 'group' ? 'active' : ''}" onclick="InsightApp.setCompareMode('person')">Per Person</button>`}
+                            <button class="btn-secondary btn-sm" onclick="InsightApp.selectVisibleCompareRows()">Select Visible</button>
+                            <button class="btn-secondary btn-sm" onclick="InsightApp.clearCompareSelection()">Clear</button>
+                        </div>
+                    `)}
+                    <div class="ins-card full ins-compare-filter-card">
+                        <h3>Result Set</h3>
+                        <p class="ins-subtle">${groupAggregateMode ? 'Select groups to compile.' : 'Select trainees to compile. Leaving the selection empty compiles the full visible set.'}</p>
+                        <div class="ins-compare-picker">
+                            ${selectableRows.length ? selectableRows.map(row => `
+                                <label class="ins-compare-pick ${selectedSet.has(row.key) ? 'active' : ''}">
+                                    <input type="checkbox" ${selectedSet.has(row.key) ? 'checked' : ''} onchange="InsightApp.toggleCompareSelection('${encodeURIComponent(row.key)}')">
+                                    <span>${esc(row.label)}</span>
+                                    <small>${groupAggregateMode ? `${row.memberCount || 0} members` : esc(row.group || 'Ungrouped')}${row.attemptLabel ? ` | ${esc(row.attemptLabel)}` : ''}</small>
+                                </label>
+                            `).join('') : '<div class="ins-item">No available comparison rows for this filter.</div>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        const rows = this.getComparisonRows();
         const topRows = rows.slice(0, 10);
         const metricAvg = {
             overall: this.averagePercent(rows.map(row => row.overallScore)) || 0,
@@ -1957,6 +3315,13 @@ const InsightApp = {
 
     renderDepartmentOverview: function() {
         const esc = this.escapeHtml;
+        if (!this.isCompiledView('department')) {
+            return `
+                <div class="ins-dept-grid">
+                    ${this.renderCompileGate('department', 'Department Overview', 'Select a group or search scope, then compile the department snapshot from the latest assessment, attendance, feedback, and activity data.')}
+                </div>
+            `;
+        }
         const summary = InsightDataService.getDepartmentOverview(this.state.groupFilter, this.state.search);
         const kpis = summary.kpis || {};
         const effortRows = Array.isArray(summary.effortRows) ? summary.effortRows : [];
@@ -2200,6 +3565,96 @@ const InsightApp = {
         `;
     },
 
+    renderHrEvidenceCapture: function() {
+        const esc = this.escapeHtml;
+        const selectedGroup = String(this.state.groupFilter || 'all');
+        const search = String(this.state.search || '').trim().toLowerCase();
+        const agents = InsightDataService.getAllAgents()
+            .filter(agent => this.isTraineeRole(agent.role) && !agent.blocked)
+            .filter(agent => selectedGroup === 'all' || String(agent.group || '') === selectedGroup)
+            .filter(agent => !search || String(agent.name || '').toLowerCase().includes(search))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+        const evidenceRows = (InsightDataService.state.hrEvidence || [])
+            .filter(row => {
+                if (selectedGroup !== 'all') {
+                    const rowGroup = String(row.groupID || row.group || '').trim();
+                    const agent = InsightDataService.getAllAgents().find(item => insMatch(item.name, row.trainee) || String(row.traineeKey || '') === insToken(item.name));
+                    const resolvedGroup = rowGroup || (agent && agent.group) || '';
+                    if (String(resolvedGroup || '') !== selectedGroup) return false;
+                }
+                return !search
+                    || String(row.trainee || '').toLowerCase().includes(search)
+                    || String(row.traineeKey || '').toLowerCase().includes(search.replace(/\s+/g, ''))
+                    || String(row.trigger || '').toLowerCase().includes(search);
+            })
+            .sort((a, b) => this.safeDateTs(b.createdAt) - this.safeDateTs(a.createdAt));
+
+        return `
+            <div class="ins-dept-grid">
+                <div class="ins-card full">
+                    <h3>HR Evidence Capture</h3>
+                    <p class="ins-subtle">Capture trainee-level HR incidents for review areas that are not automatically measured by Insight Build. These entries follow the trainee as a whole and appear in their Performance Evaluation Evidence Grid.</p>
+                    <div class="ins-mini-grid" style="margin-top:12px;">
+                        <label>
+                            <span class="ins-subtle">Trainee</span>
+                            <select id="hrEvidenceTrainee" style="width:100%; margin-top:4px;">
+                                ${agents.length ? agents.map(agent => `<option value="${esc(agent.name)}">${esc(agent.name)} (${esc(agent.group || 'Ungrouped')})</option>`).join('') : '<option value="">No trainees found</option>'}
+                            </select>
+                        </label>
+                        <label>
+                            <span class="ins-subtle">Evaluation Trigger</span>
+                            <select id="hrEvidenceTrigger" style="width:100%; margin-top:4px;">
+                                ${this.hrEvidenceTriggers.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
+                            </select>
+                        </label>
+                    </div>
+                    <label style="display:block; margin-top:12px;">
+                        <span class="ins-subtle">Description</span>
+                        <textarea id="hrEvidenceDescription" rows="5" placeholder="Add the HR incident or supporting review note..." style="width:100%; margin-top:4px;"></textarea>
+                    </label>
+                    <div class="ins-mini-grid" style="margin-top:12px;">
+                        <label>
+                            <span class="ins-subtle">Proof Link</span>
+                            <input id="hrEvidenceProofUrl" type="url" placeholder="https://... SharePoint evidence link" style="width:100%; margin-top:4px;">
+                        </label>
+                        <label>
+                            <span class="ins-subtle">Screenshot</span>
+                            <input id="hrEvidenceScreenshot" type="file" accept="image/*" style="width:100%; margin-top:4px;">
+                        </label>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+                        <button class="btn-primary btn-sm" onclick="InsightApp.captureHrEvidence()"><i class="fas fa-plus"></i> Capture Trigger</button>
+                    </div>
+                </div>
+
+                <div class="ins-card full">
+                    <h3>Captured HR Evidence</h3>
+                    <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Date</th><th>Trainee</th><th>Trigger</th><th>Description</th><th>Proof</th><th>By</th></tr></thead>
+                            <tbody>
+                                ${evidenceRows.length ? evidenceRows.map(row => `
+                                    <tr>
+                                        <td>${esc(String(row.createdAt || '').slice(0, 10))}</td>
+                                        <td><strong>${esc(row.trainee)}</strong></td>
+                                        <td><span class="ins-badge">${esc(row.trigger)}</span></td>
+                                        <td>${esc(row.description || '-')}</td>
+                                        <td>
+                                            ${row.proofUrl ? `<a href="${esc(row.proofUrl)}" target="_blank" rel="noopener">Link</a>` : ''}
+                                            ${row.proofDataUrl ? `${row.proofUrl ? ' | ' : ''}<a href="${esc(row.proofDataUrl)}" target="_blank" rel="noopener">${esc(row.proofName || 'Screenshot')}</a>` : ''}
+                                            ${!row.proofUrl && !row.proofDataUrl ? '-' : ''}
+                                        </td>
+                                        <td>${esc(row.createdBy || '-')}</td>
+                                    </tr>
+                                `).join('') : '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No HR evidence captured for this scope.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
     render: function() {
         const root = document.getElementById('insight-app');
         if (!root) return;
@@ -2231,6 +3686,8 @@ const InsightApp = {
         const isDepartmentView = this.state.viewMode === 'department';
         const isKnowledgeView = this.state.viewMode === 'knowledge';
         const isCompareView = this.state.viewMode === 'compare';
+        const isBuildView = this.state.viewMode === 'build';
+        const isHrEvidenceView = this.state.viewMode === 'hr-evidence';
 
         const rowsHtml = isProgressView
             ? this.getProgressAgents().map((row, idx) => {
@@ -2304,8 +3761,12 @@ const InsightApp = {
             <div class="ins-shell">
                 <div class="ins-toolbar">
                     <div class="ins-toolbar-left">
-                        <strong>${isCompareView ? 'Compare Viewer' : (isKnowledgeView ? 'Knowledge Gaps' : (isDepartmentView ? 'Department Overview' : (isProgressView ? 'Agent Progress' : 'Agent Triggers')))}</strong>
-                        <span class="ins-subtle">${isCompareView
+                        <strong>${isHrEvidenceView ? 'HR Evidence' : (isBuildView ? 'Insight Build' : (isCompareView ? 'Compare Viewer' : (isKnowledgeView ? 'Knowledge Gaps' : (isDepartmentView ? 'Department Overview' : (isProgressView ? 'Agent Progress' : 'Agent Triggers')))))}</strong>
+                        <span class="ins-subtle">${isHrEvidenceView
+                            ? 'Capture trainee-level HR evidence for manual performance evaluation areas.'
+                            : (isBuildView
+                            ? 'Dedicated 3 month probation review with trainee deep-dive stats and same-group context.'
+                            : (isCompareView
                             ? 'Side-by-side graph comparison by person or group across scores, attendance, focus, and progress.'
                             : (isKnowledgeView
                             ? 'Question-level gap analysis grouped by assessment, individual, or all groups.'
@@ -2313,12 +3774,14 @@ const InsightApp = {
                             ? 'High-level operational overview powered by trigger, engagement, feedback, and timeline signals.'
                             : (isProgressView
                                 ? 'Checklist progress with configurable requirements, N/A control, and graduation readiness.'
-                                : 'Program-level trainee insight with adjustable action triggers.')))}</span>
+                                : 'Program-level trainee insight with adjustable action triggers.')))))}</span>
                         <div style="display:flex; gap:8px; margin-left:6px;">
                             <button class="sub-tab-btn ${this.state.viewMode === 'triggers' ? 'active' : ''}" onclick="InsightApp.setViewMode('triggers')">Agent Triggers</button>
                             <button class="sub-tab-btn ${this.state.viewMode === 'progress' ? 'active' : ''}" onclick="InsightApp.setViewMode('progress')">Agent Progress</button>
                             <button class="sub-tab-btn ${this.state.viewMode === 'department' ? 'active' : ''}" onclick="InsightApp.setViewMode('department')">Department Overview</button>
                             <button class="sub-tab-btn ${this.state.viewMode === 'compare' ? 'active' : ''}" onclick="InsightApp.setViewMode('compare')">Compare Viewer</button>
+                            <button class="sub-tab-btn ${this.state.viewMode === 'build' ? 'active' : ''}" onclick="InsightApp.setViewMode('build')">Insight Build</button>
+                            <button class="sub-tab-btn ${this.state.viewMode === 'hr-evidence' ? 'active' : ''}" onclick="InsightApp.setViewMode('hr-evidence')">HR Evidence</button>
                             <button class="sub-tab-btn ${this.state.viewMode === 'knowledge' ? 'active' : ''}" onclick="InsightApp.setViewMode('knowledge')">Knowledge Gaps</button>
                         </div>
                     </div>
@@ -2334,6 +3797,10 @@ const InsightApp = {
 
                 ${isCompareView
                     ? this.renderComparisonViewer()
+                    : (isBuildView
+                    ? this.renderInsightBuild()
+                    : (isHrEvidenceView
+                    ? this.renderHrEvidenceCapture()
                     : (isKnowledgeView
                     ? this.renderKnowledgeGaps()
                     : (isDepartmentView
@@ -2366,9 +3833,9 @@ const InsightApp = {
                                 ${rowsHtml || `<tr><td colspan="${isProgressView ? '6' : '9'}" style="text-align:center; color:var(--text-muted);">${isProgressView ? 'No trainee agents found for this filter.' : 'No trainee agents currently in Improvement or Critical status for this filter.'}</td></tr>`}
                             </tbody>
                         </table>
-                    </div>`))}
+                    </div>`))))}
             </div>
-            ${isDepartmentView || isKnowledgeView || isCompareView ? '' : this.renderDetailDrawer()}
+            ${isDepartmentView || isKnowledgeView || isCompareView || isBuildView || isHrEvidenceView ? '' : this.renderDetailDrawer()}
         `;
     }
 };

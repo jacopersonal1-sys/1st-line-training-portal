@@ -83,15 +83,28 @@ const ContentStudioLoader = {
         const modulePath = basePath + '/modules/content_studio/index.html';
 
         container.innerHTML = `
+            <div class="embedded-program-shell">
+            <div class="embedded-program-header">
+                <div>
+                    <div class="embedded-program-title"><i class="fas fa-photo-film"></i> Content Creator</div>
+                    <div class="embedded-program-subtitle">Learning content authoring in an isolated workspace.</div>
+                </div>
+                <div class="embedded-program-actions">
+                    <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                    <button class="btn-secondary btn-sm" onclick="ContentStudioLoader.renderUI()"><i class="fas fa-rotate-right"></i> Refresh</button>
+                </div>
+            </div>
             <webview
                 id="content-studio-webview"
+                class="embedded-program-frame"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}"
-                style="width:100%; height:calc(100vh - 190px); border:none; background:transparent;"
+                style="height:calc(100vh - 230px);"
                 nodeintegration
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
                 partition="persist:content_studio"
                 allowpopups
             ></webview>
+            </div>
         `;
 
         const webview = document.getElementById('content-studio-webview');

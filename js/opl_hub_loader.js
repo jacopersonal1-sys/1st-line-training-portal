@@ -28,14 +28,27 @@ const OPLHubLoader = {
         const modulePath = basePath + '/modules/opl_hub/index.html';
 
         container.innerHTML = `
+            <div class="embedded-program-shell">
+            <div class="embedded-program-header">
+                <div>
+                    <div class="embedded-program-title"><i class="fas fa-book-open"></i> OPL Hub</div>
+                    <div class="embedded-program-subtitle">Operational learning resources in an isolated workspace.</div>
+                </div>
+                <div class="embedded-program-actions">
+                    <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                    <button class="btn-secondary btn-sm" onclick="OPLHubLoader.renderUI()"><i class="fas fa-rotate-right"></i> Refresh</button>
+                </div>
+            </div>
             <webview
                 id="opl-hub-webview"
+                class="embedded-program-frame"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}"
-                style="width:100%; height:calc(100vh - 190px); border:none; background:transparent;"
+                style="height:calc(100vh - 230px);"
                 webpreferences="nodeIntegration=yes, contextIsolation=no"
                 partition="persist:opl_hub"
                 allowpopups
             ></webview>
+            </div>
         `;
         const webview = document.getElementById('opl-hub-webview');
         if (webview) {

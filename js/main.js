@@ -1623,9 +1623,43 @@ window.addEventListener('resize', scheduleAdaptiveViewportLayoutRefresh, { passi
 window.addEventListener('orientationchange', scheduleAdaptiveViewportLayoutRefresh, { passive: true });
 window.addEventListener('focus', scheduleAdaptiveViewportLayoutRefresh, { passive: true });
 
+function getStoredLocalThemeConfig() {
+    try {
+        return JSON.parse(localStorage.getItem('local_theme_config') || '{}') || {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function hasVisualCustomTheme(localTheme = getStoredLocalThemeConfig()) {
+    const color = String(localTheme.primaryColor || '').trim().toLowerCase();
+    const background = String(localTheme.backgroundColor || '').trim().toLowerCase();
+    const wallpaper = String(localTheme.wallpaper || '').trim();
+    return !!(
+        wallpaper ||
+        (color && color !== '#f37021') ||
+        (background && background !== '#1a1410')
+    );
+}
+
+function getEffectiveExperimentalTheme() {
+    const explicitTheme = String(localStorage.getItem('experimental_theme') || '').trim();
+    if (explicitTheme) return explicitTheme;
+    return hasVisualCustomTheme() ? '' : 'theme-one-ui';
+}
+
+function applyEffectiveExperimentalTheme() {
+    if (typeof applyExperimentalTheme !== 'function') return;
+    const effectiveTheme = getEffectiveExperimentalTheme();
+    if (effectiveTheme) {
+        applyExperimentalTheme(effectiveTheme, { persist: false });
+    } else {
+        applyExperimentalTheme(null, { skipUserTheme: true });
+    }
+}
+
 function applyUserTheme() {
-    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || 'null');
-    if (!localTheme) return; // Fallback to CSS defaults
+    const localTheme = getStoredLocalThemeConfig();
 
     const root = document.documentElement;
     
@@ -1691,7 +1725,11 @@ function applyUserTheme() {
 
     applyUIDensity(localTheme.density || localStorage.getItem('ui_density') || 'comfortable');
     refreshAdaptiveViewportLayout();
-    syncThemeToEmbeddedPrograms();
+    if (!window.__APPLYING_EXPERIMENTAL_THEME && typeof applyEffectiveExperimentalTheme === 'function') {
+        applyEffectiveExperimentalTheme();
+    } else {
+        syncThemeToEmbeddedPrograms();
+    }
 }
 
 function getThemeVariableSnapshot() {
@@ -1721,6 +1759,23 @@ function getThemeVariableSnapshot() {
     }, {});
 }
 
+function getThemeClassSnapshot() {
+    if (!document.body) return [];
+    return [
+        'light-mode',
+        'exp-theme-active',
+        'theme-custom-lab',
+        'theme-one-ui',
+        'theme-cyberpunk',
+        'theme-ocean',
+        'theme-forest',
+        'theme-royal',
+        'density-compact',
+        'density-comfortable',
+        'density-spacious'
+    ].filter(name => document.body.classList.contains(name));
+}
+
 function applyThemeToEmbeddedFrame(frame) {
     if (!frame) return;
     try {
@@ -1729,7 +1784,8 @@ function applyThemeToEmbeddedFrame(frame) {
         const vars = getThemeVariableSnapshot();
         Object.keys(vars).forEach(name => doc.documentElement.style.setProperty(name, vars[name]));
         const density = getCurrentUIDensity();
-        doc.body.classList.remove('density-compact', 'density-comfortable', 'density-spacious');
+        doc.body.classList.remove('light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious');
+        getThemeClassSnapshot().forEach(name => doc.body.classList.add(name));
         doc.body.classList.add(`density-${density}`);
         if (frame.contentWindow && typeof frame.contentWindow.syncThemeFromHost === 'function') {
             frame.contentWindow.syncThemeFromHost();
@@ -1743,18 +1799,20 @@ function applyThemeToWebview(webview) {
     if (!webview || typeof webview.executeJavaScript !== 'function') return;
     try {
         const vars = getThemeVariableSnapshot();
+        const classes = getThemeClassSnapshot();
         const script = `
-            (function(vars, density) {
+            (function(vars, density, classes) {
                 try {
                     Object.keys(vars || {}).forEach(function(name) {
                         document.documentElement.style.setProperty(name, vars[name]);
                     });
                     if (document.body) {
-                        document.body.classList.remove('density-compact', 'density-comfortable', 'density-spacious');
+                        document.body.classList.remove('light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious');
+                        (classes || []).forEach(function(name) { document.body.classList.add(name); });
                         document.body.classList.add('density-' + density);
                     }
                 } catch (error) {}
-            })(${JSON.stringify(vars)}, ${JSON.stringify(getCurrentUIDensity())});
+            })(${JSON.stringify(vars)}, ${JSON.stringify(getCurrentUIDensity())}, ${JSON.stringify(classes)});
         `;
         webview.executeJavaScript(script, true).catch(() => {});
     } catch (error) {}
@@ -2248,9 +2306,11 @@ window.applyCustomExperimentalTheme = function(overrides = {}) {
 };
 
 function updateExperimentalThemePickerState() {
-    const activeTheme = localStorage.getItem('experimental_theme') || '';
+    const storedTheme = localStorage.getItem('experimental_theme') || '';
+    const activeTheme = (typeof getEffectiveExperimentalTheme === 'function') ? getEffectiveExperimentalTheme() : storedTheme;
     const labels = {
         'theme-custom-lab': 'Custom Lab',
+        'theme-one-ui': 'One UI Clean',
         'theme-cyberpunk': 'Neon Nights',
         'theme-ocean': 'Deep Sea',
         'theme-forest': 'Enchanted Forest',
@@ -2266,15 +2326,17 @@ function updateExperimentalThemePickerState() {
 
     const badge = document.getElementById('expThemeCurrentBadge');
     if (badge) {
-        badge.textContent = activeTheme ? `Current: ${labels[activeTheme] || 'Custom Preset'}` : 'Current: Original';
+        const suffix = activeTheme === 'theme-one-ui' && !storedTheme ? ' (Default)' : '';
+        badge.textContent = activeTheme ? `Current: ${labels[activeTheme] || 'Custom Preset'}${suffix}` : 'Current: Original';
     }
 
     syncCustomThemeControlUI(getStoredCustomExperimentalThemeConfig());
 }
 
-function applyExperimentalTheme(themeName) {
+function applyExperimentalTheme(themeName, options = {}) {
+    window.__APPLYING_EXPERIMENTAL_THEME = true;
     // 1. Remove all experimental classes
-    document.body.classList.remove('exp-theme-active', 'exp-theme-wallpaper', 'theme-custom-lab', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
+    document.body.classList.remove('exp-theme-active', 'exp-theme-wallpaper', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
     clearCustomExperimentalThemeVariables();
     
     if (themeName) {
@@ -2295,14 +2357,15 @@ function applyExperimentalTheme(themeName) {
             }
         }
         document.body.classList.add(themeName);
-        localStorage.setItem('experimental_theme', themeName);
+        if (options.persist !== false) localStorage.setItem('experimental_theme', themeName);
     } else {
         // 3. Reset
         localStorage.removeItem('experimental_theme');
         // Re-apply user theme to ensure we go back to normal
-        if (typeof applyUserTheme === 'function') applyUserTheme();
+        if (!options.skipUserTheme && typeof applyUserTheme === 'function') applyUserTheme();
     }
 
+    window.__APPLYING_EXPERIMENTAL_THEME = false;
     updateExperimentalThemePickerState();
     syncThemeToEmbeddedPrograms();
 }
@@ -2393,6 +2456,16 @@ function buildAdvancedNavButton(item) {
         </button>`;
 }
 
+function setActiveNavigationTarget(id) {
+    document.querySelectorAll('.nav-item.active').forEach(b => b.classList.remove('active'));
+    if (CURRENT_USER && CURRENT_USER.role === 'trainee') return;
+    const safeId = String(id || '');
+    const escapedId = (window.CSS && typeof CSS.escape === 'function') ? CSS.escape(safeId) : safeId.replace(/"/g, '\\"');
+    const sidebarBtn = document.querySelector(`button.nav-item[data-nav-target="${escapedId}"]`)
+        || document.querySelector(`button.nav-item[onclick="showTab('${safeId.replace(/'/g, "\\'")}')"]`);
+    if(sidebarBtn) sidebarBtn.classList.add('active');
+}
+
 function renderAdvancedAdminNavigation(menu) {
     menu.innerHTML = ADVANCED_ADMIN_NAV_GROUPS.map(group => `
         <div class="nav-group">
@@ -2433,6 +2506,13 @@ function applyConfiguredNavigationView() {
         menu.dataset.navView = 'classic';
         document.body.classList.remove('admin-nav-advanced');
     }
+
+    menu.querySelectorAll('button.nav-item').forEach(btn => {
+        if (btn.dataset.navTarget) return;
+        const raw = btn.getAttribute('onclick') || '';
+        const match = raw.match(/showTab\(['"]([^'"]+)['"]/);
+        if (match && match[1]) btn.dataset.navTarget = match[1];
+    });
 }
 
 window.setAdminNavigationView = function(view) {
@@ -2445,8 +2525,7 @@ window.setAdminNavigationView = function(view) {
     updateSidebarVisibility();
     const active = document.querySelector('section.active');
     if (active) {
-        const activeBtn = document.querySelector(`button.nav-item[onclick="showTab('${active.id}')"]`);
-        if (activeBtn) activeBtn.classList.add('active');
+        setActiveNavigationTarget(active.id);
     }
 };
 
@@ -2797,7 +2876,10 @@ window.changeBootRoleSelection = function changeBootRoleSelection() {
 
 let TAB_SWITCH_TIMEOUT = null;
 let VIEW_SYNC_IN_FLIGHT = false;
+let NAV_DEFER_TIMER = null;
+let LAST_NAV_REQUEST = { id: null, at: 0 };
 const VIEW_SYNC_LAST_RUN = {};
+const VIEW_RENDERED_ONCE = {};
 const HIGH_PRIORITY_SYNC_VIEWS = new Set([
     'assessment-schedule',
     'trainee-portal',
@@ -2808,6 +2890,20 @@ const HIGH_PRIORITY_SYNC_VIEWS = new Set([
     'admin-panel',
     'live-assessment',
     'monthly'
+]);
+
+const HEAVY_EMBEDDED_VIEWS = new Set([
+    'insight-studio',
+    'opl-hub',
+    'content-studio',
+    'tl-hub',
+    'assessment-schedule',
+    'superadmin-studio',
+    'vetting-arena',
+    'vetting-rework',
+    'first-line-troubleshooting',
+    'trainee-portal',
+    'study-notes'
 ]);
 
 const TRAINEE_ALLOWED_TABS = new Set([
@@ -3007,6 +3103,11 @@ function renderViewById(id, options = {}) {
     const source = String(options.source || 'switch');
 
     if (!id) return;
+    const renderedBefore = !!VIEW_RENDERED_ONCE[id];
+    if (source === 'switch' && renderedBefore && HEAVY_EMBEDDED_VIEWS.has(id)) {
+        return;
+    }
+    if (source === 'switch') VIEW_RENDERED_ONCE[id] = true;
 
     if (source === 'freshPull') {
         if (id === 'assessment-schedule' && typeof ScheduleStudioLoader !== 'undefined' && typeof ScheduleStudioLoader.refresh === 'function') {
@@ -3264,6 +3365,19 @@ function rerenderActiveViewAfterFreshPull(id) {
     renderViewById(id, { source: 'freshPull' });
 }
 
+function scheduleNavigationDeferredWork(id, target) {
+    if (NAV_DEFER_TIMER) clearTimeout(NAV_DEFER_TIMER);
+    const run = () => {
+        NAV_DEFER_TIMER = null;
+        if (target && target.isConnected && typeof applyResponsiveTableLabels === 'function') {
+            applyResponsiveTableLabels(target);
+        }
+        if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
+        syncFreshDataForView(id);
+    };
+    NAV_DEFER_TIMER = setTimeout(run, 90);
+}
+
 async function syncFreshDataForView(id) {
     if (!isHighPrioritySyncView(id)) return;
     if (id === 'assessment-schedule') return;
@@ -3289,6 +3403,10 @@ async function syncFreshDataForView(id) {
 }
 
 function showTab(id, btn) {
+  const navNow = Date.now();
+  if (LAST_NAV_REQUEST.id === id && (navNow - LAST_NAV_REQUEST.at) < 180) return;
+  LAST_NAV_REQUEST = { id, at: navNow };
+
   applyRealtimeFailoverProfile(id);
 
   // --- SYNC & REALTIME FLAGS ---
@@ -3452,12 +3570,11 @@ function showTab(id, btn) {
           refreshAdaptiveViewportLayout();
       }
 
-      // HIDDEN LOGIC: Reset views
-      document.querySelectorAll('section').forEach(s => {
-          s.classList.remove('active');
-          s.classList.remove('tab-exit-anim');
-          s.classList.remove('tab-enter-anim');
-      });
+      if (current) {
+          current.classList.remove('active');
+          current.classList.remove('tab-exit-anim');
+          current.classList.remove('tab-enter-anim');
+      }
       
       const target = document.getElementById(id);
       if(target) {
@@ -3466,37 +3583,27 @@ function showTab(id, btn) {
       }
       
       // Update Sidebar
-      document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-      if (!(CURRENT_USER && CURRENT_USER.role === 'trainee')) {
-          // Find button by onclick attribute (reliable for sidebar navigation)
-          const navTargetId = id;
-          const sidebarBtn = document.querySelector(`button.nav-item[onclick="showTab('${navTargetId}')"]`);
-          if(sidebarBtn) sidebarBtn.classList.add('active');
-      }
+      setActiveNavigationTarget(id);
 
       // --- ACTIVITY TRACKING ---
       if (typeof StudyMonitor !== 'undefined') {
           StudyMonitor.track(`Navigating: ${id.replace(/-/g, ' ')}`);
       }
 
-      // VISUAL FIX: Auto-resize textareas when tab becomes visible
-      setTimeout(() => {
-          if (typeof refreshAdaptiveViewportLayout === 'function') refreshAdaptiveViewportLayout();
-          document.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
-      }, 50);
-        
       // --- DYNAMIC DATA REFRESH ---
       renderViewById(id, { source: 'switch' });
-      if (typeof applyResponsiveTableLabels === 'function') applyResponsiveTableLabels(document.getElementById(id) || document);
-      if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
+      scheduleNavigationDeferredWork(id, target || document.getElementById(id) || document);
 
-      syncFreshDataForView(id);
-      setTimeout(() => document.body.classList.remove('route-transitioning'), 320);
+      setTimeout(() => {
+          if (target) target.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
+          if (target) target.classList.remove('tab-enter-anim');
+          document.body.classList.remove('route-transitioning');
+      }, 160);
   };
 
-  if (current) {
+  if (current && !document.body.classList.contains('theme-one-ui')) {
       current.classList.add('tab-exit-anim');
-      TAB_SWITCH_TIMEOUT = setTimeout(executeSwitch, 350);
+      TAB_SWITCH_TIMEOUT = setTimeout(executeSwitch, 120);
   } else {
       executeSwitch();
   }
@@ -4131,6 +4238,36 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.94": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> One UI Clean is now the default adaptive workspace theme when no custom visual theme is configured.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> One UI styling now reaches deeper into shell headers, cards, modals, status chips, segmented controls, tables, toasts, and embedded app title bars.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Navigation now skips rebuilding already-loaded embedded workspaces, defers non-critical tab work, and debounces repeated clicks.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Marking queue cleanup keeps actively marked linked pending submissions visible and repairs stale linked pending rows without archiving them.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Admin connectivity testing now handles missing local server fields without throwing.</li>
+            </ul>`,
+        "2.6.93": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Knowledge Gaps now reads Test Engine question scores correctly and shows clearer failure rates.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> HR Evidence now saves against the trainee's canonical name and appears reliably in Insight Build.</li>
+                <li style="margin-bottom: 8px;"><strong>Hardening:</strong> Vetting submissions and admin marking now verify critical server saves more reliably.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> One UI Clean adds a reversible mobile-inspired experimental theme with brighter surfaces and calmer motion.</li>
+            </ul>`,
+        "2.6.92": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Insight Studio now includes Insight Build, a dedicated 3 month probation review workspace for trainee deep dives.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Build adds same-group peer comparison, official Assessment/Test breakdowns, day-by-day attendance timelines, focus timelines, and probation review evidence signals.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Attendance timelines now respect trainee start dates, weekdays, and public holidays, while focus timelines can read archived and live monitor study data.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Compare Viewer, Insight Build, and Department Overview now compile on demand and the breakdown graph shows Fail, Improve, and Pass goal bands.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Activity Monitor previous-day timeline detail now fetches archived days from Supabase when the local cache has already been pruned.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Insight Build compile now directly pulls archived focus history for selected trainees and anchors probation windows to first real activity.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Build now includes a sorted Assessment, Vetting, Live Assessment, and Test score list in the review section.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Build timelines are wider and include late-entry and day-by-day focus review tables under the graphs.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Build now includes a test Performance Evaluation Evidence Grid and Training / Resource Engagement section, with an OPL Hub note for future production stats.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Insight Build can now switch between current/live training and detected retrain archive attempts, using archived attendance and focus data for the selected attempt.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> HR Evidence lets admins capture trainee-level manual performance evidence with proof links or screenshots, and Insight Build shows those rows in the evidence grid.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> HR Evidence trigger selection now includes all performance evaluation areas so admins can add manual proof alongside auto-populated Insight Build evidence.</li>
+            </ul>`,
         "2.6.91": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Admin Tools now includes Hosted HTML Tool management with separate Main and Export slots, Supabase Storage uploads, generated browser URLs, and usage tracking.</li>

@@ -15,23 +15,25 @@
 
             if (!document.getElementById('schedule-studio-frame')) {
                 container.innerHTML = `
-                    <div style="background:var(--bg-input); padding:10px 14px; border-radius:10px; margin-bottom:14px; border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                    <div class="embedded-program-shell">
+                    <div class="embedded-program-header">
                         <div>
-                            <strong style="color:var(--primary);"><i class="fas fa-layer-group"></i> Schedule Studio</strong>
-                            <div style="font-size:0.85rem; color:var(--text-muted); margin-top:4px;">The schedule timeline now runs inside its own isolated module.</div>
+                            <div class="embedded-program-title"><i class="fas fa-layer-group"></i> Schedule Studio</div>
+                            <div class="embedded-program-subtitle">The schedule timeline now runs inside its own isolated module.</div>
                         </div>
-                        <div style="display:flex; align-items:center; gap:8px;">
+                        <div class="embedded-program-actions">
                             <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
                             <button class="btn-secondary btn-sm" onclick="ScheduleStudioLoader.refresh()"><i class="fas fa-rotate-right"></i> Refresh</button>
                         </div>
                     </div>
                     <iframe
                         id="schedule-studio-frame"
+                        class="embedded-program-frame"
                         src="${modulePath}"
                         title="Schedule Studio"
                         onload="if (typeof applyThemeToEmbeddedFrame === 'function') applyThemeToEmbeddedFrame(this)"
-                        style="width:100%; height:calc(100vh - 230px); border:none; border-radius:14px; background:var(--bg-card); box-shadow:0 10px 30px rgba(0,0,0,0.2);"
                     ></iframe>
+                    </div>
                 `;
                 return;
             }

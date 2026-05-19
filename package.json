@@ -1,6 +1,6 @@
 {
   "name": "1st-line-training-portal",
-  "version": "2.6.91",
+  "version": "2.6.94",
   "description": "Training Portal Cloud Edition",
   "main": "electron-main.js",
   "scripts": {
@@ -13,7 +13,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jacopersonal1-sys/1st-line-training-portal.git"
+    "url": "git+https://github.com/jacopersonal1-sys/1st-line-training-portal.git"
   },
   "author": "Admin",
   "license": "ISC",
@@ -50,5 +50,11 @@
       "!save_data.php",
       "!server.js"
     ]
-  }
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jacopersonal1-sys/1st-line-training-portal/issues"
+  },
+  "homepage": "https://github.com/jacopersonal1-sys/1st-line-training-portal#readme"
 }

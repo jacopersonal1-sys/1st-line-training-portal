@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.6.94 - 2026-05-19
+
+- Feature: One UI Clean is now the default adaptive workspace theme when no custom visual theme is configured.
+- Improvement: One UI received deeper shell, card, modal, status-chip, segmented-control, table, toast, and embedded-workspace polish across the main app and isolated modules.
+- Performance: Navigation now avoids rebuilding heavy embedded views on return, defers responsive table labelling and fresh server sync until after the tab paints, and debounces repeated tab clicks.
+- Fix: Marking queue cleanup now keeps actively marked linked pending submissions visible and repairs stale linked pending rows without archiving them.
+- Fix: Admin connectivity testing no longer throws when Local Server fields are absent from the current modal state.
+- Verification: Syntax checks and focused Jest suites passed.
+
+> Release target: stable main channel.
+
+## 2.6.93 - 2026-05-19
+
+- Fix: Knowledge Gaps now reads Test Engine question scores from saved submission marks and shows failure rates against all marked attempts.
+- Improvement: HR Evidence now saves to the trainee's canonical app name, stable trainee key, and group so Insight Build can reliably display captured evidence.
+- Hardening: Vetting submission, force-submit, and admin marking flows now verify critical server saves and avoid false completed states when sync is interrupted.
+- Feature: Added the reversible One UI Clean experimental theme with brighter mobile-inspired surfaces, softer cards, and calmer motion.
+- Ops: Added Supabase SQL setup for Insight HR Evidence app documents.
+- Verification: Focused syntax checks and Jest suites passed.
+
+> Release target: stable main channel.
+
+## 2.6.92 - 2026-05-18
+
+- Feature: Added Insight Build as a dedicated Insight submenu for 3 month trainee probation review deep dives.
+- Feature: Insight Build includes the official Assessment / Test Breakdown graph, same-group peer comparison, attendance timeline, focus timeline, and probation review evidence signals.
+- Improvement: Attendance and focus probation graphs now render day-by-day timelines instead of the compact Compare Viewer summary style.
+- Fix: Attendance timelines now start from trainee first activity/schedule evidence, exclude weekends, separate public holidays from absences, and use a larger readable graph.
+- Fix: Focus timelines now understand archived material/tool study summaries and can use the current live monitor feed for the active day.
+- Improvement: Compare Viewer, Insight Build, and Department Overview now compile on demand after selecting the target scope, refreshing archived monitor data before rendering heavy graphs.
+- Improvement: Assessment / Test Breakdown graphs now show faded Fail, Improve, and Pass goal bands behind the progress lines.
+- Improvement: Attendance timelines now label each weekday cell Monday through Friday.
+- Fix: Activity Monitor previous-day detail and AI analysis now fetch missing archived monitor days directly from Supabase instead of relying only on the locally pruned cache.
+- Fix: Insight Build compile now performs a focused archived monitor pull for the selected trainee and peers, and probation windows use first real activity before falling back to schedule dates.
+- Improvement: Insight Build now replaces recent review evidence with a numeric Assessment, Vetting, Live Assessment, and Test score list sorted by course/name.
+- Improvement: Insight Build attendance and focus timelines are wider and now include review tables below the graphs for late entries and daily focus scores.
+- Improvement: Insight Build now includes a test Performance Evaluation Evidence Grid and Training / Resource Engagement section, with only app-backed review areas auto-populated and an OPL Hub production-readiness note.
+- Improvement: Insight Build can now choose current/live training or a detected retrain archive attempt, using archived attendance and focus rows for the selected attempt timelines.
+- Feature: Added an HR Evidence submenu for trainee-level manual performance evidence capture, including trigger, description, SharePoint proof link, and screenshot proof, with captured rows shown in Insight Build.
+- Improvement: HR Evidence trigger selection now includes all performance evaluation areas, including areas Insight Build also auto-populates, so admins can add manual supporting proof where needed.
+- Verification: Focused syntax checks and Jest suite passed.
+
+> Release target: stable main channel.
+
 ## 2.6.91 - 2026-05-14
 
 - Feature: Added Admin Tools > Tool Hosting for uploading and replacing two hosted HTML slots: Main HTML Tool and Exported HTML Tool.

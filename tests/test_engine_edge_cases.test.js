@@ -60,6 +60,105 @@ describe('Test engine edge cases', () => {
         expect(container.innerHTML).toContain('live_2');
     });
 
+    test('marking queue keeps actively marked linked pending submissions visible', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(src);
+
+        const container = { innerHTML: '' };
+        const badge = {
+            innerText: '',
+            classList: { remove: jest.fn(), add: jest.fn() }
+        };
+        global.document = {
+            getElementById: jest.fn((id) => {
+                if (id === 'markingList') return container;
+                if (id === 'markingCountBadge') return badge;
+                return null;
+            })
+        };
+        window.document = global.document;
+        global.saveToServer = jest.fn();
+        window.saveToServer = global.saveToServer;
+        window.ACTIVE_MARKING_SUBMISSION_ID = 'sub_active';
+
+        const expiresAt = new Date(Date.now() + 60000).toISOString();
+        localStorage.setItem('submissions', JSON.stringify([
+            {
+                id: 'sub_active',
+                trainee: 'Alice',
+                testId: 'test_1',
+                testTitle: 'Assessment A',
+                status: 'pending',
+                archived: false,
+                date: '2026-05-19',
+                markingLock: {
+                    marker: 'manager',
+                    markerSession: getMarkerSessionKey(),
+                    expiresAt
+                }
+            }
+        ]));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'record_sub_active', submissionId: 'sub_active', trainee: 'Alice', assessment: 'Assessment A', score: 77 }
+        ]));
+
+        loadMarkingQueue();
+
+        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        expect(submissions[0].status).toBe('pending');
+        expect(submissions[0].archived).toBe(false);
+        expect(badge.innerText).toBe(1);
+        expect(container.innerHTML).toContain('sub_active');
+        expect(global.saveToServer).not.toHaveBeenCalled();
+
+        window.ACTIVE_MARKING_SUBMISSION_ID = null;
+    });
+
+    test('marking queue repairs stale linked pending submissions without archiving them', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(src);
+
+        const container = { innerHTML: '' };
+        const badge = {
+            innerText: '',
+            classList: { remove: jest.fn(), add: jest.fn() }
+        };
+        global.document = {
+            getElementById: jest.fn((id) => {
+                if (id === 'markingList') return container;
+                if (id === 'markingCountBadge') return badge;
+                return null;
+            })
+        };
+        window.document = global.document;
+        global.saveToServer = jest.fn();
+        window.saveToServer = global.saveToServer;
+
+        localStorage.setItem('submissions', JSON.stringify([
+            {
+                id: 'sub_stale',
+                trainee: 'Alice',
+                testId: 'test_1',
+                testTitle: 'Assessment A',
+                status: 'pending',
+                archived: false,
+                date: '2026-05-19'
+            }
+        ]));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'record_sub_stale', submissionId: 'sub_stale', trainee: 'Alice', assessment: 'Assessment A', score: 88 }
+        ]));
+
+        loadMarkingQueue();
+
+        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        expect(submissions[0].status).toBe('completed');
+        expect(submissions[0].archived).toBe(false);
+        expect(submissions[0].score).toBe(88);
+        expect(badge.innerText).toBe(0);
+        expect(global.saveToServer).toHaveBeenCalledWith(['submissions'], false, true);
+    });
+
     test('deleting a submission does not delete an unrelated same-title record', async () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../js/admin_history.js'), 'utf8');
         eval(src);
