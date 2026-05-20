@@ -1,5 +1,63 @@
 # Changelog
 
+## 2.6.99 - 2026-05-20
+
+- Hotfix: Trainee Portal fresh-pull loading no longer replaces the embedded portal iframe during login.
+- Fix: If the trainee portal iframe is missing when a refresh runs, the loader remounts it instead of leaving trainees stuck on the loading card.
+- Verification: `node --check js\main.js`, `node --check js\trainee_portal_loader.js`, and full Jest passed.
+
+> Release target: stable main channel.
+
+## 2.6.98 - 2026-05-20
+
+- Performance: Trainee login now renders the portal first and moves trainee-scoped server sync plus activity monitor startup into the background.
+- Improvement: Trainee Portal now inherits One UI classes and theme tokens from the host shell.
+- Improvement: Advanced sidebar navigation now expands into a wider compact grid so more tabs fit on-screen.
+- Feature: Advanced sidebar entries can expose quick submenus for Admin Tools, Test Engine, and Onboard Report subviews.
+- Verification: Focused syntax checks and Jest coverage passed.
+
+> Release target: stable main channel.
+
+## 2.6.97 - 2026-05-20
+
+- Feature: Added shared app loading surfaces for heavier Supabase pulls, including progress-aware full-sync overlay and reusable inline loaders.
+- Improvement: High-priority view refreshes now show calm loading states while server data is pulled before rerendering records, Test Engine, Q&A Hub, trainee portal, and live booking views.
+- Improvement: Live Assessment Booking and Super Admin Data Studio now use the shared loader while authoritative booking syncs or embedded Data Studio startup is in progress.
+- Performance: Reduced Operations Dashboard render lag by caching per-render localStorage reads, moving storage-size calculation off the critical path, shortening card entrance timing, delegating edit-mode drag events, and avoiding duplicate calendar widget rendering.
+- Performance: Dashboard refreshes are now coalesced into idle-time renders, realtime submission updates debounce heavy Test Engine refreshes, and embedded theme syncing is batched to reduce navigation/editing stalls.
+- Performance: Insight background refresh no longer replaces the embedded workspace with a route loader after the first render; it now soft-refreshes the webview data after the pull completes.
+- Fix: Assessment feedback requests now use an immediate delta sync instead of a forced full upload of all submissions and records.
+- Fix: Network Diagnostics is excluded from One UI bottom-sheet modal rules and opens as a large diagnostics workspace.
+- Polish: Network Diagnostics modal cards and the admin popout now inherit One UI tokens, theme classes, rounded surfaces, and custom accent variables from the main app.
+- Polish: App-wide interaction transitions now target paint-friendly properties instead of using broad `all` transitions.
+- Polish: Host theme variables and One UI bridge styling are injected into embedded iframes/webviews so Teamleader Hub, OPL Hub, Q&A Hub, Content Creator, Schedule Studio, and Vetting Arena 2.0 inherit the current app theme more consistently.
+- Cleanup: Release sweep checked syntax, merge/debug markers, and focused Test Engine coverage.
+- Verification: JS syntax checks and focused Test Engine Jest coverage passed.
+
+> Release target: stable main channel.
+
+## 2.6.96 - 2026-05-19
+
+- Feature: Added assessment feedback requests for completed trainee assessments, including a one-time Feedback Required action in My Assessments.
+- Feature: Test Engine & History now includes Feedback Sessions for admins to review requested feedback and mark feedback as given.
+- Feature: Admin notification bell now alerts Admin/Super Admin users when a trainee requests assessment feedback.
+- Improvement: My Assessments now includes completed live assessment entries, not only upcoming live bookings.
+- Improvement: Feedback status now appears in trainee cards, completed history, feedback sessions, and marked script print/review headers.
+- Verification: Focused syntax checks and Test Engine Jest coverage passed.
+
+> Release target: stable main channel.
+
+## 2.6.95 - 2026-05-19
+
+- Feature: One UI Clean is now presented as an official workspace theme instead of only an experimental preset.
+- Improvement: One UI can now be customized from profile/admin personalization with separate light/dark accent colors, light/dark surface tones, shape, and depth controls.
+- Improvement: One UI defaults now use a dark-grey accent palette instead of blue, while keeping light/dark adaptive surfaces.
+- Polish: One UI form labels, color inputs, range controls, table headers, dropdowns, active theme cards, embedded program icons, and primary buttons received deeper visual alignment.
+- Performance: One UI navigation now defers non-critical table/sync work to idle time, avoids full-sidebar active-state scans, and temporarily disables expensive blur/shadow/transition effects while routes switch.
+- Verification: Syntax checks passed for the changed theme scripts.
+
+> Release target: stable main channel.
+
 ## 2.6.94 - 2026-05-19
 
 - Feature: One UI Clean is now the default adaptive workspace theme when no custom visual theme is configured.

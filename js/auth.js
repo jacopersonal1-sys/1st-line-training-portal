@@ -85,6 +85,34 @@ function applySuccessfulLoginSession(validUser, options = {}) {
     autoLogin();
 }
 
+function runTraineePostLoginSync() {
+    if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
+    if (window.__TRAINEE_POST_LOGIN_SYNC_RUNNING) return;
+    window.__TRAINEE_POST_LOGIN_SYNC_RUNNING = true;
+
+    const finish = () => {
+        window.__TRAINEE_POST_LOGIN_SYNC_RUNNING = false;
+        if (typeof TraineePortalLoader !== 'undefined' && typeof TraineePortalLoader.refresh === 'function') {
+            TraineePortalLoader.refresh(false);
+        }
+    };
+
+    Promise.resolve()
+        .then(async () => {
+            if (typeof loadFromServer === 'function') {
+                await loadFromServer(true);
+            }
+            if (typeof StudyMonitor !== 'undefined' && !StudyMonitor.__initStartedForSession) {
+                StudyMonitor.__initStartedForSession = true;
+                await StudyMonitor.init();
+            }
+        })
+        .catch(error => {
+            console.warn("Trainee post-login background sync failed:", error);
+        })
+        .finally(finish);
+}
+
 function isUserRevokedLocally(username) {
     try {
         const token = normalizeLoginIdentity(username);
@@ -793,20 +821,13 @@ async function autoLogin() {
   if (typeof startRealtimeSync === 'function') startRealtimeSync();
 
   // --- START ACTIVITY MONITOR (Fresh Login) ---
-  if (typeof StudyMonitor !== 'undefined') {
+  // Trainee runtime renders first and then starts monitoring/sync in the background.
+  if (typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
       await StudyMonitor.init();
   }
   
   // --- START VETTING ENFORCER ---
   if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
-
-  if (window.APP_BOOT_MODE === 'trainee' && CURRENT_USER.role === 'trainee' && typeof loadFromServer === 'function') {
-      try {
-          await loadFromServer(true);
-      } catch (error) {
-          console.warn("Trainee post-login sync failed:", error);
-      }
-  }
 
   // Redirect based on role
   if (window.RESTORE_TAB) {
@@ -820,6 +841,10 @@ async function autoLogin() {
   } else if(CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') showTab('dashboard-view'); 
   else if(CURRENT_USER.role === 'trainee') showTab('trainee-portal');
   else showTab('monthly'); // Team Leader
+
+  if (CURRENT_USER.role === 'trainee') {
+      runTraineePostLoginSync();
+  }
 }
 
 function checkFirstTimeLogin() {

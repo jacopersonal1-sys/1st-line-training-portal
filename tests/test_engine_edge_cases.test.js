@@ -290,4 +290,157 @@ describe('Test engine edge cases', () => {
         expect(record.modifiedBy).toBe('manager');
         expect(global.saveToServer).toHaveBeenCalledWith(['records'], true);
     });
+
+    test('trainee feedback request is one-time and syncs linked record plus admin notification', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        global.loadTraineeTests = jest.fn();
+        global.updateNotifications = jest.fn();
+        global.document = { getElementById: jest.fn(() => null) };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_feedback', trainee: 'Alice', testTitle: 'Assessment A', status: 'completed', score: 85 }
+        ]));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'record_sub_feedback', submissionId: 'sub_feedback', trainee: 'Alice', assessment: 'Assessment A', score: 85 }
+        ]));
+
+        await window.requestAssessmentFeedback('sub_feedback');
+
+        const submission = JSON.parse(localStorage.getItem('submissions'))[0];
+        const record = JSON.parse(localStorage.getItem('records'))[0];
+        const notifications = JSON.parse(localStorage.getItem('admin_notifications'));
+
+        expect(submission.feedbackStatus).toBe('requested');
+        expect(submission.feedbackRequestLocked).toBe(true);
+        expect(record.feedbackStatus).toBe('requested');
+        expect(record.feedbackRequestLocked).toBe(true);
+        expect(notifications[0].type).toBe('assessment_feedback_request');
+        expect(global.saveToServer).toHaveBeenCalledWith(['submissions', 'records', 'admin_notifications'], false);
+        expect(global.saveToServer).toHaveBeenCalledWith('FLUSH');
+
+        await window.requestAssessmentFeedback('sub_feedback');
+        expect(global.showToast).toHaveBeenCalledWith('Feedback can only be requested once for this assessment.', 'warning');
+    });
+
+    test('trainee my assessments shows live booking even when linked assessment is already scheduled', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        const container = { innerHTML: '' };
+        global.document = {
+            getElementById: jest.fn((id) => id === 'myTestsList' ? container : null)
+        };
+        window.document = global.document;
+
+        localStorage.setItem('tests', JSON.stringify([
+            { id: 'test_1', title: 'Assessment A', type: 'standard', questions: [{ id: 'q1' }] }
+        ]));
+        localStorage.setItem('rosters', JSON.stringify({ group_1: ['Alice'] }));
+        localStorage.setItem('schedules', JSON.stringify({
+            sched_1: {
+                assigned: 'group_1',
+                items: [{ linkedTestId: 'test_1', dateRange: '2999-01-01', dueDate: '2999-01-01' }]
+            }
+        }));
+        localStorage.setItem('liveBookings', JSON.stringify([
+            {
+                id: 'booking_1',
+                trainee: 'Alice',
+                assessmentId: 'test_1',
+                assessment: 'Assessment A',
+                status: 'Booked',
+                date: '2999-01-01',
+                time: '09:00'
+            }
+        ]));
+        localStorage.setItem('submissions', JSON.stringify([]));
+        localStorage.setItem('records', JSON.stringify([]));
+
+        loadTraineeTests();
+
+        expect(container.innerHTML).toContain('Booked 2999-01-01 09:00');
+        expect(container.innerHTML).toContain('View Live Booking');
+    });
+
+    test('trainee feedback request button uses editable tooltip config', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        const container = { innerHTML: '' };
+        global.document = {
+            getElementById: jest.fn((id) => id === 'myTestsList' ? container : null)
+        };
+        window.document = global.document;
+
+        localStorage.setItem('tests', JSON.stringify([
+            { id: 'test_1', title: 'Assessment A', type: 'standard', questions: [{ id: 'q1' }] }
+        ]));
+        localStorage.setItem('rosters', JSON.stringify({ group_1: ['Alice'] }));
+        localStorage.setItem('schedules', JSON.stringify({
+            sched_1: {
+                assigned: 'group_1',
+                items: [{ linkedTestId: 'test_1', dateRange: '2026-05-19', dueDate: '2026-05-19' }]
+            }
+        }));
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_feedback_tip', trainee: 'Alice', testId: 'test_1', testTitle: 'Assessment A', status: 'completed', score: 82 }
+        ]));
+        localStorage.setItem('records', JSON.stringify([]));
+        localStorage.setItem('assessment_feedback_config', JSON.stringify({
+            tooltipText: 'Custom feedback tooltip for trainees'
+        }));
+
+        loadTraineeTests();
+
+        expect(container.innerHTML).toContain('Feedback Required');
+        expect(container.innerHTML).toContain('data-tooltip="Custom feedback tooltip for trainees"');
+    });
+
+    test('admin marks requested assessment feedback as given without unlocking trainee request', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'manager', role: 'admin' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        global.loadFeedbackSessions = jest.fn();
+        global.loadCompletedHistory = jest.fn();
+        global.updateNotifications = jest.fn();
+
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_feedback', trainee: 'Alice', testTitle: 'Assessment A', status: 'completed', score: 85, feedbackStatus: 'requested', feedbackRequestLocked: true }
+        ]));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'record_sub_feedback', submissionId: 'sub_feedback', trainee: 'Alice', assessment: 'Assessment A', score: 85, feedbackStatus: 'requested', feedbackRequestLocked: true }
+        ]));
+        localStorage.setItem('admin_notifications', JSON.stringify([
+            { id: 'assessment_feedback_sub_feedback', type: 'assessment_feedback_request', submissionId: 'sub_feedback', status: 'open' }
+        ]));
+
+        await window.markAssessmentFeedbackGiven('sub_feedback');
+
+        const submission = JSON.parse(localStorage.getItem('submissions'))[0];
+        const record = JSON.parse(localStorage.getItem('records'))[0];
+        const notification = JSON.parse(localStorage.getItem('admin_notifications'))[0];
+
+        expect(submission.feedbackStatus).toBe('given');
+        expect(submission.feedbackRequestLocked).toBe(true);
+        expect(record.feedbackStatus).toBe('given');
+        expect(record.feedbackRequestLocked).toBe(true);
+        expect(notification.status).toBe('closed');
+        expect(global.saveToServer).toHaveBeenCalledWith(['submissions', 'records', 'admin_notifications'], false);
+        expect(global.saveToServer).toHaveBeenCalledWith('FLUSH');
+    });
 });

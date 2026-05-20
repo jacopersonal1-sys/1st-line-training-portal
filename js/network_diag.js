@@ -88,6 +88,19 @@ window.NetworkDiag = {
                 .net-group-online-wrap { display:inline-flex; align-items:center; gap:8px; padding:7px 9px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-input); }
                 .net-group-online-wrap select { max-width:230px; background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:6px; padding:5px 7px; }
                 .net-group-count { font-family:monospace; font-weight:800; font-size:1.05rem; color:#2ecc71; white-space:nowrap; }
+                body.theme-one-ui #netDiagModal .net-diag-modal { background:var(--oneui-layer-2, var(--bg-card)); border:1px solid var(--border-color); box-shadow:var(--oneui-shadow-float, 0 18px 52px rgba(34,48,70,0.15)); }
+                body.theme-one-ui #netDiagModal .net-diag-body { background:color-mix(in srgb, var(--oneui-layer-0, var(--bg-app)) 66%, transparent); border-radius:var(--oneui-radius-md, 18px); padding:12px; }
+                body.theme-one-ui #netDiagModal .net-metric-box,
+                body.theme-one-ui #netDiagModal .net-health-card,
+                body.theme-one-ui #netDiagModal .net-flow-step { border-radius:var(--oneui-radius-md, 18px); background:linear-gradient(180deg, color-mix(in srgb, var(--oneui-layer-2, var(--bg-card)) 96%, var(--primary) 4%), var(--oneui-layer-2, var(--bg-card))); box-shadow:var(--oneui-shadow-soft, 0 6px 18px rgba(34,48,70,0.07)); }
+                body.theme-one-ui #netDiagModal .net-history-wrap,
+                body.theme-one-ui #netDiagModal .net-pill,
+                body.theme-one-ui #netDiagModal .net-group-online-wrap,
+                body.theme-one-ui #netDiagModal .net-filter-group label { border-radius:var(--oneui-radius-sm, 12px); background:var(--oneui-layer-1, var(--bg-input)); }
+                body.theme-one-ui #netDiagModal .net-agent-row,
+                body.theme-one-ui #netDiagModal .net-console-row { border-color:color-mix(in srgb, var(--border-color) 78%, transparent); }
+                body.theme-one-ui #netDiagModal .net-val,
+                body.theme-one-ui #netDiagModal .net-group-count { color:var(--primary); }
                 @media (max-width: 760px) {
                     .net-diag-grid, .net-flow { grid-template-columns:1fr; }
                     .net-agent-row { grid-template-columns:1fr; gap:4px; }
@@ -1199,6 +1212,7 @@ window.NetworkDiag = {
     getPopoutThemeStyle: function() {
         try {
             const rootStyle = getComputedStyle(document.documentElement);
+            const bodyStyle = document.body ? getComputedStyle(document.body) : rootStyle;
             const names = [
                 '--primary',
                 '--primary-hover',
@@ -1210,13 +1224,62 @@ window.NetworkDiag = {
                 '--bg-hover',
                 '--text-main',
                 '--text-muted',
-                '--border-color'
+                '--border-color',
+                '--focus-ring',
+                '--oneui-user-primary',
+                '--oneui-user-primary-hover',
+                '--oneui-user-primary-soft',
+                '--oneui-user-bg-app',
+                '--oneui-user-bg-header',
+                '--oneui-user-bg-card',
+                '--oneui-user-bg-input',
+                '--oneui-user-bg-hover',
+                '--oneui-user-layer-0',
+                '--oneui-user-layer-1',
+                '--oneui-user-layer-2',
+                '--oneui-user-layer-3',
+                '--oneui-user-radius-sm',
+                '--oneui-user-radius-md',
+                '--oneui-user-radius-lg',
+                '--oneui-user-focus-ring',
+                '--oneui-user-shadow-card',
+                '--oneui-user-shadow-hover',
+                '--oneui-user-background',
+                '--oneui-layer-0',
+                '--oneui-layer-1',
+                '--oneui-layer-2',
+                '--oneui-layer-3',
+                '--oneui-green',
+                '--oneui-red',
+                '--oneui-amber',
+                '--oneui-shadow-soft',
+                '--oneui-shadow-float',
+                '--oneui-radius-sm',
+                '--oneui-radius-md',
+                '--oneui-radius-lg'
             ];
             const declarations = names.map(name => {
-                const value = rootStyle.getPropertyValue(name);
+                const value = bodyStyle.getPropertyValue(name) || rootStyle.getPropertyValue(name);
                 return value && value.trim() ? `${name}:${value.trim()};` : '';
             }).join('');
             return declarations ? `:root{${declarations}}` : '';
+        } catch (error) {
+            return '';
+        }
+    },
+
+    getPopoutThemeClasses: function() {
+        const allowed = [
+            'light-mode',
+            'theme-one-ui',
+            'theme-custom-lab',
+            'exp-theme-active',
+            'density-compact',
+            'density-comfortable',
+            'density-spacious'
+        ];
+        try {
+            return allowed.filter(cls => document.body && document.body.classList.contains(cls)).join(' ');
         } catch (error) {
             return '';
         }
@@ -1232,6 +1295,51 @@ window.NetworkDiag = {
                 ${this.getPopoutThemeStyle()}
                 * { box-sizing:border-box; }
                 body { margin:0; background:radial-gradient(circle at top left, rgba(243,112,33,0.12), transparent 34%), var(--bg-app, rgba(16,20,28,0.96)); color:var(--text-main, #eef2f7); font-family:Segoe UI, Arial, sans-serif; overflow:hidden; }
+                body.theme-one-ui {
+                    --primary: var(--oneui-user-primary, #4a4f57);
+                    --primary-hover: var(--oneui-user-primary-hover, #343942);
+                    --primary-soft: var(--oneui-user-primary-soft, rgba(74,79,87,0.12));
+                    --bg-app: var(--oneui-user-bg-app, #f4f5f7);
+                    --bg-header: var(--oneui-user-bg-header, rgba(250,251,252,0.92));
+                    --bg-card: var(--oneui-user-bg-card, rgba(255,255,255,0.94));
+                    --bg-input: var(--oneui-user-bg-input, #eceff3);
+                    --bg-hover: var(--oneui-user-bg-hover, #e2e5ea);
+                    --oneui-layer-0: var(--oneui-user-layer-0, #f4f5f7);
+                    --oneui-layer-1: var(--oneui-user-layer-1, rgba(255,255,255,0.82));
+                    --oneui-layer-2: var(--oneui-user-layer-2, rgba(255,255,255,0.96));
+                    --oneui-layer-3: var(--oneui-user-layer-3, #e9ebef);
+                    --oneui-green: #21a67a;
+                    --oneui-red: #e64f5f;
+                    --oneui-amber: #d98d13;
+                    --oneui-shadow-soft: 0 6px 18px rgba(34,48,70,0.07);
+                    --oneui-shadow-float: 0 18px 52px rgba(34,48,70,0.15);
+                    --oneui-radius-sm: var(--oneui-user-radius-sm, 12px);
+                    --oneui-radius-md: var(--oneui-user-radius-md, 18px);
+                    --oneui-radius-lg: var(--oneui-user-radius-lg, 26px);
+                    --focus-ring: var(--oneui-user-focus-ring, 0 0 0 4px rgba(74,79,87,0.16));
+                    background:var(--oneui-user-background, linear-gradient(180deg, #fbfcff 0%, #f4f5f7 48%, #ebeef2 100%));
+                }
+                body.theme-one-ui:not(.light-mode) {
+                    --primary: var(--oneui-user-primary, #c9cdd3);
+                    --primary-hover: var(--oneui-user-primary-hover, #f0f2f5);
+                    --primary-soft: var(--oneui-user-primary-soft, rgba(201,205,211,0.15));
+                    --bg-app: var(--oneui-user-bg-app, #171a1f);
+                    --bg-header: var(--oneui-user-bg-header, rgba(24,27,33,0.92));
+                    --bg-card: var(--oneui-user-bg-card, rgba(31,35,42,0.94));
+                    --bg-input: var(--oneui-user-bg-input, #252a32);
+                    --bg-hover: var(--oneui-user-bg-hover, #303641);
+                    --oneui-layer-0: var(--oneui-user-layer-0, #171a1f);
+                    --oneui-layer-1: var(--oneui-user-layer-1, rgba(30,34,41,0.82));
+                    --oneui-layer-2: var(--oneui-user-layer-2, rgba(34,38,46,0.96));
+                    --oneui-layer-3: var(--oneui-user-layer-3, #282e37);
+                    --oneui-green: #45d09d;
+                    --oneui-red: #ff7c8a;
+                    --oneui-amber: #f0b451;
+                    --oneui-shadow-soft: 0 10px 26px rgba(0,0,0,0.22);
+                    --oneui-shadow-float: 0 24px 70px rgba(0,0,0,0.42);
+                    --focus-ring: var(--oneui-user-focus-ring, 0 0 0 4px rgba(201,205,211,0.18));
+                    background:var(--oneui-user-background, linear-gradient(180deg, #1b1f26 0%, #171a1f 52%, #101216 100%));
+                }
                 .shell { height:100vh; padding:14px; display:flex; flex-direction:column; gap:10px; }
                 .top { display:flex; justify-content:space-between; align-items:center; gap:10px; min-height:44px; padding:12px 14px; border:1px solid var(--border-color, #2a3343); border-radius:10px; background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)), var(--bg-card, #171d28); box-shadow:0 16px 36px rgba(0,0,0,0.18); }
                 h1 { font-size:19px; margin:0; white-space:nowrap; }
@@ -1259,6 +1367,27 @@ window.NetworkDiag = {
                 .console-list { max-height:280px; overflow:auto; margin-top:8px; padding-right:4px; }
                 .console-row { display:grid; grid-template-columns:68px 60px 1fr; gap:6px; padding:7px 0; border-bottom:1px solid var(--border-color, #2a3343); font-size:12px; }
                 .console-msg { white-space:pre-wrap; overflow-wrap:anywhere; }
+                body.theme-one-ui .shell { padding:clamp(12px, 1.6vw, 22px); gap:12px; }
+                body.theme-one-ui .top,
+                body.theme-one-ui .card,
+                body.theme-one-ui .filter-group label {
+                    border-radius:var(--oneui-radius-md, 18px);
+                    border-color:var(--border-color, rgba(148,163,184,0.24));
+                    background:linear-gradient(180deg, color-mix(in srgb, var(--oneui-layer-2, var(--bg-card)) 96%, var(--primary) 4%), var(--oneui-layer-2, var(--bg-card)));
+                    box-shadow:var(--oneui-shadow-soft, 0 6px 18px rgba(34,48,70,0.07));
+                }
+                body.theme-one-ui .top {
+                    background:linear-gradient(180deg, color-mix(in srgb, var(--oneui-layer-2, var(--bg-card)) 92%, #ffffff), var(--oneui-layer-1, var(--bg-header)));
+                    box-shadow:var(--oneui-shadow-float, 0 18px 52px rgba(34,48,70,0.15));
+                }
+                body.theme-one-ui h1 { font-size:21px; letter-spacing:0; }
+                body.theme-one-ui .label { color:color-mix(in srgb, var(--text-muted, #9ca3af) 86%, var(--text-main, #111827)); letter-spacing:0.02em; }
+                body.theme-one-ui .value { color:var(--primary); }
+                body.theme-one-ui canvas { border-radius:var(--oneui-radius-sm, 12px); background:var(--oneui-layer-3, var(--bg-input)); }
+                body.theme-one-ui th,
+                body.theme-one-ui td,
+                body.theme-one-ui .console-row { border-color:color-mix(in srgb, var(--border-color, #2a3343) 78%, transparent); }
+                body.theme-one-ui input[type="checkbox"] { accent-color:var(--primary); }
                 @media (max-width: 760px), (max-height: 560px) {
                     body { overflow:auto; }
                     .shell { height:auto; min-height:100vh; padding:10px; }
@@ -1274,7 +1403,7 @@ window.NetworkDiag = {
                 }
             </style>
         </head>
-        <body>
+        <body class="${this.getPopoutThemeClasses()}">
             <div class="shell">
                 <div class="top">
                     <h1>Network Diagnostics</h1>

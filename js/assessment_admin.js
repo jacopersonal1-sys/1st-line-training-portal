@@ -548,6 +548,8 @@ async function approveSubmission(subId) {
     // 1. Mark as Completed
     sub.status = 'completed';
     sub.archived = false; // Ensure it appears in History
+    if (!sub.feedbackStatus) sub.feedbackStatus = 'given';
+    sub.feedbackRequestLocked = !!sub.feedbackRequestLocked;
     sub.lastEditedBy = markerName;
     sub.lastEditedDate = editTime;
     sub.lastModified = editTime;
@@ -594,6 +596,12 @@ async function approveSubmission(subId) {
         videoSaved: false,
         link: 'Digital-Assessment',
         submissionId: sub.id,
+        feedbackStatus: sub.feedbackStatus,
+        feedbackRequestLocked: sub.feedbackRequestLocked,
+        feedbackRequestedAt: sub.feedbackRequestedAt || null,
+        feedbackRequestedBy: sub.feedbackRequestedBy || null,
+        feedbackGivenAt: sub.feedbackGivenAt || null,
+        feedbackGivenBy: sub.feedbackGivenBy || null,
         createdAt: editTime,
         lastModified: editTime,
         modifiedBy: markerName
@@ -605,6 +613,12 @@ async function approveSubmission(subId) {
         recs[existingIdx].cycle = cycleVal;
         recs[existingIdx].docSaved = true;
         recs[existingIdx].submissionId = sub.id;
+        recs[existingIdx].feedbackStatus = sub.feedbackStatus;
+        recs[existingIdx].feedbackRequestLocked = sub.feedbackRequestLocked;
+        recs[existingIdx].feedbackRequestedAt = sub.feedbackRequestedAt || null;
+        recs[existingIdx].feedbackRequestedBy = sub.feedbackRequestedBy || null;
+        recs[existingIdx].feedbackGivenAt = sub.feedbackGivenAt || null;
+        recs[existingIdx].feedbackGivenBy = sub.feedbackGivenBy || null;
         recs[existingIdx].lastModified = newRecord.lastModified;
         recs[existingIdx].modifiedBy = markerName;
         if(!recs[existingIdx].id) recs[existingIdx].id = newRecord.id;
@@ -682,6 +696,7 @@ async function openAdminMarking(subId, options = {}) {
                 <div class="marking-meta-row">
                     <span><i class="fas fa-calendar-alt"></i> ${sub.date || 'No date'}</span>
                     <span><i class="fas fa-star"></i> Current score: ${sub.score || 0}%</span>
+                    ${typeof renderAssessmentFeedbackBadge === 'function' ? renderAssessmentFeedbackBadge(sub) : ''}
                     ${getMarkingLockBadgeHTML(sub)}
                 </div>
             </div>
@@ -988,6 +1003,8 @@ async function finalizeAdminMarking(subId) {
     sub.score = percentage;
     sub.status = 'completed';
     sub.archived = false; // UN-ARCHIVE when explicitly graded so it appears in History
+    if (!sub.feedbackStatus) sub.feedbackStatus = 'given';
+    sub.feedbackRequestLocked = !!sub.feedbackRequestLocked;
     sub.scores = specificScores; 
     sub.comments = specificComments;
     
@@ -1033,6 +1050,12 @@ async function finalizeAdminMarking(subId) {
         link: 'Digital-Assessment',
         docSaved: true,
         submissionId: sub.id, // Link to submission
+        feedbackStatus: sub.feedbackStatus,
+        feedbackRequestLocked: sub.feedbackRequestLocked,
+        feedbackRequestedAt: sub.feedbackRequestedAt || null,
+        feedbackRequestedBy: sub.feedbackRequestedBy || null,
+        feedbackGivenAt: sub.feedbackGivenAt || null,
+        feedbackGivenBy: sub.feedbackGivenBy || null,
         createdAt: editTime,
         lastModified: editTime,
         modifiedBy: markerName
@@ -1044,6 +1067,12 @@ async function finalizeAdminMarking(subId) {
         records[existingIdx].cycle = cycleVal;
         records[existingIdx].docSaved = true;
         records[existingIdx].submissionId = sub.id; // Ensure link is updated
+        records[existingIdx].feedbackStatus = sub.feedbackStatus;
+        records[existingIdx].feedbackRequestLocked = sub.feedbackRequestLocked;
+        records[existingIdx].feedbackRequestedAt = sub.feedbackRequestedAt || null;
+        records[existingIdx].feedbackRequestedBy = sub.feedbackRequestedBy || null;
+        records[existingIdx].feedbackGivenAt = sub.feedbackGivenAt || null;
+        records[existingIdx].feedbackGivenBy = sub.feedbackGivenBy || null;
         records[existingIdx].lastModified = newRecord.lastModified;
         records[existingIdx].modifiedBy = markerName;
         if(!records[existingIdx].id) records[existingIdx].id = newRecord.id;

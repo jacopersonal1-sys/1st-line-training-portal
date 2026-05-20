@@ -38,22 +38,40 @@ const SuperAdminDataStudioLoader = {
                     <button class="btn-secondary btn-sm" onclick="document.getElementById('superadmin-data-studio-webview').openDevTools()"><i class="fas fa-bug"></i> Inspect Studio</button>
                 </div>
             </div>
-            <webview
-                id="superadmin-data-studio-webview"
-                class="embedded-program-frame"
-                src="${modulePath}?user=${userParam}&creds=${credsParam}"
-                style="height:calc(100vh - 230px);"
-                webpreferences="nodeIntegration=yes, contextIsolation=no"
-                partition="persist:superadmin_data_studio"
-                allowpopups
-            ></webview>
+            <div class="embedded-program-frame-wrap">
+                <div id="superadmin-data-studio-loading" class="embedded-program-loading">
+                    ${typeof window.getAppLoadingHtml === 'function'
+                        ? window.getAppLoadingHtml({
+                            icon: 'fa-database',
+                            title: 'Opening Data Studio',
+                            detail: 'Preparing the isolated Supabase workspace.',
+                            phase: 'Connecting to the embedded program'
+                        })
+                        : '<div class="table-state loading"><i class="fas fa-circle-notch fa-spin"></i><span>Opening Data Studio...</span></div>'}
+                </div>
+                <webview
+                    id="superadmin-data-studio-webview"
+                    class="embedded-program-frame"
+                    src="${modulePath}?user=${userParam}&creds=${credsParam}"
+                    style="height:calc(100vh - 230px);"
+                    webpreferences="nodeIntegration=yes, contextIsolation=no"
+                    partition="persist:superadmin_data_studio"
+                    allowpopups
+                ></webview>
+            </div>
             </div>
         `;
         const webview = document.getElementById('superadmin-data-studio-webview');
         if (webview) {
+            const hideLoading = () => {
+                const loader = document.getElementById('superadmin-data-studio-loading');
+                if (loader) loader.classList.add('hidden');
+            };
             webview.addEventListener('dom-ready', () => {
                 if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+                hideLoading();
             });
+            webview.addEventListener('did-finish-load', hideLoading);
         }
     }
 };

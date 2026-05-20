@@ -1069,7 +1069,17 @@ async function renderLiveTable() {
     // Subsequent updates will be handled by the lightweight real-time listener.
     if (!window._liveSyncDone) {
         window._liveSyncDone = true; // Prevent loops
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin fa-2x"></i><br><br>Synchronizing Live Bookings...</td></tr>';
+        if (typeof window.showInlineLoading === 'function') {
+            window.showInlineLoading(tbody, {
+                table: true,
+                colspan: 5,
+                icon: 'fa-calendar-check',
+                title: 'Synchronizing live bookings',
+                detail: 'Checking layouts, trainer slots, and current Supabase booking rows.'
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin fa-2x"></i><br><br>Synchronizing Live Bookings...</td></tr>';
+        }
         if (typeof loadFromServer === 'function') {
             await loadFromServer(true); // Ensure schedules layout is fresh
         }

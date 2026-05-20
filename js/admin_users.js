@@ -1330,7 +1330,10 @@ async function confirmMoveUser() {
         // Persist the archive snapshot before clearing live rows. This avoids a half-migration
         // where deletes succeed but the retrain archive does not reach the server.
         if(typeof saveToServer === 'function') {
-            await saveToServer(['retrain_archives'], true, true);
+            const archiveSaved = await saveToServer(['retrain_archives'], true, true);
+            if (!archiveSaved) {
+                throw new Error('Retrain archive could not be saved to the server. Live data was not cleared.');
+            }
         }
 
         const deleteSummary = await executeRetrainArchiveServerDeletes(archiveData);
@@ -1390,11 +1393,14 @@ async function confirmMoveUser() {
 
         // 4. SYNC EVERYTHING
         if(typeof saveToServer === 'function') {
-            await saveToServer([
+            const movedSaved = await saveToServer([
                 'rosters', 'retrain_archives', 'records', 'submissions', 'attendance_records',
                 'savedReports', 'insightReviews', 'agentNotes', 'exemptions', 'liveBookings',
                 'linkRequests', 'monitor_history', 'tl_task_submissions', 'system_tombstones'
             ], true);
+            if (!movedSaved) {
+                throw new Error('Move changes could not be fully saved to the server. Please refresh before retrying.');
+            }
         }
 
         const cleanupCheck = await verifyRetrainArchiveServerCleanup(userToMove);

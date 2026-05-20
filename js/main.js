@@ -1359,7 +1359,7 @@ window.onload = async function() {
                     updateSidebarVisibility();
                     
                     // --- START ACTIVITY MONITOR ---
-                    if (typeof StudyMonitor !== 'undefined') {
+                    if (typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
                         await StudyMonitor.init();
                     }
                     
@@ -1632,12 +1632,10 @@ function getStoredLocalThemeConfig() {
 }
 
 function hasVisualCustomTheme(localTheme = getStoredLocalThemeConfig()) {
-    const color = String(localTheme.primaryColor || '').trim().toLowerCase();
     const background = String(localTheme.backgroundColor || '').trim().toLowerCase();
     const wallpaper = String(localTheme.wallpaper || '').trim();
     return !!(
         wallpaper ||
-        (color && color !== '#f37021') ||
         (background && background !== '#1a1410')
     );
 }
@@ -1656,6 +1654,94 @@ function applyEffectiveExperimentalTheme() {
     } else {
         applyExperimentalTheme(null, { skipUserTheme: true });
     }
+}
+
+function getDefaultOneUiThemeConfig() {
+    return {
+        accent: '#4A4F57',
+        darkAccent: '#C9CDD3',
+        surfaceTint: '#F4F5F7',
+        darkSurfaceTint: '#171A1F',
+        cornerRadius: 18,
+        glowStrength: 0.12
+    };
+}
+
+function getStoredOneUiThemeConfig(localTheme = getStoredLocalThemeConfig()) {
+    const defaults = getDefaultOneUiThemeConfig();
+    const oneUi = (localTheme.oneUi && typeof localTheme.oneUi === 'object') ? localTheme.oneUi : {};
+    return {
+        accent: sanitizeThemeHexColor(oneUi.accent || defaults.accent, defaults.accent),
+        darkAccent: sanitizeThemeHexColor(oneUi.darkAccent || defaults.darkAccent, defaults.darkAccent),
+        surfaceTint: sanitizeThemeHexColor(oneUi.surfaceTint || defaults.surfaceTint, defaults.surfaceTint),
+        darkSurfaceTint: sanitizeThemeHexColor(oneUi.darkSurfaceTint || defaults.darkSurfaceTint, defaults.darkSurfaceTint),
+        cornerRadius: clampThemeNumber(oneUi.cornerRadius, 12, 26, defaults.cornerRadius),
+        glowStrength: clampThemeNumber(oneUi.glowStrength, 0.06, 0.24, defaults.glowStrength)
+    };
+}
+
+function clearOneUiThemeVariables() {
+    if (!document.body) return;
+    [
+        '--oneui-user-primary',
+        '--oneui-user-primary-hover',
+        '--oneui-user-primary-soft',
+        '--oneui-user-bg-app',
+        '--oneui-user-bg-header',
+        '--oneui-user-bg-card',
+        '--oneui-user-bg-input',
+        '--oneui-user-bg-hover',
+        '--oneui-user-layer-0',
+        '--oneui-user-layer-1',
+        '--oneui-user-layer-2',
+        '--oneui-user-layer-3',
+        '--oneui-user-radius-sm',
+        '--oneui-user-radius-md',
+        '--oneui-user-radius-lg',
+        '--oneui-user-focus-ring',
+        '--oneui-user-shadow-card',
+        '--oneui-user-shadow-hover',
+        '--oneui-user-background',
+        '--exp-accent-rgb',
+        '--exp-glow-alpha'
+    ].forEach(name => document.body.style.removeProperty(name));
+}
+
+function applyOneUiThemeVariables(localTheme = getStoredLocalThemeConfig()) {
+    if (!document.body) return;
+    const config = getStoredOneUiThemeConfig(localTheme);
+    const isLight = document.body.classList.contains('light-mode');
+    const accent = isLight ? config.accent : config.darkAccent;
+    const surface = isLight ? config.surfaceTint : config.darkSurfaceTint;
+    const rgb = getHexRgbTuple(accent);
+    const cardLift = isLight ? lightenColor(surface, 8) : lightenColor(surface, 7);
+    const inputLift = isLight ? lightenColor(surface, -5) : lightenColor(surface, 13);
+    const hoverLift = isLight ? lightenColor(surface, -9) : lightenColor(surface, 19);
+    const bgStart = isLight ? lightenColor(surface, 11) : lightenColor(surface, 5);
+    const bgEnd = isLight ? lightenColor(surface, -7) : lightenColor(surface, -7);
+    const radius = Math.round(config.cornerRadius);
+
+    document.body.style.setProperty('--oneui-user-primary', accent);
+    document.body.style.setProperty('--oneui-user-primary-hover', isLight ? lightenColor(accent, -16) : lightenColor(accent, 10));
+    document.body.style.setProperty('--oneui-user-primary-soft', adjustOpacity(accent, isLight ? 0.13 : 0.16));
+    document.body.style.setProperty('--oneui-user-bg-app', surface);
+    document.body.style.setProperty('--oneui-user-bg-header', adjustOpacity(cardLift, 0.92));
+    document.body.style.setProperty('--oneui-user-bg-card', adjustOpacity(cardLift, 0.94));
+    document.body.style.setProperty('--oneui-user-bg-input', inputLift);
+    document.body.style.setProperty('--oneui-user-bg-hover', hoverLift);
+    document.body.style.setProperty('--oneui-user-layer-0', surface);
+    document.body.style.setProperty('--oneui-user-layer-1', adjustOpacity(cardLift, 0.82));
+    document.body.style.setProperty('--oneui-user-layer-2', adjustOpacity(cardLift, 0.96));
+    document.body.style.setProperty('--oneui-user-layer-3', inputLift);
+    document.body.style.setProperty('--oneui-user-radius-sm', `${Math.max(10, radius - 6)}px`);
+    document.body.style.setProperty('--oneui-user-radius-md', `${radius}px`);
+    document.body.style.setProperty('--oneui-user-radius-lg', `${Math.min(32, radius + 8)}px`);
+    document.body.style.setProperty('--oneui-user-focus-ring', `0 0 0 4px ${adjustOpacity(accent, isLight ? 0.15 : 0.18)}`);
+    document.body.style.setProperty('--oneui-user-shadow-card', isLight ? '0 10px 28px rgba(35, 39, 46, 0.09)' : '0 14px 34px rgba(0, 0, 0, 0.32)');
+    document.body.style.setProperty('--oneui-user-shadow-hover', isLight ? '0 18px 46px rgba(35, 39, 46, 0.15)' : '0 24px 62px rgba(0, 0, 0, 0.46)');
+    document.body.style.setProperty('--oneui-user-background', `linear-gradient(180deg, ${bgStart} 0%, ${surface} 48%, ${bgEnd} 100%)`);
+    document.body.style.setProperty('--exp-accent-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+    document.body.style.setProperty('--exp-glow-alpha', Number(config.glowStrength).toFixed(2));
 }
 
 function applyUserTheme() {
@@ -1728,12 +1814,13 @@ function applyUserTheme() {
     if (!window.__APPLYING_EXPERIMENTAL_THEME && typeof applyEffectiveExperimentalTheme === 'function') {
         applyEffectiveExperimentalTheme();
     } else {
-        syncThemeToEmbeddedPrograms();
+        scheduleEmbeddedThemeSync();
     }
 }
 
 function getThemeVariableSnapshot() {
-    const style = getComputedStyle(document.documentElement);
+    const rootStyle = getComputedStyle(document.documentElement);
+    const bodyStyle = document.body ? getComputedStyle(document.body) : rootStyle;
     const vars = [
         '--primary',
         '--primary-hover',
@@ -1750,10 +1837,41 @@ function getThemeVariableSnapshot() {
         '--shadow-card',
         '--shadow-hover',
         '--focus-ring',
-        '--transition'
+        '--transition',
+        '--oneui-user-primary',
+        '--oneui-user-primary-hover',
+        '--oneui-user-primary-soft',
+        '--oneui-user-bg-app',
+        '--oneui-user-bg-header',
+        '--oneui-user-bg-card',
+        '--oneui-user-bg-input',
+        '--oneui-user-bg-hover',
+        '--oneui-user-layer-0',
+        '--oneui-user-layer-1',
+        '--oneui-user-layer-2',
+        '--oneui-user-layer-3',
+        '--oneui-user-radius-sm',
+        '--oneui-user-radius-md',
+        '--oneui-user-radius-lg',
+        '--oneui-user-focus-ring',
+        '--oneui-user-shadow-card',
+        '--oneui-user-shadow-hover',
+        '--oneui-user-background',
+        '--oneui-layer-0',
+        '--oneui-layer-1',
+        '--oneui-layer-2',
+        '--oneui-layer-3',
+        '--oneui-green',
+        '--oneui-red',
+        '--oneui-amber',
+        '--oneui-shadow-soft',
+        '--oneui-shadow-float',
+        '--oneui-radius-sm',
+        '--oneui-radius-md',
+        '--oneui-radius-lg'
     ];
     return vars.reduce((acc, name) => {
-        const value = style.getPropertyValue(name);
+        const value = bodyStyle.getPropertyValue(name) || rootStyle.getPropertyValue(name);
         if (value && value.trim()) acc[name] = value.trim();
         return acc;
     }, {});
@@ -1776,6 +1894,67 @@ function getThemeClassSnapshot() {
     ].filter(name => document.body.classList.contains(name));
 }
 
+function getEmbeddedThemeBridgeCss() {
+    return `
+        :root {
+            color-scheme: light dark;
+        }
+        body.theme-one-ui {
+            background: var(--bg-app, #101319) !important;
+            color: var(--text-main, #eef2f7) !important;
+            letter-spacing: 0 !important;
+        }
+        body.theme-one-ui .card,
+        body.theme-one-ui .studio-card,
+        body.theme-one-ui .qa-card,
+        body.theme-one-ui .opl-card,
+        body.theme-one-ui .tp-card,
+        body.theme-one-ui .panel,
+        body.theme-one-ui .app-panel,
+        body.theme-one-ui .workspace-panel,
+        body.theme-one-ui .module-panel,
+        body.theme-one-ui .timeline-content {
+            border-radius: var(--oneui-radius-md, 18px) !important;
+            background: var(--oneui-layer-2, var(--bg-card, #171b22)) !important;
+            border-color: var(--border-color, rgba(255,255,255,0.12)) !important;
+            box-shadow: var(--oneui-shadow-soft, 0 10px 28px rgba(0,0,0,0.16)) !important;
+        }
+        body.theme-one-ui header,
+        body.theme-one-ui .header,
+        body.theme-one-ui .studio-header,
+        body.theme-one-ui .qa-header,
+        body.theme-one-ui .app-header,
+        body.theme-one-ui .toolbar,
+        body.theme-one-ui .tabs,
+        body.theme-one-ui .sub-tabs {
+            background: var(--oneui-layer-1, var(--bg-header, #141820)) !important;
+            border-color: var(--border-color, rgba(255,255,255,0.12)) !important;
+            border-radius: var(--oneui-radius-md, 18px) !important;
+        }
+        body.theme-one-ui button,
+        body.theme-one-ui .btn,
+        body.theme-one-ui .studio-btn,
+        body.theme-one-ui .qa-btn {
+            border-radius: 999px !important;
+            letter-spacing: 0 !important;
+        }
+        body.theme-one-ui input,
+        body.theme-one-ui select,
+        body.theme-one-ui textarea {
+            border-radius: var(--oneui-radius-sm, 12px) !important;
+            background: var(--oneui-layer-3, var(--bg-input, #202733)) !important;
+            color: var(--text-main, #eef2f7) !important;
+            border-color: var(--border-color, rgba(255,255,255,0.12)) !important;
+        }
+        body.theme-one-ui table,
+        body.theme-one-ui .table-wrap,
+        body.theme-one-ui .list,
+        body.theme-one-ui .grid {
+            border-radius: var(--oneui-radius-md, 18px) !important;
+        }
+    `;
+}
+
 function applyThemeToEmbeddedFrame(frame) {
     if (!frame) return;
     try {
@@ -1783,10 +1962,20 @@ function applyThemeToEmbeddedFrame(frame) {
         if (!doc || !doc.documentElement) return;
         const vars = getThemeVariableSnapshot();
         Object.keys(vars).forEach(name => doc.documentElement.style.setProperty(name, vars[name]));
+        let bridge = doc.getElementById('host-theme-bridge');
+        if (!bridge) {
+            bridge = doc.createElement('style');
+            bridge.id = 'host-theme-bridge';
+            doc.head.appendChild(bridge);
+        }
+        bridge.textContent = getEmbeddedThemeBridgeCss();
         const density = getCurrentUIDensity();
-        doc.body.classList.remove('light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious');
-        getThemeClassSnapshot().forEach(name => doc.body.classList.add(name));
-        doc.body.classList.add(`density-${density}`);
+        const classesToRemove = ['light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious'];
+        [doc.documentElement, doc.body].filter(Boolean).forEach(node => {
+            node.classList.remove(...classesToRemove);
+            getThemeClassSnapshot().forEach(name => node.classList.add(name));
+            node.classList.add(`density-${density}`);
+        });
         if (frame.contentWindow && typeof frame.contentWindow.syncThemeFromHost === 'function') {
             frame.contentWindow.syncThemeFromHost();
         }
@@ -1806,11 +1995,20 @@ function applyThemeToWebview(webview) {
                     Object.keys(vars || {}).forEach(function(name) {
                         document.documentElement.style.setProperty(name, vars[name]);
                     });
-                    if (document.body) {
-                        document.body.classList.remove('light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious');
-                        (classes || []).forEach(function(name) { document.body.classList.add(name); });
-                        document.body.classList.add('density-' + density);
+                    var bridge = document.getElementById('host-theme-bridge');
+                    if (!bridge) {
+                        bridge = document.createElement('style');
+                        bridge.id = 'host-theme-bridge';
+                        document.head.appendChild(bridge);
                     }
+                    bridge.textContent = ${JSON.stringify(getEmbeddedThemeBridgeCss())};
+                    var remove = ['light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious'];
+                    [document.documentElement, document.body].filter(Boolean).forEach(function(node) {
+                        node.classList.remove.apply(node.classList, remove);
+                        (classes || []).forEach(function(name) { node.classList.add(name); });
+                        node.classList.add('density-' + density);
+                    });
+                    if (typeof window.syncThemeFromHost === 'function') window.syncThemeFromHost();
                 } catch (error) {}
             })(${JSON.stringify(vars)}, ${JSON.stringify(getCurrentUIDensity())}, ${JSON.stringify(classes)});
         `;
@@ -1821,6 +2019,39 @@ function applyThemeToWebview(webview) {
 function syncThemeToEmbeddedPrograms() {
     document.querySelectorAll('iframe').forEach(applyThemeToEmbeddedFrame);
     document.querySelectorAll('webview').forEach(applyThemeToWebview);
+}
+
+function scheduleEmbeddedThemeSync(options = {}) {
+    const immediate = !!options.immediate;
+    const delay = typeof options.delay === 'number' ? Math.max(0, options.delay) : 120;
+
+    if (EMBEDDED_THEME_SYNC_TIMER) {
+        clearTimeout(EMBEDDED_THEME_SYNC_TIMER);
+        EMBEDDED_THEME_SYNC_TIMER = null;
+    }
+    if (EMBEDDED_THEME_SYNC_IDLE && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(EMBEDDED_THEME_SYNC_IDLE);
+        EMBEDDED_THEME_SYNC_IDLE = null;
+    }
+
+    const run = () => {
+        EMBEDDED_THEME_SYNC_TIMER = null;
+        EMBEDDED_THEME_SYNC_IDLE = null;
+        syncThemeToEmbeddedPrograms();
+    };
+
+    if (immediate) {
+        run();
+        return;
+    }
+
+    EMBEDDED_THEME_SYNC_TIMER = setTimeout(() => {
+        if (typeof requestIdleCallback === 'function') {
+            EMBEDDED_THEME_SYNC_IDLE = requestIdleCallback(run, { timeout: 1000 });
+        } else {
+            run();
+        }
+    }, delay);
 }
 
 function getCurrentUIDensity() {
@@ -1834,7 +2065,7 @@ function applyUIDensity(mode) {
     document.body.classList.remove('density-compact', 'density-comfortable', 'density-spacious');
     document.body.classList.add(`density-${density}`);
     localStorage.setItem('ui_density', density);
-    if (typeof syncThemeToEmbeddedPrograms === 'function') syncThemeToEmbeddedPrograms();
+    if (typeof scheduleEmbeddedThemeSync === 'function') scheduleEmbeddedThemeSync();
     return density;
 }
 
@@ -2338,6 +2569,7 @@ function applyExperimentalTheme(themeName, options = {}) {
     // 1. Remove all experimental classes
     document.body.classList.remove('exp-theme-active', 'exp-theme-wallpaper', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal');
     clearCustomExperimentalThemeVariables();
+    clearOneUiThemeVariables();
     
     if (themeName) {
         const existingOverlay = document.getElementById('bg-overlay');
@@ -2357,6 +2589,9 @@ function applyExperimentalTheme(themeName, options = {}) {
             }
         }
         document.body.classList.add(themeName);
+        if (themeName === 'theme-one-ui') {
+            applyOneUiThemeVariables(getStoredLocalThemeConfig());
+        }
         if (options.persist !== false) localStorage.setItem('experimental_theme', themeName);
     } else {
         // 3. Reset
@@ -2367,7 +2602,7 @@ function applyExperimentalTheme(themeName, options = {}) {
 
     window.__APPLYING_EXPERIMENTAL_THEME = false;
     updateExperimentalThemePickerState();
-    syncThemeToEmbeddedPrograms();
+    scheduleEmbeddedThemeSync({ delay: 80 });
 }
 
 const ADMIN_NAV_VIEW_KEY = 'admin_nav_view';
@@ -2378,6 +2613,18 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
         label: 'Home',
         items: [
             { id: 'dashboard-view', title: 'Home / Overview', text: 'Home', icon: 'fas fa-home' },
+            { id: 'admin-panel', title: 'Admin Tools', text: 'Admin Tools', icon: 'fas fa-cogs', classes: 'admin-only', subItems: [
+                { label: 'Manage Users', type: 'admin', view: 'users' },
+                { label: 'Training Topics', type: 'admin', view: 'assessments' },
+                { label: 'System Config', type: 'admin', view: 'insight-rules' },
+                { label: 'Database', type: 'admin', view: 'data' },
+                { label: 'Tool Hosting', type: 'admin', view: 'tool-hosting' },
+                { label: 'Access Control', type: 'admin', view: 'access' },
+                { label: 'System Status', type: 'admin', view: 'status' },
+                { label: 'Updates', type: 'admin', view: 'updates' },
+                { label: 'Theme', type: 'admin', view: 'theme' },
+                { label: 'Graduated Agents', type: 'admin', view: 'graduates' }
+            ] },
             { id: 'network-test', buttonId: 'btn-sidebar-net-test', title: 'Run Network Diagnostics', text: 'Network Test', icon: 'fas fa-wifi', action: 'network' }
         ]
     },
@@ -2385,7 +2632,10 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
         label: 'Admin Workflow',
         items: [
             { id: 'insight-studio', title: 'Insight', text: 'Insight', icon: 'fas fa-chart-line', classes: 'admin-only' },
-            { id: 'report-card', title: 'Onboard Report', text: 'Onboard Report', icon: 'fas fa-file-invoice', classes: 'admin-only tl-access' },
+            { id: 'report-card', title: 'Onboard Report', text: 'Onboard Report', icon: 'fas fa-file-invoice', classes: 'admin-only tl-access', subItems: [
+                { label: 'New Report', type: 'report', view: 'create' },
+                { label: 'Saved Reports', type: 'report', view: 'saved' }
+            ] },
             { id: 'opl-hub', title: 'OPL Hub', text: 'OPL Hub', icon: 'fas fa-book-open', classes: 'admin-only' },
             { id: 'qa-hub', title: 'Q&A Hub', text: 'Q&A Hub', icon: 'fas fa-circle-question', classes: 'admin-only' }
         ]
@@ -2395,7 +2645,13 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
         items: [
             { id: 'content-studio', title: 'Content Creator', text: 'Content Creator', icon: 'fas fa-photo-film' },
             { id: 'assessment-schedule', title: 'Schedule', text: 'Schedule', icon: 'fas fa-list-alt' },
-            { id: 'test-manage', title: 'Test Engine', text: 'Test Engine', icon: 'fas fa-clipboard-check', classes: 'admin-only' }
+            { id: 'test-manage', title: 'Test Engine', text: 'Test Engine', icon: 'fas fa-clipboard-check', classes: 'admin-only', subItems: [
+                { label: 'Overview & Manage', type: 'test-engine', view: 'overview' },
+                { label: 'Completed History', type: 'test-engine', view: 'history' },
+                { label: 'Feedback Sessions', type: 'test-engine', view: 'feedback' },
+                { label: 'Integrity Review', type: 'test-engine', view: 'integrity' },
+                { label: 'NPS Feedback', type: 'test-engine', view: 'nps' }
+            ] }
         ]
     },
     {
@@ -2438,7 +2694,8 @@ function canUseAdminNavigationView() {
 
 function getStoredAdminNavigationView() {
     const raw = String(localStorage.getItem(ADMIN_NAV_VIEW_KEY) || '').trim();
-    return raw === ADMIN_NAV_ADVANCED ? ADMIN_NAV_ADVANCED : 'classic';
+    if (raw === 'classic') return 'classic';
+    return ADMIN_NAV_ADVANCED;
 }
 
 function escapeNavAttr(value) {
@@ -2451,19 +2708,56 @@ function buildAdvancedNavButton(item) {
     const onclick = item.action === 'network'
         ? ` onclick="if(window.NetworkDiag&&typeof NetworkDiag.openModal==='function') NetworkDiag.openModal()"`
         : ` onclick="showTab('${escapeNavAttr(item.id)}')"`;
-    return `<button${idAttr} class="${escapeNavAttr(classes)}"${onclick} title="${escapeNavAttr(item.title)}" data-nav-target="${escapeNavAttr(item.id)}">
+    const submenu = Array.isArray(item.subItems) && item.subItems.length
+        ? `<div class="nav-submenu" aria-label="${escapeNavAttr(item.text)} quick links">
+                <div class="nav-submenu-title">${escapeNavAttr(item.text)}</div>
+                ${item.subItems.map(sub => `<button class="nav-subitem" onclick="navigateAdvancedSubMenu('${escapeNavAttr(item.id)}','${escapeNavAttr(sub.type)}','${escapeNavAttr(sub.view)}')">${escapeNavAttr(sub.label)}</button>`).join('')}
+           </div>`
+        : '';
+    return `<div class="nav-item-wrap">
+        <button${idAttr} class="${escapeNavAttr(classes)}"${onclick} title="${escapeNavAttr(item.title)}" data-nav-target="${escapeNavAttr(item.id)}">
             <i class="${escapeNavAttr(item.icon)}"></i><span class="nav-text">${escapeNavAttr(item.text)}</span>
-        </button>`;
+        </button>
+        ${submenu}
+    </div>`;
 }
 
+window.navigateAdvancedSubMenu = function navigateAdvancedSubMenu(tabId, type, view) {
+    const target = String(tabId || '');
+    const kind = String(type || '');
+    const subView = String(view || '');
+    if (!target) return;
+    showTab(target);
+    setTimeout(() => {
+        if (kind === 'admin' && typeof showAdminSub === 'function') {
+            const btn = document.querySelector(`#btn-sub-${subView}`) || document.querySelector(`button[onclick*="showAdminSub('${subView}'"]`);
+            showAdminSub(subView, btn || null);
+        } else if (kind === 'test-engine' && typeof showTestEngineSub === 'function') {
+            const btn = document.querySelector(`button[onclick*="showTestEngineSub('${subView}'"]`);
+            showTestEngineSub(subView, btn || null);
+        } else if (kind === 'report' && typeof showReportSub === 'function') {
+            const btnId = subView === 'saved' ? 'btn-rep-saved' : 'btn-rep-new';
+            showReportSub(subView, document.getElementById(btnId));
+        }
+    }, 90);
+};
+
 function setActiveNavigationTarget(id) {
-    document.querySelectorAll('.nav-item.active').forEach(b => b.classList.remove('active'));
+    if (LAST_ACTIVE_NAV_BUTTON && LAST_ACTIVE_NAV_BUTTON.isConnected) {
+        LAST_ACTIVE_NAV_BUTTON.classList.remove('active');
+    } else {
+        document.querySelectorAll('.nav-item.active').forEach(b => b.classList.remove('active'));
+    }
+    LAST_ACTIVE_NAV_BUTTON = null;
     if (CURRENT_USER && CURRENT_USER.role === 'trainee') return;
     const safeId = String(id || '');
     const escapedId = (window.CSS && typeof CSS.escape === 'function') ? CSS.escape(safeId) : safeId.replace(/"/g, '\\"');
     const sidebarBtn = document.querySelector(`button.nav-item[data-nav-target="${escapedId}"]`)
         || document.querySelector(`button.nav-item[onclick="showTab('${safeId.replace(/'/g, "\\'")}')"]`);
-    if(sidebarBtn) sidebarBtn.classList.add('active');
+    if(sidebarBtn) {
+        sidebarBtn.classList.add('active');
+        LAST_ACTIVE_NAV_BUTTON = sidebarBtn;
+    }
 }
 
 function renderAdvancedAdminNavigation(menu) {
@@ -2877,7 +3171,11 @@ window.changeBootRoleSelection = function changeBootRoleSelection() {
 let TAB_SWITCH_TIMEOUT = null;
 let VIEW_SYNC_IN_FLIGHT = false;
 let NAV_DEFER_TIMER = null;
+let NAV_IDLE_CALLBACK = null;
+let EMBEDDED_THEME_SYNC_TIMER = null;
+let EMBEDDED_THEME_SYNC_IDLE = null;
 let LAST_NAV_REQUEST = { id: null, at: 0 };
+let LAST_ACTIVE_NAV_BUTTON = null;
 const VIEW_SYNC_LAST_RUN = {};
 const VIEW_RENDERED_ONCE = {};
 const HIGH_PRIORITY_SYNC_VIEWS = new Set([
@@ -2905,6 +3203,156 @@ const HEAVY_EMBEDDED_VIEWS = new Set([
     'trainee-portal',
     'study-notes'
 ]);
+
+const HEAVY_VIEW_LOADING_META = {
+    'admin-panel': {
+        target: '',
+        icon: 'fa-screwdriver-wrench',
+        title: 'Refreshing Admin Tools',
+        detail: 'Reading users, access, system status, and configuration.'
+    },
+    'insight-studio': {
+        target: 'insight-studio-content',
+        icon: 'fa-magnifying-glass-chart',
+        title: 'Building Insight workspace',
+        detail: 'Refreshing integrity, assessment, and trainee signals.'
+    },
+    'live-assessment': {
+        target: 'liveBookingBody',
+        icon: 'fa-calendar-check',
+        title: 'Synchronizing live bookings',
+        detail: 'Checking booking layouts, trainer slots, and current sessions.',
+        table: true,
+        colspan: 5
+    },
+    'monthly': {
+        target: 'monthlyTableMain',
+        icon: 'fa-chart-line',
+        title: 'Refreshing monthly data',
+        detail: 'Pulling the latest records before rebuilding the reports.',
+        tableBody: true,
+        colspan: 8
+    },
+    'qa-hub': {
+        target: 'qa-hub-content',
+        icon: 'fa-circle-question',
+        title: 'Refreshing Q&A Hub',
+        detail: 'Loading the latest support and knowledge data.'
+    },
+    'test-manage': {
+        target: 'testListAdmin',
+        icon: 'fa-clipboard-check',
+        title: 'Refreshing Test Engine',
+        detail: 'Updating assessments, marking queues, history, and feedback sessions.'
+    },
+    'test-records': {
+        target: 'testRecordsTable',
+        icon: 'fa-folder-open',
+        title: 'Refreshing test records',
+        detail: 'Pulling assessment results and submission history.',
+        tableBody: true,
+        colspan: 7
+    },
+    'trainee-portal': {
+        target: 'trainee-portal-content',
+        icon: 'fa-user-graduate',
+        title: 'Refreshing trainee portal',
+        detail: 'Checking assigned assessments, live sessions, and study data.'
+    }
+};
+
+function escapeAppLoadingText(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+window.getAppLoadingHtml = function getAppLoadingHtml(options = {}) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const icon = escapeAppLoadingText(opts.icon || 'fa-circle-notch');
+    const title = escapeAppLoadingText(opts.title || 'Loading workspace');
+    const detail = escapeAppLoadingText(opts.detail || 'Fetching the latest data.');
+    const phase = escapeAppLoadingText(opts.phase || '');
+    const compact = opts.compact ? ' app-loading-card-compact' : '';
+    const total = Math.max(Number(opts.progressTotal) || 0, 0);
+    const done = Math.max(Math.min(Number(opts.progressDone) || 0, total || Number(opts.progressDone) || 0), 0);
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    const progress = total > 0
+        ? `<div class="app-loading-progress" aria-hidden="true"><span style="width:${percent}%;"></span></div><div class="app-loading-count">${done}/${total} synced</div>`
+        : `<div class="app-loading-progress app-loading-progress-indeterminate" aria-hidden="true"><span></span></div>`;
+
+    return `
+        <div class="app-loading-card${compact}" role="status" aria-live="polite">
+            <div class="app-loading-spinner"><i class="fas ${icon}"></i></div>
+            <div class="app-loading-copy">
+                <strong>${title}</strong>
+                <span>${detail}</span>
+                ${phase ? `<small>${phase}</small>` : ''}
+                ${progress}
+            </div>
+        </div>
+    `;
+};
+
+window.showInlineLoading = function showInlineLoading(target, options = {}) {
+    const el = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!el) return false;
+    const opts = options && typeof options === 'object' ? options : {};
+    const html = window.getAppLoadingHtml(opts);
+    if (opts.table) {
+        const colspan = Math.max(Number(opts.colspan) || 1, 1);
+        el.innerHTML = `<tr class="app-loading-row"><td colspan="${colspan}">${html}</td></tr>`;
+    } else {
+        el.innerHTML = html;
+    }
+    return true;
+};
+
+function showRouteLoadingState(id, override = {}) {
+    const meta = HEAVY_VIEW_LOADING_META[id];
+    if (!meta || !meta.target || typeof window.showInlineLoading !== 'function') return false;
+    let target = document.getElementById(meta.target);
+    if (target && meta.tableBody) {
+        target = target.tBodies && target.tBodies[0] ? target.tBodies[0] : target.querySelector('tbody');
+    }
+    if (!target) return false;
+    return window.showInlineLoading(target, { ...meta, ...override, table: meta.table || meta.tableBody });
+}
+
+window.showAppBusyOverlay = function showAppBusyOverlay(options = {}) {
+    const opts = options && typeof options === 'object' ? options : {};
+    let overlay = document.getElementById('app-busy-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'app-busy-overlay';
+        overlay.className = 'app-busy-overlay hidden';
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = window.getAppLoadingHtml({
+        icon: opts.icon || 'fa-cloud-arrow-down',
+        title: opts.title || 'Syncing workspace data',
+        detail: opts.detail || 'Reading Supabase updates.',
+        phase: opts.phase || '',
+        progressDone: opts.progressDone,
+        progressTotal: opts.progressTotal
+    });
+    overlay.classList.remove('hidden');
+    return overlay;
+};
+
+window.updateAppBusyOverlay = function updateAppBusyOverlay(options = {}) {
+    const overlay = document.getElementById('app-busy-overlay');
+    if (!overlay || overlay.classList.contains('hidden')) return;
+    window.showAppBusyOverlay(options);
+};
+
+window.hideAppBusyOverlay = function hideAppBusyOverlay() {
+    const overlay = document.getElementById('app-busy-overlay');
+    if (overlay) overlay.classList.add('hidden');
+};
 
 const TRAINEE_ALLOWED_TABS = new Set([
     'dashboard-view',
@@ -3154,7 +3602,10 @@ function renderViewById(id, options = {}) {
     }
 
     if (source === 'hardRefresh') {
-        if (id === 'dashboard-view' && typeof renderDashboard === 'function') renderDashboard();
+        if (id === 'dashboard-view') {
+            if (typeof scheduleDashboardRender === 'function') scheduleDashboardRender({ immediate: true });
+            else if (typeof renderDashboard === 'function') renderDashboard();
+        }
         if (id === 'trainee-portal' && typeof TraineePortalLoader !== 'undefined' && typeof TraineePortalLoader.refresh === 'function') TraineePortalLoader.refresh();
         if (id === 'study-notes' && typeof StudyNotesWorkspace !== 'undefined' && typeof StudyNotesWorkspace.refresh === 'function') StudyNotesWorkspace.refresh(false);
         if (id === 'assessment-schedule' && typeof renderSchedule === 'function') renderSchedule();
@@ -3177,10 +3628,8 @@ function renderViewById(id, options = {}) {
     }
 
     if (id === 'dashboard-view') {
-        if (typeof renderDashboard === 'function') setTimeout(renderDashboard, 0);
-        if (typeof CalendarModule !== 'undefined' && typeof CalendarModule.renderWidget === 'function') {
-            setTimeout(() => CalendarModule.renderWidget(), 200);
-        }
+        if (typeof scheduleDashboardRender === 'function') scheduleDashboardRender({ delay: 40 });
+        else if (typeof renderDashboard === 'function') setTimeout(renderDashboard, 0);
         return;
     }
 
@@ -3367,15 +3816,30 @@ function rerenderActiveViewAfterFreshPull(id) {
 
 function scheduleNavigationDeferredWork(id, target) {
     if (NAV_DEFER_TIMER) clearTimeout(NAV_DEFER_TIMER);
+    if (NAV_IDLE_CALLBACK && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(NAV_IDLE_CALLBACK);
+        NAV_IDLE_CALLBACK = null;
+    }
     const run = () => {
         NAV_DEFER_TIMER = null;
-        if (target && target.isConnected && typeof applyResponsiveTableLabels === 'function') {
-            applyResponsiveTableLabels(target);
+        const idleWork = () => {
+            NAV_DEFER_TIMER = null;
+            NAV_IDLE_CALLBACK = null;
+            if (target && target.isConnected && typeof applyResponsiveTableLabels === 'function') {
+                applyResponsiveTableLabels(target);
+            }
+            if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
+            syncFreshDataForView(id);
+        };
+
+        if (typeof requestIdleCallback === 'function') {
+            NAV_IDLE_CALLBACK = requestIdleCallback(idleWork, { timeout: 900 });
+        } else {
+            NAV_DEFER_TIMER = setTimeout(idleWork, 120);
         }
-        if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
-        syncFreshDataForView(id);
     };
-    NAV_DEFER_TIMER = setTimeout(run, 90);
+    const delay = document.body && document.body.classList.contains('theme-one-ui') ? 220 : 90;
+    NAV_DEFER_TIMER = setTimeout(run, delay);
 }
 
 async function syncFreshDataForView(id) {
@@ -3385,11 +3849,17 @@ async function syncFreshDataForView(id) {
 
     const now = Date.now();
     const last = VIEW_SYNC_LAST_RUN[id] || 0;
-    if (VIEW_SYNC_IN_FLIGHT || (now - last) < 700) return;
+    if (VIEW_SYNC_IN_FLIGHT || (now - last) < 4000) return;
 
     VIEW_SYNC_LAST_RUN[id] = now;
     VIEW_SYNC_IN_FLIGHT = true;
     try {
+        if (id !== 'insight-studio' && id !== 'trainee-portal') {
+            showRouteLoadingState(id, {
+                title: (HEAVY_VIEW_LOADING_META[id] && HEAVY_VIEW_LOADING_META[id].title) || 'Refreshing workspace',
+                detail: 'Pulling the latest server data before updating this view.'
+            });
+        }
         await loadFromServer(true);
         window._lastSuccessfulServerSyncAt = Date.now();
         localStorage.setItem('last_server_sync', String(window._lastSuccessfulServerSyncAt));
@@ -3397,7 +3867,11 @@ async function syncFreshDataForView(id) {
         console.warn(`[View Sync] Fresh pull failed for ${id}:`, error);
     } finally {
         VIEW_SYNC_IN_FLIGHT = false;
-        rerenderActiveViewAfterFreshPull(id);
+        if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.softRefresh === 'function') {
+            InsightStudioLoader.softRefresh();
+        } else {
+            rerenderActiveViewAfterFreshPull(id);
+        }
         if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
     }
 }
@@ -3566,6 +4040,7 @@ function showTab(id, btn) {
 
   const executeSwitch = () => {
       document.body.classList.add('route-transitioning');
+      document.body.classList.add('nav-rendering');
       if (typeof refreshAdaptiveViewportLayout === 'function') {
           refreshAdaptiveViewportLayout();
       }
@@ -3598,6 +4073,7 @@ function showTab(id, btn) {
           if (target) target.querySelectorAll('textarea.auto-expand').forEach(el => autoResize(el));
           if (target) target.classList.remove('tab-enter-anim');
           document.body.classList.remove('route-transitioning');
+          document.body.classList.remove('nav-rendering');
       }, 160);
   };
 
@@ -3763,6 +4239,10 @@ function toggleTheme() {
     // Save preference
     const isLight = document.body.classList.contains('light-mode');
     localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    if (document.body.classList.contains('theme-one-ui') && typeof applyOneUiThemeVariables === 'function') {
+        applyOneUiThemeVariables(getStoredLocalThemeConfig());
+    }
+    if (typeof scheduleEmbeddedThemeSync === 'function') scheduleEmbeddedThemeSync({ delay: 80 });
 }
 
 /* ================= NOTIFICATIONS ================= */
@@ -3808,6 +4288,34 @@ function getAdminCourseRequestNotifications() {
             return roles.includes(String(CURRENT_USER.role || '').toLowerCase());
         })
         .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+function getAdminAssessmentFeedbackNotifications() {
+    if (!CURRENT_USER || !['admin', 'super_admin'].includes(String(CURRENT_USER.role || '').toLowerCase())) return [];
+    let rows = [];
+    try {
+        rows = (typeof safeLocalParse === 'function')
+            ? safeLocalParse('admin_notifications', [])
+            : JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+    } catch (error) {
+        rows = [];
+    }
+    return (Array.isArray(rows) ? rows : [])
+        .filter(row => row && String(row.type || '') === 'assessment_feedback_request')
+        .filter(row => String(row.status || 'open') !== 'closed')
+        .filter(row => {
+            const roles = Array.isArray(row.targetRoles) ? row.targetRoles.map(role => String(role || '').toLowerCase()) : ['admin', 'super_admin'];
+            return roles.includes(String(CURRENT_USER.role || '').toLowerCase());
+        })
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+function markAdminAssessmentFeedbackNotificationsSeen() {
+    const latest = getAdminAssessmentFeedbackNotifications()[0];
+    if (latest && latest.createdAt) {
+        localStorage.setItem('last_seen_assessment_feedback_notification_at', String(latest.createdAt));
+    }
+    updateNotifications();
 }
 
 function markAdminCourseRequestNotificationsSeen() {
@@ -3947,7 +4455,25 @@ function updateNotifications() {
         }
     }
 
-    // 6. EMPTY STATE
+    // 6. ASSESSMENT FEEDBACK REQUEST NOTIFICATIONS
+    if (CURRENT_USER && ['super_admin', 'admin'].includes(String(CURRENT_USER.role || '').toLowerCase())) {
+        const feedbackRequests = getAdminAssessmentFeedbackNotifications();
+        const lastSeenAt = String(localStorage.getItem('last_seen_assessment_feedback_notification_at') || '');
+        const newRequests = feedbackRequests.filter(row => !lastSeenAt || String(row.createdAt || '') > lastSeenAt);
+
+        if (newRequests.length > 0) {
+            count += newRequests.length;
+            const latest = newRequests[0];
+            notifList.innerHTML += `
+            <div class="notif-item" onclick="markAdminAssessmentFeedbackNotificationsSeen(); if (typeof openAssessmentFeedbackSessions === 'function') openAssessmentFeedbackSessions(); else showTab('test-manage');" style="border-left:3px solid var(--primary);" aria-label="${newRequests.length} assessment feedback requests">
+                <i class="fas fa-comments" style="color:var(--primary);"></i>
+                <strong>${newRequests.length} Feedback Request${newRequests.length === 1 ? '' : 's'}</strong>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">${safeNotificationText(latest.message || 'A trainee requested assessment feedback.')}</div>
+            </div>`;
+        }
+    }
+
+    // 7. EMPTY STATE
     if (notifList.innerHTML === '') {
         notifList.innerHTML = '<div style="padding:15px; text-align:center; color:#888;">No new notifications</div>';
     }
@@ -4238,6 +4764,42 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.6.99": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Trainee Portal no longer gets stuck on the refresh screen during login.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Trainee Portal can recover if its embedded workspace needs to be remounted.</li>
+            </ul>`,
+        "2.6.98": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Trainee Login:</strong> Trainee Portal now opens first while trainee data sync and activity monitoring start in the background.</li>
+                <li style="margin-bottom: 8px;"><strong>One UI:</strong> Trainee Portal now inherits One UI theme classes and tokens from the main workspace.</li>
+                <li style="margin-bottom: 8px;"><strong>Navigation:</strong> The advanced sidebar expands into a wider compact grid so more tabs fit on-screen.</li>
+                <li style="margin-bottom: 8px;"><strong>Quick Menus:</strong> Admin Tools, Test Engine, and Onboard Report now expose direct subview shortcuts from the sidebar.</li>
+            </ul>`,
+        "2.6.97": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Operations Dashboard and sidebar navigation now do less blocking work while keeping the One UI visuals intact.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Dashboard and Test Engine realtime refreshes are now debounced/idle-coalesced for smoother editing and navigation.</li>
+                <li style="margin-bottom: 8px;"><strong>Sync Hardening:</strong> Feedback requests now use targeted delta uploads instead of forcing full submissions and records uploads.</li>
+                <li style="margin-bottom: 8px;"><strong>Loading States:</strong> Uploads, downloads, and heavy view refreshes now show clearer progress screens so the app feels active during server work.</li>
+                <li style="margin-bottom: 8px;"><strong>Theme Polish:</strong> One UI styling now bridges into embedded hubs and studio modules more consistently.</li>
+                <li style="margin-bottom: 8px;"><strong>Fix:</strong> Network Diagnostics now opens as a large workspace modal instead of a small bottom sheet.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> Network Diagnostics modal cards and admin popout now inherit One UI theme tokens and custom accent styling.</li>
+            </ul>`,
+        "2.6.96": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Trainees can request feedback once per completed assessment from My Assessments.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Test Engine & History now includes Feedback Sessions for admins to review requests and mark feedback as given.</li>
+                <li style="margin-bottom: 8px;"><strong>Notification:</strong> Admin and Super Admin users now receive notification-bell alerts when assessment feedback is requested.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> My Assessments now shows completed live assessments alongside upcoming live bookings.</li>
+            </ul>`,
+        "2.6.95": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> One UI Clean is now an official workspace theme in profile and admin personalization.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> One UI now has its own customization controls for light/dark accents, light/dark surfaces, corner shape, and depth.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> The One UI default accent moved from blue to dark grey with deeper styling for controls, tables, dropdowns, embedded app headers, and primary actions.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> One UI route changes now defer non-critical work and suppress expensive visual effects during the switch.</li>
+            </ul>`,
         "2.6.94": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> One UI Clean is now the default adaptive workspace theme when no custom visual theme is configured.</li>

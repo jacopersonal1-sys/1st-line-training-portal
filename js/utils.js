@@ -173,6 +173,10 @@ if (typeof window.toggleTheme !== 'function') {
     window.toggleTheme = function() {
         document.body.classList.toggle('light-mode');
         localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
+        if (document.body.classList.contains('theme-one-ui') && typeof applyOneUiThemeVariables === 'function') {
+            applyOneUiThemeVariables(typeof getStoredLocalThemeConfig === 'function' ? getStoredLocalThemeConfig() : {});
+        }
+        if (typeof syncThemeToEmbeddedPrograms === 'function') syncThemeToEmbeddedPrograms();
     };
 }
 
@@ -530,6 +534,19 @@ window.openUnifiedProfileSettings = function() {
         glowStrength: 0.26,
         cornerRadius: 13
     };
+    const oneUiDefaults = (typeof getDefaultOneUiThemeConfig === 'function')
+        ? getDefaultOneUiThemeConfig()
+        : {
+            accent: '#4A4F57',
+            darkAccent: '#C9CDD3',
+            surfaceTint: '#F4F5F7',
+            darkSurfaceTint: '#171A1F',
+            cornerRadius: 18,
+            glowStrength: 0.12
+        };
+    const oneUiConfig = (typeof getStoredOneUiThemeConfig === 'function')
+        ? getStoredOneUiThemeConfig(localTheme)
+        : { ...oneUiDefaults, ...((localTheme.oneUi && typeof localTheme.oneUi === 'object') ? localTheme.oneUi : {}) };
     try {
         if (typeof getStoredCustomExperimentalThemeConfig === 'function') {
             customExp = getStoredCustomExperimentalThemeConfig();
@@ -664,18 +681,36 @@ window.openUnifiedProfileSettings = function() {
                     </div>
 
                     <div style="margin-top:15px; padding-top:12px; border-top:1px dashed var(--border-color);">
-                        <label style="font-size:0.8rem;">Experimental Theme</label>
+                            <label style="font-size:0.8rem;">Workspace Theme</label>
                         <select id="profExperimentalTheme" onchange="updateProfileExperimentalThemeUI()" style="margin-bottom:8px;">
                             <option value="" ${expTheme === '' ? 'selected' : ''}>Original</option>
                             <option value="theme-custom-lab" ${expTheme === 'theme-custom-lab' ? 'selected' : ''}>Custom Lab</option>
-                            <option value="theme-one-ui" ${expTheme === 'theme-one-ui' ? 'selected' : ''}>One UI Clean</option>
+                            <option value="theme-one-ui" ${expTheme === 'theme-one-ui' ? 'selected' : ''}>One UI Clean (Official)</option>
                             <option value="theme-cyberpunk" ${expTheme === 'theme-cyberpunk' ? 'selected' : ''}>Neon Nights</option>
                             <option value="theme-ocean" ${expTheme === 'theme-ocean' ? 'selected' : ''}>Deep Sea</option>
                             <option value="theme-forest" ${expTheme === 'theme-forest' ? 'selected' : ''}>Enchanted Forest</option>
                             <option value="theme-royal" ${expTheme === 'theme-royal' ? 'selected' : ''}>Royal Amethyst</option>
                         </select>
                         <div id="profExperimentalHint" style="font-size:0.76rem; color:var(--text-muted); margin-bottom:8px;">
-                            Pick a preset theme or keep the original look.
+                            Pick an official workspace theme, optional preset, or keep the original look.
+                        </div>
+
+                        <div id="profOneUiBlock" class="hidden" style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input); margin-bottom:8px;">
+                            <div style="font-size:0.76rem; color:var(--text-muted); margin-bottom:8px;">Tune the official One UI palette without leaving the One UI workspace shell.</div>
+                            <div class="grid-3" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(145px, 1fr)); gap:8px;">
+                                <div><label style="font-size:0.75rem;">Light Accent</label><input type="color" id="profOneUiAccent" value="${safeAttr(oneUiConfig.accent || oneUiDefaults.accent)}"></div>
+                                <div><label style="font-size:0.75rem;">Dark Accent</label><input type="color" id="profOneUiDarkAccent" value="${safeAttr(oneUiConfig.darkAccent || oneUiDefaults.darkAccent)}"></div>
+                                <div><label style="font-size:0.75rem;">Light Surface</label><input type="color" id="profOneUiSurface" value="${safeAttr(oneUiConfig.surfaceTint || oneUiDefaults.surfaceTint)}"></div>
+                                <div><label style="font-size:0.75rem;">Dark Surface</label><input type="color" id="profOneUiDarkSurface" value="${safeAttr(oneUiConfig.darkSurfaceTint || oneUiDefaults.darkSurfaceTint)}"></div>
+                                <div>
+                                    <label style="font-size:0.75rem;">Shape: <span id="profOneUiRadiusDisplay">${Math.round(Number(oneUiConfig.cornerRadius || oneUiDefaults.cornerRadius))}px</span></label>
+                                    <input type="range" id="profOneUiRadius" min="12" max="26" step="1" value="${Math.round(Number(oneUiConfig.cornerRadius || oneUiDefaults.cornerRadius))}" oninput="updateProfileExperimentalThemeUI()">
+                                </div>
+                                <div>
+                                    <label style="font-size:0.75rem;">Depth: <span id="profOneUiGlowDisplay">${Number(oneUiConfig.glowStrength || oneUiDefaults.glowStrength).toFixed(2)}</span></label>
+                                    <input type="range" id="profOneUiGlow" min="0.06" max="0.24" step="0.01" value="${Number(oneUiConfig.glowStrength || oneUiDefaults.glowStrength).toFixed(2)}" oninput="updateProfileExperimentalThemeUI()">
+                                </div>
+                            </div>
                         </div>
 
                         <div id="profCustomLabBlock" class="hidden" style="padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
@@ -772,24 +807,32 @@ window.openUnifiedProfileSettings = function() {
 window.updateProfileExperimentalThemeUI = function() {
     const selected = document.getElementById('profExperimentalTheme') ? document.getElementById('profExperimentalTheme').value : '';
     const customBlock = document.getElementById('profCustomLabBlock');
+    const oneUiBlock = document.getElementById('profOneUiBlock');
     if (customBlock) customBlock.classList.toggle('hidden', selected !== 'theme-custom-lab');
+    if (oneUiBlock) oneUiBlock.classList.toggle('hidden', selected !== 'theme-one-ui');
 
     const motion = document.getElementById('profExpMotion');
     const glow = document.getElementById('profExpGlow');
     const radius = document.getElementById('profExpRadius');
+    const oneUiRadius = document.getElementById('profOneUiRadius');
+    const oneUiGlow = document.getElementById('profOneUiGlow');
     const motionDisplay = document.getElementById('profExpMotionDisplay');
     const glowDisplay = document.getElementById('profExpGlowDisplay');
     const radiusDisplay = document.getElementById('profExpRadiusDisplay');
+    const oneUiRadiusDisplay = document.getElementById('profOneUiRadiusDisplay');
+    const oneUiGlowDisplay = document.getElementById('profOneUiGlowDisplay');
 
     if (motion && motionDisplay) motionDisplay.textContent = `${Number(motion.value || 1).toFixed(2)}x`;
     if (glow && glowDisplay) glowDisplay.textContent = Number(glow.value || 0.26).toFixed(2);
     if (radius && radiusDisplay) radiusDisplay.textContent = `${Math.round(Number(radius.value || 13))}px`;
+    if (oneUiRadius && oneUiRadiusDisplay) oneUiRadiusDisplay.textContent = `${Math.round(Number(oneUiRadius.value || 18))}px`;
+    if (oneUiGlow && oneUiGlowDisplay) oneUiGlowDisplay.textContent = Number(oneUiGlow.value || 0.12).toFixed(2);
 
     const hint = document.getElementById('profExperimentalHint');
     if (hint) {
         if (!selected) hint.textContent = 'Original theme selected. Standard personalization still applies.';
         else if (selected === 'theme-custom-lab') hint.textContent = 'Custom Lab selected. Tune your draft below.';
-        else if (selected === 'theme-one-ui') hint.textContent = 'One UI Clean selected. This is the default for profiles without a custom visual theme.';
+        else if (selected === 'theme-one-ui') hint.textContent = 'One UI Clean selected. This official theme can use the One UI tuning controls below.';
         else hint.textContent = 'Preset selected. Save Changes to apply globally for your profile.';
     }
 };
@@ -897,7 +940,15 @@ window.saveProfileSettings = async function() {
             showRing: getChecked('profShowRing'),
             profileRingColor: getVal('profRingColor') || '#F37021',
             wallpaper: getVal('profWallpaper') || '',
-            zoomLevel: parseFloat(getVal('profZoom') || 1)
+            zoomLevel: parseFloat(getVal('profZoom') || 1),
+            oneUi: {
+                accent: getVal('profOneUiAccent') || '#4A4F57',
+                darkAccent: getVal('profOneUiDarkAccent') || '#C9CDD3',
+                surfaceTint: getVal('profOneUiSurface') || '#F4F5F7',
+                darkSurfaceTint: getVal('profOneUiDarkSurface') || '#171A1F',
+                cornerRadius: parseFloat(getVal('profOneUiRadius') || '18'),
+                glowStrength: parseFloat(getVal('profOneUiGlow') || '0.12')
+            }
         };
         
         localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));

@@ -496,6 +496,10 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.6.99 (Trainee Portal Login Hotfix, 2026-05-20):** Fixed a trainee login stall where high-priority fresh-pull loading could replace `#trainee-portal-content` with the shared "Refreshing trainee portal" card, removing the iframe that hosts `modules/trainee_portal`. `js/main.js` now skips destructive inline route loading for the Trainee Portal while still performing the background server pull, and `js/trainee_portal_loader.js` remounts the iframe if a refresh runs after the frame was removed. `js/data.js` also keeps admin submission realtime refresh leading-edge immediate while retaining a trailing debounce for repeated events. This ships as a stable main-channel hotfix over v2.6.98. Verification included syntax checks and full Jest.
+- **v2.6.97 (Supabase Loading States + Dashboard Performance, 2026-05-20):** Added shared loading helpers in `js/main.js` (`getAppLoadingHtml`, `showInlineLoading`, `showAppBusyOverlay`, `updateAppBusyOverlay`, `hideAppBusyOverlay`) so heavy Supabase pulls can present a consistent One UI friendly progress surface. `js/data.js` now shows a progress-aware overlay for explicit full server pulls and uploads while preserving silent background sync behavior. High-priority view refreshes can show inline loaders for safe data regions, Live Assessment Booking uses the shared table loader during authoritative booking sync, and Super Admin Data Studio shows a loader until the embedded webview is ready. Operations Dashboard rendering now caches repeated localStorage parses for each render, moves storage-size calculation to idle time, shortens card entrance timing, delegates edit-mode drag handlers, avoids duplicate calendar widget rendering, and exposes `scheduleDashboardRender()` so navigation/realtime refreshes can coalesce dashboard work into idle-time renders. Realtime submission updates now debounce heavy Test Engine refreshes, embedded theme syncing is batched, and app transitions target paint-friendly properties instead of broad `all` transitions. Insight background fresh pulls now soft-refresh the existing webview instead of replacing the workspace with the route loader. Assessment feedback requests use immediate delta sync (`saveToServer([...], false)` plus `FLUSH`) to avoid forced full uploads of all submissions/records. One UI theme bridging now injects host variables/classes and lightweight bridge CSS into embedded iframes/webviews, Network Diagnostics is excluded from bottom-sheet modal rules so it opens as a large workspace, and the Network Diagnostics admin popout now inherits One UI tokens/theme classes from the main app. Release verification included syntax checks, marker/debug cleanup scan, and focused Test Engine Jest coverage.
+- **v2.6.96 (Assessment Feedback Requests, 2026-05-19):** Completed assessments now carry `feedbackStatus` plus a one-time `feedbackRequestLocked` flag on both `submissions` and linked `records`. Trainees can request feedback once from My Assessments; admins review the new Test Engine & History > Feedback Sessions view and mark feedback as given without unlocking the trainee request action. Feedback requests also create `admin_notifications` rows of type `assessment_feedback_request`, and feedback status appears on trainee cards, completed history, feedback sessions, and the marked script/print header. My Assessments also now lists completed live assessment entries alongside upcoming live bookings.
+- **v2.6.95 (Official One UI Customization, 2026-05-19):** One UI Clean is now treated as an official workspace theme in the theme/profile UI. It has its own customization layer for light/dark accent, light/dark surface, corner shape, and depth while staying compatible with the existing local profile theme storage. The default One UI palette moved from blue to dark grey, and One UI received extra polish for form labels, color/range controls, table headers, dropdown surfaces, active theme cards, embedded program icon tiles, and primary buttons. One UI navigation also now defers non-critical table/sync work to idle time, tracks the previous active nav button to avoid full-sidebar scans, and temporarily suppresses expensive blur/shadow/transition effects while routes switch.
 - **v2.6.94 (One UI Default + Navigation Performance, 2026-05-19):** One UI Clean is now the effective default workspace theme when a user/PC has no custom visual theme configured, while explicit experimental themes and custom accent/background/wallpaper settings remain respected. The One UI layer now reaches deeper into shell headers, cards, bottom-sheet style modals, status chips, segmented controls, tables, toasts, embedded module title bars, and shared iframe/webview chrome. Navigation avoids rebuilding heavy embedded workspaces on return, defers responsive table labelling and fresh server sync until after tab paint, and debounces repeated tab clicks. The marking queue now keeps actively marked linked pending submissions visible and repairs stale linked pending rows without archiving them; admin connectivity testing also guards missing local-server inputs.
 - **v2.6.93 (Insight Evidence + Vetting Save Hardening, 2026-05-19):** Knowledge Gaps now reads Test Engine `scores` maps with `testSnapshot.questions`, calculates failure rates against all marked attempts, and exports the Insight data service for focused tests. HR Evidence now resolves saved rows to the canonical trainee name, normalized trainee key, and group so Insight Build can find captured proof reliably. Vetting submit/force-submit and admin marking paths now treat failed critical sync as a blocking condition and verify exact submission/record rows. Added the reversible One UI Clean experimental theme and `ops/insight_hr_evidence_setup_20260519.sql` for Supabase SQL Editor setup.
 - **v2.6.90 (Course Request Email Body Clarification, 2026-05-13):** Course move-on request emails now always prepend Timeline Course name and User automatically. `course_progress_request_config.emailBodyTemplate` stores only the editable request-message portion from Admin Tools > System Config.
@@ -573,6 +577,47 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.6.99 - 2026-05-20
+
+- Hotfix: Trainee Portal fresh-pull loading no longer replaces the embedded portal iframe during login.
+- Fix: `TraineePortalLoader.refresh()` remounts the iframe if the host container was cleared by a prior loading state.
+- Release: Stable main-channel hotfix over v2.6.98.
+- Verification: `node --check js\main.js`, `node --check js\trainee_portal_loader.js`, `node --check js\data.js`, and full Jest passed.
+
+## v2.6.97 - 2026-05-20
+
+- Feature: Added reusable app loading surfaces for heavy Supabase pulls and route-level refreshes.
+- Improvement: Full manual server pulls now show a progress-aware overlay backed by sync diagnostics.
+- Improvement: Live Booking and Super Admin Data Studio now show shared loaders while authoritative booking syncs or embedded webviews initialize.
+- Performance: Operations Dashboard avoids repeated localStorage parsing in one render, calculates storage size during idle time, uses shorter card entrance timing, delegates edit-mode drag events, and avoids duplicate calendar widget rendering.
+- Performance: Dashboard navigation/realtime refreshes now use idle-time coalescing, heavy Test Engine realtime refreshes are debounced, and embedded theme syncing is batched.
+- Performance: Insight fresh pulls soft-refresh the existing embedded webview instead of replacing the screen with a route loader after first render.
+- Fix: Assessment feedback requests use immediate delta sync and no longer force-upload every submissions/records row.
+- Fix: Network Diagnostics opens as a large workspace modal under One UI instead of a small bottom sheet.
+- Polish: Network Diagnostics modal cards and the admin popout now inherit One UI tokens, theme classes, rounded surfaces, and custom accent variables.
+- Polish: App-wide transitions now avoid broad `all` transitions to reduce repaint cost while preserving the same visual feel.
+- Polish: Embedded module theme bridge pushes One UI classes, variables, and light structural styling into Teamleader Hub, OPL Hub, Q&A Hub, Content Creator, Schedule Studio, and Vetting Arena 2.0.
+- Cleanup: Release sweep checked syntax, marker/debug leftovers, and focused Test Engine Jest coverage.
+- Verification: JS syntax checks and Test Engine Jest coverage passed.
+
+## v2.6.96 - 2026-05-19
+
+- Feature: Trainees can request feedback once per completed assessment from My Assessments.
+- Feature: Test Engine & History has a Feedback Sessions sub-menu for admins to close requested feedback as given.
+- Feature: Assessment feedback requests create admin notification-bell entries.
+- Improvement: My Assessments includes completed live assessment entries as well as upcoming live bookings.
+- Improvement: Feedback status appears on trainee cards, completed history, feedback sessions, and marked script/print headers.
+- Verification: Focused syntax checks and Test Engine Jest coverage passed.
+
+## v2.6.95 - 2026-05-19
+
+- Feature: One UI Clean is now listed and handled as an official workspace theme.
+- Improvement: One UI supports its own stored customization values for light/dark accents, light/dark surfaces, corner shape, and depth.
+- Improvement: One UI default accents changed from blue to dark grey.
+- Polish: One UI now reaches deeper into labels, theme controls, table headers, dropdowns, active theme cards, embedded program icon tiles, and button styling.
+- Performance: One UI navigation defers table/sync work to idle time, avoids full nav active-state scans, and suppresses expensive visual effects during route switches.
+- Verification: Syntax checks passed for changed theme scripts.
 
 ## v2.6.94 - 2026-05-19
 

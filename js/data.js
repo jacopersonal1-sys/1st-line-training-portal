@@ -108,6 +108,7 @@ const STRICT_SERVER_KEYS = new Set([
 const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'records',
     'submissions',
+    'exemptions',
     'liveBookings',
     'liveSessions',
     'users',
@@ -124,7 +125,9 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'course_progress_request_config',
     'admin_notifications',
     'test_integrity_overrides',
-    'qa_data'
+    'qa_data',
+    'graduated_agents',
+    'retrain_archives'
 ]);
 
 // --- TRAINEE RUNTIME OPTIMIZATION ---
@@ -442,6 +445,14 @@ async function loadFromServer(silent = false) {
             return window.LOAD_FROM_SERVER_LAST_RESULT;
         }
         window.LOAD_FROM_SERVER_IN_FLIGHT = true;
+        const showPullOverlay = !silent && typeof window.showAppBusyOverlay === 'function';
+        if (showPullOverlay) {
+            window.showAppBusyOverlay({
+                title: 'Syncing workspace data',
+                detail: 'Reading Supabase documents and row tables.',
+                phase: 'Starting server pull'
+            });
+        }
 
         const pullStartedAt = Date.now();
         let pullProgressDone = 0;
@@ -1008,11 +1019,17 @@ async function loadFromServer(silent = false) {
         }
         window.LOAD_FROM_SERVER_LAST_RESULT = true;
         window.LOAD_FROM_SERVER_IN_FLIGHT = false;
+        if (showPullOverlay && typeof window.hideAppBusyOverlay === 'function') {
+            window.hideAppBusyOverlay();
+        }
         return true; // Signal Success
 
     } catch (err) { 
         window.LOAD_FROM_SERVER_LAST_RESULT = false;
         window.LOAD_FROM_SERVER_IN_FLIGHT = false;
+        if (typeof window.hideAppBusyOverlay === 'function') {
+            window.hideAppBusyOverlay();
+        }
         updateSyncUI('error');
         updateSyncDiagnostics({
             status: 'error',
@@ -1032,6 +1049,7 @@ async function loadFromServer(silent = false) {
                 console.warn("DATABASE PERMISSION ERROR: Run the RLS Policy SQL in Supabase to allow access.");
             }
         }
+        return false;
     }
 }
 
@@ -1515,6 +1533,15 @@ function updateSyncDiagnostics(patch = {}) {
     if (!next.server || next.server === '-') next.server = getActiveSyncServerLabel();
     if (!next.statusText) next.statusText = next.status || 'Idle';
     window.SYNC_DIAGNOSTICS = next;
+    if (typeof window.updateAppBusyOverlay === 'function') {
+        window.updateAppBusyOverlay({
+            title: next.statusText || 'Syncing workspace data',
+            detail: next.item && next.item !== '-' ? String(next.item) : 'Reading Supabase updates.',
+            phase: next.phase || '',
+            progressDone: next.progressDone,
+            progressTotal: next.progressTotal
+        });
+    }
     renderSyncDiagnostics();
 }
 
@@ -1903,6 +1930,15 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         return true;
     }
     _IS_PROCESSING_SAVE = true;
+    const showPushOverlay = retryCount === 0 && !silent && typeof window.showAppBusyOverlay === 'function';
+    if (showPushOverlay) {
+        window.showAppBusyOverlay({
+            icon: 'fa-cloud-arrow-up',
+            title: 'Saving workspace changes',
+            detail: 'Uploading changed rows to Supabase.',
+            phase: 'Preparing upload queue'
+        });
+    }
 
     try {
         // LOCKDOWN CHECK
@@ -2263,6 +2299,9 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         if (!IS_DEMO_MODE && window.electronAPI && window.electronAPI.disk) {
             window.electronAPI.disk.saveCache(JSON.stringify(localStorage)).catch(()=>{});
         }
+        if (showPushOverlay && typeof window.hideAppBusyOverlay === 'function') {
+            window.hideAppBusyOverlay();
+        }
         return true;
 
     } catch (err) {
@@ -2298,8 +2337,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         }
         
         if(typeof showToast === 'function' && !silent) showToast("Save Failed: " + msg, 'error');
+        if (showPushOverlay && typeof window.hideAppBusyOverlay === 'function') {
+            window.hideAppBusyOverlay();
+        }
         return false;
     } finally {
+        if (showPushOverlay && typeof window.hideAppBusyOverlay === 'function') {
+            window.hideAppBusyOverlay();
+        }
         _IS_PROCESSING_SAVE = false;
         if (_RETRIGGER_SAVE) {
             _RETRIGGER_SAVE = false;
@@ -4367,8 +4412,12 @@ function refreshSubmissionDrivenUI() {
     const isTyping = typeof isUserTyping === 'function' ? isUserTyping() : false;
     const isActiveView = (id) => !!document.getElementById(id)?.classList.contains('active');
 
-    if (isActiveView('dashboard-view') && !isTyping && typeof renderDashboard === 'function') {
-        renderDashboard();
+    if (isActiveView('dashboard-view') && !isTyping) {
+        if (typeof scheduleDashboardRender === 'function') {
+            scheduleDashboardRender({ delay: 180 });
+        } else if (typeof renderDashboard === 'function') {
+            renderDashboard();
+        }
     }
 
     if (isActiveView('my-tests') && typeof loadTraineeTests === 'function') {
@@ -4380,12 +4429,21 @@ function refreshSubmissionDrivenUI() {
     }
 
     if (isActiveView('test-manage') && !isTyping) {
-        if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
-        if (typeof loadManageTests === 'function') loadManageTests();
-        if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
-        if (typeof loadCompletedHistory === 'function' && !document.getElementById('engine-view-history')?.classList.contains('hidden')) {
-            loadCompletedHistory();
-        }
+        const refreshTestManage = () => {
+            if (!isActiveView('test-manage') || (typeof isUserTyping === 'function' && isUserTyping())) return;
+            if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
+            if (typeof loadManageTests === 'function') loadManageTests();
+            if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
+            if (typeof loadCompletedHistory === 'function' && !document.getElementById('engine-view-history')?.classList.contains('hidden')) {
+                loadCompletedHistory();
+            }
+        };
+        if (!window.__SUBMISSION_UI_REFRESH_TIMER) refreshTestManage();
+        clearTimeout(window.__SUBMISSION_UI_REFRESH_TIMER);
+        window.__SUBMISSION_UI_REFRESH_TIMER = setTimeout(() => {
+            window.__SUBMISSION_UI_REFRESH_TIMER = null;
+            refreshTestManage();
+        }, 180);
     }
 
     if (typeof validateActiveMarkingModalLock === 'function') validateActiveMarkingModalLock();

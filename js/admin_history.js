@@ -23,6 +23,7 @@ function showTestEngineSub(viewName, btn) {
     if(document.getElementById('engine-view-nps')) document.getElementById('engine-view-nps').classList.add('hidden');
     if(document.getElementById('engine-view-search')) document.getElementById('engine-view-search').classList.add('hidden');
     if(document.getElementById('engine-view-integrity')) document.getElementById('engine-view-integrity').classList.add('hidden');
+    if(document.getElementById('engine-view-feedback')) document.getElementById('engine-view-feedback').classList.add('hidden');
     
     document.getElementById('engine-view-' + viewName).classList.remove('hidden');
     
@@ -44,6 +45,100 @@ function showTestEngineSub(viewName, btn) {
     if (viewName === 'integrity' && typeof renderTestIntegrityReview === 'function') {
         renderTestIntegrityReview();
     }
+    if (viewName === 'feedback') {
+        loadFeedbackSessions();
+    }
+}
+
+window.openAssessmentFeedbackSessions = function() {
+    if (typeof showTab === 'function') showTab('test-manage');
+    setTimeout(() => {
+        const btn = document.querySelector('button[onclick*="feedback"]');
+        if (btn && typeof showTestEngineSub === 'function') showTestEngineSub('feedback', btn);
+        else if (typeof loadFeedbackSessions === 'function') loadFeedbackSessions();
+    }, 80);
+};
+
+function getFeedbackSessionTime(submission) {
+    return new Date(
+        submission.feedbackRequestedAt ||
+        submission.feedbackGivenAt ||
+        submission.lastEditedDate ||
+        submission.lastModified ||
+        submission.createdAt ||
+        submission.date ||
+        0
+    ).getTime() || 0;
+}
+
+function loadFeedbackSessions() {
+    const container = document.getElementById('feedbackSessionsList');
+    if (!container) return;
+
+    const filter = document.getElementById('feedbackSessionFilter') ? document.getElementById('feedbackSessionFilter').value : 'requested';
+    let submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    submissions = (Array.isArray(submissions) ? submissions : []).filter(s => {
+        if (!s || String(s.status || '').toLowerCase() !== 'completed' || s.archived) return false;
+        if (!s.feedbackRequestLocked && getAssessmentFeedbackStatus(s) !== 'requested') return false;
+        const status = getAssessmentFeedbackStatus(s);
+        if (filter === 'requested') return status === 'requested';
+        if (filter === 'given') return status === 'given';
+        return true;
+    });
+
+    submissions.sort((a, b) => getFeedbackSessionTime(b) - getFeedbackSessionTime(a));
+
+    if (submissions.length === 0) {
+        container.innerHTML = `${typeof getTableStateHtml === 'function'
+            ? getTableStateHtml('empty', 'No feedback sessions found.', 'Trainee requests will appear here after they click Feedback Required.', 'fa-comments')
+            : '<div style="padding:20px; text-align:center; color:var(--text-muted);">No feedback sessions found.</div>'}`;
+        return;
+    }
+
+    const rows = submissions.map(sub => {
+        const record = typeof findAssessmentFeedbackRecord === 'function' ? findAssessmentFeedbackRecord(sub, records) : null;
+        const status = getAssessmentFeedbackStatus(sub);
+        const requestedAt = sub.feedbackRequestedAt ? new Date(sub.feedbackRequestedAt).toLocaleString() : '-';
+        const givenAt = sub.feedbackGivenAt ? new Date(sub.feedbackGivenAt).toLocaleString() : '-';
+        const group = record?.groupID || sub.groupID || '-';
+        const score = Number.isFinite(Number(sub.score)) ? `${Number(sub.score)}%` : '-';
+        const action = status === 'requested'
+            ? `<button class="btn-primary btn-sm" onclick="markAssessmentFeedbackGiven('${sub.id}')"><i class="fas fa-check"></i> Feedback Given</button>`
+            : `<button class="btn-secondary btn-sm" disabled><i class="fas fa-lock"></i> Closed</button>`;
+
+        return `
+            <tr>
+                <td><div style="display:flex; align-items:center; gap:8px;">${typeof getAvatarHTML === 'function' ? getAvatarHTML(sub.trainee) : ''}<strong>${sub.trainee || '-'}</strong></div><div style="font-size:0.76rem; color:var(--text-muted);">${group}</div></td>
+                <td><strong>${sub.testTitle || '-'}</strong><div style="font-size:0.76rem; color:var(--text-muted);">${sub.type === 'live' || sub.liveSessionId ? 'Live Assessment' : 'Assessment'}</div></td>
+                <td>${score}</td>
+                <td>${typeof renderAssessmentFeedbackBadge === 'function' ? renderAssessmentFeedbackBadge(sub) : status}</td>
+                <td><div style="font-size:0.82rem;">${requestedAt}</div><div style="font-size:0.76rem; color:var(--text-muted);">by ${sub.feedbackRequestedBy || sub.trainee || '-'}</div></td>
+                <td><div style="font-size:0.82rem;">${givenAt}</div><div style="font-size:0.76rem; color:var(--text-muted);">${sub.feedbackGivenBy ? `by ${sub.feedbackGivenBy}` : ''}</div></td>
+                <td style="white-space:nowrap;">
+                    ${action}
+                    <button class="btn-secondary btn-sm" onclick="openAdminMarking('${sub.id}', { claim: false })"><i class="fas fa-eye"></i> Script</button>
+                </td>
+            </tr>`;
+    }).join('');
+
+    container.innerHTML = `
+        <div class="table-responsive" style="max-height:620px; overflow:auto;">
+            <table class="admin-table feedback-session-table">
+                <thead>
+                    <tr>
+                        <th>Trainee</th>
+                        <th>Assessment</th>
+                        <th>Score</th>
+                        <th>Status</th>
+                        <th>Requested</th>
+                        <th>Given</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
 }
 
 function loadCompletedHistory() {
@@ -190,6 +285,7 @@ function loadCompletedHistory() {
                 <th>Trainee</th>
                 <th>Test Title</th>
                 <th>Score</th>
+                <th>Feedback</th>
                 <th>Last Edited By</th>
                 <th>Action</th>
             </tr>
@@ -222,6 +318,7 @@ function loadCompletedHistory() {
                     ${attemptHtml}${auditHtml}
                 </td>
                 <td><span style="font-weight:bold; color:${scoreColor};">${s.score}%</span></td>
+                <td>${typeof renderAssessmentFeedbackBadge === 'function' ? renderAssessmentFeedbackBadge(s) : '-'}</td>
                 <td>${editedBy}</td>
                 <td>
                     <button class="btn-primary btn-sm" onclick="openAdminMarking('${s.id}')" title="Raw Edit Score"><i class="fas fa-pen"></i> Edit</button>

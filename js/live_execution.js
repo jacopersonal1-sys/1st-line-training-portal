@@ -2054,7 +2054,13 @@ async function confirmAndSaveLiveSession() {
         marker: session.trainer,
         comments: session.comments, // Save comments
         scores: session.scores,     // Save individual scores
-        assessmentId: test.id
+        assessmentId: test.id,
+        feedbackStatus: (existingSubIdx > -1 && submissions[existingSubIdx].feedbackStatus) ? submissions[existingSubIdx].feedbackStatus : 'given',
+        feedbackRequestLocked: existingSubIdx > -1 ? !!submissions[existingSubIdx].feedbackRequestLocked : false,
+        feedbackRequestedAt: existingSubIdx > -1 ? (submissions[existingSubIdx].feedbackRequestedAt || null) : null,
+        feedbackRequestedBy: existingSubIdx > -1 ? (submissions[existingSubIdx].feedbackRequestedBy || null) : null,
+        feedbackGivenAt: existingSubIdx > -1 ? (submissions[existingSubIdx].feedbackGivenAt || null) : null,
+        feedbackGivenBy: existingSubIdx > -1 ? (submissions[existingSubIdx].feedbackGivenBy || null) : null
     };
 
     if (existingSubIdx > -1) {
@@ -2116,6 +2122,12 @@ async function confirmAndSaveLiveSession() {
         assessmentId: test.id,
         bookingId: session.bookingId || null,
         liveSessionId: session.sessionId || null,
+        feedbackStatus: newSub.feedbackStatus,
+        feedbackRequestLocked: newSub.feedbackRequestLocked,
+        feedbackRequestedAt: newSub.feedbackRequestedAt || null,
+        feedbackRequestedBy: newSub.feedbackRequestedBy || null,
+        feedbackGivenAt: newSub.feedbackGivenAt || null,
+        feedbackGivenBy: newSub.feedbackGivenBy || null,
         createdAt: existingRecIdx > -1 ? (records[existingRecIdx].createdAt || new Date().toISOString()) : new Date().toISOString(),
         lastModified: new Date().toISOString(),
         modifiedBy: CURRENT_USER?.user || 'system'

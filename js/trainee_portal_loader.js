@@ -32,6 +32,7 @@ const TraineePortalLoader = {
         frame.dataset.ready = '1';
         if (typeof applyThemeToEmbeddedFrame === 'function') applyThemeToEmbeddedFrame(frame);
         this.startAutoRefresh();
+        this.refresh(false);
     },
 
     renderUI() {
@@ -59,7 +60,10 @@ const TraineePortalLoader = {
 
     async refresh(forcePull = false) {
         const frame = document.getElementById('trainee-portal-frame');
-        if (!frame) return;
+        if (!frame) {
+            this.renderUI();
+            return;
+        }
         if (frame.dataset.ready !== '1') return;
 
         if (forcePull && typeof loadFromServer === 'function') {

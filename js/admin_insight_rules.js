@@ -7,6 +7,7 @@
     const LIVE_BOOKING_RULES_KEY = 'live_booking_rules_config';
     const TRAINING_RULES_KEY = 'training_rules_config';
     const COURSE_PROGRESS_REQUEST_KEY = 'course_progress_request_config';
+    const ASSESSMENT_FEEDBACK_CONFIG_KEY = 'assessment_feedback_config';
     const DEFAULT_LIVE_ASSESSMENT_RULES = [
         'This assessment takes approximately 1 hour to complete.',
         'You are allowed to reference the training material. However, if the material is referenced constantly and it is clear the material was not studied, the live session will be ended.',
@@ -29,6 +30,7 @@
     const DEFAULT_COURSE_REQUEST_MESSAGE = 'I fully understand this material and would like to move on to the next Course';
     const DEFAULT_COURSE_REQUEST_EMAIL_BODY = DEFAULT_COURSE_REQUEST_MESSAGE;
     const DEFAULT_COURSE_REQUEST_ACK = 'Noted\n\nyour request has been sent to darren expect a call from Darren Tupper for a personal assesment review of the studied course only then will you be allowed to move on to the next Course Material';
+    const DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP = 'This button is not to request feedback at will. If you have already received feedback during your session, do not use it. If you have not received feedback yet, you can use this button and a trainer will set a time with you for this feedback session.';
 
     const AUTO_PROGRESS_ITEMS = [
         { name: 'Onboard Report', type: 'report', source: 'auto' },
@@ -47,7 +49,9 @@
         trainingRulesLoaded: false,
         trainingRulesConfig: null,
         courseRequestLoaded: false,
-        courseRequestConfig: null
+        courseRequestConfig: null,
+        assessmentFeedbackLoaded: false,
+        assessmentFeedbackConfig: null
     };
 
     function normalizeText(value) {
@@ -268,6 +272,14 @@
         };
     }
 
+    function getDefaultAssessmentFeedbackConfig() {
+        return {
+            tooltipText: DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP,
+            updatedAt: null,
+            updatedBy: null
+        };
+    }
+
     function pushPreset(map, name, severity, scoreThreshold, defaultThreshold) {
         const cleanName = String(name || '').trim();
         if (!cleanName) return;
@@ -463,6 +475,17 @@
         };
     }
 
+    function sanitizeAssessmentFeedbackConfig(rawConfig) {
+        const defaults = getDefaultAssessmentFeedbackConfig();
+        const raw = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+        const tooltipText = String(raw.tooltipText || raw.message || '').trim() || defaults.tooltipText;
+        return {
+            tooltipText: tooltipText.slice(0, 800),
+            updatedAt: raw.updatedAt || defaults.updatedAt,
+            updatedBy: raw.updatedBy || defaults.updatedBy
+        };
+    }
+
     function sanitizeLiveRulesHtml(html) {
         const raw = String(html || '').trim();
         if (!raw) return '';
@@ -591,6 +614,14 @@
         }
     }
 
+    function getAssessmentFeedbackConfig() {
+        try {
+            return sanitizeAssessmentFeedbackConfig(JSON.parse(localStorage.getItem(ASSESSMENT_FEEDBACK_CONFIG_KEY) || 'null'));
+        } catch (error) {
+            return getDefaultAssessmentFeedbackConfig();
+        }
+    }
+
     function getLiveAssessmentRules() {
         return getLiveAssessmentRulesConfig().rules;
     }
@@ -613,6 +644,10 @@
 
     function getCourseProgressRequestAcknowledgement() {
         return getCourseProgressRequestConfig().acknowledgementMessage;
+    }
+
+    function getAssessmentFeedbackTooltipText() {
+        return getAssessmentFeedbackConfig().tooltipText;
     }
 
     function getInsightProgressRequiredItems() {
@@ -727,6 +762,19 @@
     function setDraftCourseRequestConfig(config) {
         draftState.courseRequestConfig = sanitizeCourseRequestConfig(config);
         draftState.courseRequestLoaded = true;
+    }
+
+    function getDraftAssessmentFeedbackConfig() {
+        if (!draftState.assessmentFeedbackLoaded || !draftState.assessmentFeedbackConfig) {
+            draftState.assessmentFeedbackConfig = sanitizeAssessmentFeedbackConfig(getAssessmentFeedbackConfig());
+            draftState.assessmentFeedbackLoaded = true;
+        }
+        return draftState.assessmentFeedbackConfig;
+    }
+
+    function setDraftAssessmentFeedbackConfig(config) {
+        draftState.assessmentFeedbackConfig = sanitizeAssessmentFeedbackConfig(config);
+        draftState.assessmentFeedbackLoaded = true;
     }
 
     function escapeHtml(value) {
@@ -912,6 +960,13 @@
         if (smtpUser && document.activeElement !== smtpUser && !smtpUser.dataset.dirty) smtpUser.value = smtp.user || '';
         if (smtpPass && document.activeElement !== smtpPass && !smtpPass.dataset.dirty) smtpPass.value = smtp.pass || '';
         if (smtpFrom && document.activeElement !== smtpFrom && !smtpFrom.dataset.dirty) smtpFrom.value = smtp.from || '';
+    }
+
+    function renderAssessmentFeedbackControls(config) {
+        const tooltipInput = document.getElementById('assessmentFeedbackTooltip');
+        if (tooltipInput && document.activeElement !== tooltipInput && !tooltipInput.dataset.dirty) {
+            tooltipInput.value = config.tooltipText || DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP;
+        }
     }
 
     function upsertPreset(name, severity, scoreThreshold) {
@@ -1144,6 +1199,7 @@
         const liveBookingRulesConfig = getDraftLiveBookingRulesConfig();
         const trainingRulesConfig = getDraftTrainingRulesConfig();
         const courseRequestConfig = getDraftCourseRequestConfig();
+        const assessmentFeedbackConfig = getDraftAssessmentFeedbackConfig();
         renderAssessmentSelector();
 
         const severitySelect = document.getElementById('insightPresetSeveritySelect');
@@ -1173,6 +1229,7 @@
             trainingInput.innerHTML = trainingRulesConfig.rulesHtml || rulesToLiveRulesHtml(trainingRulesConfig.rules);
         }
         renderCourseRequestControls(courseRequestConfig);
+        renderAssessmentFeedbackControls(assessmentFeedbackConfig);
     }
 
     function addInsightTriggerPreset() {
@@ -1468,6 +1525,35 @@
         if (typeof showToast === 'function') showToast('Course request email settings saved.', 'success');
     }
 
+    async function saveAssessmentFeedbackConfig() {
+        const tooltipInput = document.getElementById('assessmentFeedbackTooltip');
+        const stamp = new Date().toISOString();
+        const actor = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system';
+        const clean = sanitizeAssessmentFeedbackConfig({
+            tooltipText: tooltipInput ? tooltipInput.value : DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP,
+            updatedAt: stamp,
+            updatedBy: actor
+        });
+
+        localStorage.setItem(ASSESSMENT_FEEDBACK_CONFIG_KEY, JSON.stringify(clean));
+        setDraftAssessmentFeedbackConfig(clean);
+        if (tooltipInput) {
+            tooltipInput.value = clean.tooltipText;
+            delete tooltipInput.dataset.dirty;
+        }
+
+        try {
+            if (typeof saveToServer === 'function') {
+                await saveToServer([ASSESSMENT_FEEDBACK_CONFIG_KEY], true);
+            }
+        } catch (error) {
+            console.warn('[Assessment Feedback] Cloud sync failed:', error);
+        }
+
+        refreshInsightRulesView();
+        if (typeof showToast === 'function') showToast('Assessment feedback tooltip saved.', 'success');
+    }
+
     function resetLiveAssessmentRulesDraft() {
         setDraftLiveRulesConfig(getDefaultLiveRulesConfig());
         const input = document.getElementById('liveAssessmentRulesInput');
@@ -1521,6 +1607,11 @@
     }
 
     function markCourseRequestConfigDirty(fieldId) {
+        const input = document.getElementById(fieldId);
+        if (input) input.dataset.dirty = '1';
+    }
+
+    function markAssessmentFeedbackConfigDirty(fieldId) {
         const input = document.getElementById(fieldId);
         if (input) input.dataset.dirty = '1';
     }
@@ -1592,6 +1683,8 @@
     window.getTrainingOfficeOptions = getTrainingOfficeOptions;
     window.getCourseProgressRequestConfig = getCourseProgressRequestConfig;
     window.getCourseProgressRequestAcknowledgement = getCourseProgressRequestAcknowledgement;
+    window.getAssessmentFeedbackConfig = getAssessmentFeedbackConfig;
+    window.getAssessmentFeedbackTooltipText = getAssessmentFeedbackTooltipText;
     window.openTrainingRulesModal = openTrainingRulesModal;
     window.maybeShowTrainingRulesOnLogin = maybeShowTrainingRulesOnLogin;
     window.shouldShowTrainingRulesOnLogin = shouldShowTrainingRulesOnLogin;
@@ -1603,6 +1696,7 @@
         setDraftLiveBookingRulesConfig(getLiveBookingRulesConfig());
         setDraftTrainingRulesConfig(getTrainingRulesConfig());
         setDraftCourseRequestConfig(getCourseProgressRequestConfig());
+        setDraftAssessmentFeedbackConfig(getAssessmentFeedbackConfig());
         refreshInsightRulesView();
     };
     window.saveInsightRuleConfig = saveInsightRuleConfig;
@@ -1611,6 +1705,7 @@
     window.saveLiveBookingRulesConfig = saveLiveBookingRulesConfig;
     window.saveTrainingRulesConfig = saveTrainingRulesConfig;
     window.saveCourseProgressRequestConfig = saveCourseProgressRequestConfig;
+    window.saveAssessmentFeedbackConfig = saveAssessmentFeedbackConfig;
     window.resetLiveAssessmentRulesDraft = resetLiveAssessmentRulesDraft;
     window.resetLiveBookingRulesDraft = resetLiveBookingRulesDraft;
     window.resetTrainingRulesDraft = resetTrainingRulesDraft;
@@ -1618,6 +1713,7 @@
     window.markLiveBookingRulesDirty = markLiveBookingRulesDirty;
     window.markTrainingRulesDirty = markTrainingRulesDirty;
     window.markCourseRequestConfigDirty = markCourseRequestConfigDirty;
+    window.markAssessmentFeedbackConfigDirty = markAssessmentFeedbackConfigDirty;
     window.formatLiveRulesDoc = formatLiveRulesDoc;
     window.formatLiveBookingRulesDoc = formatLiveBookingRulesDoc;
     window.formatTrainingRulesDoc = formatTrainingRulesDoc;

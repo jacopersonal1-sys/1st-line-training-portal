@@ -38,6 +38,57 @@ body::before {
     background-size: 28px 28px;
 }
 
+body.theme-one-ui {
+    background: var(--bg-app);
+}
+
+body.theme-one-ui::before {
+    display: none;
+}
+
+body.theme-one-ui #app-container {
+    padding: 12px;
+}
+
+body.theme-one-ui .portal-card,
+body.theme-one-ui .portal-widget {
+    background: var(--oneui-layer-2, var(--bg-card));
+    border-color: var(--border-color);
+    border-radius: var(--oneui-radius-sm, 12px);
+    box-shadow: var(--oneui-shadow-soft, var(--shadow-card));
+}
+
+body.theme-one-ui .portal-actions {
+    background: var(--oneui-layer-1, var(--bg-card));
+    border-color: var(--border-color);
+    border-radius: 999px;
+}
+
+body.theme-one-ui .portal-btn,
+body.theme-one-ui .portal-action-btn,
+body.theme-one-ui .portal-link-btn,
+body.theme-one-ui .portal-control-btn {
+    background: var(--bg-input);
+    border-color: var(--border-color);
+    border-radius: 999px;
+    letter-spacing: 0;
+    box-shadow: none;
+}
+
+body.theme-one-ui .portal-btn:hover,
+body.theme-one-ui .portal-action-btn:hover,
+body.theme-one-ui .portal-link-btn:hover {
+    background: var(--primary-soft);
+    color: var(--primary);
+    transform: translateY(-1px);
+}
+
+body.theme-one-ui .portal-icon-badge {
+    background: var(--primary-soft);
+    color: var(--primary);
+    border-radius: 12px;
+}
+
 #app-container {
     min-height: 100vh;
     padding: 18px;

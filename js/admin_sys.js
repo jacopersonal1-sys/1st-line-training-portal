@@ -780,12 +780,66 @@ function loadAdminTheme() {
         }
     }
 
+    if (colorInput && !document.getElementById('themeOneUiContainer')) {
+        const container = document.createElement('div');
+        container.id = 'themeOneUiContainer';
+        container.style.marginTop = '20px';
+        container.style.paddingTop = '15px';
+        container.style.borderTop = '1px dashed var(--border-color)';
+        container.innerHTML = `
+            <label style="display:block; margin-bottom:10px; font-weight:bold;">One UI Official Theme</label>
+            <div class="grid-2" style="gap:10px; margin-bottom:8px;">
+                <div>
+                    <label for="themeOneUiAccent" style="font-size:0.78rem;">Light Accent</label>
+                    <input type="color" id="themeOneUiAccent" value="#4A4F57" style="width:100%; height:38px; cursor:pointer; border:1px solid var(--border-color); border-radius:8px;">
+                </div>
+                <div>
+                    <label for="themeOneUiDarkAccent" style="font-size:0.78rem;">Dark Accent</label>
+                    <input type="color" id="themeOneUiDarkAccent" value="#C9CDD3" style="width:100%; height:38px; cursor:pointer; border:1px solid var(--border-color); border-radius:8px;">
+                </div>
+                <div>
+                    <label for="themeOneUiSurface" style="font-size:0.78rem;">Light Surface</label>
+                    <input type="color" id="themeOneUiSurface" value="#F4F5F7" style="width:100%; height:38px; cursor:pointer; border:1px solid var(--border-color); border-radius:8px;">
+                </div>
+                <div>
+                    <label for="themeOneUiDarkSurface" style="font-size:0.78rem;">Dark Surface</label>
+                    <input type="color" id="themeOneUiDarkSurface" value="#171A1F" style="width:100%; height:38px; cursor:pointer; border:1px solid var(--border-color); border-radius:8px;">
+                </div>
+            </div>
+            <label for="themeOneUiRadius" style="font-size:0.78rem;">One UI Corner Shape: <span id="themeOneUiRadiusDisplay">18px</span></label>
+            <input type="range" id="themeOneUiRadius" min="12" max="26" step="1" value="18" style="width:100%; margin-bottom:6px;" oninput="document.getElementById('themeOneUiRadiusDisplay').innerText = this.value + 'px'">
+            <div style="font-size:0.7rem; color:var(--text-muted);">One UI is now an official workspace theme. These values apply when One UI is selected or used as the default theme.</div>
+        `;
+        const navigationContainer = document.getElementById('themeNavigationContainer');
+        const densityContainer = document.getElementById('themeDensityContainer');
+        if (navigationContainer && navigationContainer.parentNode) {
+            navigationContainer.parentNode.insertBefore(container, navigationContainer.nextSibling);
+        } else if (densityContainer && densityContainer.parentNode) {
+            densityContainer.parentNode.insertBefore(container, densityContainer.nextSibling);
+        } else if (colorInput.parentNode) {
+            colorInput.parentNode.insertBefore(container, colorInput.nextSibling);
+        }
+    }
+
     if (colorInput) colorInput.value = localTheme.primaryColor || '#F37021';
     if (wallInput) wallInput.value = localTheme.wallpaper || '';
     
     if (document.getElementById('themeBgColor')) {
         document.getElementById('themeBgColor').value = localTheme.backgroundColor || '#1A1410';
     }
+
+    const oneUi = (localTheme.oneUi && typeof localTheme.oneUi === 'object') ? localTheme.oneUi : {};
+    const setOneUiValue = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+    setOneUiValue('themeOneUiAccent', oneUi.accent || '#4A4F57');
+    setOneUiValue('themeOneUiDarkAccent', oneUi.darkAccent || '#C9CDD3');
+    setOneUiValue('themeOneUiSurface', oneUi.surfaceTint || '#F4F5F7');
+    setOneUiValue('themeOneUiDarkSurface', oneUi.darkSurfaceTint || '#171A1F');
+    setOneUiValue('themeOneUiRadius', Math.round(Number(oneUi.cornerRadius || 18)));
+    const oneUiRadiusDisplay = document.getElementById('themeOneUiRadiusDisplay');
+    if (oneUiRadiusDisplay) oneUiRadiusDisplay.innerText = `${Math.round(Number(oneUi.cornerRadius || 18))}px`;
 
     const densityInput = document.getElementById('themeDensity');
     if (densityInput) {
@@ -859,6 +913,11 @@ async function saveThemeSettings() {
     const zoom = document.getElementById('themeZoom') ? parseFloat(document.getElementById('themeZoom').value) : 1.0;
     const density = document.getElementById('themeDensity') ? document.getElementById('themeDensity').value : (localStorage.getItem('ui_density') || 'comfortable');
     const navigationView = document.getElementById('themeNavigationView') ? document.getElementById('themeNavigationView').value : (localStorage.getItem('admin_nav_view') || 'classic');
+    const oneUiAccent = document.getElementById('themeOneUiAccent') ? document.getElementById('themeOneUiAccent').value : color;
+    const oneUiDarkAccent = document.getElementById('themeOneUiDarkAccent') ? document.getElementById('themeOneUiDarkAccent').value : '#C9CDD3';
+    const oneUiSurface = document.getElementById('themeOneUiSurface') ? document.getElementById('themeOneUiSurface').value : '#F4F5F7';
+    const oneUiDarkSurface = document.getElementById('themeOneUiDarkSurface') ? document.getElementById('themeOneUiDarkSurface').value : '#171A1F';
+    const oneUiRadius = document.getElementById('themeOneUiRadius') ? parseFloat(document.getElementById('themeOneUiRadius').value) : 18;
     
     const themeConfig = {
         primaryColor: color,
@@ -866,7 +925,14 @@ async function saveThemeSettings() {
         wallpaper: wallpaper,
         zoomLevel: zoom,
         density: density,
-        navigationView: navigationView
+        navigationView: navigationView,
+        oneUi: {
+            accent: oneUiAccent,
+            darkAccent: oneUiDarkAccent,
+            surfaceTint: oneUiSurface,
+            darkSurfaceTint: oneUiDarkSurface,
+            cornerRadius: oneUiRadius
+        }
     };
     
     // Save locally only

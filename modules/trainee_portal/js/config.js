@@ -13,6 +13,8 @@ function syncThemeFromHost() {
         const hostStyle = AppContext.host.getComputedStyle(hostRoot);
         const varsToMirror = [
             '--primary',
+            '--primary-hover',
+            '--primary-soft',
             '--bg-app',
             '--bg-card',
             '--bg-input',
@@ -24,7 +26,16 @@ function syncThemeFromHost() {
             '--border-radius',
             '--shadow-card',
             '--shadow-hover',
-            '--transition'
+            '--transition',
+            '--oneui-layer-0',
+            '--oneui-layer-1',
+            '--oneui-layer-2',
+            '--oneui-layer-3',
+            '--oneui-green',
+            '--oneui-red',
+            '--oneui-amber',
+            '--oneui-shadow-soft',
+            '--oneui-shadow-float'
         ];
 
         varsToMirror.forEach((name) => {
@@ -33,6 +44,11 @@ function syncThemeFromHost() {
                 localRoot.style.setProperty(name, value.trim());
             }
         });
+
+        const hostBody = AppContext.host.document.body;
+        document.body.classList.toggle('theme-one-ui', hostBody && hostBody.classList.contains('theme-one-ui'));
+        document.body.classList.toggle('light-mode', hostBody && hostBody.classList.contains('light-mode'));
+        document.body.classList.toggle('exp-theme-active', hostBody && hostBody.classList.contains('exp-theme-active'));
     } catch (error) {
         console.warn('[Trainee Portal] Theme sync failed:', error);
     }

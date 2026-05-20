@@ -141,11 +141,33 @@ const InsightStudioLoader = {
         }
     },
 
-    launchMigrate: function(payload) {
+    launchMigrate: async function(payload) {
         const username = payload && payload.username ? String(payload.username).trim() : '';
         if (!username) return;
         if (typeof openMoveUserModal === 'function') {
+            if (typeof loadFromServer === 'function') {
+                try {
+                    await loadFromServer(true);
+                } catch (error) {
+                    console.warn('[Insight Loader] Pre-migration host refresh failed.', error);
+                }
+            }
             openMoveUserModal(username);
+            const modal = document.getElementById('moveUserModal');
+            const webview = document.getElementById('insight-studio-webview');
+            if (modal) modal.style.zIndex = '12000';
+            if (webview && webview.isConnected) {
+                webview.style.visibility = 'hidden';
+                const restoreWhenClosed = () => {
+                    if (!webview.isConnected) return;
+                    if (!modal || modal.classList.contains('hidden')) {
+                        webview.style.visibility = '';
+                        return;
+                    }
+                    setTimeout(restoreWhenClosed, 250);
+                };
+                restoreWhenClosed();
+            }
             return;
         }
         if (typeof showToast === 'function') {

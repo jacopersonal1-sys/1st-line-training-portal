@@ -65,6 +65,174 @@ function buildAssessmentSubmissionId(testId, trainee) {
     return `sub_${Date.now()}_${cleanUser}_${cleanTest}_${rand}`;
 }
 
+function getAssessmentFeedbackStatus(row) {
+    const status = String(row && row.feedbackStatus || '').trim().toLowerCase();
+    return status === 'requested' ? 'requested' : 'given';
+}
+
+function getAssessmentFeedbackLabel(row) {
+    return getAssessmentFeedbackStatus(row) === 'requested' ? 'Feedback Requested' : 'Feedback Provided';
+}
+
+const DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP = 'This button is not to request feedback at will. If you have already received feedback during your session, do not use it. If you have not received feedback yet, you can use this button and a trainer will set a time with you for this feedback session.';
+
+function getAssessmentFeedbackRequestTooltip() {
+    if (typeof window.getAssessmentFeedbackTooltipText === 'function') {
+        return window.getAssessmentFeedbackTooltipText();
+    }
+    try {
+        const config = JSON.parse(localStorage.getItem('assessment_feedback_config') || 'null');
+        const text = String((config && (config.tooltipText || config.message)) || '').trim();
+        return text || DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP;
+    } catch (error) {
+        return DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP;
+    }
+}
+
+function getAssessmentFeedbackTooltipAttributes() {
+    const text = getAssessmentFeedbackRequestTooltip();
+    const safeText = (typeof escapeHTML === 'function')
+        ? escapeHTML(text)
+        : String(text || '').replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag]));
+    return `title="${safeText}" data-tooltip="${safeText}" aria-label="${safeText}"`;
+}
+
+function findAssessmentFeedbackRecord(submission, records = null) {
+    if (!submission) return null;
+    const rows = Array.isArray(records) ? records : JSON.parse(localStorage.getItem('records') || '[]');
+    return rows.find(r => r && String(r.submissionId || '') === String(submission.id))
+        || rows.find(r => r && String(r.id || '') === `record_${submission.id}`)
+        || rows.find(r => r && submission.bookingId && String(r.bookingId || '') === String(submission.bookingId))
+        || rows.find(r => r && submission.liveSessionId && String(r.liveSessionId || '') === String(submission.liveSessionId))
+        || null;
+}
+
+function applyAssessmentFeedbackPatchToRows(submissionId, patch) {
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const sub = subs.find(s => s && String(s.id || '') === String(submissionId));
+    if (!sub) return { changed: false, submission: null, record: null };
+
+    const now = new Date().toISOString();
+    Object.assign(sub, patch, {
+        lastModified: now,
+        modifiedBy: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'system'
+    });
+
+    const record = findAssessmentFeedbackRecord(sub, records);
+    if (record) {
+        Object.assign(record, patch, {
+            lastModified: now,
+            modifiedBy: sub.modifiedBy
+        });
+    }
+
+    localStorage.setItem('submissions', JSON.stringify(subs));
+    if (record) localStorage.setItem('records', JSON.stringify(records));
+    return { changed: true, submission: sub, record };
+}
+
+function createAssessmentFeedbackAdminNotification(submission) {
+    if (!submission || !submission.id) return;
+    const notifications = JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+    const now = new Date().toISOString();
+    const id = `assessment_feedback_${submission.id}`;
+    const message = `${submission.trainee || 'A trainee'} requested feedback for ${submission.testTitle || 'an assessment'}.`;
+    const payload = {
+        id,
+        type: 'assessment_feedback_request',
+        source: 'assessment_feedback',
+        title: 'Assessment Feedback Requested',
+        message,
+        trainee: submission.trainee || '',
+        testTitle: submission.testTitle || '',
+        submissionId: submission.id,
+        targetRoles: ['admin', 'super_admin'],
+        createdAt: submission.feedbackRequestedAt || now,
+        updatedAt: now,
+        status: 'open'
+    };
+    const existingIdx = notifications.findIndex(n => n && String(n.id || '') === id);
+    if (existingIdx > -1) notifications[existingIdx] = { ...notifications[existingIdx], ...payload };
+    else notifications.push(payload);
+    localStorage.setItem('admin_notifications', JSON.stringify(notifications));
+}
+
+function renderAssessmentFeedbackBadge(row) {
+    const requested = getAssessmentFeedbackStatus(row) === 'requested';
+    return `<span class="assessment-feedback-pill ${requested ? 'requested' : 'provided'}"><i class="fas ${requested ? 'fa-comment-dots' : 'fa-check-circle'}"></i> ${getAssessmentFeedbackLabel(row)}</span>`;
+}
+
+async function syncAssessmentFeedbackDelta() {
+    if (typeof saveToServer !== 'function') return true;
+    await saveToServer(['submissions', 'records', 'admin_notifications'], false);
+    return await saveToServer('FLUSH');
+}
+
+window.requestAssessmentFeedback = async function(submissionId) {
+    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const sub = subs.find(s => s && String(s.id || '') === String(submissionId));
+    if (!sub) {
+        if (typeof showToast === 'function') showToast('Assessment feedback row not found.', 'error');
+        return;
+    }
+    if (sub.feedbackRequestLocked) {
+        if (typeof showToast === 'function') showToast('Feedback can only be requested once for this assessment.', 'warning');
+        return;
+    }
+
+    const now = new Date().toISOString();
+    const result = applyAssessmentFeedbackPatchToRows(submissionId, {
+        feedbackStatus: 'requested',
+        feedbackRequestLocked: true,
+        feedbackRequestedAt: now,
+        feedbackRequestedBy: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : sub.trainee,
+        feedbackGivenAt: null,
+        feedbackGivenBy: null
+    });
+
+    if (!result.changed) return;
+    createAssessmentFeedbackAdminNotification(result.submission);
+    await syncAssessmentFeedbackDelta();
+    if (typeof loadTraineeTests === 'function') loadTraineeTests();
+    if (typeof updateNotifications === 'function') updateNotifications();
+    if (typeof showToast === 'function') showToast('Feedback request sent to Admin.', 'success');
+};
+
+window.markAssessmentFeedbackGiven = async function(submissionId) {
+    if (!CURRENT_USER || !['admin', 'super_admin'].includes(String(CURRENT_USER.role || '').toLowerCase())) {
+        if (typeof showToast === 'function') showToast('Only Admins can update feedback sessions.', 'error');
+        return;
+    }
+
+    const now = new Date().toISOString();
+    const result = applyAssessmentFeedbackPatchToRows(submissionId, {
+        feedbackStatus: 'given',
+        feedbackRequestLocked: true,
+        feedbackGivenAt: now,
+        feedbackGivenBy: CURRENT_USER.user || 'Admin'
+    });
+    if (!result.changed) {
+        if (typeof showToast === 'function') showToast('Feedback session not found.', 'error');
+        return;
+    }
+
+    const notifications = JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+    notifications.forEach(n => {
+        if (n && String(n.type || '') === 'assessment_feedback_request' && String(n.submissionId || '') === String(submissionId)) {
+            n.status = 'closed';
+            n.updatedAt = now;
+        }
+    });
+    localStorage.setItem('admin_notifications', JSON.stringify(notifications));
+
+    await syncAssessmentFeedbackDelta();
+    if (typeof loadFeedbackSessions === 'function') loadFeedbackSessions();
+    if (typeof loadCompletedHistory === 'function') loadCompletedHistory();
+    if (typeof updateNotifications === 'function') updateNotifications();
+    if (typeof showToast === 'function') showToast('Feedback marked as given.', 'success');
+};
+
 async function ensureSubmissionRowsOnServer(submission, record = null) {
     if (!window.supabaseClient || !submission || !submission.id) return false;
 
@@ -311,7 +479,17 @@ function loadTraineeTests() {
             const bookedTest = booking.assessmentId
                 ? tests.find(t => String(t.id) === String(booking.assessmentId))
                 : tests.find(t => String(t.title || t.name || '').trim().toLowerCase() === String(booking.assessment || '').trim().toLowerCase());
-            if (bookedTest && existingVisible.has(String(bookedTest.id))) return;
+            if (bookedTest && existingVisible.has(String(bookedTest.id))) {
+                const existingIdx = visibleTests.findIndex(t => String(t.id) === String(bookedTest.id));
+                if (existingIdx > -1) {
+                    visibleTests[existingIdx] = {
+                        ...visibleTests[existingIdx],
+                        type: visibleTests[existingIdx].type || 'live',
+                        _liveBooking: booking
+                    };
+                }
+                return;
+            }
             const liveCard = bookedTest
                 ? { ...bookedTest }
                 : {
@@ -325,6 +503,37 @@ function loadTraineeTests() {
             visibleTests.push(liveCard);
             existingVisible.add(String(liveCard.id));
         });
+
+        const myLiveSubs = submissions
+            .filter(s =>
+                s &&
+                String(s.status || '').toLowerCase() === 'completed' &&
+                !isLegacySubmissionForCurrentAttempt(s, myGroupId, latestMoveTs, records) &&
+                String(s.trainee || '').trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
+                (
+                    String(s.type || s.testSnapshot?.type || '').toLowerCase() === 'live' ||
+                    !!s.bookingId ||
+                    !!s.liveSessionId
+                )
+            )
+            .sort((a, b) => new Date(b.lastEditedDate || b.lastModified || b.createdAt || b.date || 0) - new Date(a.lastEditedDate || a.lastModified || a.createdAt || a.date || 0));
+
+        myLiveSubs.forEach((submission) => {
+            const key = `completed_live_${submission.id}`;
+            if (existingVisible.has(key)) return;
+            const snapshot = submission.testSnapshot && typeof submission.testSnapshot === 'object'
+                ? { ...submission.testSnapshot }
+                : {};
+            const liveCard = {
+                id: key,
+                title: submission.testTitle || snapshot.title || 'Live Assessment',
+                type: 'live',
+                questions: Array.isArray(snapshot.questions) ? snapshot.questions : [],
+                _completedSubmission: submission
+            };
+            visibleTests.push(liveCard);
+            existingVisible.add(key);
+        });
     }
 
     if (visibleTests.length === 0) {
@@ -334,7 +543,8 @@ function loadTraineeTests() {
 
     container.innerHTML = visibleTests.map(t => {
         const liveBooking = t._liveBooking || null;
-        const sub = submissions.find(s =>
+        const completedLiveSub = t._completedSubmission || null;
+        const sub = completedLiveSub || submissions.find(s =>
             s.testId == t.id &&
             s.trainee &&
             s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
@@ -368,6 +578,8 @@ function loadTraineeTests() {
             actionBtn = `<button class="btn-primary btn-sm" onclick="showTab('live-assessment')">View Live Booking</button>`;
         }
 
+        let feedbackHtml = '';
+
         if (sub && !liveBooking) {
             if (sub.status === 'pending') {
                 statusHtml = '<span class="status-badge status-semi">Pending Review</span>';
@@ -384,6 +596,16 @@ function loadTraineeTests() {
                 actionBtn = (String(t.type || '').toLowerCase() === 'quiz' && !isLocked)
                     ? `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}', true, { popupMode: true, returnTab: 'my-tests' })">Retake Quiz</button>`
                     : `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">Completed</button>`;
+                const requestLocked = !!sub.feedbackRequestLocked;
+                const requested = getAssessmentFeedbackStatus(sub) === 'requested';
+                const feedbackButton = requestLocked
+                    ? `<button class="btn-secondary btn-sm assessment-feedback-action" disabled><i class="fas ${requested ? 'fa-hourglass-half' : 'fa-lock'}"></i> ${requested ? 'Request Sent' : 'Feedback Closed'}</button>`
+                    : `<button class="btn-warning btn-sm assessment-feedback-action" ${getAssessmentFeedbackTooltipAttributes()} onclick="requestAssessmentFeedback('${sub.id}')"><i class="fas fa-hand-paper"></i> Feedback Required</button>`;
+                feedbackHtml = `
+                    <div class="assessment-feedback-row">
+                        ${renderAssessmentFeedbackBadge(sub)}
+                        ${feedbackButton}
+                    </div>`;
             }
         }
 
@@ -408,6 +630,7 @@ function loadTraineeTests() {
                 ${statusHtml}
                 ${actionBtn}
             </div>
+            ${feedbackHtml}
         </div>`;
     }).join('');
 }
@@ -855,6 +1078,8 @@ async function submitTest(forceSubmit = false, options = {}) {
         testSnapshot: originalTestDef || window.CURRENT_TEST,
         quizMeta: quizMeta,
         contentStudioContext: window.CURRENT_TEST_CONTEXT || null,
+        feedbackStatus: 'given',
+        feedbackRequestLocked: false,
         createdAt: submissionTime,
         lastModified: submissionTime,
         modifiedBy: CURRENT_USER.user
@@ -899,6 +1124,8 @@ async function submitTest(forceSubmit = false, options = {}) {
             link: 'Digital-Assessment',
             docSaved: true,
             submissionId: submission.id, // Link to submission
+            feedbackStatus: submission.feedbackStatus,
+            feedbackRequestLocked: submission.feedbackRequestLocked,
             createdAt: submissionTime,
             lastModified: submissionTime,
             modifiedBy: CURRENT_USER.user

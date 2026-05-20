@@ -746,6 +746,7 @@
             <div class="admin-sub-nav">
                 <button class="sub-tab-btn active" onclick="showTestEngineSub('overview', this)">Overview & Manage</button>
                 <button class="sub-tab-btn" onclick="showTestEngineSub('history', this)">Completed Assessments (History)</button>
+                <button class="sub-tab-btn" onclick="showTestEngineSub('feedback', this)">Feedback Sessions</button>
                 <button class="sub-tab-btn" onclick="showTestEngineSub('integrity', this)">Integrity Review</button>
                 <button class="sub-tab-btn" onclick="showTestEngineSub('nps', this)">NPS Feedback Config</button>
             </div>
@@ -794,6 +795,23 @@
 
             <div id="engine-view-integrity" class="hidden">
                 <div id="testIntegrityReview"></div>
+            </div>
+
+            <div id="engine-view-feedback" class="hidden">
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:15px;">
+                        <div>
+                            <h3 style="margin:0;">Assessment Feedback Sessions</h3>
+                            <p class="test-engine-subtitle" style="margin:4px 0 0;">Track trainee feedback requests and close them once feedback has been given.</p>
+                        </div>
+                        <select id="feedbackSessionFilter" onchange="loadFeedbackSessions()" style="width:auto; min-width:180px; margin:0;">
+                            <option value="requested">Requested Feedback</option>
+                            <option value="given">Feedback Given</option>
+                            <option value="all">All Feedback Sessions</option>
+                        </select>
+                    </div>
+                    <div id="feedbackSessionsList"></div>
+                </div>
             </div>
 
             <div id="engine-view-nps" class="hidden">
@@ -1317,6 +1335,18 @@
                 </div>
 
                 <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
+                    <h4 style="margin:0 0 10px 0;">Assessment Feedback Request</h4>
+                    <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
+                        Configure the hover message shown on the trainee Feedback Required button.
+                    </p>
+                    <label for="assessmentFeedbackTooltip">Feedback Required Button Hover Message</label>
+                    <textarea id="assessmentFeedbackTooltip" oninput="markAssessmentFeedbackConfigDirty('assessmentFeedbackTooltip')" style="min-height:96px; margin-bottom:10px;"></textarea>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+                        <button class="btn-primary btn-sm" onclick="saveAssessmentFeedbackConfig()" style="width:auto;">Save Feedback Message</button>
+                    </div>
+                </div>
+
+                <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--border-color);">
                     <h4 style="margin:0 0 10px 0;">Live Booking Rules</h4>
                     <p style="margin:0 0 12px 0; color:var(--text-muted); font-size:0.82rem;">
                         These rules are shown in the Live Assessment Booking sidebar.
@@ -1611,10 +1641,10 @@
 
             <div class="card exp-theme-lab-card" style="margin-top:20px;">
                 <div class="exp-theme-headline">
-                    <h3 style="margin:0;"><i class="fas fa-flask" style="color:var(--primary);"></i> Experimental Themes</h3>
+                    <h3 style="margin:0;"><i class="fas fa-palette" style="color:var(--primary);"></i> Workspace Themes</h3>
                     <span id="expThemeCurrentBadge" class="exp-theme-current">Current: Original</span>
                 </div>
-                <p class="exp-theme-subtitle">Quick visual presets for this terminal. These are reversible and do not delete your saved profile theme.</p>
+                <p class="exp-theme-subtitle">Official and optional visual presets for this terminal. These are reversible and do not delete your saved profile theme.</p>
 
                 <div class="exp-theme-grid">
                     <button class="exp-theme-option" data-exp-theme="theme-custom-lab" onclick="applyExperimentalTheme('theme-custom-lab')">
@@ -1636,11 +1666,11 @@
                             <span class="exp-theme-active-tag">Active</span>
                         </div>
                         <div class="exp-theme-swatch-row">
-                            <span style="background:#2f6df6;"></span>
-                            <span style="background:#f6f8fc;"></span>
-                            <span style="background:#101720;"></span>
+                            <span style="background:#4a4f57;"></span>
+                            <span style="background:#f4f5f7;"></span>
+                            <span style="background:#171a1f;"></span>
                         </div>
-                        <p>Default adaptive workspace with layered cards, pill controls, and embedded app chrome.</p>
+                        <p>Official default workspace with grey accents, layered cards, pill controls, and embedded app chrome.</p>
                     </button>
 
                     <button class="exp-theme-option" data-exp-theme="theme-cyberpunk" onclick="applyExperimentalTheme('theme-cyberpunk')">

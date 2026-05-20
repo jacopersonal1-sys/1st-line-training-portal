@@ -720,9 +720,11 @@ const InsightDataService = {
     normalizeExemptions: function(rows) {
         return (rows || []).map((row) => {
             const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
+            const rowId = String(row.id || base.id || '').trim();
             return {
-                _rowId: String(row.id || base.id || ''),
-                trainee: String(base.trainee || base.user || row.user_id || '').trim(),
+                id: rowId,
+                _rowId: rowId,
+                trainee: String(base.trainee || base.user || row.trainee || row.user_id || '').trim(),
                 groupID: String(base.groupID || '').trim(),
                 item: String(base.item || '').trim()
             };
@@ -2305,7 +2307,9 @@ const InsightDataService = {
         const actor = AppContext && AppContext.user ? String(AppContext.user.user || '').trim() : 'system';
 
         if (shouldExempt && !existing) {
+            const exemptionId = `exemption_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
             const payload = {
+                id: exemptionId,
                 trainee,
                 groupID: group,
                 item,
@@ -2316,22 +2320,26 @@ const InsightDataService = {
             if (AppContext.supabase) {
                 const { data, error } = await AppContext.supabase
                     .from('exemptions')
-                    .insert({ user_id: trainee, data: payload, updated_at: nowIso })
+                    .upsert({ id: exemptionId, trainee, data: payload, updated_at: nowIso })
                     .select('id, data')
                     .maybeSingle();
                 if (error) {
                     console.warn('[Insight] Failed adding exemption:', error);
                     return { ok: false, message: 'Failed to save exemption on server.' };
                 }
+                const savedId = String(data && data.id || exemptionId);
                 this.state.exemptions.push({
-                    _rowId: String(data && data.id || ''),
+                    id: savedId,
+                    _rowId: savedId,
                     trainee,
                     groupID: group,
                     item
                 });
             } else {
+                const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 this.state.exemptions.push({
-                    _rowId: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    id: localId,
+                    _rowId: localId,
                     trainee,
                     groupID: group,
                     item

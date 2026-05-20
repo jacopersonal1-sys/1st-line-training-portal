@@ -73,21 +73,123 @@ const DEFAULT_TIPS = [
     "Check the schedule daily for updates."
 ];
 
+let DASHBOARD_RENDER_IN_PROGRESS = false;
+let DASHBOARD_LAST_RENDER_AT = 0;
+let DASHBOARD_PARSE_CACHE = null;
+let DASHBOARD_STORAGE_SIZE_CACHE = { value: 'Calculating...', at: 0, pending: false };
+let DASHBOARD_SCHEDULE_TIMER = null;
+let DASHBOARD_SCHEDULE_IDLE = null;
+
+function dashboardReadJson(key, fallback) {
+    const cache = DASHBOARD_PARSE_CACHE;
+    if (cache && Object.prototype.hasOwnProperty.call(cache, key)) return cache[key];
+
+    let value = fallback;
+    try {
+        if (typeof safeLocalParse === 'function') {
+            value = safeLocalParse(key, fallback);
+        } else {
+            const raw = localStorage.getItem(key);
+            value = raw ? JSON.parse(raw) : fallback;
+        }
+    } catch (error) {
+        value = fallback;
+    }
+
+    if (cache) cache[key] = value;
+    return value;
+}
+
+function scheduleDashboardStorageSizeUpdate(storageEl) {
+    if (!storageEl || DASHBOARD_STORAGE_SIZE_CACHE.pending) return;
+    const now = Date.now();
+    if (now - DASHBOARD_STORAGE_SIZE_CACHE.at < 15000 && DASHBOARD_STORAGE_SIZE_CACHE.value) {
+        storageEl.innerText = DASHBOARD_STORAGE_SIZE_CACHE.value;
+        return;
+    }
+
+    DASHBOARD_STORAGE_SIZE_CACHE.pending = true;
+    storageEl.innerText = DASHBOARD_STORAGE_SIZE_CACHE.value || 'Calculating...';
+
+    const run = () => {
+        try {
+            let total = 0;
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (!key) continue;
+                const value = localStorage.getItem(key) || '';
+                total += (key.length + value.length) * 2;
+            }
+            DASHBOARD_STORAGE_SIZE_CACHE.value = typeof formatBytes === 'function' ? formatBytes(total) : `${Math.round(total / 1024)} KB`;
+            DASHBOARD_STORAGE_SIZE_CACHE.at = Date.now();
+            if (storageEl.isConnected) storageEl.innerText = DASHBOARD_STORAGE_SIZE_CACHE.value;
+        } catch (error) {
+            if (storageEl.isConnected) storageEl.innerText = 'Unavailable';
+        } finally {
+            DASHBOARD_STORAGE_SIZE_CACHE.pending = false;
+        }
+    };
+
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 1200 });
+    else setTimeout(run, 120);
+}
+
 // --- DASHBOARD LAYOUT STATE ---
 let DASH_EDIT_MODE = false;
 const DEFAULT_LAYOUT_ADMIN = [
+    { id: 'command_center', col: 4, row: 1 },
     { id: 'stats', col: 1, row: 1 },
     { id: 'schedule', col: 1, row: 1 },
     { id: 'marking', col: 1, row: 1 },
     { id: 'insight', col: 1, row: 1 },
     { id: 'live', col: 1, row: 1 },
     { id: 'attendance', col: 1, row: 1 },
+    { id: 'ops_queue', col: 2, row: 2 },
     { id: 'monitor', col: 1, row: 1 },
     { id: 'leaderboard', col: 1, row: 1 },
     { id: 'active_users', col: 2, row: 1 },
     { id: 'tip_manager', col: 2, row: 1 },
     { id: 'calendar', col: 2, row: 2 }
 ];
+
+const DASH_WIDGET_META = {
+    admin: {
+        command_center: { label: 'Admin Command Center', icon: 'fa-gauge-high' },
+        stats: { label: 'Trainee Stats', icon: 'fa-users' },
+        schedule: { label: 'Schedule Load', icon: 'fa-clipboard-list' },
+        marking: { label: 'Pending Marking', icon: 'fa-highlighter' },
+        insight: { label: 'Insight Actions', icon: 'fa-search' },
+        live: { label: 'Live Assessments', icon: 'fa-calendar-check' },
+        attendance: { label: 'Attendance Review', icon: 'fa-clock' },
+        ops_queue: { label: 'Operations Queue', icon: 'fa-list-check' },
+        monitor: { label: 'Activity Monitor', icon: 'fa-binoculars' },
+        leaderboard: { label: 'Leaderboard', icon: 'fa-ranking-star' },
+        active_users: { label: 'Active Users', icon: 'fa-user-clock' },
+        tip_manager: { label: 'Daily Tips', icon: 'fa-lightbulb' },
+        calendar: { label: "Today's Tasks", icon: 'fa-calendar-day' }
+    },
+    teamleader: {
+        tl_overview: { label: 'Team Overview', icon: 'fa-chart-simple' },
+        schedule: { label: 'Schedule Load', icon: 'fa-clipboard-list' },
+        active_users: { label: 'Active Users', icon: 'fa-user-clock' },
+        my_team: { label: 'My Team', icon: 'fa-users' },
+        leaderboard: { label: 'Leaderboard', icon: 'fa-ranking-star' },
+        quick_links: { label: 'Quick Links', icon: 'fa-bolt' }
+    },
+    trainee: {
+        up_next: { label: 'Up Next', icon: 'fa-tasks' },
+        training_rules: { label: 'Training Rules', icon: 'fa-scale-balanced' },
+        official_progress: { label: 'Training Progress', icon: 'fa-list-check' },
+        live_upcoming: { label: 'Live Bookings', icon: 'fa-calendar-check' },
+        recent_results: { label: 'Recent Results', icon: 'fa-trophy' },
+        available_tests: { label: 'Available Now', icon: 'fa-unlock' },
+        notepad: { label: 'Notes & Clarity', icon: 'fa-sticky-note' },
+        daily_tip: { label: 'Daily Tip', icon: 'fa-lightbulb' },
+        help: { label: 'Need Help', icon: 'fa-hand-paper' },
+        badges: { label: 'Badges', icon: 'fa-award' },
+        calendar: { label: "Today's Tasks", icon: 'fa-calendar-day' }
+    }
+};
 
 const DEFAULT_LAYOUT_TRAINEE = [
     { id: 'up_next', col: 2, row: 1 },
@@ -112,110 +214,247 @@ const DEFAULT_LAYOUT_TL = [
     { id: 'quick_links', col: 2, row: 1 }
 ];
 
+function getDashboardRoleKey() {
+    if (CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer')) return 'admin';
+    if (CURRENT_USER && CURRENT_USER.role === 'teamleader') return 'teamleader';
+    return 'trainee';
+}
+
+function getDashboardLayoutStorageKey() {
+    const roleKey = getDashboardRoleKey();
+    if (roleKey === 'admin') return 'dashLayout_admin';
+    if (roleKey === 'teamleader') return 'dashLayout_tl';
+    return 'dashLayout_trainee';
+}
+
+function getDefaultDashboardLayout(roleKey = getDashboardRoleKey()) {
+    const source = roleKey === 'admin' ? DEFAULT_LAYOUT_ADMIN : roleKey === 'teamleader' ? DEFAULT_LAYOUT_TL : DEFAULT_LAYOUT_TRAINEE;
+    return JSON.parse(JSON.stringify(source));
+}
+
+function getWidgetMeta(widgetId, roleKey = getDashboardRoleKey()) {
+    const map = DASH_WIDGET_META[roleKey] || {};
+    return map[widgetId] || { label: widgetId.replace(/_/g, ' '), icon: 'fa-square' };
+}
+
+function normalizeDashboardLayout(savedLayout, defaultLayout) {
+    const raw = Array.isArray(savedLayout) ? savedLayout : [];
+    const defaults = Array.isArray(defaultLayout) ? defaultLayout : [];
+    const defaultMap = new Map(defaults.map(item => [String(item.id), item]));
+    const seen = new Set();
+    const layout = [];
+
+    raw.forEach(item => {
+        const id = String(typeof item === 'string' ? item : item && item.id || '').trim();
+        if (!id || seen.has(id) || !defaultMap.has(id)) return;
+        const fallback = defaultMap.get(id) || {};
+        layout.push({
+            id,
+            col: Math.max(1, Math.min(4, parseInt((item && item.col) || fallback.col || 1, 10) || 1)),
+            row: Math.max(1, Math.min(3, parseInt((item && item.row) || fallback.row || 1, 10) || 1)),
+            hidden: item && item.hidden === true
+        });
+        seen.add(id);
+    });
+
+    defaults.forEach(item => {
+        if (!item || seen.has(item.id)) return;
+        layout.push({ ...item, hidden: false });
+    });
+
+    return layout;
+}
+
+function getDashboardLayout() {
+    const roleKey = getDashboardRoleKey();
+    let saved = null;
+    try {
+        saved = JSON.parse(localStorage.getItem(getDashboardLayoutStorageKey()) || 'null');
+    } catch (error) {
+        saved = null;
+    }
+    return normalizeDashboardLayout(saved, getDefaultDashboardLayout(roleKey));
+}
+
+function setDashboardLayout(layout) {
+    localStorage.setItem(getDashboardLayoutStorageKey(), JSON.stringify(layout || []));
+}
+
+function getVisibleDashboardLayout() {
+    return getDashboardLayout().filter(item => !item.hidden);
+}
+
+function buildDashboardCustomizeTray(layout, widgets) {
+    const roleKey = getDashboardRoleKey();
+    const rows = layout
+        .filter(item => widgets[item.id])
+        .map(item => {
+            const meta = getWidgetMeta(item.id, roleKey);
+            const hidden = item.hidden === true;
+            return `
+                <button class="dash-widget-toggle ${hidden ? 'is-hidden' : 'is-visible'}" onclick="toggleDashboardWidgetVisibility('${item.id}')" type="button" title="${hidden ? 'Show widget' : 'Hide widget'}">
+                    <i class="fas ${meta.icon}"></i>
+                    <span>${meta.label}</span>
+                    <strong>${hidden ? 'Hidden' : 'Shown'}</strong>
+                </button>`;
+        }).join('');
+    return `<div class="dash-widget-tray">${rows}</div>`;
+}
+
+function dashboardEscape(value) {
+    const raw = String(value === undefined || value === null ? '' : value);
+    if (typeof escapeHTML === 'function') return escapeHTML(raw);
+    return raw.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag]));
+}
+
 function renderDashboard() {
     const container = document.getElementById('dashboard-view');
     if (!container) return;
+    if (DASHBOARD_RENDER_IN_PROGRESS) return;
+    const now = Date.now();
+    if (now - DASHBOARD_LAST_RENDER_AT < 120 && !DASH_EDIT_MODE) return;
 
+    DASHBOARD_RENDER_IN_PROGRESS = true;
+    DASHBOARD_LAST_RENDER_AT = now;
+    DASHBOARD_PARSE_CACHE = Object.create(null);
     container.innerHTML = ''; // Clear previous
 
-    const role = CURRENT_USER.role;
-    
-    // NEW: Invasive Modal Check for Trainees
-    if (role === 'trainee') {
-        if (typeof checkUrgentNoticesPopup === 'function') checkUrgentNoticesPopup();
-    }
+    try {
+        const role = CURRENT_USER.role;
 
-    // 1. Inject Animation Styles
-    if (!document.getElementById('dash-animations')) {
-        const style = document.createElement('style');
-        style.id = 'dash-animations';
-        style.innerHTML = `
-            @keyframes dashEntry {
-                0% { opacity: 0; transform: translateY(50px) scale(0.9); }
-                100% { opacity: 1; transform: translateY(0) scale(1); }
-            }
-            .dash-card {
-                animation: dashEntry 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-                opacity: 0; /* Start hidden */
-                will-change: opacity, transform;
-            }
-            .dash-card.editing {
-                animation: none !important;
-                opacity: 1 !important;
-            }
-        `;
-        document.head.appendChild(style);
-    }
+        // NEW: Invasive Modal Check for Trainees
+        if (role === 'trainee') {
+            if (typeof checkUrgentNoticesPopup === 'function') checkUrgentNoticesPopup();
+        }
 
-    // 2. GREETING HEADER
-    const hour = new Date().getHours();
-    const timeGreeting = hour < 12 ? "Good Morning" : (hour < 18 ? "Good Afternoon" : "Good Evening");
+        // 1. Inject Animation Styles
+        if (!document.getElementById('dash-animations')) {
+            const style = document.createElement('style');
+            style.id = 'dash-animations';
+            style.innerHTML = `
+                @keyframes dashEntry {
+                    0% { opacity: 0; transform: translateY(18px) scale(0.985); }
+                    100% { opacity: 1; transform: translateY(0) scale(1); }
+                }
+                .dash-card {
+                    animation: dashEntry 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+                    opacity: 0;
+                }
+                .dash-card.editing {
+                    animation: none !important;
+                    opacity: 1 !important;
+                }
+            `;
+            document.head.appendChild(style);
+        }
 
-    const header = document.createElement('div');
-    header.className = 'dash-header';
-    header.innerHTML = `
-        <div class="dash-titlebar">
-            <div>
-                <div class="dash-eyebrow">${role === 'trainee' ? 'Learning Dashboard' : role === 'teamleader' ? 'Team Leader Dashboard' : 'Operations Dashboard'}</div>
-                <h2 style="margin:0;">${timeGreeting}, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
-                <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
+        // 2. GREETING HEADER
+        const hour = new Date().getHours();
+        const timeGreeting = hour < 12 ? "Good Morning" : (hour < 18 ? "Good Afternoon" : "Good Evening");
+
+        const header = document.createElement('div');
+        header.className = 'dash-header';
+        header.innerHTML = `
+            <div class="dash-titlebar">
+                <div>
+                    <div class="dash-eyebrow">${role === 'trainee' ? 'Learning Dashboard' : role === 'teamleader' ? 'Team Leader Dashboard' : 'Operations Dashboard'}</div>
+                    <h2 style="margin:0;">${timeGreeting}, <span style="color:var(--primary);">${CURRENT_USER.user}</span></h2>
+                    <p style="color:var(--text-muted); margin-top:5px;">Here is your daily overview.</p>
+                </div>
+                ${(role === 'admin' || role === 'super_admin' || role === 'trainee' || role === 'teamleader') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
             </div>
-            ${(role === 'admin' || role === 'super_admin' || role === 'trainee' || role === 'teamleader') ? `<button class="btn-secondary btn-sm" onclick="toggleDashEditMode()"><i class="fas fa-pencil-alt"></i> Customize</button>` : ''}
-        </div>
-        <div id="dash-edit-controls" class="hidden" style="margin-bottom:15px; padding:10px; background:var(--bg-input); border:1px dashed var(--primary); border-radius:8px; text-align:center;">
-            <strong style="color:var(--primary);">Edit Mode Active</strong> - Drag items to reorder.
-            <button class="btn-primary btn-sm" style="margin-left:10px;" onclick="saveDashLayout()">Save Layout</button>
-            <button class="btn-secondary btn-sm" onclick="resetDashLayout()">Reset</button>
-        </div>
-    `;
-    container.appendChild(header);
+            <div id="dash-edit-controls" class="${DASH_EDIT_MODE ? '' : 'hidden'}" style="margin-bottom:15px; padding:10px; background:var(--bg-input); border:1px dashed var(--primary); border-radius:8px; text-align:center;">
+                <strong style="color:var(--primary);">Customize Mode</strong> - Drag widgets, resize them, or hide what you do not need.
+                <button class="btn-primary btn-sm" style="margin-left:10px;" onclick="saveDashLayout()">Save Layout</button>
+                <button class="btn-secondary btn-sm" onclick="resetDashLayout()">Reset</button>
+            </div>
+        `;
+        container.appendChild(header);
 
-    // 3. ROLE SPECIFIC CONTENT
-    const content = document.createElement('div');
-    content.className = 'dash-content-grid'; 
-    
-    if (role === 'admin' || role === 'super_admin' || role === 'special_viewer') {
-        buildAdminWidgets(content); // Pass container to append widgets dynamically
-        
-        // Append Notice Manager for Admins (Bottom)
-        const manager = document.createElement('div');
-        manager.className = 'dash-panel full-width';
-        manager.style.marginTop = '20px';
-        manager.innerHTML = buildNoticeManager();
-        
-        container.appendChild(content);
-        
-        // Urgent Notices (Bottom for Admin)
-        const noticeHtml = buildNoticeBanners(role);
-        if(noticeHtml) container.insertAdjacentHTML('beforeend', noticeHtml);
-        
-        container.appendChild(manager);
-        
-        // Trigger Dashboard-specific health check
-        updateDashboardHealth();
-    } else if (role === 'teamleader') {
-        // Urgent Notices (Top for TL)
-        const noticeHtml = buildNoticeBanners(role);
-        container.innerHTML = noticeHtml + container.innerHTML;
-        
-        buildTLWidgets(content);
-        container.appendChild(content);
-        
-        // NEW: Add Notice Manager for TLs (Restricted)
-        const manager = document.createElement('div');
-        manager.className = 'dash-panel full-width';
-        manager.style.marginTop = '20px';
-        manager.innerHTML = buildNoticeManager();
-        container.appendChild(manager);
-    } else {
-        // Urgent Notices (Top for Trainee)
-        const noticeHtml = buildNoticeBanners(role);
-        container.innerHTML = noticeHtml + container.innerHTML;
-        
-        buildTraineeWidgets(content);
-        container.appendChild(content);
+        // 3. ROLE SPECIFIC CONTENT
+        const content = document.createElement('div');
+        content.className = 'dash-content-grid';
+
+        if (role === 'admin' || role === 'super_admin' || role === 'special_viewer') {
+            buildAdminWidgets(content); // Pass container to append widgets dynamically
+
+            // Append Notice Manager for Admins (Bottom)
+            const manager = document.createElement('div');
+            manager.className = 'dash-panel full-width';
+            manager.style.marginTop = '20px';
+            manager.innerHTML = buildNoticeManager();
+
+            container.appendChild(content);
+
+            // Urgent Notices (Bottom for Admin)
+            const noticeHtml = buildNoticeBanners(role);
+            if(noticeHtml) container.insertAdjacentHTML('beforeend', noticeHtml);
+
+            container.appendChild(manager);
+
+            // Trigger Dashboard-specific health check
+            updateDashboardHealth();
+        } else if (role === 'teamleader') {
+            // Urgent Notices (Top for TL)
+            const noticeHtml = buildNoticeBanners(role);
+            if (noticeHtml) header.insertAdjacentHTML('beforebegin', noticeHtml);
+
+            buildTLWidgets(content);
+            container.appendChild(content);
+
+            // NEW: Add Notice Manager for TLs (Restricted)
+            const manager = document.createElement('div');
+            manager.className = 'dash-panel full-width';
+            manager.style.marginTop = '20px';
+            manager.innerHTML = buildNoticeManager();
+            container.appendChild(manager);
+        } else {
+            // Urgent Notices (Top for Trainee)
+            const noticeHtml = buildNoticeBanners(role);
+            if (noticeHtml) header.insertAdjacentHTML('beforebegin', noticeHtml);
+
+            buildTraineeWidgets(content);
+            container.appendChild(content);
+        }
+    } finally {
+        DASHBOARD_PARSE_CACHE = null;
+        DASHBOARD_RENDER_IN_PROGRESS = false;
     }
 }
+
+function scheduleDashboardRender(options = {}) {
+    const immediate = !!options.immediate;
+    const delay = typeof options.delay === 'number' ? Math.max(0, options.delay) : 90;
+    if (DASHBOARD_SCHEDULE_TIMER) {
+        clearTimeout(DASHBOARD_SCHEDULE_TIMER);
+        DASHBOARD_SCHEDULE_TIMER = null;
+    }
+    if (DASHBOARD_SCHEDULE_IDLE && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(DASHBOARD_SCHEDULE_IDLE);
+        DASHBOARD_SCHEDULE_IDLE = null;
+    }
+
+    const run = () => {
+        DASHBOARD_SCHEDULE_TIMER = null;
+        DASHBOARD_SCHEDULE_IDLE = null;
+        renderDashboard();
+    };
+
+    if (immediate) {
+        run();
+        return;
+    }
+
+    DASHBOARD_SCHEDULE_TIMER = setTimeout(() => {
+        if (typeof requestIdleCallback === 'function') {
+            DASHBOARD_SCHEDULE_IDLE = requestIdleCallback(run, { timeout: 700 });
+        } else {
+            run();
+        }
+    }, delay);
+}
+
+window.scheduleDashboardRender = scheduleDashboardRender;
 
 // Global timeout for debouncing realtime updates
 window.DASH_UPDATE_TIMEOUT = null;
@@ -268,14 +507,9 @@ async function updateDashboardHealth(useCache = false) {
             });
         }
 
-        // Calculate Storage Size locally (JSON string size)
-        let sizeStr = "0 B";
-        if (typeof formatBytes === 'function') {
-            const totalStr = JSON.stringify(localStorage);
-            sizeStr = formatBytes(new TextEncoder().encode(totalStr).length);
-        }
-        
-        if(storageEl) storageEl.innerText = sizeStr;
+        // Calculate storage size off the critical render path. The old full
+        // JSON.stringify(localStorage) path can stall the dashboard on large caches.
+        if(storageEl) scheduleDashboardStorageSizeUpdate(storageEl);
         if(latencyEl) {
             latencyEl.innerText = latency + " ms";
             latencyEl.style.color = latency < 200 ? "#2ecc71" : (latency < 500 ? "orange" : "#ff5252");
@@ -667,7 +901,9 @@ function buildAdminCommandCenter(stats) {
     const reviewTone = stats.bookingIssues > 0 ? 'danger' : 'ok';
     const lateTone = stats.unconfirmedLates > 0 || stats.openClockOuts > 0 ? 'warn' : 'ok';
     const markingTone = stats.pendingMarking > 0 ? 'danger' : 'ok';
-    const insightTone = stats.actionRequiredCount > 0 ? 'warn' : 'ok';
+    const insightTone = stats.actionRequiredCount > 0 || stats.integrityReviewRows > 0 ? 'warn' : 'ok';
+    const feedbackTone = stats.pendingFeedbackRequests > 0 || stats.openCourseRequests > 0 ? 'warn' : 'ok';
+    const monitorTone = stats.pendingViolations > 0 || stats.newProblemReports > 0 ? 'danger' : 'ok';
 
     return `
         <div class="dash-command-center">
@@ -680,21 +916,28 @@ function buildAdminCommandCenter(stats) {
             </div>
             <div class="dash-command-grid">
                 ${item('fa-highlighter', 'Pending marking', stats.pendingMarking, markingTone, "showTab('test-manage')", stats.pendingMarking ? 'Needs marking' : 'Queue clear')}
-                ${item('fa-search', 'Insight actions', stats.actionRequiredCount, insightTone, "showTab('insight-studio')", stats.actionRequiredCount ? 'Review trainees' : 'No urgent insight')}
-                ${item('fa-calendar-check', 'Live today', stats.todaysLiveBookings, reviewTone, "showTab('live-assessment')", stats.bookingIssues ? `${stats.bookingIssues} booking issue${stats.bookingIssues === 1 ? '' : 's'}` : `${stats.newBookingsCount} upcoming`)}
+                ${item('fa-search', 'Insight / integrity', stats.actionRequiredCount, insightTone, "showTab('insight-studio')", stats.integrityReviewRows ? `${stats.integrityReviewRows} integrity item${stats.integrityReviewRows === 1 ? '' : 's'}` : (stats.actionRequiredCount ? 'Review trainees' : 'No urgent insight'))}
+                ${item('fa-calendar-check', 'Live today', stats.todaysLiveBookings, reviewTone, "showTab('live-assessment')", stats.activeLiveSessions ? `${stats.activeLiveSessions} active now` : (stats.bookingIssues ? `${stats.bookingIssues} booking issue${stats.bookingIssues === 1 ? '' : 's'}` : `${stats.newBookingsCount} upcoming`))}
                 ${item('fa-clock', 'Attendance review', stats.unconfirmedLates, lateTone, "openAttendanceRegister()", stats.openClockOuts ? `${stats.openClockOuts} open clock-out${stats.openClockOuts === 1 ? '' : 's'}` : 'No open clock-outs')}
+                ${item('fa-comments', 'Feedback / course', stats.pendingFeedbackRequests, feedbackTone, "if (typeof openAssessmentFeedbackSessions === 'function') openAssessmentFeedbackSessions();", stats.openCourseRequests ? `${stats.openCourseRequests} course request${stats.openCourseRequests === 1 ? '' : 's'}` : 'No feedback queue')}
+                ${item('fa-triangle-exclamation', 'Monitor reviews', stats.pendingViolations, monitorTone, "openActivityMonitorModal()", stats.newProblemReports ? `${stats.newProblemReports} problem report${stats.newProblemReports === 1 ? '' : 's'}` : 'No new reports')}
             </div>
         </div>
     `;
 }
 
 function buildAdminWidgets(container) {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-    const attRecords = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const users = dashboardReadJson('users', []);
+    const rosters = dashboardReadJson('rosters', {});
+    const records = dashboardReadJson('records', []);
+    const submissions = dashboardReadJson('submissions', []);
+    const schedules = dashboardReadJson('schedules', {});
+    const notifications = dashboardReadJson('admin_notifications', []);
+    const violationReports = dashboardReadJson('violation_reports', []);
+    const errorReports = dashboardReadJson('error_reports', []);
+    const linkRequests = dashboardReadJson('linkRequests', []);
+    const liveSessions = dashboardReadJson('liveSessions', []);
+    const attRecords = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : dashboardReadJson('attendance_records', []);
     const today = (typeof getLocalISODate === 'function') ? getLocalISODate() : new Date().toISOString().split('T')[0];
     
     // 1. Stats Calculation
@@ -710,7 +953,13 @@ function buildAdminWidgets(container) {
     const rosterDisplay = scheduleStats.length > 0 ? scheduleStats.join(' | ') : "No active schedules";
 
     // Pending Marking (Submissions)
-    const pendingMarking = submissions.filter(s => s.status === 'pending').length;
+    const pendingSubmissions = submissions.filter(s => s && String(s.status || '').toLowerCase() === 'pending' && !s.archived);
+    const pendingMarking = pendingSubmissions.length;
+    const completedSubmissionsToday = submissions.filter(s => {
+        if (!s || String(s.status || '').toLowerCase() !== 'completed') return false;
+        const stamp = String(s.lastEditedDate || s.lastModified || s.createdAt || s.date || '');
+        return stamp.slice(0, 10) === today;
+    }).length;
 
     // Insight "Awaiting Review" Badge
     // Calculate how many trainees have scores < IMPROVE and might need attention
@@ -718,7 +967,7 @@ function buildAdminWidgets(container) {
     
     // FIX: Deduplicate failures per trainee (Highest Score Wins) to match Insight Dashboard logic
     // This prevents "Ghost Notifications" where retaken/passed tests still show as failures in the badge.
-    const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
+    const reviews = dashboardReadJson('insightReviews', []);
     const uniqueTrainees = new Set(records.map(r => r.trainee));
     let actionRequiredCount = 0;
 
@@ -754,7 +1003,7 @@ function buildAdminWidgets(container) {
         : '';
 
     // Live Booking "New Entry" Badge
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const bookings = dashboardReadJson('liveBookings', []);
     const todayStr = today;
     const newBookingsCount = bookings.filter(b => b.date >= todayStr && b.status === 'Booked').length;
     const badgeBooking = newBookingsCount > 0 
@@ -768,7 +1017,23 @@ function buildAdminWidgets(container) {
         : '';
 
     const todaysLiveBookings = bookings.filter(b => String(b.date || '') === todayStr && b.status === 'Booked').length;
+    const activeLiveSessions = liveSessions.filter(s => s && s.active).length;
     const openClockOuts = attRecords.filter(r => r.date === today && r.clockIn && !r.clockOut && !r.isIgnored).length;
+    const pendingFeedbackRequests = notifications.filter(n => n && String(n.type || '') === 'assessment_feedback_request' && String(n.status || 'open') !== 'closed').length;
+    const openCourseRequests = notifications.filter(n => n && String(n.type || '') === 'course_progress_request' && String(n.status || 'open') !== 'closed').length;
+    const pendingViolations = violationReports.filter(r => r && !r.reviewed && String(r.status || 'pending_review') !== 'reviewed').length;
+    const pendingLinkRequests = linkRequests.filter(r => r && String(r.status || '').toLowerCase() === 'pending').length;
+    const problemReports = (Array.isArray(errorReports) ? errorReports : []).filter(report => {
+        const data = report && report.data && typeof report.data === 'object' ? report.data : report;
+        const type = String((data && (data.type || data.reportType)) || '').toLowerCase();
+        const source = String((data && (data.source || data.origin)) || '').toLowerCase();
+        return type === 'user_report' || source === 'report_problem' || !!(data && data.issueDetail);
+    });
+    const seenProblemReports = parseInt(localStorage.getItem('last_seen_problem_report_count') || '0', 10) || 0;
+    const newProblemReports = Math.max(0, problemReports.length - seenProblemReports);
+    const integrityReviewRows = (typeof buildTestIntegrityRows === 'function')
+        ? buildTestIntegrityRows().filter(r => r && (r.verdict === 'invalid' || r.verdict === 'review')).length
+        : 0;
     const calendarTasks = (typeof CalendarModule !== 'undefined' && typeof CalendarModule.getTasks === 'function') ? CalendarModule.getTasks() : [];
     const bookingIssues = calendarTasks.filter(task => task.type === 'issue').length;
     const commandCenterHtml = buildAdminCommandCenter({
@@ -778,7 +1043,13 @@ function buildAdminWidgets(container) {
         newBookingsCount,
         unconfirmedLates,
         openClockOuts,
-        bookingIssues
+        bookingIssues,
+        pendingFeedbackRequests,
+        openCourseRequests,
+        pendingViolations,
+        newProblemReports,
+        integrityReviewRows,
+        activeLiveSessions
     });
 
     // --- HOVER DETAILS GENERATION ---
@@ -797,37 +1068,55 @@ function buildAdminWidgets(container) {
     if(!schedDetailsHtml) schedDetailsHtml = '<div style="color:var(--text-muted); font-style:italic;">No active schedules.</div>';
 
     // 2. Pending Marking Details
-    const pendingDetailsHtml = submissions.filter(s => s.status === 'pending').map(s => 
+    const pendingDetailsHtml = pendingSubmissions.map(s =>
         `<div style="font-size:0.8rem; margin-bottom:4px; display:flex; justify-content:space-between;">
-            <span>${s.trainee}</span> <span style="color:var(--text-muted);">${s.testTitle}</span>
+            <span>${dashboardEscape(s.trainee)}</span> <span style="color:var(--text-muted);">${dashboardEscape(s.testTitle)}</span>
         </div>`
     ).join('') || '<div style="color:var(--text-muted); font-style:italic;">Queue empty.</div>';
 
     // 3. Insight Details (Action Required)
     const insightDetailsHtml = records.filter(r => r.score < IMPROVE_LIMIT).map(r => 
         `<div style="font-size:0.8rem; margin-bottom:4px; display:flex; justify-content:space-between;">
-            <span style="color:#e74c3c;">${r.trainee}</span> <span>${r.assessment} (${r.score}%)</span>
+            <span style="color:#e74c3c;">${dashboardEscape(r.trainee)}</span> <span>${dashboardEscape(r.assessment)} (${r.score}%)</span>
         </div>`
     ).slice(0, 15).join('') || '<div style="color:var(--text-muted); font-style:italic;">No critical actions.</div>';
 
     // 4. Live Booking Details
     const bookingDetailsHtml = bookings.filter(b => b.date >= todayStr && b.status === 'Booked').map(b => 
         `<div style="font-size:0.8rem; margin-bottom:4px;">
-            <span style="color:var(--primary);">${b.time}</span> ${b.trainee}
+            <span style="color:var(--primary);">${dashboardEscape(b.time)}</span> ${dashboardEscape(b.trainee)}
         </div>`
     ).slice(0, 10).join('') || '<div style="color:var(--text-muted); font-style:italic;">No upcoming bookings.</div>';
+
+    const activityQueueHtml = [
+        { icon: 'fa-comments', label: 'Feedback requests', value: pendingFeedbackRequests, action: "if (typeof openAssessmentFeedbackSessions === 'function') openAssessmentFeedbackSessions();" },
+        { icon: 'fa-arrow-right', label: 'Course move-on requests', value: openCourseRequests, action: "showTab('assessment-schedule')" },
+        { icon: 'fa-triangle-exclamation', label: 'Violation reviews', value: pendingViolations, action: "if (typeof StudyMonitor !== 'undefined') StudyMonitor.openViolationReviewModal();" },
+        { icon: 'fa-bug', label: 'New problem reports', value: newProblemReports, action: "if (typeof viewProblemReports === 'function') viewProblemReports();" },
+        { icon: 'fa-shield-halved', label: 'Integrity review', value: integrityReviewRows, action: "showTab('test-manage'); setTimeout(() => { const btn = document.querySelector('button[onclick*=\\'integrity\\']'); if (btn) showTestEngineSub('integrity', btn); }, 80);" },
+        { icon: 'fa-link', label: 'Link requests', value: pendingLinkRequests, action: "showTab('dashboard-view')" }
+    ].map(row => `
+        <button class="dash-ops-row ${row.value > 0 ? 'needs-action' : ''}" onclick="${row.action}" type="button">
+            <span><i class="fas ${row.icon}"></i> ${row.label}</span>
+            <strong>${row.value}</strong>
+        </button>
+    `).join('');
 
     // 5. Leaderboard
     const leaderboardHtml = buildLeaderboardWidget(users, records, attRecords);
 
     // Helper to wrap widget content with resize controls
     const wrapWidget = (id, content, colSpan=1, rowSpan=1, extraClass='') => {
+        const meta = getWidgetMeta(id, 'admin');
         return `
-            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-widget-id="${id}" data-col="${colSpan}" data-row="${rowSpan}">
                 <div class="widget-controls">
+                    <span class="widget-drag-grip" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+                    <span class="widget-title-chip"><i class="fas ${meta.icon}"></i> ${meta.label}</span>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', -1, -1)" title="Shrink"><i class="fas fa-compress"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="toggleDashboardWidgetVisibility('${id}')" title="Hide widget"><i class="fas fa-eye-slash"></i></button>
                 </div>
                 ${content}
             </div>`;
@@ -836,12 +1125,14 @@ function buildAdminWidgets(container) {
     // WIDGET DEFINITIONS
     // Note: Admin widgets defined here
     const widgets = {
+        'command_center': wrapWidget('command_center', commandCenterHtml, 4, 1, 'command-center-widget'),
         'stats': wrapWidget('stats', `
             <div style="display:flex; align-items:center; gap:20px; height:100%;">
                 <div class="dash-icon"><i class="fas fa-users"></i></div>
                 <div class="dash-data">
                     <h3>${totalTrainees}</h3>
                     <p>Total Trainees</p>
+                    <div class="dash-mini-line">${completedSubmissionsToday} completed assessment${completedSubmissionsToday === 1 ? '' : 's'} today</div>
                 </div>
             </div>`),
         'schedule': wrapWidget('schedule', `
@@ -886,7 +1177,7 @@ function buildAdminWidgets(container) {
                     <div class="dash-icon"><i class="fas fa-calendar-check"></i></div>
                     <div class="dash-data">
                         <h3>Live Bookings</h3>
-                        <p>Manage Sessions</p>
+                        <p>${activeLiveSessions} active now</p>
                     </div>
                 </div>
                 <div class="dash-details">${bookingDetailsHtml}</div>
@@ -905,9 +1196,17 @@ function buildAdminWidgets(container) {
                 <div class="dash-icon"><i class="fas fa-binoculars"></i></div>
                 <div class="dash-data">
                     <h3>Activity Monitor</h3>
-                    <p>View Detailed Logs</p>
+                    <p>${pendingViolations} violation review${pendingViolations === 1 ? '' : 's'}</p>
                 </div>
             </div>`),
+        'ops_queue': wrapWidget('ops_queue', `
+            <div class="dash-ops-queue">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <div class="dash-icon"><i class="fas fa-list-check"></i></div>
+                    <h3 style="margin:0;">Operations Queue</h3>
+                </div>
+                <div class="dash-ops-list">${activityQueueHtml}</div>
+            </div>`, 2, 2),
         'leaderboard': wrapWidget('leaderboard', leaderboardHtml),
         'active_users': wrapWidget('active_users', `
             <div style="width:100%;">
@@ -938,32 +1237,19 @@ function buildAdminWidgets(container) {
     };
 
     // --- DYNAMIC FEATURE FLAGS ---
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = dashboardReadJson('system_config', {});
     const features = config.features || {};
     if (features.live_assessments === false) delete widgets['live'];
     if (features.daily_tips === false) delete widgets['tip_manager'];
 
     // LOAD LAYOUT
-    let layout = JSON.parse(localStorage.getItem('dashLayout_admin') || 'null');
-    
-    if (!layout) {
-        layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_ADMIN));
-    } else {
-        // SMART MERGE: Check for new widgets defined in code but missing in saved layout
-        const existingIds = new Set(layout.map(i => (typeof i === 'string' ? i : i.id)));
-        
-        DEFAULT_LAYOUT_ADMIN.forEach(def => {
-            if (!existingIds.has(def.id)) {
-                layout.push(def); // Append new widget to the end
-            }
-        });
-    }
-    
-    let gridHtml = commandCenterHtml + '<div class="dash-grid-main" id="dash-grid-container">';
+    let layout = getDashboardLayout();
+    let gridHtml = (DASH_EDIT_MODE ? buildDashboardCustomizeTray(layout, widgets) : '') + '<div class="dash-grid-main" id="dash-grid-container">';
     
     layout.forEach((item, index) => {
         // Handle legacy string array or new object array
         const key = typeof item === 'string' ? item : item.id;
+        if (item && item.hidden) return;
         const col = typeof item === 'object' ? item.col : 1;
         const row = typeof item === 'object' ? item.row : 1;
 
@@ -977,7 +1263,7 @@ function buildAdminWidgets(container) {
             widgetHtml = widgetHtml.replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
             
             // Inject Animation Delay
-            const delay = index * 0.2; // Even slower stagger
+            const delay = Math.min(index * 0.025, 0.18);
             widgetHtml = widgetHtml.replace('draggable="false"', `style="animation-delay: ${delay}s" draggable="false"`);
 
             gridHtml += widgetHtml;
@@ -1004,14 +1290,7 @@ function buildAdminWidgets(container) {
 
 function toggleDashEditMode() {
     DASH_EDIT_MODE = !DASH_EDIT_MODE;
-    const controls = document.getElementById('dash-edit-controls');
-    if(DASH_EDIT_MODE) {
-        controls.classList.remove('hidden');
-        enableDashEdit();
-    } else {
-        controls.classList.add('hidden');
-        renderDashboard(); // Reset view to remove drag handlers
-    }
+    renderDashboard();
 }
 
 function resizeWidget(id, dCol, dRow) {
@@ -1038,18 +1317,6 @@ function resizeWidget(id, dCol, dRow) {
 function enableDashEdit() {
     const grid = document.getElementById('dash-grid-container');
     if(!grid) return;
-    
-    // Allow dropping on empty space to append to end
-    grid.addEventListener('dragover', (e) => e.preventDefault());
-    grid.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const id = e.dataTransfer.getData('text/plain');
-        const draggable = document.getElementById(id);
-        // Only if dropped directly on grid (not on another card)
-        if (draggable && e.target === grid) {
-            grid.appendChild(draggable);
-        }
-    });
 
     const cards = grid.querySelectorAll('.dash-card');
     cards.forEach(card => {
@@ -1058,74 +1325,97 @@ function enableDashEdit() {
         card.style.border = '2px dashed var(--primary)';
         card.style.cursor = 'move';
         card.onclick = (e) => e.preventDefault(); // Disable clicks
-        
-        card.addEventListener('dragstart', (e) => {
-            e.dataTransfer.setData('text/plain', card.id);
-            e.target.style.opacity = '0.5';
-        });
-        
-        card.addEventListener('dragend', (e) => {
-            e.target.style.opacity = '1';
-        });
-        
-        card.addEventListener('dragover', (e) => e.preventDefault());
-        
-        card.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation(); // Prevent grid drop
-            const id = e.dataTransfer.getData('text/plain');
-            const draggable = document.getElementById(id);
-            const dropzone = e.target.closest('.dash-card');
-            
-            if (draggable && dropzone && draggable !== dropzone) {
-                // Swap logic: Insert before or after based on position
-                const rect = dropzone.getBoundingClientRect();
-                const next = (e.clientY - rect.top) / (rect.bottom - rect.top) > 0.5;
-                grid.insertBefore(draggable, next ? dropzone.nextSibling : dropzone);
-            }
-        });
+    });
+
+    if (grid.dataset.editBound === '1') return;
+    grid.dataset.editBound = '1';
+
+    grid.addEventListener('dragstart', (e) => {
+        const card = e.target.closest('.dash-card');
+        if (!card || !grid.contains(card)) return;
+        e.dataTransfer.setData('text/plain', card.id);
+        card.style.opacity = '0.5';
+    });
+
+    grid.addEventListener('dragend', (e) => {
+        const card = e.target.closest('.dash-card');
+        if (card) card.style.opacity = '1';
+    });
+
+    grid.addEventListener('dragover', (e) => e.preventDefault());
+
+    grid.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const id = e.dataTransfer.getData('text/plain');
+        const draggable = document.getElementById(id);
+        if (!draggable) return;
+
+        const dropzone = e.target.closest('.dash-card');
+        if (!dropzone || dropzone === draggable) {
+            if (e.target === grid) grid.appendChild(draggable);
+            return;
+        }
+
+        const rect = dropzone.getBoundingClientRect();
+        const next = (e.clientY - rect.top) / Math.max(rect.bottom - rect.top, 1) > 0.5;
+        grid.insertBefore(draggable, next ? dropzone.nextSibling : dropzone);
     });
 }
 
 function saveDashLayout() {
     const grid = document.getElementById('dash-grid-container');
+    if (!grid) return;
     const cards = grid.querySelectorAll('.dash-card');
+    const currentLayout = getDashboardLayout();
+    const hiddenItems = currentLayout.filter(item => item.hidden);
     const layout = [];
     
     cards.forEach(c => {
         const key = c.id.replace('widget-', '');
         const col = parseInt(c.dataset.col) || 1;
         const row = parseInt(c.dataset.row) || 1;
-        layout.push({ id: key, col: col, row: row });
+        layout.push({ id: key, col: col, row: row, hidden: false });
     });
-    
-    let roleKey = 'dashLayout_trainee';
-    if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') roleKey = 'dashLayout_admin';
-    if (CURRENT_USER.role === 'teamleader') roleKey = 'dashLayout_tl';
-    
-    localStorage.setItem(roleKey, JSON.stringify(layout));
+
+    hiddenItems.forEach(item => {
+        if (!layout.some(row => row.id === item.id)) layout.push(item);
+    });
+
+    setDashboardLayout(layout);
     toggleDashEditMode(); // Exit edit mode
     if(typeof showToast === 'function') showToast("Dashboard layout saved.", "success");
 }
 
 function resetDashLayout() {
     if(confirm("Reset dashboard to default layout?")) {
-        let roleKey = 'dashLayout_trainee';
-        if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') roleKey = 'dashLayout_admin';
-        if (CURRENT_USER.role === 'teamleader') roleKey = 'dashLayout_tl';
-        
-        localStorage.removeItem(roleKey);
+        localStorage.removeItem(getDashboardLayoutStorageKey());
         toggleDashEditMode();
         renderDashboard();
     }
 }
+
+function toggleDashboardWidgetVisibility(id) {
+    const layout = getDashboardLayout();
+    const idx = layout.findIndex(item => item.id === id);
+    if (idx < 0) return;
+    const visibleCount = layout.filter(item => !item.hidden).length;
+    if (!layout[idx].hidden && visibleCount <= 1) {
+        if (typeof showToast === 'function') showToast('Keep at least one dashboard widget visible.', 'warning');
+        return;
+    }
+    layout[idx].hidden = !layout[idx].hidden;
+    setDashboardLayout(layout);
+    renderDashboard();
+}
+
+window.toggleDashboardWidgetVisibility = toggleDashboardWidgetVisibility;
 
 function buildLinkRequestsWidget() {
     if (CURRENT_USER.role === 'special_viewer') {
         return ''; // Hide requests widget for viewer
     }
 
-    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    const requests = dashboardReadJson('linkRequests', []);
     const pending = requests.filter(r => r.status === 'pending');
     
     if (pending.length === 0) return '';
@@ -1161,28 +1451,32 @@ function buildLinkRequestsWidget() {
 function buildTLWidgets(container) {
     // Helper to wrap widget content with resize controls
     const wrapWidget = (id, content, colSpan=1, rowSpan=1, extraClass='') => {
+        const meta = getWidgetMeta(id, 'teamleader');
         return `
-            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-widget-id="${id}" data-col="${colSpan}" data-row="${rowSpan}">
                 <div class="widget-controls">
+                    <span class="widget-drag-grip" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+                    <span class="widget-title-chip"><i class="fas ${meta.icon}"></i> ${meta.label}</span>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', -1, -1)" title="Shrink"><i class="fas fa-compress"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="toggleDashboardWidgetVisibility('${id}')" title="Hide widget"><i class="fas fa-eye-slash"></i></button>
                 </div>
                 ${content}
             </div>`;
     };
 
     // 1. Overview Stats
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = dashboardReadJson('users', []);
     const trainees = users.filter(u => u.role === 'trainee').length;
-    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const attRecords = dashboardReadJson('attendance_records', []);
     const today = new Date().toISOString().split('T')[0];
     const latesToday = attRecords.filter(r => r.date === today && r.isLate).length;
     
     // NEW: Fetch data for Leaderboard and Schedule widgets
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const rosters = dashboardReadJson('rosters', {});
+    const schedules = dashboardReadJson('schedules', {});
+    const records = dashboardReadJson('records', []);
 
     // Schedule Details (Agents on Schedule)
     let scheduleStats = [];
@@ -1298,27 +1592,19 @@ function buildTLWidgets(container) {
     };
 
     // LOAD LAYOUT
-    let layout = JSON.parse(localStorage.getItem('dashLayout_tl') || 'null');
-    if (!layout) {
-        layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_TL));
-    } else {
-        // SMART MERGE: Add new widgets if missing from saved layout
-        const existingIds = new Set(layout.map(i => (typeof i === 'string' ? i : i.id)));
-        DEFAULT_LAYOUT_TL.forEach(def => {
-            if (!existingIds.has(def.id)) layout.push(def);
-        });
-    }
+    let layout = getDashboardLayout();
 
-    let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
+    let gridHtml = (DASH_EDIT_MODE ? buildDashboardCustomizeTray(layout, widgets) : '') + '<div class="dash-grid-main" id="dash-grid-container">';
     layout.forEach((item, index) => {
         const key = typeof item === 'string' ? item : item.id;
+        if (item && item.hidden) return;
         const col = typeof item === 'object' ? item.col : 1;
         const row = typeof item === 'object' ? item.row : 1;
         if(widgets[key]) {
             let widgetHtml = widgets[key].replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`).replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
             
             // Inject Animation Delay
-            const delay = index * 0.2;
+            const delay = Math.min(index * 0.025, 0.18);
             widgetHtml = widgetHtml.replace('draggable="false"', `style="animation-delay: ${delay}s" draggable="false"`);
             
             gridHtml += widgetHtml;
@@ -1500,7 +1786,7 @@ function getTraineeBadges(user, records, attendance) {
 
 function checkForNewBadges(currentBadges) {
     const key = 'earned_badges_' + CURRENT_USER.user;
-    const stored = JSON.parse(localStorage.getItem(key) || '[]');
+    const stored = dashboardReadJson(key, []);
     const currentTitles = currentBadges.map(b => b.title);
     
     // Find badges in current that are NOT in stored
@@ -1569,7 +1855,7 @@ function buildTraineeWidgets(container) {
     let nextTask = "All Caught Up!";
     let nextDate = "";
     
-    const allSchedules = JSON.parse(localStorage.getItem('schedules') || 'null');
+    const allSchedules = dashboardReadJson('schedules', null);
     let myItems = [];
     if(allSchedules && typeof getTraineeScheduleId === 'function') {
         const id = getTraineeScheduleId(CURRENT_USER.user, allSchedules);
@@ -1591,7 +1877,7 @@ function buildTraineeWidgets(container) {
     }
 
     // 2. Recent Results
-    const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
+    const allRecords = dashboardReadJson('records', []);
     const myRecords = allRecords.filter(r => r.trainee && r.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase());
     // FIX: Force chronological sorting before slicing to ensure accuracy
     myRecords.sort((a,b) => new Date(a.date || 0) - new Date(b.date || 0));
@@ -1601,17 +1887,17 @@ function buildTraineeWidgets(container) {
             includeAuto: true,
             data: {
                 records: myRecords,
-                submissions: JSON.parse(localStorage.getItem('submissions') || '[]'),
-                savedReports: JSON.parse(localStorage.getItem('savedReports') || '[]'),
-                insightReviews: JSON.parse(localStorage.getItem('insightReviews') || '[]'),
-                liveBookings: JSON.parse(localStorage.getItem('liveBookings') || '[]'),
-                exemptions: JSON.parse(localStorage.getItem('exemptions') || '[]')
+                submissions: dashboardReadJson('submissions', []),
+                savedReports: dashboardReadJson('savedReports', []),
+                insightReviews: dashboardReadJson('insightReviews', []),
+                liveBookings: dashboardReadJson('liveBookings', []),
+                exemptions: dashboardReadJson('exemptions', [])
             }
         })
         : null;
     
     // 3. Attendance Status
-    const attRecords = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : JSON.parse(localStorage.getItem('attendance_records') || '[]');
+    const attRecords = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : dashboardReadJson('attendance_records', []);
     const today = (typeof getLocalISODate === 'function') ? getLocalISODate() : new Date().toISOString().split('T')[0];
     const myAtt = attRecords.find(r => r.user && r.user.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && r.date === today);
     
@@ -1623,7 +1909,7 @@ function buildTraineeWidgets(container) {
     }
 
     // NEW: Check for Active Live Session (Redirect Prompt)
-    const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const liveSessions = dashboardReadJson('liveSessions', []);
     const now = Date.now();
     const myLive = liveSessions.find(s => {
         if (!s.trainee || s.trainee.trim().toLowerCase() !== CURRENT_USER.user.trim().toLowerCase() || !s.active) return false;
@@ -1648,12 +1934,16 @@ function buildTraineeWidgets(container) {
 
     // Helper to wrap widget content with resize controls
     const wrapWidget = (id, content, colSpan=1, rowSpan=1, extraClass='') => {
+        const meta = getWidgetMeta(id, 'trainee');
         return `
-            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-col="${colSpan}" data-row="${rowSpan}">
+            <div class="dash-card dash-card-expandable w-col-${colSpan} w-row-${rowSpan} ${extraClass}" id="widget-${id}" draggable="false" data-widget-id="${id}" data-col="${colSpan}" data-row="${rowSpan}">
                 <div class="widget-controls">
+                    <span class="widget-drag-grip" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+                    <span class="widget-title-chip"><i class="fas ${meta.icon}"></i> ${meta.label}</span>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 1, 0)" title="Wider"><i class="fas fa-arrows-alt-h"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', 0, 1)" title="Taller"><i class="fas fa-arrows-alt-v"></i></button>
                     <button class="btn-secondary btn-sm" onclick="resizeWidget('${id}', -1, -1)" title="Shrink"><i class="fas fa-compress"></i></button>
+                    <button class="btn-secondary btn-sm" onclick="toggleDashboardWidgetVisibility('${id}')" title="Hide widget"><i class="fas fa-eye-slash"></i></button>
                 </div>
                 ${content}
             </div>`;
@@ -1677,7 +1967,7 @@ function buildTraineeWidgets(container) {
         </div>`;
 
     // 2. Live Upcoming
-    const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const liveBookings = dashboardReadJson('liveBookings', []);
     const myUpcomingLive = liveBookings.filter(b => b.trainee && b.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && b.status === 'Booked' && b.date >= todayStr).sort((a,b) => a.date.localeCompare(b.date));
     
     let liveHtml = `<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;"><div class="dash-icon"><i class="fas fa-calendar-check"></i></div><h3 style="margin:0;">Live Bookings</h3></div>`;
@@ -1756,7 +2046,7 @@ function buildTraineeWidgets(container) {
     
     // Legacy Cloud Migration
     const legacyNoteKey = 'user_notes_' + CURRENT_USER.user;
-    let allNotes = JSON.parse(localStorage.getItem('trainee_notes') || '{}');
+    let allNotes = dashboardReadJson('trainee_notes', {});
     if (localStorage.getItem(legacyNoteKey) !== null) {
         allNotes[CURRENT_USER.user] = localStorage.getItem(legacyNoteKey);
         localStorage.setItem('trainee_notes', JSON.stringify(allNotes));
@@ -1765,9 +2055,13 @@ function buildTraineeWidgets(container) {
     }
     
     const legacyBmKey = 'trainee_bookmarks_' + CURRENT_USER.user;
-    let allBookmarks = JSON.parse(localStorage.getItem('trainee_bookmarks') || '{}');
+    let allBookmarks = dashboardReadJson('trainee_bookmarks', {});
     if (localStorage.getItem(legacyBmKey) !== null) {
-        allBookmarks[CURRENT_USER.user] = JSON.parse(localStorage.getItem(legacyBmKey));
+        try {
+            allBookmarks[CURRENT_USER.user] = JSON.parse(localStorage.getItem(legacyBmKey) || '[]');
+        } catch (error) {
+            allBookmarks[CURRENT_USER.user] = [];
+        }
         localStorage.setItem('trainee_bookmarks', JSON.stringify(allBookmarks));
         localStorage.removeItem(legacyBmKey);
         if (typeof saveToServer === 'function') saveToServer(['trainee_bookmarks'], false);
@@ -1811,7 +2105,7 @@ function buildTraineeWidgets(container) {
         </div>`;
 
     // 6. Daily Tip
-    let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    let tips = dashboardReadJson('dailyTips', []);
     if (tips.length === 0) tips = DEFAULT_TIPS;
 
     // Pick a random tip every time the dashboard loads
@@ -1892,29 +2186,18 @@ function buildTraineeWidgets(container) {
     };
 
     // --- DYNAMIC FEATURE FLAGS ---
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = dashboardReadJson('system_config', {});
     const features = config.features || {};
     if (features.live_assessments === false) delete widgets['live_upcoming'];
     if (features.daily_tips === false) delete widgets['daily_tip'];
 
     // LOAD LAYOUT
-    let layout = JSON.parse(localStorage.getItem('dashLayout_trainee') || 'null');
-    
-    if (!layout) {
-        layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT_TRAINEE));
-    } else {
-        // Smart Merge
-        const existingIds = new Set(layout.map(i => (typeof i === 'string' ? i : i.id)));
-        DEFAULT_LAYOUT_TRAINEE.forEach(def => {
-            if (!existingIds.has(def.id)) {
-                layout.push(def);
-            }
-        });
-    }
+    let layout = getDashboardLayout();
 
-    let gridHtml = '<div class="dash-grid-main" id="dash-grid-container">';
+    let gridHtml = (DASH_EDIT_MODE ? buildDashboardCustomizeTray(layout, widgets) : '') + '<div class="dash-grid-main" id="dash-grid-container">';
     layout.forEach((item, index) => {
         const key = typeof item === 'string' ? item : item.id;
+        if (item && item.hidden) return;
         const col = typeof item === 'object' ? item.col : 1;
         const row = typeof item === 'object' ? item.row : 1;
 
@@ -1924,7 +2207,7 @@ function buildTraineeWidgets(container) {
             widgetHtml = widgetHtml.replace(/data-col="\d+"/, `data-col="${col}"`).replace(/data-row="\d+"/, `data-row="${row}"`);
             
             // Inject Animation Delay
-            const delay = index * 0.2;
+            const delay = Math.min(index * 0.025, 0.18);
             widgetHtml = widgetHtml.replace('draggable="false"', `style="animation-delay: ${delay}s" draggable="false"`);
             
             gridHtml += widgetHtml;
@@ -1953,7 +2236,7 @@ window.updateLiveBannerUI = function() {
     const container = document.getElementById('dashboard-view');
     if (!container) return;
 
-    const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const liveSessions = dashboardReadJson('liveSessions', []);
     const now = Date.now();
     const myLive = liveSessions.find(s => {
         if (!s.trainee || s.trainee.trim().toLowerCase() !== CURRENT_USER.user.trim().toLowerCase() || !s.active) return false;
@@ -1983,11 +2266,7 @@ window.updateLiveBannerUI = function() {
 
 function buildTipManagerHtml() {
     let tips = [];
-    try {
-        tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
-    } catch(e) {
-        tips = [];
-    }
+    tips = dashboardReadJson('dailyTips', []);
     
     let contentHtml = '';
     
