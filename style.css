@@ -3631,7 +3631,7 @@ textarea.auto-expand {
     width: min(1500px, 96vw);
     height: 100%;
     margin: 0 auto;
-    padding: 10px 16px 14px;
+    padding: 10px 16px clamp(76px, 9vh, 116px);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -3695,19 +3695,22 @@ textarea.auto-expand {
 .live-trainee-answer-pane {
     min-height: 0;
     max-height: none;
-    overflow-y: auto;
     padding-right: 10px;
 }
 
 .live-trainee-question-pane {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 10px;
+    overflow: hidden;
 }
 
 .live-question-text {
     min-height: 0;
+    overflow-y: auto;
     overflow-wrap: anywhere;
+    padding-right: 8px;
+    padding-bottom: 4px;
     white-space: pre-wrap;
 }
 
@@ -3740,7 +3743,7 @@ textarea.auto-expand {
 
 .live-trainee-message-panel {
     flex: 0 0 auto;
-    margin-top: auto;
+    margin-top: 0;
     padding: 10px;
     border-radius: 8px;
     background: var(--bg-input);
@@ -3756,6 +3759,7 @@ textarea.auto-expand {
 
 .live-trainee-answer-pane {
     font-size: clamp(0.9rem, 0.82rem + 0.34vw, 1.06rem);
+    overflow-y: auto;
 }
 
 .live-trainee-answer-pane textarea {

@@ -1557,7 +1557,7 @@ const StudyMonitor = {
             btn.id = 'study-restore-btn';
             btn.className = 'btn-primary';
             btn.innerHTML = '<i class="fas fa-book-open"></i> Active Study Session (Click to Return)';
-            btn.style.cssText = 'position:fixed; bottom:40px; right:40px; z-index:99999; box-shadow:0 10px 30px rgba(243, 112, 33, 0.6); border-radius:30px; padding:15px 30px; font-weight:bold; font-size:1.2rem; background: var(--primary); color: white; animation: pulse 2s infinite; border: 3px solid white; cursor: pointer;';
+            btn.style.cssText = 'position:fixed; bottom:12px; left:50%; transform:translateX(-50%); width:min(560px, calc(100vw - 48px)); z-index:99999; box-shadow:0 10px 30px rgba(243, 112, 33, 0.45); border-radius:22px; padding:12px 20px; font-weight:bold; font-size:1rem; background: var(--primary); color: white; animation: pulse 2s infinite; border: 2px solid rgba(255,255,255,0.85); cursor: pointer;';
             btn.onclick = () => StudyMonitor.restoreStudyWindow();
             document.body.appendChild(btn);
         }
