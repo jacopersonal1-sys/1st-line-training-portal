@@ -4,6 +4,7 @@
 
 - Fix: Retrain migration and Insight N/A handling are more reliable for agents moved into new training groups.
 - Improvement: Admin navigation now uses a cleaner Navigation Map with drag-and-drop ordering and quick submenus.
+- Improvement: Live Assessment Arena now adapts question, answer, chat, and action areas better when UI zoom is high.
 - Performance: Trainee login, navigation, embedded modules, and heavy admin views now do less blocking work during startup and tab changes.
 - Stability: App modules now use guarded cache reads so corrupt local data is far less likely to crash login, dashboards, reports, scheduling, vetting, or diagnostics.
 - Release: Version bump to `2.7.0` for stable main-channel rollout.

@@ -202,6 +202,27 @@ function liveEscapeHtml(value) {
         .replace(/'/g, '&#039;');
 }
 
+function getLiveArenaZoomCompaction() {
+    let zoom = 1;
+    try {
+        const localTheme = (typeof liveReadObject === 'function') ? liveReadObject('local_theme_config') : {};
+        const storedZoom = parseFloat(localTheme.zoomLevel);
+        const bodyZoom = parseFloat(document.body && document.body.style ? document.body.style.zoom : '');
+        if (Number.isFinite(storedZoom) && storedZoom > 0) zoom = storedZoom;
+        else if (Number.isFinite(bodyZoom) && bodyZoom > 0) zoom = bodyZoom;
+    } catch (error) {}
+    if (zoom <= 1.05) return 1;
+    return Math.max(0.72, Math.min(1, 1 / zoom + 0.06));
+}
+
+function getLiveQuestionDensityClass(text) {
+    const length = String(text || '').replace(/\s+/g, ' ').trim().length;
+    if (length > 900) return 'live-density-xs';
+    if (length > 620) return 'live-density-sm';
+    if (length > 380) return 'live-density-md';
+    return 'live-density-lg';
+}
+
 function getLiveQuestionMessage(session, qIdx) {
     if (!session || !session.questionMessages || qIdx === undefined || qIdx === null) return null;
     const messages = session.questionMessages;
@@ -253,8 +274,8 @@ function renderAdminQuestionMessagePanel(session, qIdx) {
 
 function renderTraineeQuestionMessagePanel(session, qIdx) {
     return `
-        <div id="trainee-live-question-message-panel" style="margin-top:16px; padding:12px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border-color);">
-            <div style="font-size:0.8rem; font-weight:700; color:#f1c40f; margin-bottom:8px;"><i class="fas fa-comment-dots"></i> Trainer Message</div>
+        <div id="trainee-live-question-message-panel" class="live-trainee-message-panel">
+            <div class="live-message-title"><i class="fas fa-comment-dots"></i> Trainer Message</div>
             <div id="trainee-live-question-message-display">${renderLiveQuestionMessageBubble(session, qIdx, 'trainee')}</div>
         </div>`;
 }
@@ -1122,6 +1143,7 @@ function renderAdminLivePanel(container) {
 
     const session = liveReadObject('liveSession', { active: false });
     const showMiniGames = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin');
+    const arenaScale = getLiveArenaZoomCompaction();
     
     if (!session.active) {
         stopAdminMiniGamesLoops();
@@ -1191,20 +1213,20 @@ function renderAdminLivePanel(container) {
         const timerDisplay = formatTimer(timeLeft);
 
         mainHtml = `
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; height:100%;">
-                <div class="card" style="overflow-y:auto;">
+            <div class="live-admin-question-grid">
+                <div class="card live-admin-preview-card ${getLiveQuestionDensityClass(q.text)}">
                     <h4>Admin Preview (Q${currentQ+1})</h4>
-                    <div style="font-size:1.2rem; font-weight:bold; margin-bottom:15px;">${q.text}</div>
+                    <div class="live-admin-question-text">${q.text}</div>
                     ${refBtn}
                     ${adminNote}
-                    <div style="background:var(--bg-input); padding:10px; border-radius:4px;">
+                    <div class="live-admin-question-meta">
                         <small>Type: ${q.type}</small><br>
                         <small>Points: ${q.points || 1}</small>
                     </div>
                     ${renderAdminQuestionMessagePanel(session, currentQ)}
                 </div>
                 
-                <div class="card admin-interaction-active" style="display:flex; flex-direction:column; gap:15px;">
+                <div class="card admin-interaction-active live-admin-control-card">
                     <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color);">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                             <label style="font-size:0.8rem; font-weight:bold; margin:0;">Question Timer</label>
@@ -1217,7 +1239,7 @@ function renderAdminLivePanel(container) {
                         </div>
                     </div>
 
-                    <div id="live-admin-answer-box" style="background:#000; color:#0f0; padding:10px; border-radius:4px; font-family:monospace; min-height:60px;">
+                    <div id="live-admin-answer-box" class="live-admin-answer-box">
                         <strong>TRAINEE ANSWER:</strong><br>
                         ${formatAdminAnswerPreview(q, rawAns)}
                     </div>
@@ -1234,7 +1256,7 @@ function renderAdminLivePanel(container) {
                     
                     ${showMiniGames ? renderAdminMiniGamesPanel() : ''}
 
-                    <div style="margin-top:auto; display:flex; justify-content:space-between;">
+                    <div class="live-admin-actions">
                         <button class="btn-secondary" onclick="adminPushQuestion(${currentQ-1})" ${currentQ===0?'disabled':''}>&lt; Prev</button>
                         ${currentQ < totalQ - 1 
                             ? `<button class="btn-primary" onclick="adminPushQuestion(${currentQ+1})">Next Question &gt;</button>` 
@@ -1249,14 +1271,14 @@ function renderAdminLivePanel(container) {
     let wrapper = document.getElementById('admin-live-wrapper');
     if (!wrapper || wrapper.dataset.sessionId !== session.sessionId) {
         container.innerHTML = `
-            <div id="admin-live-wrapper" data-session-id="${session.sessionId}" style="display:flex; height:calc(100vh - 180px); gap:10px;">
-                <div style="width:200px; background:var(--bg-card); border-right:1px solid var(--border-color); overflow-y:auto; display:flex; flex-direction:column;">
-                    <div style="padding:10px; font-weight:bold; background:var(--bg-input); position:sticky; top:0; z-index:1;">Questions</div>
+            <div id="admin-live-wrapper" class="live-admin-shell" data-session-id="${session.sessionId}" style="zoom:${arenaScale};">
+                <div class="live-admin-sidebar">
+                    <div class="live-admin-sidebar-title">Questions</div>
                     <div id="admin-live-sidebar-list" style="flex:1;"></div>
                 </div>
-                <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border-color); margin-bottom:10px;">
-                        <div style="display:flex; align-items:center; gap:15px;">
+                <div class="live-admin-main-shell">
+                    <div class="live-admin-header">
+                        <div class="live-admin-session-meta">
                             ${getAvatarHTML(session.trainee, 48)}
                             <div>
                                 <div style="display:flex; align-items:center; gap:10px;">
@@ -1276,7 +1298,7 @@ function renderAdminLivePanel(container) {
                         </div>
                         <button class="btn-danger btn-sm" onclick="endLiveSession()">Abort Session</button>
                     </div>
-                    <div id="admin-live-main-area" style="flex:1;"></div>
+                    <div id="admin-live-main-area" class="live-admin-main-area"></div>
                 </div>
             </div>`;
 
@@ -1465,10 +1487,11 @@ function renderTraineeLivePanel(container) {
     let wrapper = document.getElementById('trainee-live-wrapper');
     if (!wrapper || wrapper.dataset.sessionId !== session.sessionId) {
         const timer = session.timer || { active: false, duration: 300, start: null };
+        const arenaScale = getLiveArenaZoomCompaction();
         container.innerHTML = `
-            <div id="trainee-live-wrapper" data-session-id="${session.sessionId}" style="max-width:95%; margin:0 auto; padding:20px;">
-                <div style="margin-bottom:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div id="trainee-live-wrapper" class="live-trainee-shell" data-session-id="${session.sessionId}" style="zoom:${arenaScale};">
+                <div class="live-trainee-header">
+                    <div class="live-trainee-title-row">
                         <h2 style="margin:0;">Live Assessment</h2>
                         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
                             <button class="btn-secondary btn-sm" style="width:auto;" onclick="openStudyNotesAssist('popup')" title="Open Study Notes without leaving this live session">
@@ -1479,14 +1502,14 @@ function renderTraineeLivePanel(container) {
                             </div>
                         </div>
                     </div>
-                    <div id="live-conn-status-trainee" style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
+                    <div id="live-conn-status-trainee" class="live-trainee-connection">
                         Checking connection...
                     </div>
-                    <div id="traineeTimerDisplay" style="text-align:center; font-size:1.5rem; font-weight:bold; color:${timer.active ? '#e74c3c' : 'var(--text-muted)'}; margin-top:10px;">
+                    <div id="traineeTimerDisplay" class="live-trainee-timer" style="color:${timer.active ? '#e74c3c' : 'var(--text-muted)'};">
                         ${formatTimer(calculateTimeLeft(timer))}
                     </div>
                 </div>
-                <div class="progress-track" style="margin-bottom:20px;">
+                <div class="progress-track live-trainee-progress">
                     <div id="trainee-live-progress" class="progress-fill" style="width:0%"></div>
                 </div>
                 <div id="trainee-live-main"></div>
@@ -1572,22 +1595,27 @@ function renderTraineeLivePanel(container) {
 
     btnText = (q.type === 'live_practical') ? 'Done' : (isSubmitted ? 'Update Answer' : 'Submit Answer');
     
+    const densityClass = getLiveQuestionDensityClass(q.text);
+
     // Reference Button
-    const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
+    const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm live-question-reference" onclick="openReferenceViewer('${q.imageLink}')"><i class="fas fa-image"></i> View Reference</button>` : '';
     
         mainContent = `
-        <div class="card" style="padding:40px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start;">
-                <div class="q-text-large" style="font-size:1.5rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
-                    <div>${session.currentQ + 1}. ${q.text} ${refBtn} <span style="font-size:1rem; color:var(--text-muted); font-weight:normal; margin-left:10px;">(${q.points || 1} pts)</span></div>
+        <div class="card live-trainee-card ${densityClass}">
+            <div class="live-trainee-grid">
+                <div class="q-text-large live-trainee-question-pane">
+                    <div class="live-question-text">
+                        <div class="live-question-main">${session.currentQ + 1}. ${q.text}</div>
+                        <div class="live-question-meta">${refBtn}<span>(${q.points || 1} pts)</span></div>
+                    </div>
                     ${renderTraineeQuestionMessagePanel(session, session.currentQ)}
                 </div>
-                <div class="live-input-area" style="font-size:1.2rem; max-height: 65vh; overflow-y: auto; padding-right:15px;">
+                <div class="live-input-area live-trainee-answer-pane">
                     ${inputHtml}
                 </div>
             </div>
-            <div style="margin-top:40px; text-align:right; display:flex; justify-content:flex-end; align-items:center; gap:15px;">
-                ${isSubmitted ? '<span id="submit-status" style="color:#2ecc71; font-weight:bold; font-size:1.1rem;"><i class="fas fa-check-circle"></i> Answer Submitted</span>' : '<span id="submit-status"></span>'}
+            <div class="live-trainee-actions">
+                ${isSubmitted ? '<span id="submit-status" class="live-submit-status is-submitted"><i class="fas fa-check-circle"></i> Answer Submitted</span>' : '<span id="submit-status" class="live-submit-status"></span>'}
                 <button class="btn-primary btn-lg" onclick="submitLiveAnswer(${session.currentQ})">${btnText}</button>
             </div>
         </div>`;
@@ -1607,9 +1635,7 @@ function renderTraineeLivePanel(container) {
         const statusSpan = document.getElementById('submit-status');
         if (statusSpan && isSubmitted && !statusSpan.innerHTML.includes('Answer Submitted')) {
              statusSpan.innerHTML = '<i class="fas fa-check-circle"></i> Answer Submitted';
-             statusSpan.style.color = '#2ecc71';
-             statusSpan.style.fontWeight = 'bold';
-             statusSpan.style.fontSize = '1.1rem';
+             statusSpan.classList.add('is-submitted');
         }
         const btn = mainEl.querySelector('.btn-primary.btn-lg');
         if (btn && q) {
@@ -1914,9 +1940,7 @@ async function submitLiveAnswer(qIdx) {
         const statusSpan = document.getElementById('submit-status');
         if(statusSpan) {
             statusSpan.innerHTML = '<i class="fas fa-check-circle"></i> Answer Submitted';
-            statusSpan.style.color = '#2ecc71';
-            statusSpan.style.fontWeight = 'bold';
-            statusSpan.style.fontSize = '1.1rem';
+            statusSpan.classList.add('is-submitted');
         }
     }
 }

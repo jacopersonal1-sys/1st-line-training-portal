@@ -5303,6 +5303,7 @@ function getChangelog(version) {
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Retrain migration and Insight N/A handling are more reliable for agents moved into new training groups.</li>
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Admin navigation now uses a cleaner Navigation Map with drag-and-drop ordering and quick submenus.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Live Assessment Arena now adapts question, answer, chat, and action areas better when UI zoom is high.</li>
                 <li style="margin-bottom: 8px;"><strong>Performance:</strong> Trainee login, navigation, embedded modules, and heavy admin views now do less blocking work during startup and tab changes.</li>
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> App modules now use guarded cache reads so corrupt local data is far less likely to crash login, dashboards, reports, scheduling, vetting, or diagnostics.</li>
             </ul>`,

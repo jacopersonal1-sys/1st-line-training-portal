@@ -3592,6 +3592,17 @@ textarea.auto-expand {
 .sec-warn { color: #f1c40f; }
 
 /* ================= LIVE ASSESSMENT ARENA ================= */
+#live-execution {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+#live-execution-content {
+    min-height: 0;
+    overflow: hidden;
+}
+
 .live-q-item {
     transition: background 0.2s, color 0.2s;
 }
@@ -3609,6 +3620,302 @@ textarea.auto-expand {
     border-radius: 8px;
     border: 1px solid var(--border-color);
     overflow-y: auto; /* Fix for long answers */
+}
+
+.live-trainee-shell,
+.live-admin-shell {
+    transform-origin: top center;
+}
+
+.live-trainee-shell {
+    width: min(1500px, 96vw);
+    height: 100%;
+    margin: 0 auto;
+    padding: 10px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.live-trainee-header {
+    flex: 0 0 auto;
+    margin-bottom: 8px;
+}
+
+.live-trainee-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.live-trainee-connection {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.live-trainee-timer {
+    text-align: center;
+    font-size: clamp(1.05rem, 1rem + 0.45vw, 1.45rem);
+    font-weight: 800;
+    margin-top: 6px;
+    line-height: 1.1;
+}
+
+.live-trainee-progress {
+    flex: 0 0 auto;
+    margin-bottom: 10px !important;
+}
+
+#trainee-live-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+}
+
+.live-trainee-card {
+    width: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: clamp(14px, 1.2vw, 24px);
+}
+
+.live-trainee-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+    gap: clamp(14px, 1.7vw, 26px);
+    align-items: stretch;
+}
+
+.live-trainee-question-pane,
+.live-trainee-answer-pane {
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+.live-trainee-question-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.live-question-text {
+    min-height: 0;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.live-question-main {
+    font-size: var(--live-question-size, 1.18rem);
+    line-height: 1.22;
+    font-weight: 700;
+}
+
+.live-density-lg { --live-question-size: clamp(1.05rem, 0.9rem + 0.75vw, 1.38rem); }
+.live-density-md { --live-question-size: clamp(0.96rem, 0.86rem + 0.55vw, 1.2rem); }
+.live-density-sm { --live-question-size: clamp(0.88rem, 0.82rem + 0.42vw, 1.06rem); }
+.live-density-xs { --live-question-size: clamp(0.8rem, 0.76rem + 0.32vw, 0.96rem); }
+
+.live-question-meta {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.live-question-reference {
+    float: none !important;
+    margin: 0 !important;
+}
+
+.live-trainee-message-panel {
+    flex: 0 0 auto;
+    margin-top: auto;
+    padding: 10px;
+    border-radius: 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+}
+
+.live-message-title {
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #f1c40f;
+    margin-bottom: 6px;
+}
+
+.live-trainee-answer-pane {
+    font-size: clamp(0.9rem, 0.82rem + 0.34vw, 1.06rem);
+}
+
+.live-trainee-answer-pane textarea {
+    min-height: 110px;
+}
+
+.live-trainee-actions {
+    flex: 0 0 auto;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.live-trainee-actions .btn-lg {
+    width: auto;
+    min-width: 150px;
+    padding: 11px 18px;
+    font-size: 0.98rem;
+}
+
+.live-submit-status {
+    min-height: 22px;
+    color: var(--text-muted);
+}
+
+.live-submit-status.is-submitted {
+    color: #2ecc71;
+    font-weight: 800;
+    font-size: 0.98rem;
+}
+
+.live-admin-shell {
+    display: flex;
+    height: calc(100vh - 180px);
+    gap: 10px;
+}
+
+.live-admin-sidebar {
+    width: 180px;
+    background: var(--bg-card);
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    border-radius: 8px;
+}
+
+.live-admin-sidebar-title {
+    padding: 10px;
+    font-weight: 800;
+    background: var(--bg-input);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.live-admin-main-shell {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.live-admin-header {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 10px;
+}
+
+.live-admin-session-meta {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    min-width: 0;
+}
+
+.live-admin-main-area {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.live-admin-question-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    gap: 16px;
+    height: 100%;
+    min-height: 0;
+}
+
+.live-admin-preview-card,
+.live-admin-control-card {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.live-admin-question-text {
+    font-size: var(--live-question-size, 1.08rem);
+    line-height: 1.25;
+    font-weight: 750;
+    margin-bottom: 12px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.live-admin-question-meta {
+    background: var(--bg-input);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    margin-top: 10px;
+}
+
+.live-admin-control-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.live-admin-answer-box {
+    background: #050806;
+    color: #7dff8c;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(125,255,140,0.25);
+    font-family: Consolas, monospace;
+    min-height: 60px;
+    max-height: 24vh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+
+.live-admin-actions {
+    margin-top: auto;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+    .live-trainee-grid,
+    .live-admin-question-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .live-admin-sidebar {
+        width: 130px;
+    }
 }
 
 /* ================= AGENT SEARCH ================= */
