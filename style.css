@@ -3592,7 +3592,11 @@ textarea.auto-expand {
 .sec-warn { color: #f1c40f; }
 
 /* ================= LIVE ASSESSMENT ARENA ================= */
-#live-execution {
+#live-execution:not(.active) {
+    display: none !important;
+}
+
+#live-execution.active {
     display: flex;
     flex-direction: column;
     min-height: 0;
