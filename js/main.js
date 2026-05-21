@@ -5299,6 +5299,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.1": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Live Assessment Arena now stays hidden unless its own tab is active, preventing arena visuals from bleeding into other application views.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> The active study-session return button is less intrusive and live trainee controls reserve space so action buttons stay visible.</li>
+            </ul>`,
         "2.7.0": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Retrain migration and Insight N/A handling are more reliable for agents moved into new training groups.</li>

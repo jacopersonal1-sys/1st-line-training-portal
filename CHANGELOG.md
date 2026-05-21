@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.1 - 2026-05-21
+
+- Hotfix: Live Assessment Arena is now hidden unless its own tab is active, preventing the arena layout/background from bleeding into unrelated application views.
+- Polish: The active study-session return button is less intrusive and the live trainee arena reserves bottom space so action buttons stay visible.
+- Release: Version bump to `2.7.1` for stable main-channel rollout.
+
+> Release target: stable main channel.
+
 ## 2.7.0 - 2026-05-21
 
 - Fix: Retrain migration and Insight N/A handling are more reliable for agents moved into new training groups.
