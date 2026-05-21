@@ -1,9 +1,39 @@
 # Changelog
 
+## 2.7.0 - 2026-05-21
+
+- Fix: Retrain migration and Insight N/A handling are more reliable for agents moved into new training groups.
+- Improvement: Admin navigation now uses a cleaner Navigation Map with drag-and-drop ordering and quick submenus.
+- Performance: Trainee login, navigation, embedded modules, and heavy admin views now do less blocking work during startup and tab changes.
+- Stability: App modules now use guarded cache reads so corrupt local data is far less likely to crash login, dashboards, reports, scheduling, vetting, or diagnostics.
+- Release: Version bump to `2.7.0` for stable main-channel rollout.
+
+> Release target: stable main channel.
+
 ## 2.6.99 - 2026-05-20
 
 - Hotfix: Trainee Portal fresh-pull loading no longer replaces the embedded portal iframe during login.
 - Fix: If the trainee portal iframe is missing when a refresh runs, the loader remounts it instead of leaving trainees stuck on the loading card.
+- Fix: Agent migration now safely handles local storage buckets that contain literal `undefined` values instead of failing with `"undefined" is not valid JSON`.
+- Fix: Insight Studio's Migrate action opens the host group selector immediately, then refreshes server data after the target group is confirmed.
+- Safety: Retrying a recent failed retrain migration for the same agent and target group now resumes the existing retrain archive and merges any remaining live rows before cleanup.
+- Safety: Retrain archives now calculate official progress from the Agent Progress Builder snapshot and count valid N/A marks even when the agent was already pulled between groups.
+- Polish: Admin sidebar advanced mode is now a cleaner Navigation Map with priority rows, compact destination tiles, and no visible mini group labels.
+- Feature: Navigation Map order can now be changed with drag-and-drop directly from the expanded sidebar or the local customizer, with the first six destinations becoming priority rows.
+- Improvement: Navigation Map shortcuts now open as clean inline dropdowns only when requested, keeping the sidebar uncluttered.
+- Improvement: Navigation Map now includes shortcut dropdowns for Insight, OPL Hub, Schedule Studio, Live Assessment schedules, Content Creator, Teamleader Hub, Vetting Arena, and Data Studio where those modules expose subviews.
+- Performance: Navigation now avoids repeated embedded-theme injection, full-page responsive-table rescans, hidden Admin Tools renders, and unnecessary forced server refreshes on normal admin tab changes.
+- Stability: Realtime setup now ignores duplicate same-user channel starts, and boot/notification storage reads are hardened against corrupt JSON cache values.
+- Stability: Shared utilities plus Test Builder, Test History, and Capture Scores now handle corrupt local cache values more defensively, and app-wide notification/update/lunch intervals are guarded against duplicate startup registration.
+- Stability: Study Monitor now uses defensive cache reads for monitor data, history, whitelists, schedules, users, and trainee bookmarks so corrupted local storage cannot crash activity views or background tracking.
+- Performance: Schedule Studio host rendering no longer performs a full server refresh just because a legacy `renderSchedule()` caller touched the replaced schedule tab.
+- Stability: The remaining active `schedule.js` Live Assessment Booking paths now read schedules, live schedules, bookings, live sessions, rosters, records, submissions, and repair archives defensively.
+- Stability: Admin System maintenance/migration tools and Live Assessment Execution now tolerate corrupt local cache values instead of crashing on bad JSON while reading live sessions, row counts, records, users, or system config.
+- Stability: Admin Users, Department Overview analytics, and trainee assessment screens now use defensive cache reads for users, rosters, submissions, schedules, records, notifications, and progress data.
+- Stability: Reporting, Agent Search, AI diagnostics, and Dashboard widgets now use defensive cache reads for saved reports, archives, link requests, notices, bookmarks, tips, and system-wide diagnostic data.
+- Stability: Assessment Admin marking, quick approve, history review, marking leases, and marker note updates now use defensive cache reads for submissions, records, tests, rosters, and sync hash maps.
+- Stability: Main shell, NPS, Vetting runtimes, Insight rules, attendance, and admin assessment workflows now avoid raw local storage JSON parsing in their larger hot paths.
+- Stability: Login/auth, calendar, diagnostics, Content Studio, Team Hub, OPL Hub, Q&A Hub, Insight Studio helpers, and Vetting Rework now use guarded cache reads instead of direct local storage JSON parsing.
 - Verification: `node --check js\main.js`, `node --check js\trainee_portal_loader.js`, and full Jest passed.
 
 > Release target: stable main channel.

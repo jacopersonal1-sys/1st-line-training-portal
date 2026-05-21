@@ -59,16 +59,28 @@ const QAData = {
         return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     },
 
+    readObject(key) {
+        if (typeof safeLocalParse === 'function') {
+            const parsed = safeLocalParse(key, {});
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        }
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (error) {
+            console.warn(`[Q&A Hub] Ignored invalid local data for ${key}:`, error);
+            return {};
+        }
+    },
+
     getEditor() {
         return AppContext.user && AppContext.user.user ? AppContext.user.user : 'Admin';
     },
 
     getStore() {
-        try {
-            return this.normalize(JSON.parse(localStorage.getItem(QA_LOCAL_CACHE_KEY) || '{}'));
-        } catch (error) {
-            return this.defaultStore();
-        }
+        return this.normalize(this.readObject(QA_LOCAL_CACHE_KEY));
     },
 
     setLocal(store) {

@@ -15,8 +15,30 @@ function normalizeAgentSearchIdentity(value) {
         .replace(/\s+/g, '');
 }
 
+function readAgentSearchJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`Agent Search ignored invalid local data for ${key}:`, e);
+        return fallback;
+    }
+}
+
+function readAgentSearchArray(key) {
+    const value = readAgentSearchJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function readAgentSearchObject(key) {
+    const value = readAgentSearchJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 function readGraduatedArchive() {
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const graduates = readAgentSearchArray('graduated_agents');
     return (graduates || []).filter(g => {
         const reason = String((g && g.reason) || '').toLowerCase().trim();
         return !reason.startsWith('moved to ');
@@ -24,8 +46,8 @@ function readGraduatedArchive() {
 }
 
 function readRetrainArchive() {
-    const primary = JSON.parse(localStorage.getItem('retrain_archives') || '[]');
-    const legacyMoved = (JSON.parse(localStorage.getItem('graduated_agents') || '[]') || []).filter(g => {
+    const primary = readAgentSearchArray('retrain_archives');
+    const legacyMoved = readAgentSearchArray('graduated_agents').filter(g => {
         const reason = String((g && g.reason) || '').toLowerCase().trim();
         return reason.startsWith('moved to ');
     });
@@ -107,8 +129,8 @@ function loadAgentSearch() {
     });
     
     // Populate Datalist
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const users = readAgentSearchArray('users');
+    const rosters = readAgentSearchObject('rosters');
     const graduates = readGraduatedArchive();
     const retrainArchives = readRetrainArchive();
     
@@ -184,16 +206,16 @@ function renderAgentDashboard(agentName, attemptKey = '') {
     const target = String(agentName || '').toLowerCase();
     const identityMatch = (value) => String(value || '').toLowerCase() === target;
 
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
-    const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
-    const attRecords = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const exemptions = JSON.parse(localStorage.getItem('exemptions') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const notesMap = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+    const users = readAgentSearchArray('users');
+    const records = readAgentSearchArray('records');
+    const submissions = readAgentSearchArray('submissions');
+    const reports = readAgentSearchArray('savedReports');
+    const reviews = readAgentSearchArray('insightReviews');
+    const attRecords = readAgentSearchArray('attendance_records');
+    const liveBookings = readAgentSearchArray('liveBookings');
+    const exemptions = readAgentSearchArray('exemptions');
+    const rosters = readAgentSearchObject('rosters');
+    const notesMap = readAgentSearchObject('agentNotes');
 
     const agentRecordsActive = records.filter(r => identityMatch(r.trainee || r.user || r.user_id));
     const agentSubsActive = submissions.filter(s => identityMatch(s.trainee || s.user || s.user_id));
@@ -614,7 +636,7 @@ function renderAgentDashboard(agentName, attemptKey = '') {
     `;
 
     // --- ACTIVITY HISTORY (NEW) ---
-    const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+    const history = readAgentSearchArray('monitor_history');
     const agentHistory = history.filter(h => h.user === agentName).sort((a,b) => new Date(b.date) - new Date(a.date));
     
     let activityHtml = `
@@ -723,7 +745,7 @@ async function saveAgentNote(username) {
     const content = input.value.trim();
     if (!content) return;
 
-    const notesMap = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+    const notesMap = readAgentSearchObject('agentNotes');
     let userNotes = notesMap[username];
 
     // Normalize legacy

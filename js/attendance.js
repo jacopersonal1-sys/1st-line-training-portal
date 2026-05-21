@@ -7,6 +7,28 @@ let attendanceMonitorInterval = null;
 let attendanceAdminPendingRefresh = false;
 let attendanceAdminLastRenderKey = '';
 
+function attendanceReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`Attendance ignored invalid local data for ${key}:`, error);
+        return fallback;
+    }
+}
+
+function attendanceReadArray(key) {
+    const value = attendanceReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function attendanceReadObject(key) {
+    const value = attendanceReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 function normalizeAttendanceUser(value) {
     try {
         if (typeof normalizeIdentityValue === 'function') {
@@ -72,10 +94,7 @@ function dedupeAttendanceRecords(records) {
 }
 
 function readAttendanceRecords() {
-    const rows = (typeof safeLocalParse === 'function')
-        ? safeLocalParse('attendance_records', [])
-        : JSON.parse(localStorage.getItem('attendance_records') || '[]');
-    return dedupeAttendanceRecords(Array.isArray(rows) ? rows : []);
+    return dedupeAttendanceRecords(attendanceReadArray('attendance_records'));
 }
 
 function writeAttendanceRecords(records) {
@@ -163,7 +182,7 @@ function checkAttendanceStatus() {
     const hour = now.getHours();
 
     // DYNAMIC CONFIG
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = attendanceReadObject('system_config');
     const endHour = config.attendance ? parseInt(config.attendance.work_end.split(':')[0]) : 17;
     const allowWeekend = config.attendance && config.attendance.allow_weekend_login === true;
 
@@ -197,7 +216,7 @@ function checkClockOutReminder() {
     const day = now.getDay();
     const hour = now.getHours();
     const min = now.getMinutes();
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = attendanceReadObject('system_config');
     const allowWeekend = config.attendance && config.attendance.allow_weekend_login === true;
 
     if ((day === 0 || day === 6) && !allowWeekend) return;
@@ -263,7 +282,7 @@ function openClockInModal() {
     
     // Check Time (8:00 AM Cutoff)
     const now = new Date();
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = attendanceReadObject('system_config');
     const startStr = config.attendance ? config.attendance.work_start : "08:00";
     const [startH, startM] = startStr.split(':').map(Number);
     const cutoff = new Date();
@@ -298,7 +317,7 @@ window.showLunchModal = function() {
 };
 
 window.takeLunchBreak = function() {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = attendanceReadObject('system_config');
     const duration = config.attendance ? (config.attendance.lunch_duration || 60) : 60;
     const lunchEndTime = Date.now() + (duration * 60000);
     localStorage.setItem('lunch_end_time', lunchEndTime.toString());
@@ -308,7 +327,7 @@ window.takeLunchBreak = function() {
 };
 
 function populateAttendanceDropdowns() {
-    const settings = JSON.parse(localStorage.getItem('attendance_settings') || '{"platforms":[], "contacts":[]}');
+    const settings = attendanceReadJson('attendance_settings', { platforms: [], contacts: [] });
     
     const platSel = document.getElementById('attPlatform');
     const contactSel = document.getElementById('attContact');
@@ -345,7 +364,7 @@ async function submitClockIn() {
     
     // Late Check
     const cutoff = new Date();
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = attendanceReadObject('system_config');
     const startStr = config.attendance ? config.attendance.work_start : "08:00";
     const [startH, startM] = startStr.split(':').map(Number);
     cutoff.setHours(startH, startM, 0, 0);
@@ -519,8 +538,8 @@ function populateAttendanceGroupSelect() {
     const sel = document.getElementById('attAdminGroupSelect');
     if(!sel) return;
     const previousValue = sel.value;
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const rosters = attendanceReadObject('rosters');
+    const schedules = attendanceReadObject('schedules');
     sel.innerHTML = '';
     Object.keys(rosters).sort().reverse().forEach(gid => {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
@@ -555,12 +574,12 @@ function renderAttendanceRegister(options = {}) {
         return;
     }
 
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = attendanceReadObject('rosters');
     const records = readAttendanceRecords();
     let members = [];
 
     if (gid === 'active_schedules') {
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const schedules = attendanceReadObject('schedules');
         Object.values(schedules).forEach(s => {
             if(s.assigned && rosters[s.assigned]) {
                 members = [...members, ...rosters[s.assigned]];

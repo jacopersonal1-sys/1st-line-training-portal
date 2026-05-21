@@ -8,7 +8,19 @@ const ContentStudioLoader = {
         const testId = payload && payload.testId ? String(payload.testId) : '';
         if (!testId) return;
 
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const tests = (typeof safeLocalParse === 'function')
+            ? safeLocalParse('tests', [])
+            : (() => {
+                try {
+                    const raw = localStorage.getItem('tests');
+                    if (!raw || raw === 'undefined' || raw === 'null') return [];
+                    const parsed = JSON.parse(raw);
+                    return Array.isArray(parsed) ? parsed : [];
+                } catch (error) {
+                    console.warn('Content Studio ignored invalid local tests data:', error);
+                    return [];
+                }
+            })();
         const linked = tests.find(t => String(t.id) === testId);
         if (!linked) {
             if (typeof showToast === 'function') showToast('Linked quiz test was not found in Test Engine.', 'warning');

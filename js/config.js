@@ -9,6 +9,22 @@ window.CLOUD_CREDENTIALS = {
     key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE'
 };
 
+function configReadObject(key) {
+    if (typeof safeLocalParse === 'function') {
+        const parsed = safeLocalParse(key, {});
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    }
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+        console.warn(`Config ignored invalid local data for ${key}:`, error);
+        return {};
+    }
+}
+
 // --- NEW: DYNAMIC CLIENT INITIALIZATION ---
 window.initSupabaseClient = function() {
     // EMERGENCY RESCUE: Force all stranded clients to point to the new Local VM as the primary server.
@@ -21,13 +37,13 @@ window.initSupabaseClient = function() {
     }
     
     let activeTarget = localStorage.getItem('active_server_target') || 'cloud';
-    const systemConfig = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const systemConfig = configReadObject('system_config');
     const localSettings = systemConfig.server_settings || {};
 
     let SUPABASE_URL = window.CLOUD_CREDENTIALS.url;
     let SUPABASE_ANON_KEY = window.CLOUD_CREDENTIALS.key;
 
-    const stagingCreds = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
+    const stagingCreds = configReadObject('staging_credentials');
 
     if (activeTarget === 'staging' && stagingCreds.url && stagingCreds.key) {
         console.log("Using STAGING Server Credentials");

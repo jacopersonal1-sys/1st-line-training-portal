@@ -295,7 +295,19 @@ function recordAnswer(qIdx, val) {
     }
     // Live Arena: Persist answer locally to session immediately
     if (window.IS_LIVE_ARENA) {
-        const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        const session = (typeof safeLocalParse === 'function')
+            ? safeLocalParse('liveSession', {})
+            : (() => {
+                try {
+                    const raw = localStorage.getItem('liveSession');
+                    if (!raw || raw === 'undefined' || raw === 'null') return {};
+                    const parsed = JSON.parse(raw);
+                    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+                } catch (error) {
+                    console.warn('Assessment ignored invalid local live session data:', error);
+                    return {};
+                }
+            })();
         if (session.active && session.currentQ === qIdx) {
             if (!session.answers) session.answers = {};
             session.answers[qIdx] = val;

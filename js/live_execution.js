@@ -14,8 +14,30 @@ function normalizeLiveText(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+function liveReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`Live execution ignored invalid local data for ${key}:`, e);
+        return fallback;
+    }
+}
+
+function liveReadArray(key) {
+    const value = liveReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function liveReadObject(key, fallback = {}) {
+    const value = liveReadJson(key, fallback);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
 function getLiveBookingById(bookingId) {
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const bookings = liveReadArray('liveBookings');
     return bookings.find(b => String(b.id) === String(bookingId)) || null;
 }
 
@@ -35,13 +57,13 @@ function cleanupLocalLiveSessionState(sessionId) {
         localStorage.removeItem('currentLiveSessionId');
     }
 
-    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    let allSessions = liveReadArray('liveSessions');
     allSessions = Array.isArray(allSessions) ? allSessions : [];
     const nextSessions = allSessions.filter(s => String((s && s.sessionId) || '') !== String(sessionId));
     localStorage.setItem('liveSessions', JSON.stringify(nextSessions));
     if (typeof emitDataChange === 'function') emitDataChange('liveSessions', 'local_close_cleanup');
 
-    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const localSession = liveReadObject('liveSession');
     if (localSession && String(localSession.sessionId || '') === String(sessionId)) {
         localStorage.setItem('liveSession', JSON.stringify({ active: false, sessionId }));
     }
@@ -50,7 +72,7 @@ function cleanupLocalLiveSessionState(sessionId) {
 function releaseTraineeLiveArena(reason = 'ended') {
     if (!CURRENT_USER || CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') return;
 
-    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const localSession = liveReadObject('liveSession');
     const sessionId = localStorage.getItem('currentLiveSessionId') || localSession.sessionId || '';
     if (sessionId) cleanupLocalLiveSessionState(sessionId);
     else localStorage.setItem('liveSession', JSON.stringify({ active: false, endedAt: Date.now(), reason }));
@@ -112,7 +134,7 @@ function resolveLiveTestDefinition(tests, assessmentName, assessmentId) {
 
 function resolveLiveTestForSession(session) {
     if (!session || typeof session !== 'object') return null;
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = liveReadArray('tests');
     const direct = Array.isArray(tests) ? tests.find(t => String(t.id) === String(session.testId)) : null;
     if (direct && Array.isArray(direct.questions)) return direct;
 
@@ -238,7 +260,7 @@ function renderTraineeQuestionMessagePanel(session, qIdx) {
 }
 
 function updateLiveQuestionMessageViews(session) {
-    const activeSession = session || JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const activeSession = session || liveReadObject('liveSession');
     if (!activeSession || activeSession.currentQ === undefined || activeSession.currentQ === -1) return;
     const qIdx = activeSession.currentQ;
 
@@ -288,7 +310,7 @@ function runLiveHardSyncCheck() {
     const liveTab = document.getElementById('live-execution');
     if (liveTab && !liveTab.classList.contains('active')) return;
 
-    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const localSession = liveReadObject('liveSession');
     const sessionId = localStorage.getItem('currentLiveSessionId') || localSession.sessionId || '';
     if (!sessionId) return;
 
@@ -330,7 +352,7 @@ function loadLiveExecution() {
 // --- NEW: GLOBAL REJOIN LOGIC ---
 window.rejoinLiveSession = function(sessionId) {
     localStorage.setItem('currentLiveSessionId', sessionId);
-    const allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const allSessions = liveReadArray('liveSessions');
     const target = allSessions.find(s => s.sessionId === sessionId);
     if (target) {
         localStorage.setItem('liveSession', JSON.stringify(target));
@@ -370,7 +392,7 @@ function enforceTraineeLiveArenaFocus(session) {
 async function syncLiveSessionState() {
     // READ FROM REALTIME CACHE INSTEAD OF HAMMERING DATABASE
     // The data.js WebSocket listener automatically keeps this array perfectly up to date with 0 latency.
-    const allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const allSessions = liveReadArray('liveSessions');
     
     processLiveSessionState(allSessions);
 }
@@ -391,7 +413,7 @@ function processLiveSessionState(allSessions) {
 
     // FIND MY RELEVANT SESSION
     let myServerSession = null;
-    const localSession = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+    const localSession = liveReadObject('liveSession', { active: false });
 
     if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
         // Admin: Prefer the session we are explicitly viewing
@@ -464,7 +486,7 @@ function processLiveSessionState(allSessions) {
 
     // PRESERVE LOCAL ANSWERS (Trainee Only)
     if (CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin' && CURRENT_USER.role !== 'special_viewer' && myServerSession.active) {
-        const currentLocal = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        const currentLocal = liveReadObject('liveSession');
         if (currentLocal.answers) {
             myServerSession.answers = { ...myServerSession.answers, ...currentLocal.answers };
         }
@@ -482,7 +504,7 @@ function processLiveSessionState(allSessions) {
 
         // Trainee: Detect Ping Request
         if (myServerSession.diagnosticReq && myServerSession.diagnosticReq !== localSession.diagnosticReq) {
-            const netLogs = JSON.parse(localStorage.getItem('network_diagnostics') || '[]');
+            const netLogs = liveReadArray('network_diagnostics');
             myServerSession.diagnosticRes = {
                 timestamp: Date.now(),
                 network: netLogs.length > 0 ? netLogs[netLogs.length-1] : null
@@ -529,7 +551,7 @@ function processLiveSessionState(allSessions) {
                     if (typeof REALTIME_SAVE_TIMEOUT !== 'undefined' && REALTIME_SAVE_TIMEOUT) {
                         clearTimeout(REALTIME_SAVE_TIMEOUT);
                         REALTIME_SAVE_TIMEOUT = null;
-                        const sessionToSave = JSON.parse(localStorage.getItem('liveSession') || '{}');
+                        const sessionToSave = liveReadObject('liveSession');
                         if (typeof updateGlobalSessionArray === 'function') updateGlobalSessionArray(sessionToSave, true).catch(()=>{});
                     }
 
@@ -1098,7 +1120,7 @@ function renderAdminLivePanel(container) {
     // FIX: Do not re-render if we are in the Summary/Finish view
     if (document.getElementById('live-summary-view')) return;
 
-    const session = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+    const session = liveReadObject('liveSession', { active: false });
     const showMiniGames = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin');
     
     if (!session.active) {
@@ -1114,7 +1136,7 @@ function renderAdminLivePanel(container) {
     }
 
     // Load Test Data
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = liveReadArray('tests');
     const test = tests.find(t => t.id == session.testId);
     
     if (!test) {
@@ -1283,11 +1305,11 @@ function renderAdminLivePanel(container) {
 
 function updateAdminLiveView() {
     // Helper to update just the answer box without redrawing inputs (preserves focus)
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     if (!session || !session.active) return;
     
     // Load current test definition once (used by both answer box and sidebar)
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = liveReadArray('tests');
     const test = tests.find(t => t.id == session.testId);
     if (!test) return;
 
@@ -1405,7 +1427,7 @@ function renderTraineeLivePanel(container) {
     window.IS_LIVE_ARENA = true;
 
     // Note: This function wipes the container. Only call if question changed.
-    const session = JSON.parse(localStorage.getItem('liveSession') || '{"active":false}');
+    const session = liveReadObject('liveSession', { active: false });
     
     if (!session.active || session.trainee !== CURRENT_USER.user) {
         container.innerHTML = `
@@ -1417,7 +1439,7 @@ function renderTraineeLivePanel(container) {
         return;
     }
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = liveReadArray('tests');
     const test = tests.find(t => t.id == session.testId);
     
     // SAFETY GUARD: If test hasn't synced to this device yet (Prevents fatal UI crash)
@@ -1616,7 +1638,7 @@ function handleRealtimeInput(qIdx) {
     // Wait briefly for assessment_core.js to update the global USER_ANSWERS object
     setTimeout(() => {
         const ans = window.USER_ANSWERS[qIdx];
-        const session = JSON.parse(localStorage.getItem('liveSession'));
+        const session = liveReadObject('liveSession');
         
         // Only sync if data actually changed
         if (JSON.stringify(session.answers[qIdx]) !== JSON.stringify(ans)) {
@@ -1680,7 +1702,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
 
     // RACE CONDITION CHECK: Ensure session doesn't already exist
     // (Prevents double-clicks or two admins starting same slot)
-    const allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const allSessions = liveReadArray('liveSessions');
     const existing = allSessions.find(s => String(s.bookingId) === String(bookingId) && s.active);
     if (existing) {
         alert("A session is already active for this booking. Joining existing session...");
@@ -1691,7 +1713,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
     }
 
     // Find the Test Definition
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = liveReadArray('tests');
     // Match by title (assuming Admin named them identically as per instructions)
     const test = resolveLiveTestDefinition(tests, resolvedAssessment, resolvedAssessmentId);
     
@@ -1724,7 +1746,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
     localStorage.setItem('currentLiveSessionId', session.sessionId); // Track what Admin is looking at
     
     // 1.5. Clean Local Array Immediately (Prevent Ghosting in UI before sync)
-    let currentGlobal = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    let currentGlobal = liveReadArray('liveSessions');
     currentGlobal = currentGlobal.filter(s => normalizeLiveText(s.trainee) !== normalizeLiveText(resolvedTrainee)); // Remove old trainee sessions
     currentGlobal.push(session); // Add new one
     localStorage.setItem('liveSessions', JSON.stringify(currentGlobal));
@@ -1739,7 +1761,7 @@ async function initiateLiveSession(bookingId, assessmentName, traineeName, asses
 }
 
 async function adminPushQuestion(idx) {
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     if (!session) return;
     session.currentQ = idx;
     session.lastQuestionPushTs = Date.now();
@@ -1764,7 +1786,7 @@ async function adminJumpToQuestion(idx) {
 }
 
 async function saveLiveScore(idx, val) {
-    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const session = liveReadObject('liveSession');
     if (!session || !session.sessionId) return;
     if (!session.scores || typeof session.scores !== 'object') session.scores = {};
     session.scores[idx] = parseFloat(val);
@@ -1774,7 +1796,7 @@ async function saveLiveScore(idx, val) {
 }
 
 async function saveLiveComment(idx, val) {
-    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const session = liveReadObject('liveSession');
     if (!session || !session.sessionId) return;
     if (!session.comments || typeof session.comments !== 'object') session.comments = {};
     session.comments[idx] = val;
@@ -1784,7 +1806,7 @@ async function saveLiveComment(idx, val) {
 }
 
 async function sendLiveQuestionMessage(idx) {
-    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const session = liveReadObject('liveSession');
     if (!session || !session.sessionId) return;
     if (session.currentQ !== idx) {
         if (typeof showToast === 'function') showToast('Open the question before sending its trainee message.', 'warning');
@@ -1814,7 +1836,7 @@ async function sendLiveQuestionMessage(idx) {
 }
 
 async function clearLiveQuestionMessage(idx) {
-    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const session = liveReadObject('liveSession');
     if (!session || !session.sessionId) return;
     if (!session.questionMessages || typeof session.questionMessages !== 'object') session.questionMessages = {};
     delete session.questionMessages[String(idx)];
@@ -1848,7 +1870,7 @@ async function submitLiveAnswer(qIdx) {
         }
     }
 
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     const test = resolveLiveTestForSession(session);
     if (!test) {
         warnMissingLiveTestDefinition(session, 'submit your answer');
@@ -1901,7 +1923,7 @@ async function submitLiveAnswer(qIdx) {
 
 async function finishLiveSession() {
     // 1. Build Editable Summary View
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     
     // FIX: Scrape current inputs if visible (for the last question)
     const currentCommentInput = document.getElementById('liveCommentInput');
@@ -1992,7 +2014,7 @@ async function finishLiveSession() {
 }
 
 async function confirmAndSaveLiveSession() {
-    const session = JSON.parse(localStorage.getItem('liveSession') || '{}');
+    const session = liveReadObject('liveSession');
     if (!session || !session.sessionId) {
         alert("Live session data is missing. Please reopen the live session before saving.");
         return false;
@@ -2028,7 +2050,7 @@ async function confirmAndSaveLiveSession() {
     const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
 
     // 1. Create Full Submission Record (For "View Completed Test" & Marking Queue)
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const submissions = liveReadArray('submissions');
     
     // DEDUPLICATION: Only update the same booking/session. Do not collapse separate live attempts.
     const existingSubIdx = submissions.findIndex(s => 
@@ -2071,7 +2093,7 @@ async function confirmAndSaveLiveSession() {
     localStorage.setItem('submissions', JSON.stringify(submissions));
 
     // 2. Update Booking Status
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const bookings = liveReadArray('liveBookings');
     const booking = bookings.find(b => String(b.id) === String(session.bookingId));
     if (booking && booking.status !== 'Cancelled') {
         booking.status = 'Completed';
@@ -2083,10 +2105,10 @@ async function confirmAndSaveLiveSession() {
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
 
     // 3. Create Record (For Dashboard/Progress)
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = liveReadArray('records');
     
     // Determine Group ID dynamically
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = liveReadObject('rosters');
     let groupId = "Live-Session";
     for (const [gid, members] of Object.entries(rosters)) {
         if (members.some(m => m.trim().toLowerCase() === session.trainee.trim().toLowerCase())) { 
@@ -2150,7 +2172,7 @@ async function confirmAndSaveLiveSession() {
 
 async function endLiveSession() {
     if(!confirm("Abort session? Data will be lost.")) return;
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     await closeLiveSessionAuthoritatively(session);
     showTab('live-assessment');
 }
@@ -2164,7 +2186,7 @@ window.updateGlobalSessionArray = async function(localSession, force = true) {
     localSession.lastUpdateTs = nowTs;
 
     // 1. Update Local Cache (for UI responsiveness)
-    let allSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    let allSessions = liveReadArray('liveSessions');
     allSessions = allSessions.filter(s => s.sessionId !== localSession.sessionId);
     allSessions.push(localSession);
     localStorage.setItem('liveSessions', JSON.stringify(allSessions));
@@ -2209,7 +2231,7 @@ window.updateGlobalSessionArray = async function(localSession, force = true) {
 // --- TIMER LOGIC ---
 
 function toggleLiveTimer() {
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     if (!session.timer) session.timer = { active: false, duration: 300, start: null };
     
     if (session.timer.active) {
@@ -2245,7 +2267,7 @@ function formatTimer(seconds) {
 }
 
 function updateTimerDisplays() {
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     if (!session || !session.timer) return;
     
     const timeLeft = calculateTimeLeft(session.timer);
@@ -2278,7 +2300,7 @@ window.forceTraineeRefresh = async function(traineeUsername) {
     if(!confirm(`Force ${traineeUsername}'s app to reload immediately?`)) return;
     
     // 1. Try Live Session Stream (Fastest)
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     if (session && session.active && session.trainee === traineeUsername) {
         session.remoteCommand = { action: 'restart', ts: Date.now() };
         localStorage.setItem('liveSession', JSON.stringify(session));
@@ -2293,7 +2315,7 @@ window.forceTraineeRefresh = async function(traineeUsername) {
 };
 
 window.runLiveDiagnostics = async function() {
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     if (!session || !session.active) return;
     
     session.diagnosticReq = Date.now();
@@ -2308,7 +2330,7 @@ window.runLiveDiagnostics = async function() {
     
     // Timeout fallback (Extended to 35 seconds to allow HTTP fallback loops if WebSockets are blocked)
     setTimeout(() => {
-        const check = JSON.parse(localStorage.getItem('liveSession'));
+        const check = liveReadObject('liveSession');
         if (check.diagnosticReq === session.diagnosticReq && !check.diagnosticRes) {
             if(el) el.innerHTML = '<i class="fas fa-times-circle" style="color:#ff5252;"></i> Ping Timeout (Trainee unreachable)';
         }
@@ -2323,7 +2345,7 @@ window.showDiagnosticReport = function(rtt, net) {
     }
 
     // Reset connection status text so it resumes normal polling display
-    const session = JSON.parse(localStorage.getItem('liveSession'));
+    const session = liveReadObject('liveSession');
     if(typeof updateLiveConnectionStatus === 'function') updateLiveConnectionStatus(session.trainee);
 
     const modal = document.getElementById('diagnosticReportModal');

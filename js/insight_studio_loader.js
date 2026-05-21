@@ -141,17 +141,10 @@ const InsightStudioLoader = {
         }
     },
 
-    launchMigrate: async function(payload) {
+    launchMigrate: function(payload) {
         const username = payload && payload.username ? String(payload.username).trim() : '';
         if (!username) return;
         if (typeof openMoveUserModal === 'function') {
-            if (typeof loadFromServer === 'function') {
-                try {
-                    await loadFromServer(true);
-                } catch (error) {
-                    console.warn('[Insight Loader] Pre-migration host refresh failed.', error);
-                }
-            }
             openMoveUserModal(username);
             const modal = document.getElementById('moveUserModal');
             const webview = document.getElementById('insight-studio-webview');

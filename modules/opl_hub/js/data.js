@@ -31,6 +31,22 @@ function touchDocAuditFields(doc) {
 }
 
 const DataService = {
+    _readObject: function(key) {
+        if (typeof safeLocalParse === 'function') {
+            const parsed = safeLocalParse(key, {});
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        }
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (error) {
+            console.warn(`[OPL Hub] Ignored invalid local data for ${key}:`, error);
+            return {};
+        }
+    },
+
     _defaultStore: function() {
         return {
             linkedContents: [],
@@ -76,7 +92,7 @@ const DataService = {
     },
 
     loadInitialData: async function() {
-        let local = this._normalizeStore(JSON.parse(localStorage.getItem(OPL_LOCAL_CACHE_KEY) || '{}'));
+        let local = this._normalizeStore(this._readObject(OPL_LOCAL_CACHE_KEY));
 
         if (!localStorage.getItem(OPL_LOCAL_CACHE_KEY)) {
             localStorage.setItem(OPL_LOCAL_CACHE_KEY, JSON.stringify(local));
@@ -105,7 +121,7 @@ const DataService = {
     },
 
     getStore: function() {
-        return this._normalizeStore(JSON.parse(localStorage.getItem(OPL_LOCAL_CACHE_KEY) || '{}'));
+        return this._normalizeStore(this._readObject(OPL_LOCAL_CACHE_KEY));
     },
 
     saveStore: async function(store) {

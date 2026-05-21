@@ -2,6 +2,22 @@
 /* HOST LOADER: Launches the isolated Vetting 2.0 Module */
 
 const VettingReworkLoader = {
+    readObject: function(key) {
+        if (typeof safeLocalParse === 'function') {
+            const parsed = safeLocalParse(key, {});
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        }
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (error) {
+            console.warn(`[Vetting Rework Loader] Ignored invalid local data for ${key}:`, error);
+            return {};
+        }
+    },
+
     resolveActiveCredentials: function() {
         const normalizeUrl = (raw) => {
             const url = String(raw || '').trim();
@@ -13,22 +29,18 @@ const VettingReworkLoader = {
         const cloud = window.CLOUD_CREDENTIALS || {};
 
         if (target === 'staging') {
-            try {
-                const stage = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
-                if (stage.url && stage.key) {
-                    return { url: normalizeUrl(stage.url), key: stage.key, target: 'staging' };
-                }
-            } catch (e) {}
+            const stage = this.readObject('staging_credentials');
+            if (stage.url && stage.key) {
+                return { url: normalizeUrl(stage.url), key: stage.key, target: 'staging' };
+            }
         }
 
         if (target === 'local') {
-            try {
-                const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
-                const localCfg = (cfg && cfg.server_settings) ? cfg.server_settings : {};
-                if (localCfg.local_url && localCfg.local_key) {
-                    return { url: normalizeUrl(localCfg.local_url), key: localCfg.local_key, target: 'local' };
-                }
-            } catch (e) {}
+            const cfg = this.readObject('system_config');
+            const localCfg = (cfg && cfg.server_settings) ? cfg.server_settings : {};
+            if (localCfg.local_url && localCfg.local_key) {
+                return { url: normalizeUrl(localCfg.local_url), key: localCfg.local_key, target: 'local' };
+            }
         }
 
         return { url: normalizeUrl(cloud.url), key: cloud.key || '', target: 'cloud' };

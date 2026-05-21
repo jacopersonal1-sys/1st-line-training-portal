@@ -79,6 +79,28 @@ window._AUTO_REPORT_CACHE = window._AUTO_REPORT_CACHE || {};
 
 const AUTO_REPORT_TYPES = new Set(['error', 'fatal', 'unhandled-rejection', 'resource-error', 'silent-error', 'network-error']);
 
+function mainReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`Main ignored invalid local data for ${key}:`, e);
+        return fallback;
+    }
+}
+
+function mainReadArray(key) {
+    const value = mainReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function mainReadObject(key) {
+    const value = mainReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 function safeStringifyForLog(value) {
     try {
         const seen = new WeakSet();
@@ -371,8 +393,7 @@ window.submitReportProblem = async function() {
                 activeTab: payload.activeTab,
                 appVersion: payload.appVersion
             };
-            const rawReports = (typeof safeLocalParse === 'function') ? safeLocalParse('error_reports', []) : JSON.parse(localStorage.getItem('error_reports') || '[]');
-            const reports = Array.isArray(rawReports) ? rawReports : [];
+            const reports = mainReadArray('error_reports');
             reports.push(report);
             if (reports.length > 500) reports.shift();
             localStorage.setItem('error_reports', JSON.stringify(reports));
@@ -466,7 +487,7 @@ async function migrateLocalStateToActiveServer(options = {}) {
             if (serverIds) {
                 const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
                 if (localKey) {
-                    const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+                    const localData = mainReadArray(localKey);
                     const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
                     const toDelete = serverIds.filter(row => !localIdSet.has(row.id.toString())).map(r => r.id);
                     if (toDelete.length > 0) await window.supabaseClient.from(table).delete().in('id', toDelete);
@@ -484,8 +505,7 @@ function applyRecordSubmissionSyncSafetyPatch() {
 
     try {
         ['records', 'submissions'].forEach((key) => {
-            const raw = JSON.parse(localStorage.getItem(key) || '[]');
-            const safeArray = Array.isArray(raw) ? raw : [];
+            const safeArray = mainReadArray(key);
 
             // Preserve local offline work, but remove obvious duplicate identities before the fresh pull.
             const deduped = (typeof dedupeArrayByIdentity === 'function')
@@ -1021,7 +1041,8 @@ window.onload = async function() {
             try {
                 const cacheData = await window.electronAPI.disk.loadCache();
                 if (cacheData) {
-                    const parsed = JSON.parse(cacheData);
+                    const parsed = (typeof safeParse === 'function') ? safeParse(cacheData, null) : JSON.parse(cacheData);
+                    if (!parsed || typeof parsed !== 'object') throw new Error('Invalid disk cache payload');
                     if (parsed.DEMO_MODE === 'true' || parsed.IS_SANDBOX_DB === 'true') {
                         console.warn("Disk cache contains Sandbox Data. Discarding to protect production.");
                         window.electronAPI.disk.saveCache('{}');
@@ -1137,7 +1158,8 @@ window.onload = async function() {
     const earlySession = sessionStorage.getItem('currentUser');
     if (earlySession) {
         try {
-            CURRENT_USER = JSON.parse(earlySession);
+            CURRENT_USER = (typeof safeParse === 'function') ? safeParse(earlySession, null) : JSON.parse(earlySession);
+            if (!CURRENT_USER) throw new Error('Invalid early session payload');
             window.CURRENT_USER = CURRENT_USER;
             // Render Skeletons
             if (typeof renderLoadingDashboard === 'function') renderLoadingDashboard();
@@ -1261,7 +1283,7 @@ window.onload = async function() {
     }
     
     // Ensure Admin Account exists
-    let users = JSON.parse(localStorage.getItem('users') || '[]');
+    let users = mainReadArray('users');
     let admin = users.find(u => u.user === 'admin');
     let usersModified = false;
 
@@ -1316,10 +1338,10 @@ window.onload = async function() {
     const restoreStateStr = localStorage.getItem('pending_update_restore');
     if (restoreStateStr) {
         try {
-            const state = JSON.parse(restoreStateStr);
+            const state = (typeof safeParse === 'function') ? safeParse(restoreStateStr, null) : JSON.parse(restoreStateStr);
             localStorage.removeItem('pending_update_restore');
             
-            if (state.user) {
+            if (state && state.user) {
                 console.log("Restoring session after update...");
                 sessionStorage.setItem('currentUser', JSON.stringify(state.user));
                 window.RESTORE_TAB = state.tab; // Signal autoLogin to switch tabs
@@ -1342,7 +1364,12 @@ window.onload = async function() {
         if (typeof checkAccessControl === 'function') {
             checkAccessControl().then(async allowed => {
                 if(allowed) {
-                    CURRENT_USER = JSON.parse(savedSession);
+                    CURRENT_USER = (typeof safeParse === 'function') ? safeParse(savedSession, null) : JSON.parse(savedSession);
+                    if (!CURRENT_USER) {
+                        sessionStorage.removeItem('currentUser');
+                        if (typeof clearPersistentAppSession === 'function') clearPersistentAppSession();
+                        return;
+                    }
                     window.CURRENT_USER = CURRENT_USER;
                     if (!sessionStorage.getItem('real_admin_identity') && typeof persistAppSession === 'function') {
                         persistAppSession(CURRENT_USER);
@@ -1374,7 +1401,13 @@ window.onload = async function() {
             });
         } else {
             // Fallback if IP check isn't loaded
-             CURRENT_USER = JSON.parse(savedSession);
+             CURRENT_USER = (typeof safeParse === 'function') ? safeParse(savedSession, null) : JSON.parse(savedSession);
+             if (!CURRENT_USER) {
+                 sessionStorage.removeItem('currentUser');
+                 if (typeof clearPersistentAppSession === 'function') clearPersistentAppSession();
+                 if (typeof initLoginParticles === 'function') initLoginParticles();
+                 return;
+             }
              window.CURRENT_USER = CURRENT_USER;
              if (!sessionStorage.getItem('real_admin_identity') && typeof persistAppSession === 'function') {
                  persistAppSession(CURRENT_USER);
@@ -1388,7 +1421,7 @@ window.onload = async function() {
              updateSidebarVisibility();
              
              // --- START ACTIVITY MONITOR ---
-             if (typeof StudyMonitor !== 'undefined') {
+             if (typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
                  await StudyMonitor.init();
              }
              
@@ -1402,8 +1435,9 @@ window.onload = async function() {
         const remembered = localStorage.getItem('rememberedUser');
         if (remembered) {
             try {
-                const creds = JSON.parse(remembered);
-                const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
+                const creds = (typeof safeParse === 'function') ? safeParse(remembered, null) : JSON.parse(remembered);
+                const allUsers = mainReadArray('users');
+                if (!creds || !Array.isArray(allUsers)) throw new Error('Invalid remembered session cache');
                 const valid = allUsers.find(u => u.user === creds.user && u.pass === creds.pass);
                 if (valid) {
                     // PRE-FILL CREDENTIALS (No Auto-Login)
@@ -1448,17 +1482,19 @@ window.onload = async function() {
     }
 
     // Poll for notifications every minute
-    setInterval(updateNotifications, 60000);
+    if (!window.__APP_NOTIFICATION_INTERVAL && typeof updateNotifications === 'function') {
+        window.__APP_NOTIFICATION_INTERVAL = setInterval(updateNotifications, 60000);
+    }
     // Also run once immediately if logged in
     if(savedSession) setTimeout(updateNotifications, 1000); 
-    if (typeof updateViewSyncIndicators === 'function') {
-        setInterval(updateViewSyncIndicators, 60000);
+    if (!window.__APP_VIEW_SYNC_INDICATOR_INTERVAL && typeof updateViewSyncIndicators === 'function') {
+        window.__APP_VIEW_SYNC_INDICATOR_INTERVAL = setInterval(updateViewSyncIndicators, 60000);
     }
 
     // --- NEW: AUTO-UPDATE POLLER ---
     // Actively check for updates every 30 minutes so the bell icon appears for open apps
-    if (typeof require !== 'undefined') {
-        setInterval(() => {
+    if (typeof require !== 'undefined' && !window.__APP_UPDATE_CHECK_INTERVAL) {
+        window.__APP_UPDATE_CHECK_INTERVAL = setInterval(() => {
             const { ipcRenderer } = require('electron');
             const target = localStorage.getItem('active_server_target');
             const preferred = normalizeClientUpdateChannel(localStorage.getItem('profile_update_channel'));
@@ -1473,7 +1509,9 @@ window.onload = async function() {
     }
 
     // --- LUNCH TIMER LOGIC ---
-    setInterval(updateLunchTimer, 1000);
+    if (!window.__APP_LUNCH_TIMER_INTERVAL && typeof updateLunchTimer === 'function') {
+        window.__APP_LUNCH_TIMER_INTERVAL = setInterval(updateLunchTimer, 1000);
+    }
     updateLunchTimer();
 
     // --- DEMO SEED TRIGGER ---
@@ -1564,7 +1602,7 @@ function getCurrentUiZoomFactor() {
     let zoom = 1;
 
     try {
-        const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}') || {};
+        const localTheme = mainReadObject('local_theme_config');
         const storedZoom = parseFloat(localTheme.zoomLevel);
         if (Number.isFinite(storedZoom) && storedZoom > 0) zoom = storedZoom;
     } catch (e) {}
@@ -1624,11 +1662,7 @@ window.addEventListener('orientationchange', scheduleAdaptiveViewportLayoutRefre
 window.addEventListener('focus', scheduleAdaptiveViewportLayoutRefresh, { passive: true });
 
 function getStoredLocalThemeConfig() {
-    try {
-        return JSON.parse(localStorage.getItem('local_theme_config') || '{}') || {};
-    } catch (error) {
-        return {};
-    }
+    return mainReadObject('local_theme_config');
 }
 
 function hasVisualCustomTheme(localTheme = getStoredLocalThemeConfig()) {
@@ -1955,12 +1989,23 @@ function getEmbeddedThemeBridgeCss() {
     `;
 }
 
-function applyThemeToEmbeddedFrame(frame) {
+function getEmbeddedThemePayload() {
+    const vars = getThemeVariableSnapshot();
+    const classes = getThemeClassSnapshot();
+    const density = getCurrentUIDensity();
+    const bridgeCss = getEmbeddedThemeBridgeCss();
+    const signature = JSON.stringify({ vars, classes, density, bridgeCss });
+    return { vars, classes, density, bridgeCss, signature };
+}
+
+function applyThemeToEmbeddedFrame(frame, payload = null) {
     if (!frame) return;
     try {
+        const theme = payload || getEmbeddedThemePayload();
+        if (frame.dataset && frame.dataset.themeSignature === theme.signature) return;
         const doc = frame.contentDocument || (frame.contentWindow && frame.contentWindow.document);
         if (!doc || !doc.documentElement) return;
-        const vars = getThemeVariableSnapshot();
+        const vars = theme.vars || {};
         Object.keys(vars).forEach(name => doc.documentElement.style.setProperty(name, vars[name]));
         let bridge = doc.getElementById('host-theme-bridge');
         if (!bridge) {
@@ -1968,27 +2013,31 @@ function applyThemeToEmbeddedFrame(frame) {
             bridge.id = 'host-theme-bridge';
             doc.head.appendChild(bridge);
         }
-        bridge.textContent = getEmbeddedThemeBridgeCss();
-        const density = getCurrentUIDensity();
+        if (bridge.textContent !== theme.bridgeCss) bridge.textContent = theme.bridgeCss;
+        const density = theme.density || getCurrentUIDensity();
+        const classes = theme.classes || getThemeClassSnapshot();
         const classesToRemove = ['light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious'];
         [doc.documentElement, doc.body].filter(Boolean).forEach(node => {
             node.classList.remove(...classesToRemove);
-            getThemeClassSnapshot().forEach(name => node.classList.add(name));
+            classes.forEach(name => node.classList.add(name));
             node.classList.add(`density-${density}`);
         });
         if (frame.contentWindow && typeof frame.contentWindow.syncThemeFromHost === 'function') {
             frame.contentWindow.syncThemeFromHost();
         }
+        if (frame.dataset) frame.dataset.themeSignature = theme.signature;
     } catch (error) {
         // Cross-origin webviews cannot be styled directly; same-origin modules are handled here.
     }
 }
 
-function applyThemeToWebview(webview) {
+function applyThemeToWebview(webview, payload = null) {
     if (!webview || typeof webview.executeJavaScript !== 'function') return;
     try {
-        const vars = getThemeVariableSnapshot();
-        const classes = getThemeClassSnapshot();
+        const theme = payload || getEmbeddedThemePayload();
+        if (webview.dataset && webview.dataset.themeSignature === theme.signature) return;
+        const vars = theme.vars || {};
+        const classes = theme.classes || [];
         const script = `
             (function(vars, density, classes) {
                 try {
@@ -2001,7 +2050,8 @@ function applyThemeToWebview(webview) {
                         bridge.id = 'host-theme-bridge';
                         document.head.appendChild(bridge);
                     }
-                    bridge.textContent = ${JSON.stringify(getEmbeddedThemeBridgeCss())};
+                    var css = ${JSON.stringify(theme.bridgeCss || '')};
+                    if (bridge.textContent !== css) bridge.textContent = css;
                     var remove = ['light-mode', 'exp-theme-active', 'theme-custom-lab', 'theme-one-ui', 'theme-cyberpunk', 'theme-ocean', 'theme-forest', 'theme-royal', 'density-compact', 'density-comfortable', 'density-spacious'];
                     [document.documentElement, document.body].filter(Boolean).forEach(function(node) {
                         node.classList.remove.apply(node.classList, remove);
@@ -2010,15 +2060,27 @@ function applyThemeToWebview(webview) {
                     });
                     if (typeof window.syncThemeFromHost === 'function') window.syncThemeFromHost();
                 } catch (error) {}
-            })(${JSON.stringify(vars)}, ${JSON.stringify(getCurrentUIDensity())}, ${JSON.stringify(classes)});
+            })(${JSON.stringify(vars)}, ${JSON.stringify(theme.density)}, ${JSON.stringify(classes)});
         `;
-        webview.executeJavaScript(script, true).catch(() => {});
+        if (webview.dataset) webview.dataset.themeSignature = theme.signature;
+        webview.executeJavaScript(script, true).catch(() => {
+            if (webview.dataset) delete webview.dataset.themeSignature;
+        });
     } catch (error) {}
 }
 
 function syncThemeToEmbeddedPrograms() {
-    document.querySelectorAll('iframe').forEach(applyThemeToEmbeddedFrame);
-    document.querySelectorAll('webview').forEach(applyThemeToWebview);
+    const payload = getEmbeddedThemePayload();
+    const force = payload.signature !== LAST_EMBEDDED_THEME_SIGNATURE;
+    LAST_EMBEDDED_THEME_SIGNATURE = payload.signature;
+    document.querySelectorAll('iframe').forEach(frame => {
+        if (force && frame.dataset) delete frame.dataset.themeSignature;
+        applyThemeToEmbeddedFrame(frame, payload);
+    });
+    document.querySelectorAll('webview').forEach(webview => {
+        if (force && webview.dataset) delete webview.dataset.themeSignature;
+        applyThemeToWebview(webview, payload);
+    });
 }
 
 function scheduleEmbeddedThemeSync(options = {}) {
@@ -2055,7 +2117,7 @@ function scheduleEmbeddedThemeSync(options = {}) {
 }
 
 function getCurrentUIDensity() {
-    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    const localTheme = mainReadObject('local_theme_config');
     const stored = localStorage.getItem('ui_density') || localTheme.density || 'comfortable';
     return ['compact', 'comfortable', 'spacious'].includes(stored) ? stored : 'comfortable';
 }
@@ -2071,7 +2133,7 @@ function applyUIDensity(mode) {
 
 function setUIDensity(mode) {
     const density = applyUIDensity(mode);
-    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    const localTheme = mainReadObject('local_theme_config');
     localTheme.density = density;
     localStorage.setItem('local_theme_config', JSON.stringify(localTheme));
     const input = document.getElementById('themeDensity');
@@ -2081,7 +2143,10 @@ function setUIDensity(mode) {
 
 function applyResponsiveTableLabels(root = document) {
     const scope = root && root.querySelectorAll ? root : document;
-    scope.querySelectorAll('table').forEach(table => {
+    const tables = [];
+    if (scope.tagName && scope.tagName.toLowerCase() === 'table') tables.push(scope);
+    scope.querySelectorAll('table').forEach(table => tables.push(table));
+    tables.forEach(table => {
         const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim());
         if (!headers.length) return;
         table.classList.add('responsive-row-card-table');
@@ -2098,14 +2163,33 @@ function applyResponsiveTableLabels(root = document) {
 function installResponsiveTableCards() {
     applyResponsiveTableLabels(document);
     if (window.__responsiveTableObserver) return;
+    let queuedRoots = new Set();
     let queued = false;
-    window.__responsiveTableObserver = new MutationObserver(() => {
+    const flush = () => {
+        queued = false;
+        const roots = Array.from(queuedRoots);
+        queuedRoots.clear();
+        roots.forEach(root => applyResponsiveTableLabels(root));
+    };
+    window.__responsiveTableObserver = new MutationObserver((mutations) => {
+        mutations.forEach(mutation => {
+            (mutation.addedNodes || []).forEach(node => {
+                if (!node || node.nodeType !== 1) return;
+                const ownTag = node.tagName ? node.tagName.toLowerCase() : '';
+                const parentTable = node.closest && node.closest('table');
+                if (parentTable) queuedRoots.add(parentTable);
+                else if (ownTag === 'table') queuedRoots.add(node);
+                else if (node.querySelector && node.querySelector('table')) queuedRoots.add(node);
+            });
+        });
+        if (!queuedRoots.size) return;
         if (queued) return;
         queued = true;
-        setTimeout(() => {
-            queued = false;
-            applyResponsiveTableLabels(document);
-        }, 80);
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(flush, { timeout: 500 });
+        } else {
+            setTimeout(flush, 120);
+        }
     });
     window.__responsiveTableObserver.observe(document.body, { childList: true, subtree: true });
 }
@@ -2348,10 +2432,7 @@ function buildCustomExperimentalThemeBackground(config) {
 }
 
 function getStoredCustomExperimentalThemeConfig() {
-    let stored = {};
-    try {
-        stored = JSON.parse(localStorage.getItem('experimental_theme_custom') || '{}');
-    } catch (e) {}
+    const stored = mainReadObject('experimental_theme_custom');
     return sanitizeCustomExperimentalThemeConfig(stored);
 }
 
@@ -2606,7 +2687,8 @@ function applyExperimentalTheme(themeName, options = {}) {
 }
 
 const ADMIN_NAV_VIEW_KEY = 'admin_nav_view';
-const ADMIN_NAV_ADVANCED = 'advanced-minimal';
+const ADMIN_NAV_ADVANCED = 'navigation-map';
+const ADMIN_NAV_ORDER_KEY = 'admin_nav_order';
 
 const ADVANCED_ADMIN_NAV_GROUPS = [
     {
@@ -2631,20 +2713,39 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
     {
         label: 'Admin Workflow',
         items: [
-            { id: 'insight-studio', title: 'Insight', text: 'Insight', icon: 'fas fa-chart-line', classes: 'admin-only' },
+            { id: 'insight-studio', title: 'Insight', text: 'Insight', icon: 'fas fa-chart-line', classes: 'admin-only', subItems: [
+                { label: 'Agent Triggers', type: 'insight', view: 'triggers' },
+                { label: 'Agent Progress', type: 'insight', view: 'progress' },
+                { label: 'Department Overview', type: 'insight', view: 'department' },
+                { label: 'Compare Viewer', type: 'insight', view: 'compare' },
+                { label: 'Insight Build', type: 'insight', view: 'build' },
+                { label: 'HR Evidence', type: 'insight', view: 'hr-evidence' },
+                { label: 'Knowledge Gaps', type: 'insight', view: 'knowledge' }
+            ] },
             { id: 'report-card', title: 'Onboard Report', text: 'Onboard Report', icon: 'fas fa-file-invoice', classes: 'admin-only tl-access', subItems: [
                 { label: 'New Report', type: 'report', view: 'create' },
                 { label: 'Saved Reports', type: 'report', view: 'saved' }
             ] },
-            { id: 'opl-hub', title: 'OPL Hub', text: 'OPL Hub', icon: 'fas fa-book-open', classes: 'admin-only' },
+            { id: 'opl-hub', title: 'OPL Hub', text: 'OPL Hub', icon: 'fas fa-book-open', classes: 'admin-only', subItems: [
+                { label: 'OPL Search', type: 'opl', view: 'opl_search' },
+                { label: 'Backend Data', type: 'opl', view: 'backend_data' }
+            ] },
             { id: 'qa-hub', title: 'Q&A Hub', text: 'Q&A Hub', icon: 'fas fa-circle-question', classes: 'admin-only' }
         ]
     },
     {
         label: 'Training Content',
         items: [
-            { id: 'content-studio', title: 'Content Creator', text: 'Content Creator', icon: 'fas fa-photo-film' },
-            { id: 'assessment-schedule', title: 'Schedule', text: 'Schedule', icon: 'fas fa-list-alt' },
+            { id: 'content-studio', title: 'Content Creator', text: 'Content Creator', icon: 'fas fa-photo-film', subItems: [
+                { label: 'View Content', type: 'content-studio', view: 'view' },
+                { label: 'Builder', type: 'content-studio', view: 'builder' },
+                { label: 'Engagement', type: 'content-studio', view: 'engagement' },
+                { label: 'Files', type: 'content-studio', view: 'files' }
+            ] },
+            { id: 'assessment-schedule', title: 'Schedule', text: 'Schedule', icon: 'fas fa-list-alt', subItems: [
+                { label: 'Timeline View', type: 'schedule-view', view: 'list' },
+                { label: 'Calendar View', type: 'schedule-view', view: 'calendar' }
+            ] },
             { id: 'test-manage', title: 'Test Engine', text: 'Test Engine', icon: 'fas fa-clipboard-check', classes: 'admin-only', subItems: [
                 { label: 'Overview & Manage', type: 'test-engine', view: 'overview' },
                 { label: 'Completed History', type: 'test-engine', view: 'history' },
@@ -2657,9 +2758,17 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
     {
         label: 'Arenas',
         items: [
-            { id: 'live-assessment', buttonId: 'nav-live-assessment', title: 'Live Assessment Booking', text: 'Live Assessment Booking', icon: 'fas fa-calendar-check' },
+            { id: 'live-assessment', buttonId: 'nav-live-assessment', title: 'Live Assessment Booking', text: 'Live Assessment Booking', icon: 'fas fa-calendar-check', subItems: [
+                { label: 'Schedule Grid', type: 'live-booking', view: 'grid' },
+                { label: 'Booking Controls', type: 'live-booking', view: 'controls' },
+                { label: 'Schedule Settings', type: 'live-booking', view: 'settings' },
+                { label: 'Booking Guide', type: 'live-booking', view: 'rules' }
+            ] },
             { id: 'live-execution', buttonId: 'btn-live-exec', title: 'Live Session Arena', text: 'Live Session Arena', icon: 'fas fa-satellite-dish' },
-            { id: 'vetting-arena', title: 'Vetting Test Arena', text: 'Vetting Test Arena', icon: 'fas fa-shield-halved', classes: 'admin-only' }
+            { id: 'vetting-arena', title: 'Vetting Test Arena', text: 'Vetting Test Arena', icon: 'fas fa-shield-halved', classes: 'admin-only', subItems: [
+                { label: 'Tabbed View', type: 'vetting-arena', view: 'tabbed' },
+                { label: 'Split View', type: 'vetting-arena', view: 'split' }
+            ] }
         ]
     },
     {
@@ -2681,8 +2790,23 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
     {
         label: 'Extras',
         items: [
-            { id: 'tl-hub', title: 'Teamleader Hub', text: 'Teamleader Hub', icon: 'fas fa-users-cog' },
-            { id: 'superadmin-studio', title: 'Super Admin Data Studio', text: 'Data Studio', icon: 'fas fa-satellite-dish', classes: 'admin-only' },
+            { id: 'tl-hub', title: 'Teamleader Hub', text: 'Teamleader Hub', icon: 'fas fa-users-cog', subItems: [
+                { label: 'Operations Timeline', type: 'teamleader-hub', view: 'timeline' },
+                { label: 'My Team', type: 'teamleader-hub', view: 'my_team' },
+                { label: 'Insight Overview', type: 'teamleader-hub', view: 'overview' },
+                { label: 'Agent Feedback', type: 'teamleader-hub', view: 'agent_feedback' },
+                { label: 'Add Team', type: 'teamleader-hub', view: 'roster' },
+                { label: 'Backend Data', type: 'teamleader-hub', view: 'backend_data' }
+            ] },
+            { id: 'superadmin-studio', title: 'Super Admin Data Studio', text: 'Data Studio', icon: 'fas fa-satellite-dish', classes: 'admin-only', subItems: [
+                { label: 'Overview', type: 'superadmin-studio', view: 'overview' },
+                { label: 'People', type: 'superadmin-studio', view: 'people' },
+                { label: 'User Control', type: 'superadmin-studio', view: 'user-control' },
+                { label: 'Assessments', type: 'superadmin-studio', view: 'learning' },
+                { label: 'Operations', type: 'superadmin-studio', view: 'operations' },
+                { label: 'System', type: 'superadmin-studio', view: 'system' },
+                { label: 'Raw Explorer', type: 'superadmin-studio', view: 'explorer' }
+            ] },
             { id: 'first-line-troubleshooting', title: 'First Line Troubleshooting Tool', text: 'Troubleshooting', icon: 'fas fa-screwdriver-wrench' }
         ]
     }
@@ -2695,6 +2819,7 @@ function canUseAdminNavigationView() {
 function getStoredAdminNavigationView() {
     const raw = String(localStorage.getItem(ADMIN_NAV_VIEW_KEY) || '').trim();
     if (raw === 'classic') return 'classic';
+    if (raw === 'advanced-minimal') return ADMIN_NAV_ADVANCED;
     return ADMIN_NAV_ADVANCED;
 }
 
@@ -2702,25 +2827,148 @@ function escapeNavAttr(value) {
     return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function getDefaultAdminNavigationItems() {
+    return ADVANCED_ADMIN_NAV_GROUPS.flatMap(group => group.items.map(item => ({ ...item })));
+}
+
+function readAdminNavigationOrder() {
+    return mainReadArray(ADMIN_NAV_ORDER_KEY).map(id => String(id || '').trim()).filter(Boolean);
+}
+
+function getOrderedAdminNavigationItems() {
+    const items = getDefaultAdminNavigationItems().map(item => ({
+        ...item,
+        subItems: getNavigationSubItems(item)
+    }));
+    const byId = new Map(items.map(item => [item.id, item]));
+    const orderedIds = readAdminNavigationOrder();
+    const ordered = [];
+    orderedIds.forEach(id => {
+        if (!byId.has(id)) return;
+        ordered.push(byId.get(id));
+        byId.delete(id);
+    });
+    return [...ordered, ...Array.from(byId.values())];
+}
+
+function getAdminNavigationOrderSignature() {
+    return getOrderedAdminNavigationItems()
+        .map(item => `${item.id}:${(item.subItems || []).map(sub => `${sub.type}:${sub.view}:${sub.label}`).join(',')}`)
+        .join('|');
+}
+
+function readNavigationJson(key, fallback) {
+    return mainReadJson(key, fallback);
+}
+
+function getNavigationGroupLabel(groupId, count = null) {
+    if (typeof getGroupLabel === 'function') return getGroupLabel(groupId, count).replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+    return String(groupId || '').trim();
+}
+
+function getScheduleNavigationItems() {
+    const schedules = readNavigationJson('schedules', {});
+    const rosters = readNavigationJson('rosters', {});
+    return Object.keys(schedules || {}).sort().map(id => {
+        const assigned = schedules[id] && schedules[id].assigned;
+        const label = assigned ? getNavigationGroupLabel(assigned, (rosters[assigned] || []).length) : 'Unassigned';
+        return { label: `Schedule ${id}: ${label}`, type: 'schedule-id', view: id };
+    });
+}
+
+function getLiveScheduleNavigationItems() {
+    const liveSchedules = readNavigationJson('liveSchedules', {});
+    return Object.keys(liveSchedules || {}).sort().map(id => {
+        const assigned = liveSchedules[id] && liveSchedules[id].assigned;
+        const label = assigned ? getNavigationGroupLabel(assigned) : 'Unassigned';
+        return { label: `Live Schedule ${id}: ${label}`, type: 'live-schedule-id', view: id };
+    });
+}
+
+function getNavigationSubItems(item) {
+    const base = Array.isArray(item && item.subItems) ? item.subItems.slice() : [];
+    if (!item) return base;
+    if (item.id === 'assessment-schedule') {
+        return [...base, ...getScheduleNavigationItems()];
+    }
+    if (item.id === 'live-assessment') {
+        return [...base, ...getLiveScheduleNavigationItems()];
+    }
+    return base;
+}
+
+function saveAdminNavigationOrder(ids) {
+    const validIds = new Set(getDefaultAdminNavigationItems().map(item => item.id));
+    const next = (Array.isArray(ids) ? ids : []).filter(id => validIds.has(id));
+    getDefaultAdminNavigationItems().forEach(item => {
+        if (!next.includes(item.id)) next.push(item.id);
+    });
+    localStorage.setItem(ADMIN_NAV_ORDER_KEY, JSON.stringify(next));
+}
+
+function reorderAdminNavigationItem(draggedId, targetId) {
+    if (!draggedId || !targetId || draggedId === targetId) return false;
+    const ids = getOrderedAdminNavigationItems().map(item => item.id);
+    const from = ids.indexOf(draggedId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return false;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    saveAdminNavigationOrder(ids);
+    return true;
+}
+
+function refreshAdvancedNavigationMap() {
+    const menu = document.querySelector('.sidebar-menu');
+    if (!menu || menu.dataset.navView !== ADMIN_NAV_ADVANCED) return;
+    const active = document.querySelector('section.active');
+    renderAdvancedAdminNavigation(menu);
+    menu.dataset.navView = ADMIN_NAV_ADVANCED;
+    if (active) setActiveNavigationTarget(active.id);
+}
+
 function buildAdvancedNavButton(item) {
-    const classes = ['nav-item'].concat(String(item.classes || '').split(/\s+/).filter(Boolean)).join(' ');
+    const classes = ['nav-item', item.featured ? 'nav-item--primary' : 'nav-item--compact'].concat(String(item.classes || '').split(/\s+/).filter(Boolean)).join(' ');
+    const hasSubmenu = Array.isArray(item.subItems) && item.subItems.length;
     const idAttr = item.buttonId ? ` id="${escapeNavAttr(item.buttonId)}"` : '';
     const onclick = item.action === 'network'
         ? ` onclick="if(window.NetworkDiag&&typeof NetworkDiag.openModal==='function') NetworkDiag.openModal()"`
         : ` onclick="showTab('${escapeNavAttr(item.id)}')"`;
-    const submenu = Array.isArray(item.subItems) && item.subItems.length
-        ? `<div class="nav-submenu" aria-label="${escapeNavAttr(item.text)} quick links">
-                <div class="nav-submenu-title">${escapeNavAttr(item.text)}</div>
+    const submenu = hasSubmenu
+        ? `<div class="nav-inline-submenu" id="nav-submenu-${escapeNavAttr(item.id)}" aria-label="${escapeNavAttr(item.text)} quick links">
                 ${item.subItems.map(sub => `<button class="nav-subitem" onclick="navigateAdvancedSubMenu('${escapeNavAttr(item.id)}','${escapeNavAttr(sub.type)}','${escapeNavAttr(sub.view)}')">${escapeNavAttr(sub.label)}</button>`).join('')}
            </div>`
         : '';
-    return `<div class="nav-item-wrap">
-        <button${idAttr} class="${escapeNavAttr(classes)}"${onclick} title="${escapeNavAttr(item.title)}" data-nav-target="${escapeNavAttr(item.id)}">
-            <i class="${escapeNavAttr(item.icon)}"></i><span class="nav-text">${escapeNavAttr(item.text)}</span>
-        </button>
+    const expand = hasSubmenu
+        ? `<button type="button" class="nav-submenu-control" title="Show shortcuts" aria-label="${escapeNavAttr(item.text)} shortcuts" onclick="toggleAdvancedNavSubmenu('${escapeNavAttr(item.id)}', event)">
+                <i class="fas fa-chevron-down"></i>
+           </button>`
+        : '';
+    return `<div class="nav-item-wrap${hasSubmenu ? ' nav-item-wrap--has-submenu' : ''}" draggable="true" data-nav-id="${escapeNavAttr(item.id)}" title="Drag to reorder">
+        <div class="nav-item-row">
+            <button${idAttr} class="${escapeNavAttr(classes)}"${onclick} title="${escapeNavAttr(item.title)}" data-nav-target="${escapeNavAttr(item.id)}">
+                <i class="${escapeNavAttr(item.icon)}"></i><span class="nav-text">${escapeNavAttr(item.text)}</span>
+            </button>
+            ${expand}
+        </div>
         ${submenu}
     </div>`;
 }
+
+window.toggleAdvancedNavSubmenu = function toggleAdvancedNavSubmenu(id, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const safeId = String(id || '');
+    const selectorId = (window.CSS && typeof CSS.escape === 'function') ? CSS.escape(safeId) : safeId.replace(/"/g, '\\"');
+    const targetWrap = document.querySelector(`.nav-item-wrap[data-nav-id="${selectorId}"]`);
+    if (!targetWrap) return;
+    const shouldOpen = !targetWrap.classList.contains('submenu-open');
+    document.querySelectorAll('.nav-item-wrap.submenu-open').forEach(wrap => {
+        if (wrap !== targetWrap) wrap.classList.remove('submenu-open');
+    });
+    targetWrap.classList.toggle('submenu-open', shouldOpen);
+};
 
 window.navigateAdvancedSubMenu = function navigateAdvancedSubMenu(tabId, type, view) {
     const target = String(tabId || '');
@@ -2738,9 +2986,154 @@ window.navigateAdvancedSubMenu = function navigateAdvancedSubMenu(tabId, type, v
         } else if (kind === 'report' && typeof showReportSub === 'function') {
             const btnId = subView === 'saved' ? 'btn-rep-saved' : 'btn-rep-new';
             showReportSub(subView, document.getElementById(btnId));
+        } else if (kind === 'insight') {
+            navigateEmbeddedInsightView(subView);
+        } else if (kind === 'opl') {
+            navigateOplHubView(subView);
+        } else if (kind === 'content-studio') {
+            navigateGenericWebviewApp('content-studio-webview', subView);
+        } else if (kind === 'teamleader-hub') {
+            navigateGenericWebviewApp('tl-hub-webview', subView);
+        } else if (kind === 'superadmin-studio') {
+            navigateGenericWebviewApp('superadmin-data-studio-webview', subView);
+        } else if (kind === 'vetting-arena') {
+            navigateGenericWebviewScript('vetting-arena-webview', `(() => {
+                if (window.App && typeof window.App.setViewMode === 'function') {
+                    window.App.setViewMode(${JSON.stringify(subView)});
+                    true;
+                } else {
+                    false;
+                }
+            })();`);
+        } else if (kind === 'schedule-view') {
+            navigateScheduleStudio({ view: subView });
+        } else if (kind === 'schedule-id') {
+            navigateScheduleStudio({ scheduleId: subView });
+        } else if (kind === 'live-booking') {
+            navigateLiveBookingSection(subView);
+        } else if (kind === 'live-schedule-id') {
+            navigateLiveBookingSchedule(subView);
         }
-    }, 90);
+    }, 140);
 };
+
+function navigateGenericWebviewScript(webviewId, script, attempts = 8) {
+    const webview = document.getElementById(webviewId)
+        || (webviewId === 'vetting-arena-webview' ? document.querySelector('#vetting-arena-content .vetting-rework-webview') : null);
+    if (webview && typeof webview.executeJavaScript === 'function') {
+        webview.executeJavaScript(script, true).catch(() => {
+            if (attempts > 0) setTimeout(() => navigateGenericWebviewScript(webviewId, script, attempts - 1), 180);
+        });
+        return;
+    }
+    if (attempts > 0) setTimeout(() => navigateGenericWebviewScript(webviewId, script, attempts - 1), 180);
+}
+
+function navigateGenericWebviewApp(webviewId, view, attempts = 8) {
+    const webview = document.getElementById(webviewId);
+    const safeView = JSON.stringify(String(view || ''));
+    const script = `(() => {
+        if (window.App && typeof window.App.setView === 'function') {
+            window.App.setView(${safeView});
+            true;
+        } else {
+            false;
+        }
+    })();`;
+    if (webview && typeof webview.executeJavaScript === 'function') {
+        webview.executeJavaScript(script, true).catch(() => {
+            if (attempts > 0) setTimeout(() => navigateGenericWebviewApp(webviewId, view, attempts - 1), 180);
+        });
+        return;
+    }
+    if (attempts > 0) setTimeout(() => navigateGenericWebviewApp(webviewId, view, attempts - 1), 180);
+}
+
+function executeInsightScript(script, attempts = 8) {
+    const webview = document.getElementById('insight-studio-webview');
+    if (webview && typeof webview.executeJavaScript === 'function') {
+        webview.executeJavaScript(script, true).catch(() => {
+            if (attempts > 0) setTimeout(() => executeInsightScript(script, attempts - 1), 180);
+        });
+        return;
+    }
+    if (attempts > 0) setTimeout(() => executeInsightScript(script, attempts - 1), 180);
+}
+
+function navigateEmbeddedInsightView(view) {
+    const safeView = JSON.stringify(String(view || 'triggers'));
+    executeInsightScript(`(() => {
+        if (window.InsightApp && typeof window.InsightApp.setViewMode === 'function') {
+            window.InsightApp.setViewMode(${safeView});
+            true;
+        } else {
+            false;
+        }
+    })();`);
+}
+
+function executeOplScript(script, attempts = 8) {
+    const webview = document.getElementById('opl-hub-webview');
+    if (webview && typeof webview.executeJavaScript === 'function') {
+        webview.executeJavaScript(script, true).catch(() => {
+            if (attempts > 0) setTimeout(() => executeOplScript(script, attempts - 1), 180);
+        });
+        return;
+    }
+    if (attempts > 0) setTimeout(() => executeOplScript(script, attempts - 1), 180);
+}
+
+function navigateOplHubView(view) {
+    const safeView = JSON.stringify(String(view || 'opl_search'));
+    executeOplScript(`(() => {
+        if (window.App && typeof window.App.setView === 'function') {
+            window.App.setView(${safeView});
+            true;
+        } else {
+            false;
+        }
+    })();`);
+}
+
+function navigateScheduleStudio(options = {}, attempts = 8) {
+    const frame = document.getElementById('schedule-studio-frame');
+    const app = frame && frame.contentWindow && frame.contentWindow.App;
+    if (app) {
+        if (options.scheduleId && typeof app.setSchedule === 'function') app.setSchedule(String(options.scheduleId));
+        if (options.view && typeof app.setView === 'function') app.setView(String(options.view));
+        return;
+    }
+    if (attempts > 0) setTimeout(() => navigateScheduleStudio(options, attempts - 1), 180);
+}
+
+function navigateLiveBookingSchedule(id) {
+    if (id) {
+        try {
+            ACTIVE_LIVE_SCHED_ID = String(id);
+        } catch (error) {
+            window.ACTIVE_LIVE_SCHED_ID = String(id);
+        }
+    }
+    if (typeof renderLiveTable === 'function') renderLiveTable();
+    setTimeout(() => {
+        const section = document.querySelector('#live-assessment .sched-tabs-container') || document.getElementById('liveBookingBody');
+        if (section && typeof section.scrollIntoView === 'function') section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+}
+
+function navigateLiveBookingSection(view) {
+    if (typeof renderLiveTable === 'function') renderLiveTable();
+    setTimeout(() => {
+        const selectors = {
+            controls: '#liveBookingSearch',
+            settings: '.live-schedule-config-card',
+            rules: '.live-booking-rules-panel',
+            grid: '#liveBookingBody'
+        };
+        const el = document.querySelector(selectors[view] || selectors.grid);
+        if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+}
 
 function setActiveNavigationTarget(id) {
     if (LAST_ACTIVE_NAV_BUTTON && LAST_ACTIVE_NAV_BUTTON.isConnected) {
@@ -2761,13 +3154,62 @@ function setActiveNavigationTarget(id) {
 }
 
 function renderAdvancedAdminNavigation(menu) {
-    menu.innerHTML = ADVANCED_ADMIN_NAV_GROUPS.map(group => `
-        <div class="nav-group">
-            <div class="nav-group-label">${escapeNavAttr(group.label)}</div>
-            ${group.items.map(buildAdvancedNavButton).join('')}
+    const items = getOrderedAdminNavigationItems();
+    const featured = [];
+    const compact = [];
+    items.forEach((item, index) => {
+        if (index < 6) featured.push({ ...item, featured: true });
+        else compact.push(item);
+    });
+    menu.innerHTML = `
+        <div class="nav-map">
+            <div class="nav-map-primary">
+                ${featured.map(buildAdvancedNavButton).join('')}
+            </div>
+            <div class="nav-map-grid">
+                ${compact.map(buildAdvancedNavButton).join('')}
+            </div>
         </div>
-    `).join('');
+    `;
     document.body.classList.add('admin-nav-advanced');
+    menu.dataset.navOrder = getAdminNavigationOrderSignature();
+    bindAdvancedNavigationMapDrag(menu);
+}
+
+function bindAdvancedNavigationMapDrag(menu) {
+    if (!menu) return;
+    menu.querySelectorAll('.nav-map .nav-item-wrap').forEach(row => {
+        row.addEventListener('dragstart', event => {
+            if (event.target && event.target.closest('.nav-submenu-control, .nav-inline-submenu')) {
+                event.preventDefault();
+                return;
+            }
+            row.classList.add('nav-map-dragging');
+            document.body.classList.add('nav-map-reordering');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', row.dataset.navId || '');
+        });
+        row.addEventListener('dragend', () => {
+            row.classList.remove('nav-map-dragging');
+            document.body.classList.remove('nav-map-reordering');
+            menu.querySelectorAll('.nav-map-drop-target').forEach(item => item.classList.remove('nav-map-drop-target'));
+        });
+        row.addEventListener('dragover', event => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            row.classList.add('nav-map-drop-target');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('nav-map-drop-target'));
+        row.addEventListener('drop', event => {
+            event.preventDefault();
+            row.classList.remove('nav-map-drop-target');
+            const draggedId = event.dataTransfer.getData('text/plain');
+            const targetId = row.dataset.navId || '';
+            if (reorderAdminNavigationItem(draggedId, targetId)) {
+                refreshAdvancedNavigationMap();
+            }
+        });
+    });
 }
 
 function applyConfiguredNavigationView() {
@@ -2780,9 +3222,10 @@ function applyConfiguredNavigationView() {
 
     const selectedView = getStoredAdminNavigationView();
     const useAdvanced = selectedView === ADMIN_NAV_ADVANCED && canUseAdminNavigationView();
+    const orderSignature = getAdminNavigationOrderSignature();
 
     if (useAdvanced) {
-        if (menu.dataset.navView !== ADMIN_NAV_ADVANCED) {
+        if (menu.dataset.navView !== ADMIN_NAV_ADVANCED || menu.dataset.navOrder !== orderSignature) {
             renderAdvancedAdminNavigation(menu);
             menu.dataset.navView = ADMIN_NAV_ADVANCED;
         }
@@ -2810,9 +3253,9 @@ function applyConfiguredNavigationView() {
 }
 
 window.setAdminNavigationView = function(view) {
-    const nextView = view === ADMIN_NAV_ADVANCED ? ADMIN_NAV_ADVANCED : 'classic';
+    const nextView = (view === ADMIN_NAV_ADVANCED || view === 'advanced-minimal') ? ADMIN_NAV_ADVANCED : 'classic';
     localStorage.setItem(ADMIN_NAV_VIEW_KEY, nextView);
-    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    const localTheme = mainReadObject('local_theme_config');
     localTheme.navigationView = nextView;
     localStorage.setItem('local_theme_config', JSON.stringify(localTheme));
     applyConfiguredNavigationView();
@@ -2821,6 +3264,101 @@ window.setAdminNavigationView = function(view) {
     if (active) {
         setActiveNavigationTarget(active.id);
     }
+};
+
+function renderNavigationCustomizerList() {
+    const list = document.getElementById('navCustomizerList');
+    if (!list) return;
+    const items = getOrderedAdminNavigationItems();
+    list.innerHTML = items.map((item, index) => `
+        <div class="nav-customizer-row" draggable="true" data-nav-id="${escapeNavAttr(item.id)}">
+            <div class="nav-customizer-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></div>
+            <div class="nav-customizer-icon"><i class="${escapeNavAttr(item.icon)}"></i></div>
+            <div class="nav-customizer-name">
+                <strong>${escapeNavAttr(item.text)}</strong>
+                <span>${index < 6 ? 'Priority row' : 'Compact tile'}</span>
+            </div>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.nav-customizer-row').forEach(row => {
+        row.addEventListener('dragstart', event => {
+            row.classList.add('dragging');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', row.dataset.navId || '');
+        });
+        row.addEventListener('dragend', () => row.classList.remove('dragging'));
+        row.addEventListener('dragover', event => event.preventDefault());
+        row.addEventListener('drop', event => {
+            event.preventDefault();
+            const draggedId = event.dataTransfer.getData('text/plain');
+            const targetId = row.dataset.navId || '';
+            if (!draggedId || !targetId || draggedId === targetId) return;
+            const ids = getOrderedAdminNavigationItems().map(item => item.id);
+            const from = ids.indexOf(draggedId);
+            const to = ids.indexOf(targetId);
+            if (from < 0 || to < 0) return;
+            ids.splice(to, 0, ids.splice(from, 1)[0]);
+            saveAdminNavigationOrder(ids);
+            renderNavigationCustomizerList();
+        });
+    });
+}
+
+window.moveNavigationCustomizerItem = function moveNavigationCustomizerItem(id, direction) {
+    const ids = getOrderedAdminNavigationItems().map(item => item.id);
+    const index = ids.indexOf(id);
+    if (index < 0) return;
+    if (direction === 'top') {
+        ids.splice(0, 0, ids.splice(index, 1)[0]);
+    } else if (direction === 'up' && index > 0) {
+        [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]];
+    } else if (direction === 'down' && index < ids.length - 1) {
+        [ids[index + 1], ids[index]] = [ids[index], ids[index + 1]];
+    }
+    saveAdminNavigationOrder(ids);
+    renderNavigationCustomizerList();
+};
+
+window.resetNavigationMapOrder = function resetNavigationMapOrder() {
+    if (!confirm('Reset Navigation Map order to the default layout?')) return;
+    localStorage.removeItem(ADMIN_NAV_ORDER_KEY);
+    renderNavigationCustomizerList();
+};
+
+window.saveNavigationMapOrder = function saveNavigationMapOrder() {
+    applyConfiguredNavigationView();
+    refreshAdvancedNavigationMap();
+    const active = document.querySelector('section.active');
+    if (active) setActiveNavigationTarget(active.id);
+    const modal = document.getElementById('navCustomizerModal');
+    if (modal) modal.remove();
+    if (typeof showToast === 'function') showToast('Navigation Map order saved.', 'success');
+};
+
+window.openNavigationMapCustomizer = function openNavigationMapCustomizer() {
+    if (!canUseAdminNavigationView()) return;
+    const existing = document.getElementById('navCustomizerModal');
+    if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'navCustomizerModal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-box nav-customizer-modal">
+            <button class="modal-close" type="button" onclick="document.getElementById('navCustomizerModal').remove()">&times;</button>
+            <h3>Customize Navigation Map</h3>
+            <p class="nav-customizer-note">Drag destinations into your preferred order. The first six positions display as priority rows; the rest display as compact tiles.</p>
+            <div id="navCustomizerList" class="nav-customizer-list"></div>
+            <div class="nav-customizer-footer">
+                <button type="button" class="btn-secondary" onclick="resetNavigationMapOrder()">Reset Order</button>
+                <div style="flex:1"></div>
+                <button type="button" class="btn-secondary" onclick="document.getElementById('navCustomizerModal').remove()">Cancel</button>
+                <button type="button" class="btn-primary" onclick="saveNavigationMapOrder()">Save Layout</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    renderNavigationCustomizerList();
 };
 
 // --- SIDEBAR VISIBILITY LOGIC ---
@@ -2950,7 +3488,7 @@ function updateSidebarVisibility() {
         if (!targetTab) return;
         
         // --- DYNAMIC FEATURE FLAGS ---
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = mainReadObject('system_config');
         const features = config.features || {};
 
         if (features.live_assessments === false && (targetTab === 'live-assessment' || targetTab === 'live-execution')) {
@@ -3046,7 +3584,7 @@ function deriveBootRoleFromRemembered() {
     try {
         const rememberedRaw = localStorage.getItem('rememberedUser');
         if (!rememberedRaw) return '';
-        const remembered = JSON.parse(rememberedRaw);
+        const remembered = (typeof safeParse === 'function') ? safeParse(rememberedRaw, null) : JSON.parse(rememberedRaw);
         if (!remembered || typeof remembered !== 'object') return '';
 
         const rememberedMode = normalizeBootRoleMode(remembered.bootMode || remembered.role || '');
@@ -3055,8 +3593,8 @@ function deriveBootRoleFromRemembered() {
         const rememberedUser = String(remembered.user || '').trim().toLowerCase();
         if (!rememberedUser) return '';
 
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        if (!Array.isArray(users)) return '';
+        const users = mainReadArray('users');
+        if (!users.length) return '';
         const hit = users.find(u => String(u && u.user || '').trim().toLowerCase() === rememberedUser);
         return hit ? normalizeBootRoleMode(hit.role || '') : '';
     } catch (e) {
@@ -3176,18 +3714,13 @@ let EMBEDDED_THEME_SYNC_TIMER = null;
 let EMBEDDED_THEME_SYNC_IDLE = null;
 let LAST_NAV_REQUEST = { id: null, at: 0 };
 let LAST_ACTIVE_NAV_BUTTON = null;
+let LAST_EMBEDDED_THEME_SIGNATURE = '';
 const VIEW_SYNC_LAST_RUN = {};
 const VIEW_RENDERED_ONCE = {};
 const HIGH_PRIORITY_SYNC_VIEWS = new Set([
-    'assessment-schedule',
     'trainee-portal',
     'insight-studio',
-    'qa-hub',
-    'test-manage',
-    'test-records',
-    'admin-panel',
-    'live-assessment',
-    'monthly'
+    'qa-hub'
 ]);
 
 const HEAVY_EMBEDDED_VIEWS = new Set([
@@ -3381,7 +3914,7 @@ function getTraineeVettingNotesGate() {
 
     let session = null;
     try {
-        session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        session = mainReadObject('vettingSession');
     } catch (error) {
         session = {};
     }
@@ -3409,7 +3942,7 @@ function getTraineeVettingNotesGate() {
 
     let forceGlobalKiosk = false;
     try {
-        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const cfg = mainReadObject('system_config');
         forceGlobalKiosk = !!(cfg && cfg.security && cfg.security.force_kiosk_global);
     } catch (error) {}
 
@@ -3507,12 +4040,15 @@ function applyRealtimeFailoverProfile(id) {
 }
 
 function renderAdminPanelSubViews() {
-    if (typeof loadAdminUsers === 'function') loadAdminUsers();
-    if (typeof loadAdminAssessments === 'function') loadAdminAssessments();
-    if (typeof loadAdminVetting === 'function') loadAdminVetting();
-    if (typeof loadAdminDatabase === 'function') loadAdminDatabase();
-    if (typeof loadAdminAccess === 'function') loadAdminAccess();
-    if (typeof loadAdminTheme === 'function') loadAdminTheme();
+    const activeView = document.querySelector('#admin-panel .admin-view.active');
+    const activeId = activeView ? String(activeView.id || '').replace(/^admin-view-/, '') : 'users';
+
+    if (activeId === 'users' && typeof loadAdminUsers === 'function') loadAdminUsers();
+    if (activeId === 'assessments' && typeof loadAdminAssessments === 'function') loadAdminAssessments();
+    if (activeId === 'vetting' && typeof loadAdminVetting === 'function') loadAdminVetting();
+    if (activeId === 'data' && typeof loadAdminDatabase === 'function') loadAdminDatabase();
+    if (activeId === 'access' && typeof loadAdminAccess === 'function') loadAdminAccess();
+    if (activeId === 'theme' && typeof loadAdminTheme === 'function') loadAdminTheme();
 
     const statusView = document.getElementById('admin-view-status');
     if (statusView && statusView.classList.contains('active') && typeof refreshSystemStatus === 'function') {
@@ -3849,7 +4385,7 @@ async function syncFreshDataForView(id) {
 
     const now = Date.now();
     const last = VIEW_SYNC_LAST_RUN[id] || 0;
-    if (VIEW_SYNC_IN_FLIGHT || (now - last) < 4000) return;
+    if (VIEW_SYNC_IN_FLIGHT || (now - last) < 30000) return;
 
     VIEW_SYNC_LAST_RUN[id] = now;
     VIEW_SYNC_IN_FLIGHT = true;
@@ -3976,7 +4512,7 @@ function showTab(id, btn) {
   }
 
   if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id !== 'live-execution') {
-      const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+      const liveSessions = mainReadArray('liveSessions');
       const currentUser = String(CURRENT_USER.user || '').trim().toLowerCase();
       const hasActiveLiveSession = Array.isArray(liveSessions) && liveSessions.some(s =>
           s &&
@@ -4061,7 +4597,7 @@ function showTab(id, btn) {
       setActiveNavigationTarget(id);
 
       // --- ACTIVITY TRACKING ---
-      if (typeof StudyMonitor !== 'undefined') {
+      if (CURRENT_USER && CURRENT_USER.role === 'trainee' && typeof StudyMonitor !== 'undefined') {
           StudyMonitor.track(`Navigating: ${id.replace(/-/g, ' ')}`);
       }
 
@@ -4105,6 +4641,12 @@ function showAdminSub(viewName, btn) {
   if(btn) btn.classList.add('active');
   
   // Trigger specific refresh for sub-tabs
+  if(viewName === 'users' && typeof loadAdminUsers === 'function') loadAdminUsers();
+  if(viewName === 'assessments' && typeof loadAdminAssessments === 'function') loadAdminAssessments();
+  if(viewName === 'vetting' && typeof loadAdminVetting === 'function') loadAdminVetting();
+  if(viewName === 'data' && typeof loadAdminDatabase === 'function') loadAdminDatabase();
+  if(viewName === 'access' && typeof loadAdminAccess === 'function') loadAdminAccess();
+  if(viewName === 'theme' && typeof loadAdminTheme === 'function') loadAdminTheme();
   if(viewName === 'status' && typeof refreshSystemStatus === 'function') {
       refreshSystemStatus();
   }
@@ -4255,9 +4797,7 @@ function toggleNotifications() {
 function getLocalProblemReportCount() {
     let rawReports = [];
     try {
-        rawReports = (typeof safeLocalParse === 'function')
-            ? safeLocalParse('error_reports', [])
-            : JSON.parse(localStorage.getItem('error_reports') || '[]');
+        rawReports = mainReadArray('error_reports');
     } catch (err) {
         rawReports = [];
     }
@@ -4275,9 +4815,7 @@ function getAdminCourseRequestNotifications() {
     if (!CURRENT_USER || !['admin', 'super_admin'].includes(String(CURRENT_USER.role || '').toLowerCase())) return [];
     let rows = [];
     try {
-        rows = (typeof safeLocalParse === 'function')
-            ? safeLocalParse('admin_notifications', [])
-            : JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+        rows = mainReadArray('admin_notifications');
     } catch (error) {
         rows = [];
     }
@@ -4294,9 +4832,7 @@ function getAdminAssessmentFeedbackNotifications() {
     if (!CURRENT_USER || !['admin', 'super_admin'].includes(String(CURRENT_USER.role || '').toLowerCase())) return [];
     let rows = [];
     try {
-        rows = (typeof safeLocalParse === 'function')
-            ? safeLocalParse('admin_notifications', [])
-            : JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+        rows = mainReadArray('admin_notifications');
     } catch (error) {
         rows = [];
     }
@@ -4361,10 +4897,10 @@ function updateNotifications() {
     // 2. TRAINEE SPECIFIC NOTIFICATIONS
     if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
         // --- PROGRESS LOGIC ---
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const safeRecords = mainReadArray('records');
         const currentRecords = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
-            ? filterRowsToCurrentTraineeLifecycle(records)
-            : records;
+            ? filterRowsToCurrentTraineeLifecycle(safeRecords)
+            : safeRecords;
         const myRecords = currentRecords.filter(r => r.trainee === CURRENT_USER.user);
         
         let progress = 0;
@@ -4383,8 +4919,7 @@ function updateNotifications() {
             </div>`;
 
         // --- LIVE ASSESSMENT UPDATES ---
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-        const myBookings = bookings.filter(b => b.trainee === CURRENT_USER.user);
+        const myBookings = mainReadArray('liveBookings').filter(b => b.trainee === CURRENT_USER.user);
         
         myBookings.forEach(b => {
             if(b.status === 'Completed') {
@@ -4424,7 +4959,7 @@ function updateNotifications() {
     if (CURRENT_USER && ['super_admin', 'admin', 'teamleader'].includes(String(CURRENT_USER.role || '').toLowerCase())) {
         const pendingViolations = (typeof StudyMonitor !== 'undefined' && StudyMonitor.getPendingViolationReviewCount)
             ? StudyMonitor.getPendingViolationReviewCount()
-            : (JSON.parse(localStorage.getItem('violation_reports') || '[]') || []).filter(r => r && !r.reviewed && String(r.status || 'pending_review') !== 'reviewed').length;
+            : mainReadArray('violation_reports').filter(r => r && !r.reviewed && String(r.status || 'pending_review') !== 'reviewed').length;
 
         if (pendingViolations > 0) {
             count += pendingViolations;
@@ -4492,13 +5027,13 @@ function populateFetchFilters() {
     if(!select) return;
     
     const currentVal = select.value;
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const assessments = mainReadArray('assessments');
+    const records = mainReadArray('records');
     
     // Combine names from Definitions and actual Records (history)
     const names = new Set();
-    assessments.forEach(a => names.add(a.name));
-    records.forEach(r => { if(r.assessment) names.add(r.assessment); });
+    (Array.isArray(assessments) ? assessments : []).forEach(a => names.add(a.name));
+    (Array.isArray(records) ? records : []).forEach(r => { if(r.assessment) names.add(r.assessment); });
     
     const sortedNames = Array.from(names).sort();
     
@@ -4764,10 +5299,37 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.0": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Retrain migration and Insight N/A handling are more reliable for agents moved into new training groups.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Admin navigation now uses a cleaner Navigation Map with drag-and-drop ordering and quick submenus.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Trainee login, navigation, embedded modules, and heavy admin views now do less blocking work during startup and tab changes.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> App modules now use guarded cache reads so corrupt local data is far less likely to crash login, dashboards, reports, scheduling, vetting, or diagnostics.</li>
+            </ul>`,
         "2.6.99": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Trainee Portal no longer gets stuck on the refresh screen during login.</li>
                 <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Trainee Portal can recover if its embedded workspace needs to be remounted.</li>
+                <li style="margin-bottom: 8px;"><strong>Migration Fix:</strong> Agent migration now handles corrupted local storage values without failing on "undefined" JSON.</li>
+                <li style="margin-bottom: 8px;"><strong>Insight Fix:</strong> Insight Studio Migrate now opens the group selector immediately and refreshes data before archiving after confirmation.</li>
+                <li style="margin-bottom: 8px;"><strong>Retrain Safety:</strong> Retrying a recent failed retrain migration resumes the existing archive and merges remaining live rows before cleanup.</li>
+                <li style="margin-bottom: 8px;"><strong>Official Progress:</strong> Retrain archives now use the Agent Progress Builder checklist and preserve valid N/A marks when agents move between groups.</li>
+                <li style="margin-bottom: 8px;"><strong>Navigation:</strong> Admin sidebar advanced mode is now a cleaner Navigation Map with priority rows and compact destination tiles.</li>
+                <li style="margin-bottom: 8px;"><strong>Customization:</strong> Navigation Map order can now be changed with drag-and-drop directly from the expanded sidebar.</li>
+                <li style="margin-bottom: 8px;"><strong>Quick Menus:</strong> Navigation shortcuts now open as clean inline dropdowns only when requested.</li>
+                <li style="margin-bottom: 8px;"><strong>Submenus:</strong> Insight, OPL Hub, Schedule, Live Assessment, Content Creator, Teamleader Hub, Vetting Arena, and Data Studio now expose their key subviews from the Navigation Map.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Navigation now avoids repeated embedded-theme injection, full-page responsive-table rescans, hidden Admin Tools renders, and unnecessary forced server refreshes on normal admin tab changes.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Realtime setup now ignores duplicate same-user channel starts, and boot/notification storage reads are hardened against corrupt JSON cache values.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Shared utilities plus Test Builder, Test History, and Capture Scores now handle corrupt local cache values more defensively, and app-wide notification/update/lunch intervals are guarded against duplicate startup registration.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Study Monitor now uses defensive cache reads for monitor data, history, whitelists, schedules, users, and trainee bookmarks so corrupted local storage cannot crash activity views or background tracking.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> Schedule Studio host rendering no longer performs a full server refresh just because a legacy renderSchedule caller touched the replaced schedule tab.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> The remaining active schedule.js Live Assessment Booking paths now read schedules, live schedules, bookings, live sessions, rosters, records, submissions, and repair archives defensively.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Admin System maintenance/migration tools and Live Assessment Execution now tolerate corrupt local cache values instead of crashing on bad JSON while reading live sessions, row counts, records, users, or system config.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Admin Users, Department Overview analytics, and trainee assessment screens now use defensive cache reads for users, rosters, submissions, schedules, records, notifications, and progress data.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Reporting, Agent Search, AI diagnostics, and Dashboard widgets now use defensive cache reads for saved reports, archives, link requests, notices, bookmarks, tips, and system-wide diagnostic data.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Assessment Admin marking, quick approve, history review, marking leases, and marker note updates now use defensive cache reads for submissions, records, tests, rosters, and sync hash maps.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Main shell, NPS, Vetting runtimes, Insight rules, attendance, and admin assessment workflows now avoid raw local storage JSON parsing in their larger hot paths.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Login/auth, calendar, diagnostics, Content Studio, Team Hub, OPL Hub, Q&A Hub, Insight Studio helpers, and Vetting Rework now use guarded cache reads instead of direct local storage JSON parsing.</li>
             </ul>`,
         "2.6.98": `
             <ul style="padding-left: 20px; margin: 0;">

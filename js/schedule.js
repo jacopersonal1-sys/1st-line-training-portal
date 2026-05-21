@@ -11,6 +11,27 @@ let DRAG_SRC_INDEX = null; // Track item being dragged
 let CALENDAR_MONTH = new Date();
 window.IS_DRAGGING_LIVE = false; // Global lock for drag operations
 
+function scheduleReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === 'undefined') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        return fallback;
+    }
+}
+
+function scheduleReadArray(key) {
+    const value = scheduleReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function scheduleReadObject(key, fallback = {}) {
+    const value = scheduleReadJson(key, fallback);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
 const LIVE_BOOKING_TIME_SLOTS = [
     "8:00 AM",
     "9:00 AM",
@@ -73,7 +94,7 @@ function getLiveBookingRulesDisplayHtml() {
         if (html) return html;
     }
     try {
-        const parsed = JSON.parse(localStorage.getItem('live_booking_rules_config') || 'null');
+        const parsed = scheduleReadJson('live_booking_rules_config', null);
         const html = String((parsed && (parsed.rulesHtml || parsed.html)) || '').trim();
         if (html) return html;
     } catch (error) {
@@ -126,7 +147,7 @@ function cleanSharePointUrl(url) {
 
 function migrateLegacySharePointLinksInSchedules() {
     try {
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const schedules = scheduleReadObject('schedules', {});
         if (!schedules || typeof schedules !== 'object') return;
 
         let touched = false;
@@ -159,7 +180,7 @@ function migrateLegacySharePointLinksInSchedules() {
 
 function migrateScheduleDurationMetadata() {
     try {
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const schedules = scheduleReadObject('schedules', {});
         if (!schedules || typeof schedules !== 'object') return;
 
         let touched = false;
@@ -282,7 +303,7 @@ function normalizeDurationDays(value) {
 function getConfiguredScheduleHolidays() {
     let saved = [];
     try {
-        saved = JSON.parse(localStorage.getItem(SCHEDULE_HOLIDAY_STORAGE_KEY) || '[]');
+        saved = scheduleReadArray(SCHEDULE_HOLIDAY_STORAGE_KEY);
     } catch (e) {
         saved = [];
     }
@@ -475,7 +496,7 @@ function escapeInlineJs(value) {
 }
 
 function buildLiveAssessmentCatalog() {
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = scheduleReadArray('tests');
     const byId = new Map();
     const byTitle = new Map();
 
@@ -690,13 +711,13 @@ function renderSchedule() {
         loadFromServer(true).then(() => { renderSchedule(); }); // Re-render with new data
     }
 
-    let schedules = JSON.parse(localStorage.getItem('schedules') || 'null');
+    let schedules = scheduleReadJson('schedules', null);
 
     // Initialization Logic
     if (!schedules || Object.keys(schedules).length === 0) {
-        const oldA = JSON.parse(localStorage.getItem('trainingSchedule_A') || '[]');
-        const oldB = JSON.parse(localStorage.getItem('trainingSchedule_B') || '[]');
-        const oldMaps = JSON.parse(localStorage.getItem('scheduleMappings') || '{}');
+        const oldA = scheduleReadArray('trainingSchedule_A');
+        const oldB = scheduleReadArray('trainingSchedule_B');
+        const oldMaps = scheduleReadObject('scheduleMappings', {});
         const assignA = Object.keys(oldMaps).find(k => oldMaps[k] === 'A') || null;
         const assignB = Object.keys(oldMaps).find(k => oldMaps[k] === 'B') || null;
 
@@ -1089,9 +1110,9 @@ async function renderLiveTable() {
     }
 
     // 1. MIGRATION & INIT
-    let liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || 'null');
+    let liveSchedules = scheduleReadJson('liveSchedules', null);
     if (!liveSchedules) {
-        const oldSettings = JSON.parse(localStorage.getItem('liveScheduleSettings') || '{}');
+        const oldSettings = scheduleReadObject('liveScheduleSettings', {});
         liveSchedules = {
             "A": {
                 startDate: oldSettings.startDate || new Date().toISOString().split('T')[0],
@@ -1137,8 +1158,8 @@ async function renderLiveTable() {
     }
 
     const currentSched = liveSchedules[ACTIVE_LIVE_SCHED_ID];
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const allLiveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+    const bookings = scheduleReadArray('liveBookings');
+    const allLiveSessions = scheduleReadArray('liveSessions');
     
     // 3. RENDER ADMIN CONTROLS (TABS & TOOLBAR)
     if (canViewLive) {
@@ -1349,8 +1370,9 @@ async function renderLiveTable() {
 // --- NEW: PER-DAY TRAINER EDIT ---
 window.editDailyTrainers = async function(dateKey) {
     if (!isLiveBookingManager()) return;
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
     const current = liveSchedules[ACTIVE_LIVE_SCHED_ID];
+    if (!current) return;
     
     const defaults = current.trainers || ["Trainer 1", "Trainer 2"];
     const currentOverride = (current.dailyTrainers && current.dailyTrainers[dateKey]) ? current.dailyTrainers[dateKey] : defaults;
@@ -1425,7 +1447,7 @@ async function moveLiveBooking(id, date, time, trainer) {
     if (!isLiveBookingManager()) return;
 
     const originalBookingsJSON = localStorage.getItem('liveBookings') || '[]';
-    const bookings = JSON.parse(originalBookingsJSON);
+    const bookings = scheduleReadArray('liveBookings');
     const targetBooking = bookings.find(b => String(b.id) === String(id));
     
     if (!targetBooking) return;
@@ -1521,7 +1543,7 @@ async function moveLiveBooking(id, date, time, trainer) {
 
 // --- NEW: LIVE ASSESSMENT STATS MODAL ---
 window.openLiveStatsModal = function() {
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
     const currentSched = liveSchedules[ACTIVE_LIVE_SCHED_ID];
     
     if (!currentSched || !currentSched.assigned) {
@@ -1530,13 +1552,13 @@ window.openLiveStatsModal = function() {
     }
 
     const groupId = currentSched.assigned;
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = scheduleReadObject('rosters', {});
     const trainees = rosters[groupId] || [];
     
     // Get Data
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const bookings = scheduleReadArray('liveBookings');
+    const submissions = scheduleReadArray('submissions');
+    const records = scheduleReadArray('records');
     const catalog = buildLiveAssessmentCatalog();
     const configuredLiveItems = (window.ProgressCatalog && typeof window.ProgressCatalog.getOfficialItems === 'function')
         ? window.ProgressCatalog.getOfficialItems({ includeAuto: false })
@@ -1638,9 +1660,9 @@ window.viewTraineeLiveDetails = function(trainee) {
         .sort((a, b) => a.title.localeCompare(b.title));
     
     // Get Data
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const bookings = scheduleReadArray('liveBookings');
+    const submissions = scheduleReadArray('submissions');
+    const records = scheduleReadArray('records');
     if (hydrateBookingAssessmentIds(bookings, catalog)) {
         localStorage.setItem('liveBookings', JSON.stringify(bookings));
     }
@@ -1836,8 +1858,8 @@ function updateLiveBookingWorkspaceStats(bookings, schedule, validDays) {
 }
 
 function buildLiveSessionStaleReport() {
-    const sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const sessions = scheduleReadArray('liveSessions');
+    const bookings = scheduleReadArray('liveBookings');
     const bookingById = new Map(
         (Array.isArray(bookings) ? bookings : [])
             .filter(b => b && b.id)
@@ -1917,8 +1939,7 @@ function renderLiveSessionStaleRows(report) {
 }
 
 function getLiveSessionRecoveryArchive() {
-    const data = JSON.parse(localStorage.getItem(LIVE_SESSION_RECOVERY_ARCHIVE_KEY) || '[]');
-    return Array.isArray(data) ? data : [];
+    return scheduleReadArray(LIVE_SESSION_RECOVERY_ARCHIVE_KEY);
 }
 
 function saveLiveSessionRecoveryArchive(entries) {
@@ -1993,7 +2014,7 @@ window.closeLiveBookingIntegrityModal = function() {
 
 window.openLiveBookingIntegrityModal = function() {
     if (!isLiveBookingManager()) return;
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const bookings = scheduleReadArray('liveBookings');
     const report = buildLiveBookingIntegrityReport(bookings);
     const staleReport = buildLiveSessionStaleReport();
 
@@ -2059,16 +2080,12 @@ window.runLiveSessionStaleRecovery = async function() {
 
     if (!confirm(`Recover ${recoverableItems.length} stale live session(s)?\n\nThis will archive session payloads first, recover missing submissions/records where needed, then close stale sessions.`)) return;
 
-    let sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-    sessions = Array.isArray(sessions) ? sessions : [];
-    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
-    bookings = Array.isArray(bookings) ? bookings : [];
-    let submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    submissions = Array.isArray(submissions) ? submissions : [];
-    let records = JSON.parse(localStorage.getItem('records') || '[]');
-    records = Array.isArray(records) ? records : [];
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    let sessions = scheduleReadArray('liveSessions');
+    let bookings = scheduleReadArray('liveBookings');
+    let submissions = scheduleReadArray('submissions');
+    let records = scheduleReadArray('records');
+    const tests = scheduleReadArray('tests');
+    const rosters = scheduleReadObject('rosters', {});
     const nowIso = new Date().toISOString();
 
     const bookingById = new Map(bookings.filter(b => b && b.id).map(b => [String(b.id), b]));
@@ -2196,7 +2213,7 @@ window.runLiveSessionStaleRecovery = async function() {
         if (String(localStorage.getItem('currentLiveSessionId') || '') === String(session.sessionId)) {
             localStorage.removeItem('currentLiveSessionId');
         }
-        const currentLocalSession = JSON.parse(localStorage.getItem('liveSession') || '{}');
+        const currentLocalSession = scheduleReadObject('liveSession', {});
         if (String(currentLocalSession.sessionId || '') === String(session.sessionId)) {
             localStorage.setItem('liveSession', JSON.stringify({ active: false, sessionId: session.sessionId, endedAt: Date.now() }));
         }
@@ -2239,9 +2256,9 @@ window.runLiveRecordLinkRepair = async function() {
     }
 
     const nowIso = new Date().toISOString();
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    let records = JSON.parse(localStorage.getItem('records') || '[]');
-    let bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const submissions = scheduleReadArray('submissions');
+    let records = scheduleReadArray('records');
+    let bookings = scheduleReadArray('liveBookings');
     records = Array.isArray(records) ? records : [];
     bookings = Array.isArray(bookings) ? bookings : [];
 
@@ -2251,7 +2268,7 @@ window.runLiveRecordLinkRepair = async function() {
     });
 
     const findGroupForTrainee = (traineeName) => {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = scheduleReadObject('rosters', {});
         const normalized = normalizeScheduleText(traineeName);
         for (const [gid, members] of Object.entries(rosters)) {
             if (!Array.isArray(members)) continue;
@@ -2340,7 +2357,7 @@ window.runLiveBookingAutoRepair = async function() {
     if (!isLiveBookingManager()) return;
     if (!confirm("Run auto-repair on live bookings? This will normalize bad records and cancel conflicting duplicates.")) return;
 
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]').map((b, idx) => ({ ...(b || {}), __tmpKey: `row_${idx}` }));
+    const bookings = scheduleReadArray('liveBookings').map((b, idx) => ({ ...(b || {}), __tmpKey: `row_${idx}` }));
     const catalog = buildLiveAssessmentCatalog();
     const nowIso = new Date().toISOString();
     const validStatuses = new Set(['Booked', 'Completed', 'Cancelled']);
@@ -2517,10 +2534,10 @@ function switchLiveScheduleTab(id) {
 
 async function createNewLiveSchedule() {
     if (!isLiveBookingManager()) return;
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
     const keys = Object.keys(liveSchedules).sort();
     const lastKey = keys[keys.length - 1];
-    const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
+    const nextKey = lastKey ? String.fromCharCode(lastKey.charCodeAt(0) + 1) : 'A';
     
     if (confirm(`Create new Live Schedule '${nextKey}'?`)) {
         liveSchedules[nextKey] = { 
@@ -2542,7 +2559,7 @@ async function createNewLiveSchedule() {
 async function deleteLiveSchedule(id) {
     if (!isLiveBookingManager()) return;
     if (!confirm(`Delete Live Schedule ${id}?`)) return;
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
     delete liveSchedules[id];
     
     if (Object.keys(liveSchedules).length === 0) {
@@ -2564,7 +2581,8 @@ async function deleteLiveSchedule(id) {
 
 async function assignRosterToLiveSchedule(schedId, groupId) {
     if (!isLiveBookingManager()) return;
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
+    if (!liveSchedules[schedId]) return;
     
     // Check conflict
     if (groupId) {
@@ -2585,7 +2603,7 @@ async function assignRosterToLiveSchedule(schedId, groupId) {
 }
 
 function getTraineeLiveScheduleId(username, liveSchedules) {
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = scheduleReadObject('rosters', {});
     const normalizedUser = normalizeScheduleText(username);
     let myGroupId = null;
     for (const [gid, members] of Object.entries(rosters)) {
@@ -2596,7 +2614,7 @@ function getTraineeLiveScheduleId(username, liveSchedules) {
     }
     if (!myGroupId) return null;
     const normalizedGroup = normalizeScheduleText(myGroupId);
-    return Object.keys(liveSchedules).find(key => normalizeScheduleText(liveSchedules[key] && liveSchedules[key].assigned) === normalizedGroup) || null;
+    return Object.keys(liveSchedules || {}).find(key => normalizeScheduleText(liveSchedules[key] && liveSchedules[key].assigned) === normalizedGroup) || null;
 }
 
 // --- BOOKING LOGIC ---
@@ -2619,14 +2637,14 @@ function openBookingModal(date, time, trainer) {
     // FILTER FOR TRAINEES
     if (CURRENT_USER.role === 'trainee') {
         // Ensure user is assigned to a schedule (already checked in renderLiveTable, but safe to double check)
-        const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+        const liveSchedules = scheduleReadObject('liveSchedules', {});
         const schedId = getTraineeLiveScheduleId(CURRENT_USER.user, liveSchedules);
         
         if (!schedId) {
             availableList = [];
         } else {
             // FILTER OUT ALREADY BOOKED/COMPLETED ASSESSMENTS
-            const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+            const bookings = scheduleReadArray('liveBookings');
             if (hydrateBookingAssessmentIds(bookings, catalog)) {
                 localStorage.setItem('liveBookings', JSON.stringify(bookings));
             }
@@ -2680,15 +2698,15 @@ window.openAdminBookingModal = function(date, time, trainer) {
     let traineeSelectHtml = `<label style="font-weight:bold; display:block; margin-top:10px; margin-bottom:5px;">Select Trainee:</label>
                              <select id="adminBookingTrainee" style="width:100%; padding:10px; margin-bottom:15px;">`;
                              
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+    const rosters = scheduleReadObject('rosters', {});
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
     const currentSched = liveSchedules[ACTIVE_LIVE_SCHED_ID];
     
     let trainees = [];
     if (currentSched && currentSched.assigned && rosters[currentSched.assigned]) {
         trainees = rosters[currentSched.assigned];
     } else {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const users = scheduleReadArray('users');
         trainees = users.filter(u => u.role === 'trainee').map(u => u.user);
     }
     
@@ -2763,7 +2781,7 @@ window.confirmAdminBooking = async function() {
             if (dupAssess && dupAssess.length > 0) return alert(`Agent ${trainee} already has a booking for '${assess}'.`);
         }
 
-        const existingBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const existingBookings = scheduleReadArray('liveBookings');
         const localSlotConflict = existingBookings.some(b =>
             b.status !== 'Cancelled' &&
             b.date === PENDING_BOOKING.date &&
@@ -2894,7 +2912,7 @@ async function confirmBooking() {
         }
 
         // 2. Read Data
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const bookings = scheduleReadArray('liveBookings');
         
         // VALIDATION 2: User booking > 1 session per hour?
         const isUserBookedThisHour = bookings.some(b => 
@@ -2978,7 +2996,7 @@ async function cancelBooking(id) {
     try {
         if(!confirm("Are you sure you want to cancel this booking?")) return;
 
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const bookings = scheduleReadArray('liveBookings');
         const target = bookings.find(b => String(b.id) === String(id));
         if (!target) return;
 
@@ -2992,7 +3010,7 @@ async function cancelBooking(id) {
         // CHECK CANCELLATION POLICY
         const countSnapshot = localStorage.getItem('cancellationCounts') || '{}';
         if(CURRENT_USER.role === 'trainee' && !canManage) {
-            const counts = JSON.parse(countSnapshot);
+            const counts = scheduleReadJson('cancellationCounts', {});
             const myCount = counts[CURRENT_USER.user] || 0;
             if(myCount >= 1) {
                 alert("Cancellation Limit Reached.\n\nPlease contact your trainer to change this booking.");
@@ -3019,7 +3037,7 @@ async function cancelBooking(id) {
         
         // Increment cancellation count only after successful cancel write
         if(CURRENT_USER.role === 'trainee' && !canManage) {
-            const counts = JSON.parse(countSnapshot);
+            const counts = scheduleReadJson('cancellationCounts', {});
             const myCount = counts[CURRENT_USER.user] || 0;
             counts[CURRENT_USER.user] = myCount + 1;
             localStorage.setItem('cancellationCounts', JSON.stringify(counts));
@@ -3043,7 +3061,7 @@ async function cancelBooking(id) {
 
 async function markBookingComplete(id) {
     if (!isLiveBookingManager()) return;
-    const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+    const bookings = scheduleReadArray('liveBookings');
     const target = bookings.find(b => String(b.id) === String(id));
     if(!target) return;
 
@@ -3094,7 +3112,8 @@ async function saveLiveScheduleSettings() {
 
     if(activeSlots.length === 0) return alert("Please select at least one time slot.");
 
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules'));
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
+    if (!liveSchedules[ACTIVE_LIVE_SCHED_ID]) return;
     liveSchedules[ACTIVE_LIVE_SCHED_ID].startDate = start;
     liveSchedules[ACTIVE_LIVE_SCHED_ID].days = days;
     liveSchedules[ACTIVE_LIVE_SCHED_ID].activeSlots = activeSlots;
@@ -3119,7 +3138,7 @@ async function generateLiveTable() {
     const days = String(daysInput ? daysInput.value : '').trim();
     if (!start || !days) return alert("Please fill in start date and duration.");
 
-    const liveSchedules = JSON.parse(localStorage.getItem('liveSchedules') || '{}');
+    const liveSchedules = scheduleReadObject('liveSchedules', {});
     const activeId = ACTIVE_LIVE_SCHED_ID || Object.keys(liveSchedules).sort()[0] || 'A';
     if (!liveSchedules[activeId]) {
         liveSchedules[activeId] = {
@@ -3148,7 +3167,7 @@ async function clearLiveBookings() {
     if(btn) { btn.disabled = true; btn.innerText = 'Clearing...'; }
 
     try {
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const bookings = scheduleReadArray('liveBookings');
         if (bookings.length > 0 && typeof hardDelete === 'function') {
             for (const booking of bookings) {
                 // This will send a standard DELETE event for each booking, which all clients can process.
@@ -3210,7 +3229,7 @@ function stampScheduleGroup(group, options = {}) {
 }
 
 function getScheduleTemplates() {
-    const raw = JSON.parse(localStorage.getItem(SCHEDULE_TEMPLATE_STORAGE_KEY) || '[]');
+    const raw = scheduleReadArray(SCHEDULE_TEMPLATE_STORAGE_KEY);
     if (!Array.isArray(raw)) return [];
     return raw
         .filter(t => t && typeof t === 'object' && Array.isArray(t.items))
@@ -3612,7 +3631,7 @@ async function promptForTemplateSelection() {
 }
 
 async function applyTemplateToScheduleById(targetScheduleId, template, startDateInput) {
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const schedules = scheduleReadObject('schedules');
     const group = schedules[targetScheduleId];
     if (!group) return false;
 
@@ -3646,7 +3665,7 @@ async function applyTemplateToScheduleById(targetScheduleId, template, startDate
 
 async function promptAndApplyTemplateToSchedule(targetScheduleId, options = {}) {
     if (!ensureScheduleTemplateAdmin('apply schedule templates')) return false;
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const schedules = scheduleReadObject('schedules');
     const group = schedules[targetScheduleId];
     if (!group) return false;
 
@@ -3776,7 +3795,7 @@ async function promptTemplateActionForNewSchedule(scheduleId) {
 }
 
 async function createNewSchedule() {
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const schedules = scheduleReadObject('schedules');
     if (!schedules || typeof schedules !== 'object') return;
 
     const keys = Object.keys(schedules).sort();
@@ -3798,7 +3817,7 @@ async function assignRosterToSchedule(schedId) {
     const groupId = select.value;
     if (!groupId) return alert("Please select a group.");
 
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
     const conflict = Object.keys(schedules).find(k => schedules[k].assigned === groupId);
     if (conflict) {
         if (!confirm(`Group '${groupId}' is already assigned to Schedule ${conflict}. Move it here?`)) return;
@@ -3815,7 +3834,7 @@ async function assignRosterToSchedule(schedId) {
 
 async function clearAssignment(schedId) {
     if(!confirm("Clear assignment?")) return;
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
     schedules[schedId].assigned = null;
     stampScheduleGroup(schedules[schedId], { touchGroup: true });
     localStorage.setItem('schedules', JSON.stringify(schedules));
@@ -3826,7 +3845,7 @@ async function clearAssignment(schedId) {
 function populateScheduleDropdown(elementId) {
     const select = document.getElementById(elementId);
     if(!select) return;
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = scheduleReadObject('rosters');
     select.innerHTML = '<option value="">-- Select Group --</option>';
     Object.keys(rosters).sort().reverse().forEach(gid => {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
@@ -3835,7 +3854,7 @@ function populateScheduleDropdown(elementId) {
 }
 
 function getTraineeScheduleId(username, schedules) {
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = scheduleReadObject('rosters');
     const normalizedUser = normalizeScheduleText(username);
     let myGroupId = null;
     for (const [gid, members] of Object.entries(rosters)) {
@@ -3851,7 +3870,8 @@ function getTraineeScheduleId(username, schedules) {
 
 // Timeline Item Editing (CRUD)
 async function addTimelineItem() {
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
+    if (!schedules[ACTIVE_SCHED_ID]) return;
     const defaultStart = getTodayOrNextBusinessDateDash();
     const defaultWindow = calculateScheduleWindow(defaultStart, 1);
     schedules[ACTIVE_SCHED_ID].items.push({
@@ -3876,7 +3896,8 @@ async function addTimelineItem() {
 
 async function deleteTimelineItem(index) {
     if(!confirm("Delete this item?")) return;
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
+    if (!schedules[ACTIVE_SCHED_ID]) return;
     schedules[ACTIVE_SCHED_ID].items.splice(index, 1);
     stampScheduleGroup(schedules[ACTIVE_SCHED_ID], { touchGroup: true });
     localStorage.setItem('schedules', JSON.stringify(schedules));
@@ -3886,7 +3907,8 @@ async function deleteTimelineItem(index) {
 }
 
 function editTimelineItem(index) {
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
+    if (!schedules[ACTIVE_SCHED_ID] || !schedules[ACTIVE_SCHED_ID].items[index]) return;
     const item = schedules[ACTIVE_SCHED_ID].items[index];
     const inferredDuration = inferScheduleDurationDays(item);
     const startDateDash = getScheduleStartDateFromRange(item.dateRange, '-');
@@ -3912,7 +3934,7 @@ function editTimelineItem(index) {
     if(chkVetting) chkVetting.checked = item.isVetting || false;
     if(chkLive) chkLive.checked = item.isLive || false;
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = scheduleReadArray('tests');
     const select = document.getElementById('editLinkedTest');
     select.innerHTML = '<option value="">-- None (External) --</option>';
     tests.forEach(t => select.add(new Option(t.title, t.id)));
@@ -3927,7 +3949,8 @@ function editTimelineItem(index) {
 async function saveScheduleItem() {
     const index = document.getElementById('editStepIndex').value;
     const schedId = document.getElementById('editStepType').value;
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
+    if (!schedules[schedId] || !schedules[schedId].items[index]) return;
     const item = schedules[schedId].items[index];
     const startInputEl = document.getElementById('editStartDate');
     const durationInputEl = document.getElementById('editDurationDays');
@@ -3984,7 +4007,7 @@ async function saveScheduleItem() {
 }
 
 async function cloneSchedule(targetId) {
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
     const sources = Object.keys(schedules).filter(k => k !== targetId);
     if(sources.length === 0) return alert("No other schedules to copy from.");
     const sourceId = await customPrompt("Clone Schedule", `Enter the Schedule Letter to copy FROM (${sources.join(', ')}):`);
@@ -4001,7 +4024,8 @@ async function cloneSchedule(targetId) {
 }
 
 async function duplicateCurrentSchedule() {
-    const schedules = JSON.parse(localStorage.getItem('schedules'));
+    const schedules = scheduleReadObject('schedules');
+    if (!schedules[ACTIVE_SCHED_ID]) return;
     const keys = Object.keys(schedules).sort();
     const lastKey = keys[keys.length - 1];
     const nextKey = String.fromCharCode(lastKey.charCodeAt(0) + 1);
@@ -4130,7 +4154,7 @@ async function deleteSchedule(id) {
     if (!confirm(`Are you sure you want to delete Schedule ${id} and all its items? This cannot be undone.`)) return;
     
     const previousSchedulesJson = localStorage.getItem('schedules');
-    const schedules = JSON.parse(previousSchedulesJson);
+    const schedules = previousSchedulesJson ? scheduleReadJson('schedules', {}) : {};
     delete schedules[id];
     
     const oldKeys = Object.keys(schedules).sort();
@@ -4179,7 +4203,8 @@ function schedDragOver(e) {
 async function schedDrop(e, targetIndex) {
     if (e.stopPropagation) e.stopPropagation();
     if (DRAG_SRC_INDEX !== null && DRAG_SRC_INDEX !== targetIndex) {
-        const schedules = JSON.parse(localStorage.getItem('schedules'));
+        const schedules = scheduleReadObject('schedules');
+        if (!schedules[ACTIVE_SCHED_ID] || !Array.isArray(schedules[ACTIVE_SCHED_ID].items)) return false;
         const items = schedules[ACTIVE_SCHED_ID].items;
         const item = items[DRAG_SRC_INDEX];
         items.splice(DRAG_SRC_INDEX, 1); // Remove from old

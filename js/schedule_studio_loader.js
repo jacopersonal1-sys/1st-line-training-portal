@@ -38,7 +38,15 @@
                 return;
             }
 
-            this.refresh();
+            const frame = document.getElementById('schedule-studio-frame');
+            if (typeof applyThemeToEmbeddedFrame === 'function') applyThemeToEmbeddedFrame(frame);
+            try {
+                if (frame.contentWindow && frame.contentWindow.App && typeof frame.contentWindow.App.refresh === 'function') {
+                    frame.contentWindow.App.refresh({ forcePull: false });
+                }
+            } catch (error) {
+                console.warn('[Schedule Studio Loader] Soft refresh bridge failed:', error);
+            }
         },
 
         async refresh() {

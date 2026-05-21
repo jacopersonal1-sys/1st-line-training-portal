@@ -1,5 +1,27 @@
 /* ================= UTILITIES & HELPERS ================= */
 
+function utilsReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`Utils ignored invalid local data for ${key}:`, error);
+        return fallback;
+    }
+}
+
+function utilsReadArray(key) {
+    const value = utilsReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function utilsReadObject(key) {
+    const value = utilsReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 // --- NEW: Formatters for System Status ---
 function formatBytes(bytes, decimals = 2) {
     if (!+bytes) return '0 Bytes';
@@ -32,7 +54,7 @@ function getAvatarHTML(name, size = 32) {
     let boxShadow = '0 2px 4px rgba(0,0,0,0.1)'; // Default shadow
 
     if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && name === CURRENT_USER.user) {
-        const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+        const localTheme = utilsReadObject('local_theme_config');
         if (localTheme && localTheme.showRing && localTheme.profileRingColor) {
             boxShadow = `0 0 0 3px ${localTheme.profileRingColor}`;
         }
@@ -138,7 +160,7 @@ function getGroupLabel(groupId, count) {
     
     // FETCH NAMES: Get the roster to display member names
     // Note: We access localStorage directly because data.js keeps it synced
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = utilsReadObject('rosters');
     const members = rosters[groupId] || [];
     
     // LOGIC: Create a comma-separated string of names (truncated for safety)
@@ -199,7 +221,8 @@ if (typeof window.refreshApp !== 'function') {
 
 // UPDATED: Async Migration Save
 async function migrateData() {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = utilsReadArray('users');
+    if (!Array.isArray(users)) return;
     let changed = false;
     
     users.forEach(u => {
@@ -230,7 +253,7 @@ async function migrateData() {
 function getTraineeCycle(traineeName, currentGroupId) {
     if(!traineeName || !currentGroupId) return "New Onboard";
 
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = utilsReadObject('rosters');
     const allGroups = Object.keys(rosters).sort(); 
     
     let previousCount = 0;
@@ -314,7 +337,7 @@ window.triggerConfetti = function() {
 /* ================= AI INTEGRATION HELPERS ================= */
 
 async function generateAIResponse(systemPrompt, userPrompt) {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = utilsReadObject('system_config');
     
     if (!config.ai || !config.ai.enabled) {
         console.warn("AI is disabled in System Config.");
@@ -360,16 +383,17 @@ function getProfileIdentityToken(value) {
 }
 
 function findCurrentProfileUserSnapshot() {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = utilsReadArray('users');
+    const safeUsers = Array.isArray(users) ? users : [];
     const currentToken = getProfileIdentityToken(CURRENT_USER && CURRENT_USER.user);
-    const idx = users.findIndex(u => getProfileIdentityToken(u && (u.user || u.username)) === currentToken);
-    return { users, idx, user: idx > -1 ? users[idx] : null };
+    const idx = safeUsers.findIndex(u => getProfileIdentityToken(u && (u.user || u.username)) === currentToken);
+    return { users: safeUsers, idx, user: idx > -1 ? safeUsers[idx] : null };
 }
 
 function getCurrentProfileGroups(username) {
     const labels = [];
     try {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = utilsReadObject('rosters');
         const target = getProfileIdentityToken(username);
         Object.entries(rosters || {}).forEach(([gid, members]) => {
             if (!Array.isArray(members)) return;
@@ -384,7 +408,7 @@ function getCurrentProfileGroups(username) {
 function getCurrentRosterGroupIdsForUser(username) {
     const groups = [];
     try {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = utilsReadObject('rosters');
         const target = getProfileIdentityToken(username);
         Object.entries(rosters || {}).forEach(([gid, members]) => {
             if (!Array.isArray(members)) return;
@@ -399,8 +423,8 @@ function getLatestRetrainMoveTimestamp(username) {
     if (!target) return 0;
     let archives = [];
     try {
-        archives = JSON.parse(localStorage.getItem('retrain_archives') || '[]') || [];
-        const legacyMoved = JSON.parse(localStorage.getItem('graduated_agents') || '[]') || [];
+        archives = utilsReadArray('retrain_archives');
+        const legacyMoved = utilsReadArray('graduated_agents');
         archives = archives.concat(legacyMoved.filter(entry => String((entry && entry.reason) || '').trim().toLowerCase().startsWith('moved to ')));
     } catch (e) {
         archives = [];
@@ -503,7 +527,7 @@ function validateEnterprisePassword(password) {
 }
 
 window.openUnifiedProfileSettings = function() {
-    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    const localTheme = utilsReadObject('local_theme_config');
     const storedExpTheme = localStorage.getItem('experimental_theme') || '';
     const expTheme = storedExpTheme || ((typeof getEffectiveExperimentalTheme === 'function') ? getEffectiveExperimentalTheme() : '');
     const selectedChannel = (localStorage.getItem('profile_update_channel') || 'main') === 'beta' ? 'beta' : 'main';
@@ -551,7 +575,7 @@ window.openUnifiedProfileSettings = function() {
         if (typeof getStoredCustomExperimentalThemeConfig === 'function') {
             customExp = getStoredCustomExperimentalThemeConfig();
         } else {
-            const rawExp = JSON.parse(localStorage.getItem('experimental_theme_custom') || '{}');
+            const rawExp = utilsReadObject('experimental_theme_custom');
             customExp = { ...customExp, ...rawExp };
         }
     } catch (e) {}

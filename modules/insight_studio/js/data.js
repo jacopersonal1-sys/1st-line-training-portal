@@ -92,7 +92,9 @@ function insUnique(values) {
 
 function insParseJson(key, fallbackValue) {
     try {
-        const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallbackValue;
+        const parsed = JSON.parse(raw);
         if (parsed === null || parsed === undefined) return fallbackValue;
         return parsed;
     } catch (error) {

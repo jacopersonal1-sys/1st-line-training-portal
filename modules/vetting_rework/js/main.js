@@ -42,6 +42,28 @@ const App = {
         return user && user.user ? user.user : '';
     },
 
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (e) {
+            console.warn(`[Vetting Rework] ignored invalid local data for ${key}:`, e);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     getMyTraineeData: function(session) {
         if (!session || !session.trainees) return null;
         const username = this.getMyUsername();
@@ -104,7 +126,7 @@ const App = {
         // 3. Setup Realtime Listener
         let realtimeRenderDebounce = null;
         this.state.realtimeUnsub = DataService.setupRealtime((payload) => {
-            let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+            let sessions = this.readArray('adminVettingSessions');
             if (payload.eventType === 'DELETE') {
                 sessions = sessions.filter(s => s.sessionId !== payload.old.id);
                 if (this.state.activeTabId === payload.old.id) this.state.activeTabId = null;
@@ -309,7 +331,7 @@ const App = {
         
         if (!staticForm || !dynamicViews) return;
 
-        const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        const activeSessions = this.readArray('adminVettingSessions');
         const isCompact = activeSessions.length > 0;
         
         // Ensure an active tab is selected
@@ -648,7 +670,7 @@ const App = {
         const groupId = document.getElementById('rwGroupSelect').value;
         if (!testId) return alert("Select a test.");
 
-        const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        const activeSessions = this.readArray('adminVettingSessions');
         if (activeSessions.some(s => s.targetGroup === groupId)) {
             if(!confirm(`A session is already active for group: ${groupId}. Continue?`)) return;
         }
@@ -677,7 +699,7 @@ const App = {
     endSession: async function(sessionId) {
         if(!confirm("End this session? This will unlock the arena for trainees.")) return;
         
-        let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        let activeSessions = this.readArray('adminVettingSessions');
         const session = activeSessions.find(s => s.sessionId === sessionId);
         
         if (session) {
@@ -722,7 +744,7 @@ const App = {
     },
 
     forceRefreshSession: async function(sessionId) {
-        const sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        const sessions = this.readArray('adminVettingSessions');
         const session = sessions.find(s => s.sessionId === sessionId);
         if (!session) return;
         try {
@@ -745,7 +767,7 @@ const App = {
     },
 
     patchUser: async function(sessionId, username, patchData) {
-        let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        let activeSessions = this.readArray('adminVettingSessions');
         const session = activeSessions.find(s => s.sessionId === sessionId);
         if (!session) return;
 
@@ -762,7 +784,7 @@ const App = {
 
     excludeTrainee: async function(sessionId, username) {
         if(!confirm(`Exclude ${username} from this session?`)) return;
-        let activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        let activeSessions = this.readArray('adminVettingSessions');
         const session = activeSessions.find(s => s.sessionId === sessionId);
         if (!session) return;
 
@@ -841,7 +863,7 @@ const App = {
             if (!username) return;
             const myData = this.getMyTraineeData(session);
             const isOverridden = myData && myData.override;
-            const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+            const cfg = this.readObject('system_config');
             const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
             const isRelaxed = (myData && myData.relaxed) && !forceGlobalKiosk;
             
@@ -866,7 +888,7 @@ const App = {
                     screenCount = await ipcInvoke('get-screen-count');
                     if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
 
-                    const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                    const forbidden = this.readArray('forbiddenApps');
                     let apps = [];
                     apps = await ipcInvoke('get-process-list', forbidden.length > 0 ? forbidden : null);
                     if (apps && apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
@@ -935,7 +957,7 @@ const App = {
         const session = this.state.traineeSession;
         if (!session) return;
         const myData = this.getMyTraineeData(session);
-        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const cfg = this.readObject('system_config');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         if (myData && myData.relaxed && !forceGlobalKiosk) {
             this.state.securityWarningCount = 0;
@@ -958,7 +980,7 @@ const App = {
                 window.electronAPI.setKioskMode(true).catch(()=>{});
                 window.electronAPI.setContentProtection(true).catch(()=>{});
 
-                const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                const forbidden = this.readArray('forbiddenApps');
                 const apps = await window.electronAPI.getProcessList(forbidden.length > 0 ? forbidden : null).catch(()=>[]);
                 const screens = await window.electronAPI.getScreenCount().catch(()=>0);
 
@@ -976,7 +998,7 @@ const App = {
                 ipcRenderer.invoke('set-kiosk-mode', true).catch(()=>{});
                 ipcRenderer.invoke('set-content-protection', true).catch(()=>{});
 
-                const forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                const forbidden = this.readArray('forbiddenApps');
                 const apps = await ipcRenderer.invoke('get-process-list', forbidden.length > 0 ? forbidden : null);
                 const screens = await ipcRenderer.invoke('get-screen-count');
 
@@ -1004,7 +1026,7 @@ const App = {
         this.state.complianceConsecutiveErrors = 0;
         this.state.complianceConsecutivePasses = 0;
         const myData = this.getMyTraineeData(this.state.traineeSession);
-        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const cfg = this.readObject('system_config');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         const isRelaxed = !!(myData && myData.relaxed && !forceGlobalKiosk);
         try {

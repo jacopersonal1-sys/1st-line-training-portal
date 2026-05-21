@@ -3,7 +3,9 @@
 const TeamUI = {
     renderRoster: function() {
         const myTeam = DataService.getMyTeam();
-        const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
+        const allUsers = (typeof DataService !== 'undefined' && DataService.readArray)
+            ? DataService.readArray('users')
+            : [];
         
         const options = allUsers
             .filter(u => u.role === 'trainee' && !myTeam.some(m => m.name === u.user))
@@ -65,7 +67,9 @@ const TeamUI = {
     },
 
     renderCalendar: function(currentDate) {
-        const submissions = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+        const submissions = (typeof DataService !== 'undefined' && DataService.readArray)
+            ? DataService.readArray('tl_task_submissions')
+            : [];
         const mySubs = submissions.filter(s => s.user === AppContext.user.user);
         const datesWithData = new Set(mySubs.map(s => s.date));
         

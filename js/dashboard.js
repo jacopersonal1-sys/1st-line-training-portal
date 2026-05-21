@@ -39,7 +39,7 @@ function renderLoadingDashboard() {
     // Try to load saved layout if possible
     try {
         const roleKey = (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') ? 'dashLayout_admin' : 'dashLayout_trainee';
-        const saved = JSON.parse(localStorage.getItem(roleKey));
+        const saved = dashboardReadJson(roleKey, null);
         if(saved) layout = saved;
     } catch(e) {}
 
@@ -90,7 +90,7 @@ function dashboardReadJson(key, fallback) {
             value = safeLocalParse(key, fallback);
         } else {
             const raw = localStorage.getItem(key);
-            value = raw ? JSON.parse(raw) : fallback;
+            value = (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') ? fallback : JSON.parse(raw);
         }
     } catch (error) {
         value = fallback;
@@ -269,7 +269,7 @@ function getDashboardLayout() {
     const roleKey = getDashboardRoleKey();
     let saved = null;
     try {
-        saved = JSON.parse(localStorage.getItem(getDashboardLayoutStorageKey()) || 'null');
+        saved = dashboardReadJson(getDashboardLayoutStorageKey(), null);
     } catch (error) {
         saved = null;
     }
@@ -575,8 +575,8 @@ async function updateDashboardHealth(useCache = false) {
 // --- NOTICE SYSTEM LOGIC ---
 
 function buildNoticeBanners(role) {
-    const notices = JSON.parse(localStorage.getItem('notices') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const notices = dashboardReadJson('notices', []);
+    const rosters = dashboardReadJson('rosters', {});
     
     // Filter: Active AND (Target Role Matches OR Target is All)
     const activeNotices = notices.filter(n => 
@@ -625,8 +625,8 @@ function buildNoticeManager() {
         return '<div style="color:var(--text-muted); text-align:center; padding:20px;">Notice Management Hidden (View Only)</div>';
     }
 
-    const notices = JSON.parse(localStorage.getItem('notices') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const notices = dashboardReadJson('notices', []);
+    const rosters = dashboardReadJson('rosters', {});
     const isTL = CURRENT_USER.role === 'teamleader';
     
     // Sort by date desc
@@ -753,7 +753,7 @@ async function postNotice() {
     
     if(!msg) return alert("Message cannot be empty.");
 
-    const notices = JSON.parse(localStorage.getItem('notices') || '[]');
+    const notices = dashboardReadJson('notices', []);
     
     // UPDATED: Consistent Unique ID
     const newNotice = {
@@ -791,7 +791,7 @@ async function postNotice() {
 }
 
 async function toggleNoticeStatus(id, isActive) {
-    const notices = JSON.parse(localStorage.getItem('notices') || '[]');
+    const notices = dashboardReadJson('notices', []);
     const target = notices.find(n => n.id === id);
     if(target) {
         target.active = isActive;
@@ -804,7 +804,7 @@ async function toggleNoticeStatus(id, isActive) {
 }
 
 async function acknowledgeNotice(id) {
-    const notices = JSON.parse(localStorage.getItem('notices') || '[]');
+    const notices = dashboardReadJson('notices', []);
     const target = notices.find(n => n.id === id);
     
     if(target) {
@@ -832,8 +832,8 @@ async function acknowledgeNotice(id) {
 window.checkUrgentNoticesPopup = function() {
     if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
     
-    const notices = JSON.parse(localStorage.getItem('notices') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const notices = dashboardReadJson('notices', []);
+    const rosters = dashboardReadJson('rosters', {});
     
     // Filter: Active AND Role Match AND Group Match AND Not Acknowledged
     const unread = notices.filter(n => 
@@ -1623,7 +1623,7 @@ function buildTLWidgets(container) {
 
 window.fulfillLinkRequest = async function(recordId) {
     // Find record index
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = dashboardReadJson('records', []);
     const idx = records.findIndex(r => r.id === recordId);
     
     if (idx === -1) {
@@ -1644,7 +1644,7 @@ window.fulfillLinkRequest = async function(recordId) {
 window.dismissLinkRequest = async function(requestId) {
     if(!confirm("Dismiss this request without adding a link?")) return;
     
-    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    const requests = dashboardReadJson('linkRequests', []);
     const idx = requests.findIndex(r => r.id === requestId);
     
     if (idx > -1) {
@@ -1683,7 +1683,7 @@ window.handleRecordLinkClick = async function(recordId, currentLink, trainee, as
     // 3. If no link, handle Request Logic
     if (CURRENT_USER.role === 'teamleader') {
         // Check if request already exists
-        const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+        const requests = dashboardReadJson('linkRequests', []);
         const existing = requests.find(r => r.recordId === recordId && r.status === 'pending');
         
         if (existing) {
@@ -1709,7 +1709,7 @@ window.handleRecordLinkClick = async function(recordId, currentLink, trainee, as
         }
     } else if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
         // FIX: Allow Admin to add link directly
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const records = dashboardReadJson('records', []);
         const idx = records.findIndex(r => r.id === recordId);
         
         if (idx !== -1 && typeof updateRecordLink === 'function') {
@@ -1735,7 +1735,7 @@ window.submitHelpRequest = async function() {
 window.deleteBookmark = function(id, e) {
     if (e) e.stopPropagation();
     if(!confirm("Delete this bookmark?")) return;
-    const allBookmarks = JSON.parse(localStorage.getItem('trainee_bookmarks') || '{}');
+    const allBookmarks = dashboardReadJson('trainee_bookmarks', {});
     const bookmarks = allBookmarks[CURRENT_USER.user] || [];
     const updated = bookmarks.filter(b => b.id !== id);
     allBookmarks[CURRENT_USER.user] = updated;
@@ -1745,7 +1745,7 @@ window.deleteBookmark = function(id, e) {
 };
 
 window.updateTraineeNote = function(val) {
-    const notes = JSON.parse(localStorage.getItem('trainee_notes') || '{}');
+    const notes = dashboardReadJson('trainee_notes', {});
     notes[CURRENT_USER.user] = val;
     localStorage.setItem('trainee_notes', JSON.stringify(notes));
     if (typeof saveToServer === 'function') saveToServer(['trainee_notes'], false);
@@ -2058,7 +2058,7 @@ function buildTraineeWidgets(container) {
     let allBookmarks = dashboardReadJson('trainee_bookmarks', {});
     if (localStorage.getItem(legacyBmKey) !== null) {
         try {
-            allBookmarks[CURRENT_USER.user] = JSON.parse(localStorage.getItem(legacyBmKey) || '[]');
+            allBookmarks[CURRENT_USER.user] = dashboardReadJson(legacyBmKey, []);
         } catch (error) {
             allBookmarks[CURRENT_USER.user] = [];
         }
@@ -2315,7 +2315,7 @@ async function addDailyTip() {
         const val = await customPrompt("Add Daily Tip", "Enter the text for the new daily tip:");
         if (!val || !val.trim()) return;
         
-        let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+        let tips = dashboardReadJson('dailyTips', []);
         tips.push(val.trim());
         localStorage.setItem('dailyTips', JSON.stringify(tips));
         
@@ -2336,7 +2336,7 @@ async function addDailyTip() {
 
 async function deleteDailyTip(idx) {
     if(!confirm("Delete this tip?")) return;
-    let tips = JSON.parse(localStorage.getItem('dailyTips') || '[]');
+    let tips = dashboardReadJson('dailyTips', []);
     tips.splice(idx, 1);
     localStorage.setItem('dailyTips', JSON.stringify(tips));
     

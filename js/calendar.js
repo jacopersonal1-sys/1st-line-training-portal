@@ -2,6 +2,28 @@
 /* Aggregates Schedules, Live Bookings, and Custom Events */
 
 const CalendarModule = {
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (error) {
+            console.warn(`Calendar ignored invalid local data for ${key}:`, error);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     esc: function(value) {
         return String(value === undefined || value === null ? '' : value)
             .replace(/&/g, '&amp;')
@@ -34,8 +56,8 @@ const CalendarModule = {
         const normalizedUser = String(user || '').toLowerCase();
         
         // 1. SCHEDULE ITEMS (Timeline)
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const schedules = this.readObject('schedules');
+        const rosters = this.readObject('rosters');
         
         Object.keys(schedules).forEach(schedId => {
             const sched = schedules[schedId];
@@ -89,7 +111,7 @@ const CalendarModule = {
         });
 
         // 2. LIVE BOOKINGS
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const bookings = this.readArray('liveBookings');
         bookings.forEach(b => {
             if (b.status === 'Cancelled') return;
             let isVisible = false;
@@ -124,7 +146,7 @@ const CalendarModule = {
         });
 
         // 3. CUSTOM EVENTS
-        const custom = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
+        const custom = this.readArray('calendarEvents');
         custom.forEach(ev => {
             let isVisible = false;
             if (role === 'admin' || role === 'super_admin') isVisible = true;
@@ -189,13 +211,13 @@ const CalendarModule = {
 
         // ADMIN TASKS (Marking & Attendance)
         if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin') {
-            const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+            const subs = this.readArray('submissions');
             const pendingMarking = subs.filter(s => s.status === 'pending').length;
             if (pendingMarking > 0) {
                 todaysEvents.push({ title: `${pendingMarking} Assessments to Mark`, color: '#e74c3c', type: 'admin_task', source: 'Admin queue', action: "showTab('test-manage')" });
             }
 
-            const att = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : JSON.parse(localStorage.getItem('attendance_records') || '[]');
+            const att = (typeof readAttendanceRecords === 'function') ? readAttendanceRecords() : this.readArray('attendance_records');
             const unconfirmed = att.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored).length;
             if (unconfirmed > 0) {
                 todaysEvents.push({ title: `${unconfirmed} Late Arrivals to Review`, color: '#f1c40f', type: 'admin_task', source: 'Attendance review', action: "openAttendanceRegister()" });
@@ -290,7 +312,7 @@ const CalendarModule = {
         if (modal) modal.classList.remove('hidden');
         const select = document.getElementById('calEventGroup');
         if (select) {
-            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+            const rosters = this.readObject('rosters');
             select.innerHTML = '<option value="">-- Select Group --</option>';
             Object.keys(rosters).sort().reverse().forEach(gid => { select.add(new Option(gid, gid)); });
         }
@@ -304,7 +326,7 @@ const CalendarModule = {
         const user = document.getElementById('calEventUser').value;
         if (!title || !date) return alert("Title and Date are required.");
         const newEvent = { id: Date.now() + "_" + Math.random().toString(36).substr(2, 5), title: title, date: date.replace(/-/g, '/'), visibility: visibility, targetGroup: group, targetUser: user, createdBy: CURRENT_USER.user };
-        const events = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
+        const events = this.readArray('calendarEvents');
         events.push(newEvent);
         localStorage.setItem('calendarEvents', JSON.stringify(events));
         if (typeof saveToServer === 'function') await saveToServer(['calendarEvents'], false);

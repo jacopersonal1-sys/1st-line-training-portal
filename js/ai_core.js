@@ -8,6 +8,28 @@ const AICore = {
     lastErrorTime: 0,
     analysisInterval: null,
 
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (e) {
+            console.warn(`AI Core ignored invalid local data for ${key}:`, e);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     init: function() {
         // Start background analysis loop (every 10 minutes)
         if (this.analysisInterval) clearInterval(this.analysisInterval);
@@ -44,7 +66,7 @@ const AICore = {
         "analyze_logs": {
             description: "Read the last 20 audit logs for suspicious activity.",
             execute: () => {
-                const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+                const logs = AICore.readArray('auditLogs');
                 const recent = logs.slice(-20);
                 return JSON.stringify(recent);
             }
@@ -58,7 +80,7 @@ const AICore = {
         "config_history": {
             description: "Show recent changes to System Configuration (AI or Admin).",
             execute: () => {
-                const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+                const logs = AICore.readArray('auditLogs');
                 // Filter for config changes
                 const configLogs = logs.filter(l => l.action === 'System Config' || l.details.includes('Super Admin Settings'));
                 return configLogs.length > 0 ? JSON.stringify(configLogs.slice(-10)) : "No recent configuration changes found.";
@@ -119,7 +141,7 @@ const AICore = {
         "list_users": {
             description: "List all registered users and their roles.",
             execute: () => {
-                const users = JSON.parse(localStorage.getItem('users') || '[]');
+                const users = AICore.readArray('users');
                 const summary = users.map(u => `${u.user} (${u.role})`).join(', ');
                 return `Total Users: ${users.length}\nList: ${summary}`;
             }
@@ -127,7 +149,7 @@ const AICore = {
         "toggle_maintenance": {
             description: "Toggle Maintenance Mode on/off.",
             execute: async () => {
-                const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+                const config = AICore.readObject('system_config');
                 if(!config.security) config.security = {};
                 config.security.maintenance_mode = !config.security.maintenance_mode;
                 localStorage.setItem('system_config', JSON.stringify(config));
@@ -139,8 +161,8 @@ const AICore = {
             description: "Get a briefing of today's attendance and submissions.",
             execute: () => {
                 const today = new Date().toISOString().split('T')[0];
-                const att = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-                const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+                const att = AICore.readArray('attendance_records');
+                const subs = AICore.readArray('submissions');
                 
                 const todayAtt = att.filter(r => r.date === today);
                 const lates = todayAtt.filter(r => r.isLate).length;
@@ -156,8 +178,8 @@ const AICore = {
         "check_security_posture": {
             description: "Audit security settings (Maintenance Mode, IP Whitelist, Ban List).",
             execute: () => {
-                const config = JSON.parse(localStorage.getItem('system_config') || '{}');
-                const ac = JSON.parse(localStorage.getItem('accessControl') || '{"enabled":false}');
+                const config = AICore.readObject('system_config');
+                const ac = AICore.readObject('accessControl');
                 const sec = config.security || {};
                 
                 return `🛡️ **Security Posture**\n\n- Maintenance Mode: ${sec.maintenance_mode ? 'ON 🔴' : 'OFF 🟢'}\n- Global Kiosk: ${sec.force_kiosk_global ? 'ON 🔴' : 'OFF 🟢'}\n- IP Restriction: ${ac.enabled ? 'ON 🟢' : 'OFF ⚠️'}\n- Banned Clients: ${sec.banned_clients ? sec.banned_clients.length : 0}\n- Whitelisted Clients: ${sec.client_whitelist ? sec.client_whitelist.length : 0}`;
@@ -169,7 +191,7 @@ const AICore = {
                 const username = await customPrompt("Reset Password", "Enter username to reset:");
                 if (!username) return "Operation cancelled.";
                 
-                const users = JSON.parse(localStorage.getItem('users') || '[]');
+                const users = AICore.readArray('users');
                 const idx = users.findIndex(u => u.user === username);
                 if (idx === -1) return `User '${username}' not found.`;
                 
@@ -193,7 +215,7 @@ const AICore = {
         "clear_old_logs": {
             description: "Delete audit logs older than 30 days to free up space.",
             execute: async () => {
-                const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+                const logs = AICore.readArray('auditLogs');
                 const cutoff = new Date();
                 cutoff.setDate(cutoff.getDate() - 30);
                 
@@ -213,11 +235,11 @@ const AICore = {
             execute: () => {
                 const exportData = {
                     date: new Date().toISOString(),
-                    error_reports: JSON.parse(localStorage.getItem('error_reports') || '[]'),
-                    nps_responses: JSON.parse(localStorage.getItem('nps_responses') || '[]'),
-                    auditLogs: JSON.parse(localStorage.getItem('auditLogs') || '[]'),
-                    monitor_data: JSON.parse(localStorage.getItem('monitor_data') || '{}'),
-                    system_config: JSON.parse(localStorage.getItem('system_config') || '{}')
+                    error_reports: AICore.readArray('error_reports'),
+                    nps_responses: AICore.readArray('nps_responses'),
+                    auditLogs: AICore.readArray('auditLogs'),
+                    monitor_data: AICore.readObject('monitor_data'),
+                    system_config: AICore.readObject('system_config')
                 };
                 
                 const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: 'application/json'});
@@ -241,7 +263,7 @@ const AICore = {
         "analyze_records": {
             description: "Analyze assessment records for averages and trends.",
             execute: () => {
-                const records = JSON.parse(localStorage.getItem('records') || '[]');
+                const records = AICore.readArray('records');
                 if (records.length === 0) return "No records found.";
                 let total = 0;
                 const counts = {};
@@ -391,7 +413,7 @@ const AICore = {
             }
         }
 
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = this.readObject('system_config');
         if (!config.ai || !config.ai.enabled || !config.ai.apiKey) {
             return "Error: AI is disabled or API Key is missing.<br>1. Get a key from <a href='#' onclick=\"event.preventDefault(); if(typeof require!=='undefined') require('electron').shell.openExternal('https://aistudio.google.com/app/apikey'); else window.open('https://aistudio.google.com/app/apikey', '_blank');\" style='color:#4285f4'>Google AI Studio</a><br>2. Configure it in the <a href='#' onclick='event.preventDefault(); openSuperAdminConfig();' style='color:#4285f4'>Super Admin Console</a> (Ctrl+Shift+S).";
         }
@@ -455,8 +477,8 @@ const AICore = {
         let log = [];
         
         // 1. Fix Ghost Users (In Roster but no Account)
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const records = this.readArray('records');
+        const users = this.readArray('users');
         const userMap = new Set(users.map(u => u.user));
         
         let ghostRecords = 0;
@@ -492,7 +514,7 @@ const AICore = {
         if (Date.now() - this.lastErrorTime < 15000) return;
         
         // 2. Check Config
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = this.readObject('system_config');
         if (!config.ai || !config.ai.enabled || !config.ai.apiKey) return;
         
         if (this.isAnalyzing) return;
@@ -522,7 +544,7 @@ const AICore = {
 
     // --- BACKGROUND IMPROVEMENT ANALYZER ---
     analyzeForImprovements: async function(force = false) {
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = this.readObject('system_config');
         
         // Detailed Diagnostics
         if (!config.ai) return "AI Error: Configuration missing. Please save settings in Super Admin Console.";
@@ -531,7 +553,7 @@ const AICore = {
 
         // Gather Context
         const logs = window.CONSOLE_HISTORY || [];
-        const audit = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        const audit = this.readArray('auditLogs');
         const recentErrors = logs.filter(l => l.type === 'error').slice(-10);
         const recentAudit = audit.slice(-10);
 
@@ -559,7 +581,7 @@ const AICore = {
                     desc: desc.trim()
                 };
 
-                const list = JSON.parse(localStorage.getItem('ai_suggestions') || '[]');
+                const list = this.readArray('ai_suggestions');
                 // Add to top, keep max 20
                 list.unshift(suggestion);
                 if (list.length > 20) list.pop();
@@ -578,7 +600,7 @@ const AICore = {
         const container = document.getElementById('aiSuggestionsList');
         if (!container) return;
         
-        const list = JSON.parse(localStorage.getItem('ai_suggestions') || '[]');
+        const list = this.readArray('ai_suggestions');
         if (list.length === 0) {
             container.innerHTML = '<div style="color:#888; font-style:italic; font-size:0.8rem; text-align:center; margin-top:20px;">No suggestions available.</div>';
             return;

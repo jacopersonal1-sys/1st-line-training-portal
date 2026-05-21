@@ -5,6 +5,28 @@ const NPSSystem = {
     // --- CONFIGURATION ---
     checkInterval: null,
 
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (e) {
+            console.warn(`NPS ignored invalid local data for ${key}:`, e);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     init: function() {
         // Check for pending surveys every minute
         if (this.checkInterval) clearInterval(this.checkInterval);
@@ -19,11 +41,11 @@ const NPSSystem = {
         if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
 
         // FEATURE FLAG CHECK
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = this.readObject('system_config');
         if (config.features && config.features.nps_surveys === false) return;
 
-        const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
-        const responses = JSON.parse(localStorage.getItem('nps_responses') || '[]');
+        const surveys = this.readArray('nps_surveys');
+        const responses = this.readArray('nps_responses');
         
         // Find active surveys that haven't been answered by this user
         const pending = surveys.filter(s => {
@@ -43,7 +65,7 @@ const NPSSystem = {
             // ARCHITECTURAL FIX: RETROACTIVE COMPLETION CATCHER
             // Prevents lost surveys if the app crashes during submission
             if (s.triggerType === 'completion' && s.contextType === 'assessment') {
-                const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+                const subs = this.readArray('submissions');
                 return subs.some(sub => sub.trainee === CURRENT_USER.user && sub.status === 'completed' && sub.testId == s.contextId);
             }
             
@@ -60,11 +82,11 @@ const NPSSystem = {
         if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
 
         // FEATURE FLAG CHECK
-        const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const config = this.readObject('system_config');
         if (config.features && config.features.nps_surveys === false) return;
 
-        const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
-        const responses = JSON.parse(localStorage.getItem('nps_responses') || '[]');
+        const surveys = this.readArray('nps_surveys');
+        const responses = this.readArray('nps_responses');
 
         const target = surveys.find(s => 
             s.active && 
@@ -180,7 +202,7 @@ const NPSSystem = {
             date: new Date().toISOString()
         };
         
-        const responses = JSON.parse(localStorage.getItem('nps_responses') || '[]');
+        const responses = this.readArray('nps_responses');
         responses.push(response);
         localStorage.setItem('nps_responses', JSON.stringify(responses));
         
@@ -198,7 +220,7 @@ NPSSystem.renderAdminPanel = function() {
     const container = document.getElementById('npsConfigContainer');
     if (!container) return;
 
-    const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
+    const surveys = this.readArray('nps_surveys');
     
     let html = `
         <div class="card">
@@ -253,8 +275,8 @@ NPSSystem.renderAdminPanel = function() {
 };
 
 NPSSystem.openBuilder = function() {
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+    const assessments = this.readArray('assessments');
+    const schedules = this.readObject('schedules');
     
     let assessOpts = assessments.map(a => `<option value="assessment:${a.name}">${a.name} (Assessment)</option>`).join('');
     
@@ -328,15 +350,15 @@ NPSSystem.saveSurvey = async function() {
     if (contextVal.startsWith('assessment:')) {
         contextType = 'assessment';
         contextName = contextVal.split(':')[1];
-        const assessments = JSON.parse(localStorage.getItem('tests') || '[]');
+        const assessments = this.readArray('tests');
         const test = assessments.find(t => t.title === contextName);
         contextId = test ? test.id : contextName;
     } else if (contextVal.startsWith('schedule:')) {
         contextType = 'schedule';
         const parts = contextVal.split(':');
         contextId = `${parts[1]}_${parts[2]}`;
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-        contextName = schedules[parts[1]].items[parseInt(parts[2])].courseName;
+        const schedules = this.readObject('schedules');
+        contextName = schedules[parts[1]] && schedules[parts[1]].items ? schedules[parts[1]].items[parseInt(parts[2])].courseName : '';
     }
 
     const newSurvey = {
@@ -347,7 +369,7 @@ NPSSystem.saveSurvey = async function() {
         created: new Date().toISOString()
     };
 
-    const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
+    const surveys = this.readArray('nps_surveys');
     surveys.push(newSurvey);
     localStorage.setItem('nps_surveys', JSON.stringify(surveys));
     
@@ -359,7 +381,7 @@ NPSSystem.saveSurvey = async function() {
 };
 
 NPSSystem.toggleStatus = async function(id) {
-    const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
+    const surveys = this.readArray('nps_surveys');
     const target = surveys.find(s => s.id === id);
     if (target) {
         target.active = !target.active;
@@ -370,7 +392,7 @@ NPSSystem.toggleStatus = async function(id) {
 };
 
 NPSSystem.cloneSurvey = async function(id) {
-    const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
+    const surveys = this.readArray('nps_surveys');
     const original = surveys.find(s => s.id === id);
     if (!original) return;
 
@@ -398,7 +420,7 @@ NPSSystem.cloneSurvey = async function(id) {
 };
 
 NPSSystem.previewSurvey = function(id) {
-    const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
+    const surveys = this.readArray('nps_surveys');
     const survey = surveys.find(s => s.id === id);
     if (!survey) return;
     this.showSurveyModal(survey);
@@ -406,7 +428,7 @@ NPSSystem.previewSurvey = function(id) {
 
 NPSSystem.deleteSurvey = async function(id) {
     if (!confirm("Delete this survey?")) return;
-    let surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
+    let surveys = this.readArray('nps_surveys');
     surveys = surveys.filter(x => x.id !== id);
     localStorage.setItem('nps_surveys', JSON.stringify(surveys));
     if (typeof saveToServer === 'function') await saveToServer(['nps_surveys'], true);

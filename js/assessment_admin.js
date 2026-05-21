@@ -7,6 +7,28 @@ if (!window.MARKING_SESSION_ID) {
     window.MARKING_SESSION_ID = (window.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`);
 }
 
+function assessmentAdminReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`Assessment Admin ignored invalid local data for ${key}:`, e);
+        return fallback;
+    }
+}
+
+function assessmentAdminReadArray(key) {
+    const value = assessmentAdminReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function assessmentAdminReadObject(key) {
+    const value = assessmentAdminReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 /**
  * 1. ADMIN: ASSESSMENT DASHBOARD (OVERVIEW)
  */
@@ -16,8 +38,8 @@ function loadAssessmentDashboard() {
     
     container.innerHTML = '';
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const tests = assessmentAdminReadArray('tests');
+    const subs = assessmentAdminReadArray('submissions');
 
     if (tests.length === 0) {
         container.innerHTML = '<p style="color:var(--text-muted); padding:10px;">No assessments created yet. Use the "+ Create New Assessment" button.</p>';
@@ -64,8 +86,8 @@ function loadMarkingQueue() {
     const container = document.getElementById('markingList');
     if (!container) return;
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const subs = assessmentAdminReadArray('submissions');
+    const records = assessmentAdminReadArray('records');
 
     // Filter pending
     let pending = subs.filter(s => s.status === 'pending' && !s.archived);
@@ -240,7 +262,7 @@ async function ensureMarkedAssessmentRowsOnServer(submission, record = null) {
 
 function applyServerSubmissionLocally(serverSubmission) {
     if (!serverSubmission?.id) return;
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = assessmentAdminReadArray('submissions');
     const idx = subs.findIndex(s => s.id === serverSubmission.id);
     if (idx > -1) {
         subs[idx] = { ...subs[idx], ...serverSubmission };
@@ -250,7 +272,7 @@ function applyServerSubmissionLocally(serverSubmission) {
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     if (typeof generateChecksum === 'function') {
-        const hashMap = JSON.parse(localStorage.getItem('hash_map_submissions') || '{}');
+        const hashMap = assessmentAdminReadObject('hash_map_submissions');
         hashMap[serverSubmission.id] = generateChecksum(JSON.stringify(serverSubmission));
         localStorage.setItem('hash_map_submissions', JSON.stringify(hashMap));
     }
@@ -442,7 +464,7 @@ function validateActiveMarkingModalLock() {
     const modal = document.getElementById('markingModal');
     if (!activeSubId || !modal || modal.classList.contains('hidden')) return;
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = assessmentAdminReadArray('submissions');
     const sub = subs.find(s => s.id === activeSubId);
     const activeLock = getActiveMarkingLock(sub);
     if (activeLock && !isOwnMarkingLock(activeLock)) {
@@ -522,7 +544,7 @@ async function approveSubmission(subId) {
     if (window._isApproving === subId) return;
     window._isApproving = subId;
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = assessmentAdminReadArray('submissions');
     const sub = subs.find(s => s.id === subId);
     if (!sub) {
         window._isApproving = null;
@@ -559,7 +581,7 @@ async function approveSubmission(subId) {
     localStorage.setItem('submissions', JSON.stringify(subs));
 
     // 2. Create Permanent Record
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = assessmentAdminReadObject('rosters');
     let targetGroup = 'Manual-Upload';
     
     for (const [gid, members] of Object.entries(rosters)) {
@@ -574,7 +596,7 @@ async function approveSubmission(subId) {
         cycleVal = getTraineeCycle(sub.trainee, targetGroup);
     }
 
-    const recs = JSON.parse(localStorage.getItem('records') || '[]');
+    const recs = assessmentAdminReadArray('records');
     const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
     const recordId = buildRecordIdForSubmission(sub);
 
@@ -658,7 +680,7 @@ async function openAdminMarking(subId, options = {}) {
         return;
     }
 
-    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    let subs = assessmentAdminReadArray('submissions');
     let sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Error: Submission data not found.");
 
@@ -667,7 +689,7 @@ async function openAdminMarking(subId, options = {}) {
     if (shouldClaim) {
         const claimed = await claimMarkingLease(subId, sub.status === 'completed' ? 'history_edit' : 'detailed_marking');
         if (!claimed) return;
-        subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        subs = assessmentAdminReadArray('submissions');
         sub = subs.find(s => s.id === subId) || sub;
     }
 
@@ -675,7 +697,7 @@ async function openAdminMarking(subId, options = {}) {
     let test = sub.testSnapshot;
     
     if (!test || !test.questions) {
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const tests = assessmentAdminReadArray('tests');
         test = tests.find(t => t.id == sub.testId); 
     }
 
@@ -915,7 +937,7 @@ function viewCompletedTest(submissionId, arg2, arg3) {
         return;
     }
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = assessmentAdminReadArray('submissions');
     let mode = 'view';
 
     if (arg3 === 'view' || arg3 === 'edit') mode = arg3;
@@ -955,7 +977,7 @@ async function finalizeAdminMarking(subId) {
         document.activeElement.blur();
     }
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = assessmentAdminReadArray('submissions');
     const sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Submission data not found.");
 
@@ -965,7 +987,7 @@ async function finalizeAdminMarking(subId) {
     const markerName = getCurrentMarkerName();
     const editTime = new Date().toISOString();
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = assessmentAdminReadArray('tests');
     const test = (sub.testSnapshot && Array.isArray(sub.testSnapshot.questions))
         ? sub.testSnapshot
         : tests.find(t => t.id == sub.testId);
@@ -1017,7 +1039,7 @@ async function finalizeAdminMarking(subId) {
 
     localStorage.setItem('submissions', JSON.stringify(subs));
 
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = assessmentAdminReadObject('rosters');
     let groupId = "Unknown";
     for (const [gid, members] of Object.entries(rosters)) {
         if (members.some(m => m.toLowerCase() === sub.trainee.toLowerCase())) { 
@@ -1030,7 +1052,7 @@ async function finalizeAdminMarking(subId) {
     if(typeof getTraineeCycle === 'function') cycleVal = getTraineeCycle(sub.trainee, groupId);
     const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
 
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = assessmentAdminReadArray('records');
     const recordId = buildRecordIdForSubmission(sub);
     
     const existingIdx = records.findIndex(r =>
@@ -1115,7 +1137,7 @@ function printAssessmentView() {
 
 // --- NEW: LIVE MARKER NOTE EDITOR ---
 window.editMarkerNote = async function(testId, qIdx, subId = null) {
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = assessmentAdminReadArray('tests');
     const test = tests.find(t => t.id == testId);
     
     if (!test || !test.questions[qIdx]) return alert("Master test or question not found.");
@@ -1135,7 +1157,7 @@ window.editMarkerNote = async function(testId, qIdx, subId = null) {
     
     // 2. Update Submission Snapshot (if marking an existing submission)
     if (subId) {
-        const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const subs = assessmentAdminReadArray('submissions');
         const sub = subs.find(s => s.id === subId);
         if (sub && sub.testSnapshot && sub.testSnapshot.questions[qIdx]) {
             sub.testSnapshot.questions[qIdx].adminNotes = newNote;

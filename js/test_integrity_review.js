@@ -7,7 +7,9 @@ const TEST_INTEGRITY_OVERRIDES_KEY = 'test_integrity_overrides';
 
 function testIntegrityParse(key, fallback) {
     try {
-        const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        const parsed = JSON.parse(raw);
         return parsed === null || parsed === undefined ? fallback : parsed;
     } catch (error) {
         return fallback;

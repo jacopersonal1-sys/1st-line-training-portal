@@ -47,11 +47,23 @@ function normalizeReportingIdentity(value) {
 function readReportingJson(key, fallback) {
     try {
         if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
-        const parsed = JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        const parsed = JSON.parse(raw);
         return parsed === null || typeof parsed === 'undefined' ? fallback : parsed;
     } catch (e) {
         return fallback;
     }
+}
+
+function readReportingArray(key) {
+    const value = readReportingJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function readReportingObject(key) {
+    const value = readReportingJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
 function getLiveRosterMembershipSnapshot() {
@@ -155,7 +167,7 @@ async function submitInsightReview() {
     if (!targetName) return alert("No trainee selected for review.");
     if (!status) return alert("Please select a final status.");
 
-    const decisions = JSON.parse(localStorage.getItem('adminDecisions') || '{}');
+    const decisions = readReportingObject('adminDecisions');
     decisions[targetName] = {
         status,
         comment,
@@ -387,8 +399,8 @@ function renderMonthly() {
 }
 
 function loadReportTab() {
-  let users = JSON.parse(localStorage.getItem('users') || '[]');
-  let reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+  let users = readReportingArray('users');
+  let reports = readReportingArray('savedReports');
   const existingTrainees = new Set(reports.map(r => r.trainee.toLowerCase()));
 
   const select = document.getElementById('reportTraineeSelect');
@@ -496,7 +508,7 @@ function getConfiguredOnboardReportItems(sectionKey) {
             return getInsightProgressRequiredItems();
         }
         try {
-            const cfg = JSON.parse(localStorage.getItem('insight_progress_config') || '{}');
+            const cfg = readReportingObject('insight_progress_config');
             return Array.isArray(cfg.requiredItems) ? cfg.requiredItems : [];
         } catch (error) {
             return [];
@@ -613,7 +625,7 @@ function generateReport() {
   setTimeout(() => {
       document.getElementById('repName').innerText = name;
       
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
+      const users = readReportingArray('users');
       const trainee = users.find(u => u.user === name);
       if(trainee && trainee.traineeData) {
           document.getElementById('repContact').innerText = trainee.traineeData.contact || "";
@@ -623,7 +635,7 @@ function generateReport() {
           document.getElementById('repKnowledge').innerText = "Not filled";
       }
 
-      const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+      const rosters = readReportingObject('rosters');
       let group = "Unknown";
       for (const [gid, members] of Object.entries(rosters)) {
           if (members.map(m=>m.toLowerCase()).includes(name.toLowerCase())) {
@@ -639,15 +651,15 @@ function generateReport() {
       document.getElementById('repPeriod').innerText = group;
       
       // DATA AGGREGATION: Manual Records + Approved Digital Submissions
-      const allRecs = JSON.parse(localStorage.getItem('records') || '[]');
-      const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+      const allRecs = readReportingArray('records');
+      const submissions = readReportingArray('submissions');
       
       // Filter for this trainee (Safe check for nulls)
       const myRecs = allRecs.filter(r => r.trainee && r.trainee.toLowerCase() === name.toLowerCase());
       const mySubs = submissions.filter(s => s.trainee && s.trainee.toLowerCase() === name.toLowerCase() && s.status === 'completed');
 
       // 1. STANDARD ASSESSMENTS (Configured from Agent Progress Builder Insight)
-      const assessList = JSON.parse(localStorage.getItem('assessments') || '[]');
+      const assessList = readReportingArray('assessments');
       const configuredGoalItems = getConfiguredOnboardReportItems('trainingGoal');
       const configuredScoreItems = getConfiguredOnboardReportItems('assessmentScores');
       const fallbackAssessments = assessList
@@ -688,7 +700,7 @@ function generateReport() {
       renderVettingTable('Final Vetting', myRecs, mySubs, 'repVetting2Body', getConfiguredOnboardReportItems('vettingFinal'));
 
       // PRE-FILL ADMIN DECISIONS (If any)
-      const decisions = JSON.parse(localStorage.getItem('adminDecisions') || '{}');
+      const decisions = readReportingObject('adminDecisions');
       if(decisions[name]) {
           document.getElementById('repFeedback').innerText = decisions[name].comment || "";
           document.getElementById('repDeploy').innerText = decisions[name].status || "";
@@ -702,7 +714,7 @@ function generateReport() {
 }
 
 function renderVettingTable(phaseKey, records, submissions, tableId, configuredItems = []) {
-    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
+    const topics = readReportingArray('vettingTopics');
     const reportTopics = Array.isArray(configuredItems) && configuredItems.length
         ? configuredItems.map(item => String(item.name || '').trim()).filter(Boolean)
         : topics;
@@ -753,7 +765,7 @@ async function saveGeneratedReport() {
         deploy: document.getElementById('repDeploy').innerHTML,
         checks: [document.getElementById('repPass1').checked, document.getElementById('repPass2').checked, document.getElementById('repPass3').checked]
     };
-    const saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    const saved = readReportingArray('savedReports');
     saved.push(reportData);
     localStorage.setItem('savedReports', JSON.stringify(saved));
     
@@ -793,7 +805,7 @@ function renderSavedReportsList() {
         select.style.cssText = "padding: 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-input); color: var(--text-main); margin-right: 10px; height: 32px; vertical-align: middle; max-width: 200px;";
         select.onchange = () => renderSavedReportsList();
         
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = readReportingObject('rosters');
         select.innerHTML = '<option value="">All Groups</option>';
         Object.keys(rosters).sort().reverse().forEach(gid => {
             const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
@@ -804,10 +816,10 @@ function renderSavedReportsList() {
         searchInput.parentNode.insertBefore(select, searchInput);
     }
 
-    const saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    const saved = readReportingArray('savedReports');
     const search = searchInput ? searchInput.value.toLowerCase() : '';
     const groupFilter = document.getElementById('savedReportGroupFilter') ? document.getElementById('savedReportGroupFilter').value : '';
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = readReportingObject('rosters');
 
     const tbody = document.getElementById('savedReportsList');
     if(!tbody) return;
@@ -842,7 +854,7 @@ function renderSavedReportsList() {
 
 async function deleteSavedReport(id) {
     if(!confirm("Are you sure you want to delete this saved report?")) return;
-    let saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    let saved = readReportingArray('savedReports');
     saved = saved.filter(r => r.id !== id);
     localStorage.setItem('savedReports', JSON.stringify(saved));
     
@@ -854,19 +866,19 @@ async function deleteSavedReport(id) {
 }
 
 function viewSavedReport(id) {
-    const saved = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    const saved = readReportingArray('savedReports');
     // FIX: Use loose equality (==) to match string ID from HTML with number ID in data
     let report = saved.find(r => r.id == id);
 
     // NEW: Check Archives if not found in active reports
     if (!report) {
-        const allArchiveRows = JSON.parse(localStorage.getItem('graduated_agents') || '[]') || [];
+        const allArchiveRows = readReportingArray('graduated_agents');
         const graduates = allArchiveRows.filter(g => {
             const reason = String((g && g.reason) || '').toLowerCase().trim();
             return !reason.startsWith('moved to ');
         });
         const retrainArchives = [
-            ...(JSON.parse(localStorage.getItem('retrain_archives') || '[]') || []),
+            ...readReportingArray('retrain_archives'),
             ...allArchiveRows.filter(g => {
                 const reason = String((g && g.reason) || '').toLowerCase().trim();
                 return reason.startsWith('moved to ');
@@ -921,7 +933,7 @@ function viewSavedReport(id) {
 async function requestRecordLink(recordId, trainee, assessment) {
     if (!confirm(`Request Admin to upload a link for ${trainee}'s ${assessment}?`)) return;
     
-    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    const requests = readReportingArray('linkRequests');
     
     // Deduplicate
     if (requests.some(r => r.recordId === recordId && r.status === 'pending')) return alert("Request already pending.");
@@ -944,7 +956,7 @@ async function requestRecordLink(recordId, trainee, assessment) {
 }
 
 async function updateRecordLink(index) {
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = readReportingArray('records');
     const r = records[index];
     if (!r) return;
 
@@ -955,7 +967,7 @@ async function updateRecordLink(index) {
     localStorage.setItem('records', JSON.stringify(records));
     
     // Check if this fulfills a request
-    const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+    const requests = readReportingArray('linkRequests');
     let reqUpdated = false;
     
     // Find pending request for this record (by ID or composite key if ID missing)
@@ -986,7 +998,7 @@ async function updateRecordScore(index) {
         return;
     }
 
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = readReportingArray('records');
     const record = records[index];
     if (!record) return;
 
@@ -1011,7 +1023,7 @@ async function updateRecordScore(index) {
     const keysToSave = ['records'];
 
     if (record.submissionId) {
-        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const submissions = readReportingArray('submissions');
         const submission = submissions.find(s => String(s.id || '') === String(record.submissionId));
         if (submission) {
             submission.score = record.score;

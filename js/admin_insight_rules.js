@@ -135,12 +135,25 @@
     }
 
     function parseArrayFromLocalStorage(key) {
+        const parsed = readInsightRulesLocalJson(key, []);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+
+    function readInsightRulesLocalJson(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
         try {
-            const parsed = JSON.parse(localStorage.getItem(key) || '[]');
-            return Array.isArray(parsed) ? parsed : [];
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
         } catch (error) {
-            return [];
+            console.warn(`Insight rules ignored invalid local data for ${key}:`, error);
+            return fallback;
         }
+    }
+
+    function readInsightRulesLocalObject(key) {
+        const parsed = readInsightRulesLocalJson(key, {});
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     }
 
     function getAssessmentCatalog() {
@@ -565,61 +578,31 @@
     }
 
     function getInsightRuleConfig() {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(INSIGHT_RULE_KEY) || 'null');
-            return sanitizeConfig(parsed);
-        } catch (error) {
-            return sanitizeConfig(null);
-        }
+        return sanitizeConfig(readInsightRulesLocalJson(INSIGHT_RULE_KEY, null));
     }
 
     function getInsightProgressConfig() {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(INSIGHT_PROGRESS_KEY) || 'null');
-            return sanitizeProgressConfig(parsed);
-        } catch (error) {
-            return sanitizeProgressConfig(null);
-        }
+        return sanitizeProgressConfig(readInsightRulesLocalJson(INSIGHT_PROGRESS_KEY, null));
     }
 
     function getLiveAssessmentRulesConfig() {
-        try {
-            return sanitizeLiveRulesConfig(JSON.parse(localStorage.getItem(LIVE_RULES_KEY) || 'null'));
-        } catch (error) {
-            return getDefaultLiveRulesConfig();
-        }
+        return sanitizeLiveRulesConfig(readInsightRulesLocalJson(LIVE_RULES_KEY, null));
     }
 
     function getLiveBookingRulesConfig() {
-        try {
-            return sanitizeLiveBookingRulesConfig(JSON.parse(localStorage.getItem(LIVE_BOOKING_RULES_KEY) || 'null'));
-        } catch (error) {
-            return getDefaultLiveBookingRulesConfig();
-        }
+        return sanitizeLiveBookingRulesConfig(readInsightRulesLocalJson(LIVE_BOOKING_RULES_KEY, null));
     }
 
     function getTrainingRulesConfig() {
-        try {
-            return sanitizeTrainingRulesConfig(JSON.parse(localStorage.getItem(TRAINING_RULES_KEY) || 'null'));
-        } catch (error) {
-            return getDefaultTrainingRulesConfig();
-        }
+        return sanitizeTrainingRulesConfig(readInsightRulesLocalJson(TRAINING_RULES_KEY, null));
     }
 
     function getCourseProgressRequestConfig() {
-        try {
-            return sanitizeCourseRequestConfig(JSON.parse(localStorage.getItem(COURSE_PROGRESS_REQUEST_KEY) || 'null'));
-        } catch (error) {
-            return getDefaultCourseRequestConfig();
-        }
+        return sanitizeCourseRequestConfig(readInsightRulesLocalJson(COURSE_PROGRESS_REQUEST_KEY, null));
     }
 
     function getAssessmentFeedbackConfig() {
-        try {
-            return sanitizeAssessmentFeedbackConfig(JSON.parse(localStorage.getItem(ASSESSMENT_FEEDBACK_CONFIG_KEY) || 'null'));
-        } catch (error) {
-            return getDefaultAssessmentFeedbackConfig();
-        }
+        return sanitizeAssessmentFeedbackConfig(readInsightRulesLocalJson(ASSESSMENT_FEEDBACK_CONFIG_KEY, null));
     }
 
     function getLiveAssessmentRules() {
@@ -795,25 +778,17 @@
     }
 
     function getTrainingConfigGroups() {
-        try {
-            return Object.keys(JSON.parse(localStorage.getItem('rosters') || '{}') || {})
-                .sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
-        } catch (error) {
-            return [];
-        }
+        return Object.keys(readInsightRulesLocalObject('rosters'))
+            .sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
     }
 
     function getGroupsForTrainee(username) {
         const target = normalizeText(username);
         if (!target) return [];
-        try {
-            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}') || {};
-            return Object.entries(rosters)
-                .filter(([, members]) => Array.isArray(members) && members.some(member => normalizeText(member) === target))
-                .map(([gid]) => String(gid));
-        } catch (error) {
-            return [];
-        }
+        const rosters = readInsightRulesLocalObject('rosters');
+        return Object.entries(rosters)
+            .filter(([, members]) => Array.isArray(members) && members.some(member => normalizeText(member) === target))
+            .map(([gid]) => String(gid));
     }
 
     function isTrainingRulesTargetedToCurrentUser(configInput) {
@@ -911,10 +886,8 @@
             targetGroups.innerHTML = getTrainingConfigGroups()
                 .map(group => {
                     let label = group;
-                    try {
-                        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}') || {};
-                        label = (typeof getGroupLabel === 'function') ? getGroupLabel(group, Array.isArray(rosters[group]) ? rosters[group].length : 0) : group;
-                    } catch (error) {}
+                    const rosters = readInsightRulesLocalObject('rosters');
+                    label = (typeof getGroupLabel === 'function') ? getGroupLabel(group, Array.isArray(rosters[group]) ? rosters[group].length : 0) : group;
                     return `<option value="${escapeHtml(group)}" ${selected.has(normalizeText(group)) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
                 })
                 .join('') || '<option value="">No groups found</option>';

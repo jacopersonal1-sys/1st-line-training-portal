@@ -237,7 +237,9 @@ const App = {
         // 1. Check Global Limits if moving TO restricted group
         if (targetRole === 'AM Group' || targetRole === 'CX Group') {
             const limit = 2;
-            const allSubs = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+            const allSubs = (typeof DataService !== 'undefined' && DataService.readArray)
+                ? DataService.readArray('tl_task_submissions')
+                : [];
             let count = 0;
             allSubs.forEach(s => {
                 if (s.date === this.currentDate && s.data && s.data.start_shift && s.data.start_shift.t_assign) {
@@ -405,7 +407,9 @@ const App = {
 
     copyPreviousTeam: function() {
         if (!confirm("Replace current team list with agents from your last submission?")) return;
-        const submissions = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+        const submissions = (typeof DataService !== 'undefined' && DataService.readArray)
+            ? DataService.readArray('tl_task_submissions')
+            : [];
         const mySubs = submissions.filter(s => s.user === AppContext.user.user).sort((a,b) => new Date(b.date) - new Date(a.date));
         if (mySubs.length === 0) return alert("No previous submissions found.");
         const lastSub = mySubs[0];

@@ -38,6 +38,28 @@ window.NetworkDiag = {
         lastStage: 'waiting'
     },
 
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (error) {
+            console.warn(`Network diagnostics ignored invalid local data for ${key}:`, error);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     init: function() {
         this.installConsoleCapture();
 
@@ -401,8 +423,8 @@ window.NetworkDiag = {
     },
 
     getScheduleGroupOptions: function() {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const rosters = this.readObject('rosters');
+        const schedules = this.readObject('schedules');
         const scheduled = new Set();
         Object.values(schedules || {}).forEach(schedule => {
             if (schedule && schedule.assigned && Array.isArray(rosters[schedule.assigned])) {
@@ -430,7 +452,7 @@ window.NetworkDiag = {
     },
 
     getGroupOnlineSummary: function(groupId) {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = this.readObject('rosters');
         const members = Array.isArray(rosters[groupId]) ? rosters[groupId] : [];
         const activeRows = Object.values(window.ACTIVE_USERS_CACHE || {});
         const now = Date.now();
@@ -805,8 +827,8 @@ window.NetworkDiag = {
     },
 
     getAgentRows: function() {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const reports = JSON.parse(localStorage.getItem('network_diagnostics') || '[]');
+        const users = this.readArray('users');
+        const reports = this.readArray('network_diagnostics');
         const reportMap = new Map();
         reports.forEach(r => {
             const key = this.identityKey(r.user);
@@ -1587,7 +1609,7 @@ window.NetworkDiag = {
             }
         };
 
-        const logs = JSON.parse(localStorage.getItem('network_diagnostics') || '[]');
+        const logs = this.readArray('network_diagnostics');
         logs.push(report);
         if (logs.length > 100) logs.shift();
         localStorage.setItem('network_diagnostics', JSON.stringify(logs));
@@ -1615,7 +1637,7 @@ window.NetworkDiag.openAdminView = async function() {
 
     if(typeof loadFromServer === 'function') await loadFromServer(true);
 
-    const reports = JSON.parse(localStorage.getItem('network_diagnostics') || '[]');
+    const reports = this.readArray('network_diagnostics');
     reports.sort((a,b) => new Date(b.date) - new Date(a.date));
 
     const rows = reports.map(r => {

@@ -4,6 +4,28 @@
 window.LOGIN_MODE = window.LOGIN_MODE || 'admin';
 window.PERSISTENT_SESSION_KEY = window.PERSISTENT_SESSION_KEY || 'persistent_app_session';
 
+function authReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`Auth ignored invalid local data for ${key}:`, error);
+        return fallback;
+    }
+}
+
+function authReadArray(key) {
+    const value = authReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function authReadObject(key, fallback = {}) {
+    const value = authReadJson(key, fallback);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
 function persistAppSession(user) {
     if (!user) return;
     try {
@@ -117,8 +139,7 @@ function isUserRevokedLocally(username) {
     try {
         const token = normalizeLoginIdentity(username);
         if (!token) return false;
-        const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
-        if (!Array.isArray(revoked)) return false;
+        const revoked = authReadArray('revokedUsers');
         return revoked.some(entry => {
             const raw = (entry && typeof entry === 'object')
                 ? (entry.user || entry.username || entry.name || '')
@@ -545,7 +566,7 @@ async function attemptLogin() {
   }
 
   // --- SECURITY CHECK 1.5: PRE-AUTH CHECKS (Version, Client ID) ---
-  const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+  const config = authReadObject('system_config');
   if (config.security) {
       // Version Check (Semantic Comparison)
       const minVersion = String(config.security.min_version || '').trim();
@@ -585,7 +606,7 @@ async function attemptLogin() {
   }
 
   // --- SECURITY CHECK 2: PASSWORD VALIDATION ---
-  const users = JSON.parse(localStorage.getItem('users') || '[]');
+  const users = authReadArray('users');
   
   // Generate hash of input password
   const hashedPassword = await hashPassword(p);
@@ -792,7 +813,7 @@ async function autoLogin() {
   if (typeof applyUserTheme === 'function') applyUserTheme();
   
   // --- WEEKEND LOGIN CHECK ---
-  const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+  const config = authReadObject('system_config');
   if (config.attendance && config.attendance.allow_weekend_login === false) {
       const day = new Date().getDay();
       if ((day === 0 || day === 6) && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
@@ -1075,15 +1096,15 @@ function applyRolePermissions() {
     if(subBtnUpdates) subBtnUpdates.classList.remove('hidden');
 
     // --- VETTING ARENA VISIBILITY ---
-    const session = JSON.parse(localStorage.getItem('vettingSession') || '{"active":false}');
+    const session = authReadObject('vettingSession', { active: false });
     const arenaBtn = document.querySelector('button[onclick="showTab(\'vetting-arena\')"]');
     
   if (arenaBtn) {
         let show = false;
         if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') show = true;
         else {
-            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-            const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+            const rosters = authReadObject('rosters');
+            const activeSessions = authReadArray('adminVettingSessions');
             const isTargeted = (s) => {
                 if (!s || !s.active) return false;
                 if (!s.targetGroup || s.targetGroup === 'all') return true;
@@ -1208,10 +1229,10 @@ function isIpInCidr(ip, cidr) {
 }
 
 async function checkAccessControl() {
-    const ac = JSON.parse(localStorage.getItem('accessControl') || '{"enabled":false, "whitelist":[]}');
+    const ac = authReadObject('accessControl', { enabled: false, whitelist: [] });
     
     // MERGE SUPER ADMIN IPS
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = authReadObject('system_config');
     const superIps = (config.security && config.security.allowed_ips) ? config.security.allowed_ips : [];
     
     if(!ac.enabled && superIps.length === 0) return true;

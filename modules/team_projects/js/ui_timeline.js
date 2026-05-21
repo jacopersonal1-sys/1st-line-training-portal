@@ -231,7 +231,9 @@ const TimelineUI = {
             if (myTeam.length === 0) return '<div style="color:var(--text-muted);">No ESAs in your team to assign. Add agents with role "ESA" in My Team tab.</div>';
 
             // Calculate Global Counts from ALL submissions for today
-            const allSubs = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+            const allSubs = (typeof DataService !== 'undefined' && DataService.readArray)
+                ? DataService.readArray('tl_task_submissions')
+                : [];
             // Filter for current date (handled by App.currentDate context in main)
             // We need to pass date to renderInput or assume App.currentDate is available via App context, 
             // but TimelineUI.render receives date. renderInput doesn't receive date directly but we can use App.currentDate if needed or parse from data.

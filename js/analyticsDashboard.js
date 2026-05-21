@@ -5,6 +5,28 @@ const AnalyticsEngine = {
     
     // --- DATA AGGREGATION ---
 
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (e) {
+            console.warn(`Analytics ignored invalid local data for ${key}:`, e);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     getSharedRecordBuckets: function() {
         return new Set(['live-session', 'digital-assessment', 'manual-upload', 'unknown']);
     },
@@ -54,20 +76,20 @@ const AnalyticsEngine = {
         return window.ProgressCatalog.getTraineeProgress(userId, groupId || '', {
             includeAuto: false,
             data: {
-                records: this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]')),
-                submissions: JSON.parse(localStorage.getItem('submissions') || '[]'),
-                liveBookings: JSON.parse(localStorage.getItem('liveBookings') || '[]'),
-                savedReports: JSON.parse(localStorage.getItem('savedReports') || '[]'),
-                insightReviews: JSON.parse(localStorage.getItem('insightReviews') || '[]'),
-                exemptions: JSON.parse(localStorage.getItem('exemptions') || '[]')
+                records: this.getReliableRecords(this.readArray('records')),
+                submissions: this.readArray('submissions'),
+                liveBookings: this.readArray('liveBookings'),
+                savedReports: this.readArray('savedReports'),
+                insightReviews: this.readArray('insightReviews'),
+                exemptions: this.readArray('exemptions')
             }
         });
     },
 
     // 1. Department Health (Critical vs On-Track)
     calculateDepartmentHealth: function(groupId) {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const users = this.readArray('users');
+        const rosters = this.readObject('rosters');
         
         // Filter trainees by group if provided
         let trainees = users.filter(u => u.role === 'trainee');
@@ -79,8 +101,8 @@ const AnalyticsEngine = {
         
         if (totalTrainees === 0) return { critical: 0, warning: 0, onTrack: 0, total: 0 };
 
-        const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
-        const records = this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]'));
+        const reviews = this.readArray('insightReviews');
+        const records = this.getReliableRecords(this.readArray('records'));
         
         let criticalCount = 0;
         let warningCount = 0;
@@ -120,13 +142,13 @@ const AnalyticsEngine = {
 
     // 2. Group Knowledge Gaps (Deep Dive)
     calculateGroupGaps: function(groupId, testFilter = null) {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = this.readObject('rosters');
         const members = rosters[groupId] || [];
         
         if (members.length === 0) return [];
 
-        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const submissions = this.readArray('submissions');
+        const tests = this.readArray('tests');
         
         // Filter submissions for this group
         let groupSubs = submissions.filter(s => members.includes(s.trainee));
@@ -226,7 +248,7 @@ const AnalyticsEngine = {
         const weights = { focus: 30, attendance: 30, admin: 40 };
 
         // A. Focus Score (< 60% is bad)
-        const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        const history = this.readArray('monitor_history');
         const userHistory = history.filter(h => h.user === userId);
         
         if (userHistory.length > 0) {
@@ -245,14 +267,14 @@ const AnalyticsEngine = {
         }
 
         // B. Lateness (2+ instances)
-        const attendance = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+        const attendance = this.readArray('attendance_records');
         const lates = attendance.filter(r => r.user === userId && r.isLate).length;
         
         if (lates >= 3) riskScore += weights.attendance;
         else if (lates >= 1) riskScore += (weights.attendance / 2);
 
         // C. Admin Critical Flags
-        const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
+        const reviews = this.readArray('insightReviews');
         const review = reviews.find(r => r.trainee === userId);
         
         if (review) {
@@ -261,7 +283,7 @@ const AnalyticsEngine = {
         } else {
             // Fallback to record average if no review
             const officialProgress = this.getOfficialProgress(userId, '');
-            const records = this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]'));
+            const records = this.getReliableRecords(this.readArray('records'));
             const progressScores = officialProgress ? officialProgress.items.filter(item => item.status === 'completed' && Number.isFinite(Number(item.score))) : [];
             const myRecords = progressScores.length ? progressScores : records.filter(r => r.trainee === userId);
             if (officialProgress && officialProgress.progress < 70) riskScore += (weights.admin / 2);
@@ -301,19 +323,19 @@ const AnalyticsEngine = {
 
     // 4. Department Overview UI
     renderDepartmentDashboard: function(container, navHTML, groupId) {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const users = this.readArray('users');
+        const rosters = this.readObject('rosters');
         
         let trainees = users.filter(u => u.role === 'trainee');
         if (groupId && rosters[groupId]) {
             trainees = trainees.filter(t => rosters[groupId].includes(t.user));
         }
 
-        const records = this.getReliableRecords(JSON.parse(localStorage.getItem('records') || '[]'));
+        const records = this.getReliableRecords(this.readArray('records'));
         const groupRecords = this.filterRecordsForTrainees(records, trainees, groupId);
         const groupAssessmentRecords = groupRecords.filter(r => this.isAssessmentRecord(r));
         
-        const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        const history = this.readArray('monitor_history');
 
         // Calculate Average Assessment Score for Group
         let totalScore = 0;
@@ -427,8 +449,8 @@ const AnalyticsEngine = {
         `).join('') : '<div style="padding:15px; text-align:center; color:var(--text-muted);">No global pain points detected.</div>';
 
         // --- 4. NPS FEEDBACK OVERVIEW ---
-        const surveys = JSON.parse(localStorage.getItem('nps_surveys') || '[]');
-        const responses = JSON.parse(localStorage.getItem('nps_responses') || '[]');
+        const surveys = this.readArray('nps_surveys');
+        const responses = this.readArray('nps_responses');
         
         // Filter responses for this group
         const groupResponses = responses.filter(r => trainees.some(t => t.user === r.user));
@@ -586,9 +608,9 @@ const AnalyticsEngine = {
     // 5. Group/Cohort UI
     renderGroupDashboard: function(container, groupId) {
         // Get available tests for filter
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = this.readObject('rosters');
         const members = rosters[groupId] || [];
-        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const submissions = this.readArray('submissions');
         const groupTests = new Set();
         submissions.forEach(s => {
             if (members.includes(s.trainee)) groupTests.add(s.testTitle);
@@ -599,7 +621,7 @@ const AnalyticsEngine = {
         const gaps = this.calculateGroupGaps(groupId);
         
         // Fetch Lateness Data for this group
-        const attendance = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+        const attendance = this.readArray('attendance_records');
         
         // Filter lates for this group
         const groupLates = attendance.filter(r => members.includes(r.user) && r.isLate);
@@ -679,10 +701,10 @@ const AnalyticsEngine = {
         const risk = this.calculateAtRiskScore(userId);
         
         // Fetch Data
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
-        const attendance = JSON.parse(localStorage.getItem('attendance_records') || '[]');
-        const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
-        const reviews = JSON.parse(localStorage.getItem('insightReviews') || '[]');
+        const records = this.readArray('records');
+        const attendance = this.readArray('attendance_records');
+        const notes = this.readObject('agentNotes');
+        const reviews = this.readArray('insightReviews');
 
         // Filter
         const userRecords = records.filter(r => r.trainee === userId);

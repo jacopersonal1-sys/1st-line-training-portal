@@ -6,6 +6,28 @@ let BUILDER_QUESTIONS = [];
 let EDITING_TEST_ID = null; 
 let BUILDER_DRAG_STATE = { fromIdx: null };
 
+function builderReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`Builder ignored invalid local data for ${key}:`, error);
+        return fallback;
+    }
+}
+
+function builderReadArray(key) {
+    const value = builderReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function builderReadObject(key) {
+    const value = builderReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 function getBuilderLinkedTitleFromInputs() {
     const type = document.getElementById('builderTestType')?.value || 'standard';
     if (type === 'vetting') {
@@ -49,7 +71,7 @@ function renameInsightConfigTitle(oldTitle, newTitle) {
     };
 
     try {
-        const ruleConfig = JSON.parse(localStorage.getItem('insight_rule_config') || '{}');
+        const ruleConfig = builderReadObject('insight_rule_config');
         if (ruleConfig && typeof ruleConfig === 'object') {
             ['triggerPresets', 'severityRules', 'topicOverrides'].forEach(key => {
                 if (Array.isArray(ruleConfig[key])) ruleConfig[key] = ruleConfig[key].map(renameConfigArrayItem);
@@ -70,7 +92,7 @@ function renameInsightConfigTitle(oldTitle, newTitle) {
     }
 
     try {
-        const progressConfig = JSON.parse(localStorage.getItem('insight_progress_config') || '{}');
+        const progressConfig = builderReadObject('insight_progress_config');
         if (progressConfig && typeof progressConfig === 'object' && Array.isArray(progressConfig.requiredItems)) {
             progressConfig.requiredItems = progressConfig.requiredItems.map(item => {
                 if (typeof item === 'string') {
@@ -98,9 +120,9 @@ window.renameAssessmentEverywhere = async function(oldTitle, newTitle, testId = 
 
     const oldKey = normalizeAssessmentTitle(cleanOld);
     const keys = new Set();
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const tests = builderReadArray('tests');
+    const submissions = builderReadArray('submissions');
+    const records = builderReadArray('records');
     const targetTestId = testId !== null && testId !== undefined ? String(testId) : null;
     const affectedSubmissionIds = new Set();
 
@@ -194,9 +216,9 @@ function loadTestBuilder(existingId = null, targetQIdx = null) {
                 if(inp) inp.classList.add('hidden'); // Hide raw input, use wrapper
                 if(vetWrap) {
                     vetWrap.classList.remove('hidden');
-                    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
+                    const topics = builderReadArray('vettingTopics');
                     const vSel = document.getElementById('builderVettingTopic');
-                    vSel.innerHTML = '<option value="">-- Select Topic --</option>' + topics.map(t => `<option value="${t}">${t}</option>`).join('');
+                    vSel.innerHTML = '<option value="">-- Select Topic --</option>' + (Array.isArray(topics) ? topics : []).map(t => `<option value="${t}">${t}</option>`).join('');
                 }
             } else if(val === 'live') {
                 durWrap.classList.add('hidden');
@@ -227,15 +249,15 @@ function loadTestBuilder(existingId = null, targetQIdx = null) {
     document.getElementById('builderDuration').value = '30';
 
     const select = document.getElementById('builderAssessmentSelect');
-    const assessments = JSON.parse(localStorage.getItem('assessments') || '[]');
+    const assessments = builderReadArray('assessments');
     select.innerHTML = '<option value="">-- Create Standalone / Not Linked --</option>';
-    assessments.forEach(a => select.add(new Option(a.name, a.name)));
+    (Array.isArray(assessments) ? assessments : []).forEach(a => select.add(new Option(a.name, a.name)));
 
     // Load Data if Editing
     if(existingId) {
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const tests = builderReadArray('tests');
         // Loose comparison (==) handles string/number ID differences
-        const test = tests.find(t => t.id == existingId);
+        const test = (Array.isArray(tests) ? tests : []).find(t => t.id == existingId);
         
         if(test) {
             if(typeSelect) {
@@ -591,7 +613,11 @@ function restoreBuilderDraft() {
     const draftStr = localStorage.getItem('draft_builder');
     if (!draftStr) return;
 
-    const draft = JSON.parse(draftStr);
+    const draft = (typeof safeParse === 'function') ? safeParse(draftStr, null) : JSON.parse(draftStr);
+    if (!draft || typeof draft !== 'object') {
+        localStorage.removeItem('draft_builder');
+        return;
+    }
     const fallbackReview = draft.type === 'quiz' ? (draft.title || '') : '';
     BUILDER_QUESTIONS = (draft.questions || []).map(q => normalizeBuilderQuestion(q, fallbackReview));
     EDITING_TEST_ID = draft.id;
@@ -790,7 +816,7 @@ async function saveTest() {
         }
     }
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = builderReadArray('tests');
 
     // Update existing or create new
     if (EDITING_TEST_ID) {
@@ -885,9 +911,9 @@ function loadManageTests() {
     const container = document.getElementById('testListAdmin');
     if (!container) return;
     
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]'); // For Ghost Data check
+    const tests = builderReadArray('tests');
+    const subs = builderReadArray('submissions');
+    const records = builderReadArray('records'); // For Ghost Data check
     const searchInput = document.getElementById('testManagerSearch');
     const search = searchInput ? searchInput.value.toLowerCase() : '';
     
@@ -910,7 +936,10 @@ function loadManageTests() {
     const typeFilter = document.getElementById('testManagerTypeFilter') ? document.getElementById('testManagerTypeFilter').value : '';
     
     // Filter
-    const filtered = tests.filter(t => {
+    const safeTests = tests;
+    const safeSubs = subs;
+    const safeRecords = records;
+    const filtered = safeTests.filter(t => {
         if (search && !t.title.toLowerCase().includes(search)) return false;
         if (typeFilter && t.type !== typeFilter && (t.type || 'standard') !== typeFilter) return false;
         return true;
@@ -935,12 +964,12 @@ function loadManageTests() {
     `;
 
     filtered.forEach(t => {
-        const testSubs = subs.filter(s => s.testId == t.id && !s.archived);
+        const testSubs = safeSubs.filter(s => s.testId == t.id && !s.archived);
         
         // GHOST DATA FIX: Filter out pending submissions that already have a final record.
         const pendingSubs = testSubs.filter(s => s.status === 'pending');
         const validPending = pendingSubs.filter(s => {
-            const isLinkedToRecord = records.some(r => r.submissionId === s.id);
+            const isLinkedToRecord = safeRecords.some(r => r.submissionId === s.id);
             return !isLinkedToRecord;
         });
         const pending = validPending.length;
@@ -994,8 +1023,8 @@ async function renameTest(id) {
         return;
     }
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const test = tests.find(t => t && t.id == id);
+    const safeTests = builderReadArray('tests');
+    const test = safeTests.find(t => t && t.id == id);
     if (!test) {
         if (typeof showToast === 'function') showToast("Assessment not found.", "error");
         return;
@@ -1006,7 +1035,7 @@ async function renameTest(id) {
     const cleanNew = String(newTitle || '').trim();
     if (!cleanNew || normalizeAssessmentTitle(cleanNew) === normalizeAssessmentTitle(oldTitle)) return;
 
-    const duplicate = tests.some(t => t && t.id != id && normalizeAssessmentTitle(t.title || t.name) === normalizeAssessmentTitle(cleanNew));
+    const duplicate = safeTests.some(t => t && t.id != id && normalizeAssessmentTitle(t.title || t.name) === normalizeAssessmentTitle(cleanNew));
     if (duplicate) {
         if (typeof showToast === 'function') showToast("Another active assessment already uses that name.", "warning");
         return;
@@ -1023,7 +1052,7 @@ async function renameTest(id) {
 async function deleteTest(id) {
     if (!confirm("Delete test permanently? Attempt history will be lost.")) return;
     
-    let tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    let tests = builderReadArray('tests');
     tests = tests.filter(t => t.id != id);
     
     // ARCHITECTURAL FIX: Must update local storage BEFORE calling saveToServer
@@ -1045,7 +1074,8 @@ async function deleteTest(id) {
 }
 
 async function copyTest(id) {
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = builderReadArray('tests');
+    if (!tests.length) return;
     const original = tests.find(t => t.id == id);
     if (!original) return;
 

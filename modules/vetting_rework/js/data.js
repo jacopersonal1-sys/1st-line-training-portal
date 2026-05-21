@@ -24,6 +24,28 @@ const DataService = {
         return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
     },
 
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (error) {
+            console.warn(`[Vetting Rework] Ignored invalid local data for ${key}:`, error);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     loadInitialData: async function() {
         if (!AppContext.supabase) return;
         const unwrap = (result) => result && result.status === 'fulfilled' ? result.value : null;
@@ -56,20 +78,15 @@ const DataService = {
     },
 
     getTests: function() {
-        return JSON.parse(localStorage.getItem('tests') || '[]');
+        return this.readArray('tests');
     },
 
     getRosters: function() {
-        return JSON.parse(localStorage.getItem('rosters') || '{}');
+        return this.readObject('rosters');
     },
 
     getUsers: function() {
-        try {
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
-            return Array.isArray(users) ? users : [];
-        } catch (e) {
-            return [];
-        }
+        return this.readArray('users');
     },
 
     getUserIdentityCandidates: function(user) {
@@ -118,11 +135,7 @@ const DataService = {
     },
 
     getPendingOps: function() {
-        try {
-            return JSON.parse(localStorage.getItem(this.PENDING_KEY) || '[]');
-        } catch (e) {
-            return [];
-        }
+        return this.readArray(this.PENDING_KEY);
     },
 
     savePendingOps: function(ops) {
@@ -278,7 +291,7 @@ const DataService = {
 
         let sessions = Object.values(mergedById).map(row => row.data);
         if (hadError && !sessions.length) {
-            sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+            sessions = this.readArray('adminVettingSessions');
         }
 
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
@@ -287,7 +300,7 @@ const DataService = {
 
     ensureServerState: async function() {
         if (!AppContext.supabase) return;
-        const activeSessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        const activeSessions = this.readArray('adminVettingSessions');
         if (activeSessions.length === 0) return;
 
         // Fetch all IDs currently on server
@@ -323,7 +336,7 @@ const DataService = {
 
     saveSessionDirectly: async function(session) {
         // Also update local cache for immediate UI response
-        let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        let sessions = this.readArray('adminVettingSessions');
         const idx = sessions.findIndex(s => s.sessionId === session.sessionId);
         if (idx > -1) sessions[idx] = session;
         else sessions.push(session);
@@ -344,7 +357,7 @@ const DataService = {
 
     deleteSession: async function(id) {
         // Also update local cache
-        let sessions = JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+        let sessions = this.readArray('adminVettingSessions');
         sessions = sessions.filter(s => s.sessionId !== id);
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
 

@@ -60,4 +60,42 @@ describe('ProgressCatalog', () => {
     expect(progress.completedCount).toBe(5);
     expect(progress.items.find(item => item.type === 'live').score).toBe(82);
   });
+
+  test('can calculate archive progress from a builder snapshot and retrain N/A exemptions from another group', () => {
+    const builderSnapshot = {
+      requiredItems: [
+        { name: 'Course 1 - Terms', type: 'assessment' },
+        { name: 'Final Vetting - Wireless Standards', type: 'vetting' }
+      ]
+    };
+    localStorage.setItem('insight_progress_config', JSON.stringify({
+      requiredItems: [
+        { name: 'Different Current Builder Item', type: 'assessment' }
+      ]
+    }));
+
+    const items = ProgressCatalog.getOfficialItemsFromConfig(builderSnapshot, { includeAuto: true });
+    const progress = ProgressCatalog.getTraineeProgress('Hloni Masenkane', 'Old Group', {
+      includeAuto: true,
+      items,
+      ignoreExemptionGroup: true,
+      data: {
+        records: [
+          { trainee: 'Hloni Masenkane', assessment: 'Course 1 - Terms', score: 81 }
+        ],
+        submissions: [],
+        liveBookings: [],
+        savedReports: [{ trainee: 'Hloni Masenkane' }],
+        insightReviews: [{ trainee: 'Hloni Masenkane' }],
+        exemptions: [
+          { trainee: 'Hloni Masenkane', groupID: 'New Retrain Group', item: 'Final Vetting - Wireless Standards' }
+        ]
+      }
+    });
+
+    expect(progress.progress).toBe(100);
+    expect(progress.items.map(item => item.name)).toContain('Final Vetting - Wireless Standards');
+    expect(progress.items.find(item => item.name === 'Final Vetting - Wireless Standards').status).toBe('exempt');
+    expect(progress.items.map(item => item.name)).not.toContain('Different Current Builder Item');
+  });
 });

@@ -30,6 +30,28 @@ async function secureSysSave() {
     }
 }
 
+function adminSysReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`Admin system ignored invalid local data for ${key}:`, e);
+        return fallback;
+    }
+}
+
+function adminSysReadArray(key) {
+    const value = adminSysReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function adminSysReadObject(key, fallback = {}) {
+    const value = adminSysReadJson(key, fallback);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
 // --- SECTION 1: GLOBAL CONFIGURATION (Assessments & Vetting) ---
 
 function loadAdminAssessments() { 
@@ -39,7 +61,7 @@ function loadAdminAssessments() {
     
     if(!stdList || !liveList || !vetList) return;
     
-    const arr = JSON.parse(localStorage.getItem('assessments')||'[]');
+    const arr = adminSysReadArray('assessments');
     
     let stdHtml = '';
     let liveHtml = '';
@@ -80,7 +102,7 @@ async function addAssessment() {
         return;
     }
     
-    const a = JSON.parse(localStorage.getItem('assessments') || '[]'); 
+    const a = adminSysReadArray('assessments');
     if(a.find(x => x.name.toLowerCase() === n.toLowerCase())) {
         if(typeof showToast === 'function') showToast("Assessment already exists", "warning");
         return;
@@ -107,7 +129,7 @@ async function addAssessment() {
 async function remAssess(name) { 
     if(!confirm(`Remove "${name}" from the list? Existing records will not be deleted.`)) return;
     
-    let a = JSON.parse(localStorage.getItem('assessments') || '[]'); 
+    let a = adminSysReadArray('assessments');
     const initialLen = a.length;
     
     // Filter by name (Robust Deletion)
@@ -133,7 +155,7 @@ async function remAssess(name) {
 }
 
 function loadAdminVetting() { 
-    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]'); 
+    const topics = adminSysReadArray('vettingTopics');
     const list = document.getElementById('vettingList');
     if(list) {
         list.innerHTML = topics.map((t,i) => `
@@ -156,7 +178,7 @@ async function addVettingTopic() {
     const t = document.getElementById('newVettingTopic').value.trim(); 
     if(!t) return; 
     
-    const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]'); 
+    const topics = adminSysReadArray('vettingTopics');
     // Prevent duplicates
     if(topics.some(existing => existing.toLowerCase() === t.toLowerCase())) return alert("Topic exists.");
 
@@ -172,7 +194,7 @@ async function addVettingTopic() {
 
 async function remVetting(i) { 
     if(!confirm("Remove topic?")) return; 
-    const topics = JSON.parse(localStorage.getItem('vettingTopics')); 
+    const topics = adminSysReadArray('vettingTopics');
     topics.splice(i, 1); 
     localStorage.setItem('vettingTopics', JSON.stringify(topics)); 
     
@@ -202,8 +224,8 @@ function loadAdminDatabase() {
     }
     // -----------------------------
 
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const records = adminSysReadArray('records');
+    const users = adminSysReadArray('users');
     
     const validNames = new Set(users.filter(u => u.role === 'trainee').map(u => u.user.toLowerCase()));
     
@@ -264,7 +286,7 @@ async function deleteBulkRecords() {
     if(checks.length === 0) return alert("No records selected.");
     if(!confirm(`Permanently delete ${checks.length} records?`)) return;
     
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = adminSysReadArray('records');
     const indicesToDelete = Array.from(checks).map(c => parseInt(c.value)).sort((a,b) => b-a);
     const idsToDelete = indicesToDelete.map(idx => records[idx] ? records[idx].id : null).filter(id => id);
 
@@ -298,7 +320,8 @@ async function deleteBulkRecords() {
 let editRecIndex = -1;
 function openRecordEdit(index) {
     editRecIndex = index;
-    const records = JSON.parse(localStorage.getItem('records')); 
+    const records = adminSysReadArray('records');
+    if (!records[index]) return alert("Record not found.");
     const r = records[index];
     
     document.getElementById('adminEditTitle').innerText = `Edit Record`;
@@ -313,8 +336,9 @@ function openRecordEdit(index) {
 }
 
 async function saveRecordEdit() {
-    const records = JSON.parse(localStorage.getItem('records'));
+    const records = adminSysReadArray('records');
     const originalRec = records[editRecIndex];
+    if (!originalRec) return alert("Record not found.");
 
     // --- OPTIMISTIC CONCURRENCY CONTROL (OCC) ---
     if (window.supabaseClient && originalRec.id) {
@@ -349,7 +373,7 @@ async function saveRecordEdit() {
 
 async function delRec(i) { 
     if(confirm("Permanently delete?")) { 
-        const r = JSON.parse(localStorage.getItem('records')); 
+        const r = adminSysReadArray('records');
         const target = r[i];
         
         // 1. Delete from server first
@@ -371,8 +395,8 @@ async function delRec(i) {
 }
 
 async function syncGroupsFromRecords() { 
-    const recs = JSON.parse(localStorage.getItem('records') || '[]'); 
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}'); 
+    const recs = adminSysReadArray('records');
+    const rosters = adminSysReadObject('rosters');
     let updatedCount = 0; 
     
     recs.forEach(r => { 
@@ -395,8 +419,8 @@ async function syncGroupsFromRecords() {
 async function archiveOldSubmissions() {
     if(!confirm("Archive submissions from previous months?\n\nThis moves completed tests older than the current month to a separate storage key ('archive_submissions').\n\nThis significantly reduces bandwidth usage for daily syncs.")) return;
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const archives = JSON.parse(localStorage.getItem('archive_submissions') || '[]');
+    const subs = adminSysReadArray('submissions');
+    const archives = adminSysReadArray('archive_submissions');
     
     const now = new Date();
     // Cutoff: 1st day of the current month (00:00:00)
@@ -435,7 +459,7 @@ async function archiveOldSubmissions() {
 async function cleanupDuplicateRecords() {
     if(!confirm("Run duplicate cleanup? This will remove duplicate records for the same Trainee + Assessment, keeping the highest score.")) return;
 
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = adminSysReadArray('records');
     const uniqueMap = new Map();
     let duplicatesCount = 0;
 
@@ -566,12 +590,12 @@ window.exportDatabase = async function() {
         const schemaKeys = (typeof DB_SCHEMA !== 'undefined') ? Object.keys(DB_SCHEMA) : ['records','users','assessments','rosters','schedules','liveBookings'];
         
         schemaKeys.forEach(k => {
-            d[k] = JSON.parse(localStorage.getItem(k)) || (typeof DB_SCHEMA !== 'undefined' ? DB_SCHEMA[k] : []);
+            d[k] = adminSysReadJson(k, (typeof DB_SCHEMA !== 'undefined' ? DB_SCHEMA[k] : []));
         });
         
         d.theme = localStorage.getItem('theme') || 'dark';
         d.autoBackup = localStorage.getItem('autoBackup') || 'false';
-        d.local_theme_config = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+        d.local_theme_config = adminSysReadObject('local_theme_config');
        
         const b = new Blob([JSON.stringify(d,null,2)],{type:'application/json'}); 
         const a = document.createElement('a'); 
@@ -592,7 +616,8 @@ window.exportDatabase = async function() {
 // --- SECTION 4: SECURITY & ACCESS CONTROL ---
 
 async function loadAdminAccess() {
-    const ac = JSON.parse(localStorage.getItem('accessControl') || '{"enabled":false, "whitelist":[]}');
+    const ac = adminSysReadObject('accessControl', { enabled: false, whitelist: [] });
+    if (!Array.isArray(ac.whitelist)) ac.whitelist = [];
     const DEFAULT_IPS = ["102.66.15.0/24", "102.66.15.79"];
     let modified = false;
 
@@ -643,7 +668,8 @@ async function loadAdminAccess() {
 }
 
 async function toggleIpRestriction() {
-    const ac = JSON.parse(localStorage.getItem('accessControl') || '{"enabled":false, "whitelist":[]}');
+    const ac = adminSysReadObject('accessControl', { enabled: false, whitelist: [] });
+    if (!Array.isArray(ac.whitelist)) ac.whitelist = [];
     ac.enabled = !ac.enabled;
     localStorage.setItem('accessControl', JSON.stringify(ac));
     
@@ -658,7 +684,8 @@ async function addIpAddress() {
     const ip = input.value.trim();
     if(!ip) return alert("Enter IP.");
     
-    const ac = JSON.parse(localStorage.getItem('accessControl') || '{"enabled":false, "whitelist":[]}');
+    const ac = adminSysReadObject('accessControl', { enabled: false, whitelist: [] });
+    if (!Array.isArray(ac.whitelist)) ac.whitelist = [];
     if(ac.whitelist.includes(ip)) return alert("IP already exists.");
     
     ac.whitelist.push(ip);
@@ -672,7 +699,8 @@ async function addIpAddress() {
 
 async function removeIpAddress(index) {
     if(!confirm("Remove IP?")) return;
-    const ac = JSON.parse(localStorage.getItem('accessControl') || '{"enabled":false, "whitelist":[]}');
+    const ac = adminSysReadObject('accessControl', { enabled: false, whitelist: [] });
+    if (!Array.isArray(ac.whitelist)) ac.whitelist = [];
     ac.whitelist.splice(index, 1);
     localStorage.setItem('accessControl', JSON.stringify(ac));
     
@@ -688,7 +716,7 @@ function loadAdminTheme() {
     if(typeof restrictTraineeMenu === 'function') restrictTraineeMenu();
 
     // Load from Local Storage (PC specific)
-    const localTheme = JSON.parse(localStorage.getItem('local_theme_config') || '{}');
+    const localTheme = adminSysReadObject('local_theme_config');
     
     const colorInput = document.getElementById('themeColor');
     const wallInput = document.getElementById('themeWallpaper');
@@ -763,9 +791,12 @@ function loadAdminTheme() {
             <label for="themeNavigationView" style="display:block; margin-bottom:10px; font-weight:bold;">Admin View Arrangement</label>
             <select id="themeNavigationView" onchange="setAdminNavigationView(this.value)" style="width:100%; margin-bottom:6px;">
                 <option value="classic">Classic Sidebar</option>
-                <option value="advanced-minimal">Advanced Minimal Groups</option>
+                <option value="navigation-map">Navigation Map</option>
             </select>
-            <div style="font-size:0.7rem; color:var(--text-muted);">Changes the sidebar grouping for Admin, Super Admin, and Team Leader sessions on this PC.</div>
+            <button type="button" class="btn-secondary btn-sm" onclick="openNavigationMapCustomizer()" style="width:100%; margin:4px 0 6px;">
+                <i class="fas fa-sliders"></i> Customize Navigation Map
+            </button>
+            <div style="font-size:0.7rem; color:var(--text-muted);">Changes the sidebar layout for Admin, Super Admin, and Team Leader sessions on this PC.</div>
         `;
         const densityContainer = document.getElementById('themeDensityContainer');
         const zoomContainer = document.getElementById('themeZoomContainer');
@@ -849,7 +880,7 @@ function loadAdminTheme() {
     const navigationInput = document.getElementById('themeNavigationView');
     if (navigationInput) {
         const storedNavigation = localStorage.getItem('admin_nav_view') || localTheme.navigationView || 'classic';
-        navigationInput.value = storedNavigation === 'advanced-minimal' ? 'advanced-minimal' : 'classic';
+        navigationInput.value = (storedNavigation === 'navigation-map' || storedNavigation === 'advanced-minimal') ? 'navigation-map' : 'classic';
     }
     
     const zoomInput = document.getElementById('themeZoom');
@@ -938,7 +969,7 @@ async function saveThemeSettings() {
     // Save locally only
     localStorage.setItem('local_theme_config', JSON.stringify(themeConfig));
     localStorage.setItem('ui_density', density);
-    localStorage.setItem('admin_nav_view', navigationView === 'advanced-minimal' ? 'advanced-minimal' : 'classic');
+    localStorage.setItem('admin_nav_view', navigationView === 'navigation-map' ? 'navigation-map' : 'classic');
     
     if (typeof applyUserTheme === 'function') applyUserTheme();
     if (typeof applyConfiguredNavigationView === 'function') applyConfiguredNavigationView();
@@ -1094,7 +1125,7 @@ async function resetLiveSessionsKey() {
 // --- SECTION 7: SUPER ADMIN CONFIGURATION ---
 
 function openSuperAdminConfig() {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     
     // Defaults if missing
     const rawRates = config.sync_rates || {};
@@ -1407,7 +1438,7 @@ function openSuperAdminConfig() {
                     <div class="card" style="margin-top:15px; border-left: 4px solid #ff5252;">
                         <h4><i class="fas fa-user-slash"></i> Blacklisted Users (Identity Revoked)</h4>
                         <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:10px;">Users who were Archived or Graduated are placed on this blacklist so the system can destroy their old data. <strong>Remove their name from this list</strong> to allow them to be recreated or log in again.</div>
-                        <input type="text" id="sa_sec_revoked" value="${JSON.parse(localStorage.getItem('revokedUsers') || '[]').join(', ')}" style="width:100%;" placeholder="username1, username2...">
+                        <input type="text" id="sa_sec_revoked" value="${adminSysReadArray('revokedUsers').join(', ')}" style="width:100%;" placeholder="username1, username2...">
                     </div>
                     </div>
 
@@ -1499,7 +1530,7 @@ function openSuperAdminConfig() {
     refreshClientHealthTable();
     
     // Load Staging Creds
-    const stage = JSON.parse(localStorage.getItem('staging_credentials') || '{}');
+    const stage = adminSysReadObject('staging_credentials');
     if(document.getElementById('sa_stage_url')) document.getElementById('sa_stage_url').value = stage.url || '';
     if(document.getElementById('sa_stage_key')) document.getElementById('sa_stage_key').value = stage.key || '';
 
@@ -1576,16 +1607,16 @@ window.checkRowSyncStatus = async function() {
         if (!window.supabaseClient) throw new Error("Not connected to Supabase.");
 
         // Local Counts
-        const locRecs = (JSON.parse(localStorage.getItem('records') || '[]')).length;
-        const locSubs = (JSON.parse(localStorage.getItem('submissions') || '[]')).length;
-        const locLogs = (JSON.parse(localStorage.getItem('auditLogs') || '[]')).length;
-        const locLive = (JSON.parse(localStorage.getItem('liveBookings') || '[]')).length;
-        const locAtt = (JSON.parse(localStorage.getItem('attendance_records') || '[]')).length;
-        const locArch = (JSON.parse(localStorage.getItem('graduated_agents') || '[]')).length;
-        const locRep = (JSON.parse(localStorage.getItem('savedReports') || '[]')).length;
-        const locReq = (JSON.parse(localStorage.getItem('linkRequests') || '[]')).length;
-        const locMon = Object.keys(JSON.parse(localStorage.getItem('monitor_data') || '{}')).length;
-        const locTests = (JSON.parse(localStorage.getItem('tests') || '[]')).length;
+        const locRecs = adminSysReadArray('records').length;
+        const locSubs = adminSysReadArray('submissions').length;
+        const locLogs = adminSysReadArray('auditLogs').length;
+        const locLive = adminSysReadArray('liveBookings').length;
+        const locAtt = adminSysReadArray('attendance_records').length;
+        const locArch = adminSysReadArray('graduated_agents').length;
+        const locRep = adminSysReadArray('savedReports').length;
+        const locReq = adminSysReadArray('linkRequests').length;
+        const locMon = Object.keys(adminSysReadObject('monitor_data')).length;
+        const locTests = adminSysReadArray('tests').length;
         
         // Remote Counts (Head Query)
         const { count: remRecs } = await supabaseClient.from('records').select('*', { count: 'exact', head: true });
@@ -1612,7 +1643,7 @@ window.checkRowSyncStatus = async function() {
             return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
         };
         
-        const locCal = (JSON.parse(localStorage.getItem('calendarEvents') || '[]')).length;
+        const locCal = adminSysReadArray('calendarEvents').length;
 
         container.innerHTML = `
             <table class="admin-table compressed-table" style="margin-top:5px;">
@@ -1756,7 +1787,7 @@ window.cleanupLocalDuplicates = function() {
     
     // 1. Standard Deduplication
     keys.forEach(key => {
-        const items = JSON.parse(localStorage.getItem(key) || '[]');
+        const items = adminSysReadArray(key);
         if(items.length === 0) return;
         
         const uniqueMap = new Map();
@@ -1789,7 +1820,7 @@ window.cleanupLocalDuplicates = function() {
     });
 
     // 2. Monitor History Optimization (The Big Fix)
-    const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+    const history = adminSysReadArray('monitor_history');
     const initialHistLen = history.length;
     const initialHistSize = JSON.stringify(history).length;
     
@@ -1888,70 +1919,70 @@ window.performBlobToRowMigration = async function() {
         };
 
         // 0. Users (Row-Level Sync Migration)
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const users = adminSysReadArray('users');
         if(mode === 'real') { users.forEach(u => { if(!u.id) u.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('users', JSON.stringify(users)); }
         await uploadBatch('users', users, u => ({ id: u.id, data: u, updated_at: new Date().toISOString() }));
 
         // 1. Records
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const records = adminSysReadArray('records');
         if(mode === 'real') { records.forEach(r => { if(!r.id) r.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('records', JSON.stringify(records)); }
         await uploadBatch('records', records, r => ({ id: r.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), trainee: r.trainee, data: r, updated_at: new Date().toISOString() }));
 
         // 2. Submissions
-        const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const subs = adminSysReadArray('submissions');
         if(mode === 'real') { subs.forEach(s => { if(!s.id) s.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('submissions', JSON.stringify(subs)); }
         await uploadBatch('submissions', subs, s => ({ id: s.id, trainee: s.trainee, data: s, updated_at: new Date().toISOString() }));
 
         // 3. Audit Logs
-        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        const logs = adminSysReadArray('auditLogs');
         if(mode === 'real') { logs.forEach(l => { if(!l.id) l.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('auditLogs', JSON.stringify(logs)); }
         await uploadBatch('audit_logs', logs, l => ({ id: l.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: l.user, data: l, updated_at: new Date().toISOString() }));
 
         // 4. Live Bookings
-        const bookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const bookings = adminSysReadArray('liveBookings');
         if(mode === 'real') { bookings.forEach(b => { if(!b.id) b.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('liveBookings', JSON.stringify(bookings)); }
         await uploadBatch('live_bookings', bookings, b => ({ id: b.id, trainee: b.trainee, data: b, updated_at: new Date().toISOString() }));
 
         // 5. Monitor History
-        const history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        const history = adminSysReadArray('monitor_history');
         if(mode === 'real') { history.forEach(h => { if(!h.id) h.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('monitor_history', JSON.stringify(history)); }
         await uploadBatch('monitor_history', history, h => ({ id: Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: h.user, data: h, updated_at: new Date().toISOString() }));
 
         // 6. Attendance
-        const att = JSON.parse(localStorage.getItem('attendance_records') || '[]');
+        const att = adminSysReadArray('attendance_records');
         if(mode === 'real') { att.forEach(a => { if(!a.id) a.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('attendance_records', JSON.stringify(att)); }
         await uploadBatch('attendance', att, a => ({ id: a.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: a.user, data: a, updated_at: new Date().toISOString() }));
 
         // 7. Access Logs
-        const access = JSON.parse(localStorage.getItem('accessLogs') || '[]');
+        const access = adminSysReadArray('accessLogs');
         if(mode === 'real') { access.forEach(a => { if(!a.id) a.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('accessLogs', JSON.stringify(access)); }
         await uploadBatch('access_logs', access, a => ({ id: a.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: a.user, data: a, updated_at: new Date().toISOString() }));
 
         // 8. Saved Reports
-        const reports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+        const reports = adminSysReadArray('savedReports');
         if(mode === 'real') { reports.forEach(r => { if(!r.id) r.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('savedReports', JSON.stringify(reports)); }
         await uploadBatch('saved_reports', reports, r => ({ id: r.id.toString(), trainee: r.trainee, data: r, updated_at: new Date().toISOString() }));
 
         // 9. Archived Users
-        const archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        const archives = adminSysReadArray('graduated_agents');
         if(mode === 'real') { archives.forEach(a => { if(!a.id) a.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('graduated_agents', JSON.stringify(archives)); }
         await uploadBatch('archived_users', archives, a => ({ id: a.id || Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: a.user, data: a, updated_at: new Date().toISOString() }));
 
         // 10. Live Sessions
-        const sessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
+        const sessions = adminSysReadArray('liveSessions');
         await uploadBatch('live_sessions', sessions, s => ({ id: s.sessionId || s.id, trainer: s.trainer, data: s, updated_at: new Date().toISOString() }));
 
         // 11. Link Requests
-        const requests = JSON.parse(localStorage.getItem('linkRequests') || '[]');
+        const requests = adminSysReadArray('linkRequests');
         if(mode === 'real') { requests.forEach(r => { if(!r.id) r.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('linkRequests', JSON.stringify(requests)); }
         await uploadBatch('link_requests', requests, r => ({ id: r.id, trainee: r.trainee, data: r, updated_at: new Date().toISOString() }));
 
         // 12. Calendar Events
-        const events = JSON.parse(localStorage.getItem('calendarEvents') || '[]');
+        const events = adminSysReadArray('calendarEvents');
         await uploadBatch('calendar_events', events, e => ({ id: e.id, created_by: e.createdBy, data: e, updated_at: new Date().toISOString() }));
 
         // 13. Tests (Assessments)
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const tests = adminSysReadArray('tests');
         if(mode === 'real') { tests.forEach(t => { if(!t.id) t.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('tests', JSON.stringify(tests)); }
         await uploadBatch('tests', tests, t => ({ id: t.id, title: t.title, type: t.type, data: t, updated_at: new Date().toISOString() }));
 
@@ -2018,10 +2049,10 @@ window.executeDataPatch = async function() {
     
     try {
         // Load Context
-        let users = JSON.parse(localStorage.getItem('users') || '[]');
-        let records = JSON.parse(localStorage.getItem('records') || '[]');
-        let rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-        let system_config = JSON.parse(localStorage.getItem('system_config') || '{}');
+        let users = adminSysReadArray('users');
+        let records = adminSysReadArray('records');
+        let rosters = adminSysReadObject('rosters');
+        let system_config = adminSysReadObject('system_config');
         
         // Execute
         eval(code);
@@ -2073,7 +2104,7 @@ window.sendSaAiMessage = async function() {
 };
 
 async function saveSuperAdminConfig() {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     
     // Helper to safely get values without crashing
     const getVal = (id, def) => {
@@ -2234,7 +2265,7 @@ window.testGeminiConnection = async function() {
 };
 
 window.toggleLockdown = async function() {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     if(!config.security) config.security = {};
     
     const newState = !config.security.lockdown_mode;
@@ -2292,7 +2323,7 @@ window.impersonateUser = function(username) {
     }
     if (!confirm(`Impersonate ${username}? You will see exactly what they see.`)) return;
     
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = adminSysReadArray('users');
     const target = users.find(u => matchAdminIdentity(u && (u.user || u.username), username));
     
     if(!target) return alert("User not found.");
@@ -2317,7 +2348,7 @@ async function sendSystemBroadcast() {
     
     if(!confirm("Send this popup message to ALL active users immediately?")) return;
     
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     const sound = true; // Default to sound on
     config.broadcast = { id: Date.now(), message: msg, sound: sound };
     
@@ -2489,7 +2520,7 @@ document.addEventListener('keydown', (e) => {
 async function banClient(clientId, username) {
     if(!confirm(`Ban terminal ${clientId} (User: ${username})?\n\nThey will be logged out and blocked from signing in.`)) return;
     
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     if (!config.security) config.security = {};
     if (!config.security.banned_clients) config.security.banned_clients = [];
     
@@ -2506,7 +2537,7 @@ async function banClient(clientId, username) {
 
 // --- BANNED CLIENTS REPORT ---
 function viewBannedClientsReport() {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     const banned = (config.security && config.security.banned_clients) ? config.security.banned_clients : [];
 
     let html = `<div class="modal-overlay" id="bannedReportModal" style="z-index:10001;">
@@ -2540,7 +2571,7 @@ function viewBannedClientsReport() {
 async function unbanClient(id) {
     if(!confirm(`Unban Client ID: ${id}?`)) return;
     
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     if (config.security && config.security.banned_clients) {
         config.security.banned_clients = config.security.banned_clients.filter(c => c !== id);
         localStorage.setItem('system_config', JSON.stringify(config));
@@ -2569,7 +2600,7 @@ function isProblemReportEntry(report) {
 function getErrorReportCollections() {
     const parsed = (typeof safeLocalParse === 'function')
         ? safeLocalParse('error_reports', [])
-        : JSON.parse(localStorage.getItem('error_reports') || '[]');
+        : adminSysReadArray('error_reports');
     const rawReports = Array.isArray(parsed) ? parsed : [];
     const allReports = rawReports.map(entry => {
         const data = entry && entry.data && typeof entry.data === 'object' ? entry.data : entry;
@@ -3031,7 +3062,7 @@ window.switchToStaging = function() {
 };
 
 window.exitStaging = function() {
-    const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+    const config = adminSysReadObject('system_config');
     const target = (config.server_settings && config.server_settings.active) ? config.server_settings.active : 'cloud';
     
     sessionStorage.removeItem('recovery_mode');
@@ -3086,7 +3117,7 @@ window.forceMigrationPush = async function() {
                 const localKey = Object.keys(ROW_MAP).find(k => ROW_MAP[k] === table);
                 if (!localKey) continue;
                 
-                const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+                const localData = adminSysReadArray(localKey);
                 const localIdSet = new Set(localData.map(i => i.id ? i.id.toString() : null).filter(i => i));
                 
                 // 3. Find IDs on server that are NOT in local
@@ -3162,7 +3193,7 @@ window.performOrphanCleanup = async function(silent = false) {
         for (const item of map) {
             // 1. Load local rows first, then ask the server only about those IDs.
             // Pulling every ID from high-volume telemetry tables can hit Supabase statement timeouts.
-            const localData = JSON.parse(localStorage.getItem(item.key) || '[]');
+            const localData = adminSysReadArray(item.key);
             if (!Array.isArray(localData) || localData.length === 0) continue;
 
             const idField = item.idField || 'id';

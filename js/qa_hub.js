@@ -18,6 +18,22 @@ const QAHub = {
             .replace(/\r?\n/g, ' ');
     },
 
+    readObject(key) {
+        if (typeof safeLocalParse === 'function') {
+            const parsed = safeLocalParse(key, {});
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        }
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (error) {
+            console.warn(`Q&A Hub ignored invalid local data for ${key}:`, error);
+            return {};
+        }
+    },
+
     renderUI() {
         const container = document.getElementById('qa-hub-content');
         if (!container) return;
@@ -62,12 +78,7 @@ const QAHub = {
             try { await loadFromServer(true); } catch (error) {}
         }
 
-        let data = {};
-        try {
-            data = JSON.parse(localStorage.getItem(this.dataKey) || '{}') || {};
-        } catch (error) {
-            data = {};
-        }
+        let data = this.readObject(this.dataKey);
 
         if (!Array.isArray(data.questions)) data.questions = [];
         if (!Array.isArray(data.submissions)) data.submissions = [];
@@ -94,11 +105,7 @@ const QAHub = {
     },
 
     getData() {
-        try {
-            return JSON.parse(localStorage.getItem(this.dataKey) || '{}') || {};
-        } catch (error) {
-            return { questions: [], submissions: [], updatedAt: null, updatedBy: null };
-        }
+        return this.readObject(this.dataKey);
     },
 
     async saveData(data) {

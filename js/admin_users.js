@@ -144,8 +144,8 @@ function dedupeRosterSnapshot(inputRosters) {
 }
 
 function sanitizeUsersAndRosters() {
-    const rawUsers = JSON.parse(localStorage.getItem('users') || '[]');
-    const rawRosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rawUsers = readAdminUsersArray('users');
+    const rawRosters = readAdminUsersObject('rosters');
 
     const users = dedupeUsersSnapshot(rawUsers);
     const rosters = dedupeRosterSnapshot(rawRosters);
@@ -165,15 +165,68 @@ function isRetrainArchiveEntry(entry) {
 }
 
 function readRetrainArchives() {
-    return JSON.parse(localStorage.getItem('retrain_archives') || '[]');
+    const archives = readAdminUsersJson('retrain_archives', []);
+    return Array.isArray(archives) ? archives : [];
 }
 
 function readProgressConfigSnapshot() {
-    try {
-        return JSON.parse(localStorage.getItem('insight_progress_config') || '{}') || {};
-    } catch (error) {
-        return {};
+    const config = readAdminUsersJson('insight_progress_config', {});
+    return config && typeof config === 'object' && !Array.isArray(config) ? config : {};
+}
+
+function readAdminUsersArray(key) {
+    const value = readAdminUsersJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function readAdminUsersObject(key) {
+    const value = readAdminUsersJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function rowsForMoveArchive(key, identityFields, targetToken) {
+    const fields = Array.isArray(identityFields) ? identityFields : [identityFields];
+    return readAdminUsersArray(key).filter(row => {
+        if (!row || typeof row !== 'object') return false;
+        return fields.some(field => getUserIdentityToken(row[field]) === targetToken);
+    });
+}
+
+function mergeArchiveRows(existingRows, incomingRows) {
+    const out = Array.isArray(existingRows) ? [...existingRows] : [];
+    const rowKey = (row) => {
+        if (!row || typeof row !== 'object') return '';
+        if (row.id) return `id:${String(row.id)}`;
+        try {
+            return `row:${JSON.stringify(row)}`;
+        } catch (error) {
+            return '';
+        }
+    };
+    const seen = new Set(out.map(rowKey).filter(Boolean));
+    (Array.isArray(incomingRows) ? incomingRows : []).forEach(row => {
+        if (!row || typeof row !== 'object') return;
+        const key = rowKey(row);
+        if (key && seen.has(key)) return;
+        if (key) seen.add(key);
+        out.push(row);
+    });
+    return out;
+}
+
+function findResumableRetrainArchiveIndex(archives, userToken, targetGroup) {
+    const target = String(targetGroup || '').trim();
+    const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    for (let i = archives.length - 1; i >= 0; i--) {
+        const entry = archives[i];
+        if (!entry || typeof entry !== 'object') continue;
+        if (getUserIdentityToken(entry.user || entry.trainee || entry.username) !== userToken) continue;
+        if (String(entry.targetGroup || '').trim() !== target) continue;
+        const movedTs = new Date(entry.movedDate || entry.archivedAt || entry.createdAt || 0).getTime() || 0;
+        if (movedTs && movedTs < weekAgo) continue;
+        return i;
     }
+    return -1;
 }
 
 function getArchiveGroupForProgress(entry) {
@@ -192,9 +245,17 @@ function buildOfficialProgressForArchive(entry) {
     if (!window.ProgressCatalog || typeof window.ProgressCatalog.getTraineeProgress !== 'function') return null;
     const username = String(entry.user || entry.trainee || entry.username || '').trim();
     if (!username) return null;
+    const progressConfig = (entry.progressConfigSnapshot && typeof entry.progressConfigSnapshot === 'object')
+        ? entry.progressConfigSnapshot
+        : readProgressConfigSnapshot();
+    const officialItems = (typeof window.ProgressCatalog.getOfficialItemsFromConfig === 'function')
+        ? window.ProgressCatalog.getOfficialItemsFromConfig(progressConfig, { includeAuto: true })
+        : null;
 
     return window.ProgressCatalog.getTraineeProgress(username, getArchiveGroupForProgress(entry), {
         includeAuto: true,
+        items: officialItems,
+        ignoreExemptionGroup: true,
         data: {
             records: Array.isArray(entry.records) ? entry.records : [],
             submissions: Array.isArray(entry.submissions) ? entry.submissions : [],
@@ -264,7 +325,7 @@ async function repairArchiveSnapshots() {
     ].join('\n');
     if (!confirm(message)) return;
 
-    let graduated = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    let graduated = readAdminUsersArray('graduated_agents');
     let retrain = readRetrainArchives();
     if (!Array.isArray(graduated)) graduated = [];
     if (!Array.isArray(retrain)) retrain = [];
@@ -468,7 +529,7 @@ async function splitLegacyRetrainArchives() {
 
     _legacyRetrainArchiveSplitRunning = true;
     try {
-        const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        const graduates = readAdminUsersArray('graduated_agents');
         if (!Array.isArray(graduates) || graduates.length === 0) {
             localStorage.setItem('archive_split_v268', 'true');
             return;
@@ -636,7 +697,7 @@ async function saveRoster() {
         }
     });
 
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = readAdminUsersObject('rosters');
     let targetGroupId = "";
 
     if (mode === 'new') {
@@ -755,7 +816,7 @@ async function deleteGroup(groupId) {
     if(!confirm(`Delete group ${groupId} and all associated data? This cannot be undone.`)) return;
     
     const previousRostersJson = localStorage.getItem('rosters') || '{}';
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = readAdminUsersObject('rosters');
     delete rosters[groupId];
     localStorage.setItem('rosters', JSON.stringify(rosters));
     
@@ -785,7 +846,7 @@ async function deleteAgentFromSystem(agentName, groupKey) {
 
     try {
         // 1. Remove from ALL Rosters (just in case they are in multiple)
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = readAdminUsersObject('rosters');
         Object.keys(rosters).forEach(gid => {
             if (rosters[gid]) {
                 rosters[gid] = rosters[gid].filter(m => getUserIdentityToken(m) !== targetToken);
@@ -794,12 +855,12 @@ async function deleteAgentFromSystem(agentName, groupKey) {
         localStorage.setItem('rosters', JSON.stringify(rosters));
         
         // 2. Remove User Account
-        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        let users = readAdminUsersArray('users');
         users = users.filter(u => getUserIdentityToken(u && (u.user || u.username)) !== targetToken);
         localStorage.setItem('users', JSON.stringify(users));
         
         // 3. Add to Revoked (Blacklist) to prevent resurrection
-        let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        let revoked = readAdminUsersArray('revokedUsers');
         if(!revoked.some(name => getUserIdentityToken(name) === targetToken)) {
             revoked.push(agentName);
             localStorage.setItem('revokedUsers', JSON.stringify(revoked));
@@ -897,7 +958,7 @@ async function deleteAgentFromSystem(agentName, groupKey) {
 }
 
 function loadRostersToSelect(elementId = 'selectedGroup') { 
-    const r = JSON.parse(localStorage.getItem('rosters')||'{}'); 
+    const r = readAdminUsersObject('rosters');
     const s = document.getElementById(elementId); 
     if(!s) return;
     
@@ -912,7 +973,7 @@ function loadRostersToSelect(elementId = 'selectedGroup') {
 }
 
 function populateTraineeDropdown() { 
-    const users = JSON.parse(localStorage.getItem('users') || '[]'); 
+    const users = readAdminUsersArray('users');
     const list = document.getElementById('traineeOptions'); 
     
      if(list) {
@@ -939,7 +1000,7 @@ async function scanAndGenerateUsers(silent = false, emailMap = {}) {
     const sanitized = sanitizeUsersAndRosters();
     const users = Array.isArray(sanitized.users) ? sanitized.users : [];
     const rosters = (sanitized.rosters && typeof sanitized.rosters === 'object') ? sanitized.rosters : {};
-    const revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    const revoked = readAdminUsersArray('revokedUsers');
     const revokedSet = new Set(revoked.map(r => String(r || '').trim().toLowerCase()));
 
     let allNames = new Set(); 
@@ -1137,7 +1198,7 @@ function loadAdminUsers(forceRender = false) {
 
     const sanitized = sanitizeUsersAndRosters();
     const users = sanitized.users;
-    const savedReports = JSON.parse(localStorage.getItem('savedReports') || '[]');
+    const savedReports = readAdminUsersArray('savedReports');
     const rosters = sanitized.rosters;
 
     if (sanitized.usersChanged || sanitized.rostersChanged) {
@@ -1238,7 +1299,7 @@ function togglePasswordView(elementId) {
 
 function openMoveUserModal(username) {
     userToMove = username;
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = readAdminUsersObject('rosters');
     let currentGroup = "None";
     
     for (const [gid, members] of Object.entries(rosters)) {
@@ -1264,6 +1325,7 @@ async function confirmMoveUser() {
     const targetGid = document.getElementById('moveUserTargetSelect').value;
     if(!targetGid) return alert("Please select a destination group.");
     const normalizedUserToMove = getUserIdentityToken(userToMove);
+    if (!normalizedUserToMove) return alert("No agent selected for migration. Please reopen the move dialog.");
 
     if(!confirm(`Move ${userToMove} to ${targetGid}?\n\nWARNING: This will ARCHIVE all their current progress, records, and attendance to start fresh in the new group (Retrain Mode).\n\nProceed?`)) return;
 
@@ -1271,8 +1333,16 @@ async function confirmMoveUser() {
     if(btn) { btn.innerText = "Moving & Archiving..."; btn.disabled = true; }
 
     try {
+        if (typeof loadFromServer === 'function') {
+            try {
+                await loadFromServer(true);
+            } catch (syncError) {
+                console.warn('Pre-migration refresh failed; continuing with local cache.', syncError);
+            }
+        }
+
         const targetToken = normalizedUserToMove;
-        const currentRosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const currentRosters = readAdminUsersObject('rosters');
         let previousGroup = 'Ungrouped';
         Object.keys(currentRosters).forEach((gid) => {
             const members = Array.isArray(currentRosters[gid]) ? currentRosters[gid] : [];
@@ -1280,38 +1350,75 @@ async function confirmMoveUser() {
         });
 
         // 1. ARCHIVE DATA (Snapshot)
-        const existingAttempts = readRetrainArchives().filter(entry => getUserIdentityToken(entry && entry.user) === targetToken).length;
+        let archives = readRetrainArchives();
+        const resumeIndex = findResumableRetrainArchiveIndex(archives, targetToken, targetGid);
+        const existingAttempts = archives.filter(entry => getUserIdentityToken(entry && entry.user) === targetToken).length;
         const attemptNumber = existingAttempts + 1;
-        const archiveData = {
-            id: `retrain_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-            user: userToMove,
-            movedDate: new Date().toISOString(),
-            attemptNumber,
-            attemptLabel: `Attempt ${attemptNumber}`,
-            archiveType: 'retrain',
-            reason: 'Moved to ' + targetGid,
-            fromGroup: previousGroup,
-            targetGroup: targetGid,
-            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => getUserIdentityToken(s && s.trainee) === targetToken),
-            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => getUserIdentityToken(r && r.user) === targetToken),
-            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            exemptions: (JSON.parse(localStorage.getItem('exemptions') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            liveBookings: (JSON.parse(localStorage.getItem('liveBookings') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            linkRequests: (JSON.parse(localStorage.getItem('linkRequests') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            monitorHistory: (JSON.parse(localStorage.getItem('monitor_history') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.user_id)) === targetToken),
-            tlTaskSubmissions: (JSON.parse(localStorage.getItem('tl_task_submissions') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.trainee)) === targetToken),
+        const progressConfigSnapshot = resumeIndex > -1 && archives[resumeIndex].progressConfigSnapshot
+            ? archives[resumeIndex].progressConfigSnapshot
+            : readProgressConfigSnapshot();
+        const officialProgressItems = (window.ProgressCatalog && typeof window.ProgressCatalog.getOfficialItemsFromConfig === 'function')
+            ? window.ProgressCatalog.getOfficialItemsFromConfig(progressConfigSnapshot, { includeAuto: true })
+            : null;
+        const liveSnapshot = {
+            records: rowsForMoveArchive('records', 'trainee', targetToken),
+            submissions: rowsForMoveArchive('submissions', 'trainee', targetToken),
+            attendance: rowsForMoveArchive('attendance_records', 'user', targetToken),
+            reports: rowsForMoveArchive('savedReports', ['trainee', 'user'], targetToken),
+            reviews: rowsForMoveArchive('insightReviews', ['trainee', 'user'], targetToken),
+            exemptions: rowsForMoveArchive('exemptions', ['trainee', 'user'], targetToken),
+            liveBookings: rowsForMoveArchive('liveBookings', ['trainee', 'user'], targetToken),
+            linkRequests: rowsForMoveArchive('linkRequests', ['trainee', 'user'], targetToken),
+            monitorHistory: rowsForMoveArchive('monitor_history', ['user', 'user_id'], targetToken),
+            tlTaskSubmissions: rowsForMoveArchive('tl_task_submissions', ['user', 'trainee'], targetToken),
             notes: (() => {
-                const allNotes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+                const allNotes = readAdminUsersObject('agentNotes');
                 const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
                 return key ? allNotes[key] : null;
-            })(),
-            progressConfigSnapshot: readProgressConfigSnapshot()
+            })()
         };
+        const archiveData = resumeIndex > -1
+            ? {
+                ...archives[resumeIndex],
+                user: archives[resumeIndex].user || userToMove,
+                attemptNumber: archives[resumeIndex].attemptNumber || Math.max(1, existingAttempts),
+                attemptLabel: archives[resumeIndex].attemptLabel || `Attempt ${Math.max(1, existingAttempts)}`,
+                archiveType: 'retrain',
+                reason: archives[resumeIndex].reason || ('Moved to ' + targetGid),
+                fromGroup: archives[resumeIndex].fromGroup || previousGroup,
+                targetGroup: targetGid,
+                records: mergeArchiveRows(archives[resumeIndex].records, liveSnapshot.records),
+                submissions: mergeArchiveRows(archives[resumeIndex].submissions, liveSnapshot.submissions),
+                attendance: mergeArchiveRows(archives[resumeIndex].attendance, liveSnapshot.attendance),
+                reports: mergeArchiveRows(archives[resumeIndex].reports, liveSnapshot.reports),
+                reviews: mergeArchiveRows(archives[resumeIndex].reviews, liveSnapshot.reviews),
+                exemptions: mergeArchiveRows(archives[resumeIndex].exemptions, liveSnapshot.exemptions),
+                liveBookings: mergeArchiveRows(archives[resumeIndex].liveBookings, liveSnapshot.liveBookings),
+                linkRequests: mergeArchiveRows(archives[resumeIndex].linkRequests, liveSnapshot.linkRequests),
+                monitorHistory: mergeArchiveRows(archives[resumeIndex].monitorHistory, liveSnapshot.monitorHistory),
+                tlTaskSubmissions: mergeArchiveRows(archives[resumeIndex].tlTaskSubmissions, liveSnapshot.tlTaskSubmissions),
+                notes: archives[resumeIndex].notes || liveSnapshot.notes,
+                progressConfigSnapshot,
+                resumedAt: new Date().toISOString()
+            }
+            : {
+                id: `retrain_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                user: userToMove,
+                movedDate: new Date().toISOString(),
+                attemptNumber,
+                attemptLabel: `Attempt ${attemptNumber}`,
+                archiveType: 'retrain',
+                reason: 'Moved to ' + targetGid,
+                fromGroup: previousGroup,
+                targetGroup: targetGid,
+                ...liveSnapshot,
+                progressConfigSnapshot
+            };
         if (window.ProgressCatalog && typeof window.ProgressCatalog.getTraineeProgress === 'function') {
             archiveData.officialProgress = window.ProgressCatalog.getTraineeProgress(userToMove, previousGroup, {
                 includeAuto: true,
+                items: officialProgressItems || undefined,
+                ignoreExemptionGroup: true,
                 data: {
                     records: archiveData.records,
                     submissions: archiveData.submissions,
@@ -1323,8 +1430,11 @@ async function confirmMoveUser() {
             });
         }
 
-        let archives = readRetrainArchives();
-        archives.push(archiveData);
+        if (resumeIndex > -1) {
+            archives[resumeIndex] = archiveData;
+        } else {
+            archives.push(archiveData);
+        }
         localStorage.setItem('retrain_archives', JSON.stringify(archives));
 
         // Persist the archive snapshot before clearing live rows. This avoids a half-migration
@@ -1354,7 +1464,7 @@ async function confirmMoveUser() {
         // 2. WIPE ACTIVE DATA (Clean Slate)
         const wipe = (key, fields) => {
             const fieldList = Array.isArray(fields) ? fields : [fields];
-            let data = JSON.parse(localStorage.getItem(key) || '[]');
+            let data = readAdminUsersArray(key);
             const newData = data.filter(item => {
                 if (!item) return true;
                 return !fieldList.some(field => getUserIdentityToken(item[field] || '') === normalizedUserToMove);
@@ -1373,12 +1483,12 @@ async function confirmMoveUser() {
         wipe('monitor_history', ['user', 'user_id']);
         wipe('tl_task_submissions', ['user', 'trainee']);
         
-        let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+        let notes = readAdminUsersObject('agentNotes');
         const noteKey = Object.keys(notes).find(k => getUserIdentityToken(k) === normalizedUserToMove);
         if(noteKey) { delete notes[noteKey]; localStorage.setItem('agentNotes', JSON.stringify(notes)); }
 
         // 3. MOVE ROSTER
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = readAdminUsersObject('rosters');
         for (const gid in rosters) {
             if (!Array.isArray(rosters[gid])) continue;
             rosters[gid] = rosters[gid].filter(member => getUserIdentityToken(member) !== normalizedUserToMove);
@@ -1433,7 +1543,7 @@ async function confirmMoveUser() {
 async function demoteSuperAdmin(username) {
     if (!confirm(`Demote ${username} from Super Admin to Admin?`)) return;
 
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = readAdminUsersArray('users');
     const idx = findUserByIdentityIndex(users, username);
     
     if (idx > -1) {
@@ -1523,7 +1633,7 @@ async function addUser(payload = null) {
         alert("Username and password are required.");
         return false;
     }
-    const users = JSON.parse(localStorage.getItem('users') || '[]'); 
+    const users = readAdminUsersArray('users');
     if(findUserByIdentityIndex(users, u) > -1) {
         alert("User exists");
         return false;
@@ -1532,7 +1642,7 @@ async function addUser(payload = null) {
     // --- TOMBSTONE CHECK ---
     // If this user was previously deleted (revoked), remove them from blacklist
     // so they can be re-created successfully.
-    let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    let revoked = readAdminUsersArray('revokedUsers');
     let revokedChanged = false;
     if(revoked.some(name => getUserIdentityToken(name) === normalizedUser)) {
         revoked = revoked.filter(name => getUserIdentityToken(name) !== normalizedUser);
@@ -1595,7 +1705,7 @@ async function setUserBlocked(username, shouldBlock) {
         return false;
     }
 
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = readAdminUsersArray('users');
     const idx = findUserByIdentityIndex(users, target);
     if (idx === -1) {
         alert("User not found.");
@@ -1614,7 +1724,7 @@ async function setUserBlocked(username, shouldBlock) {
 }
 
 async function toggleBlockUser(username) {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = readAdminUsersArray('users');
     const idx = findUserByIdentityIndex(users, username);
     if (idx === -1) return;
 
@@ -1636,19 +1746,19 @@ async function remUser(username) {
         const targetNorm = getUserIdentityToken(target);
 
         // 1) Remove account (case-insensitive)
-        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        let users = readAdminUsersArray('users');
         users = users.filter(u => getUserIdentityToken(u && (u.user || u.username)) !== targetNorm);
         localStorage.setItem('users', JSON.stringify(users));
 
         // 2) Add to blacklist/tombstone (case-insensitive dedupe)
-        let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        let revoked = readAdminUsersArray('revokedUsers');
         if (!revoked.some(r => getUserIdentityToken(r) === targetNorm)) {
             revoked.push(target);
         }
         localStorage.setItem('revokedUsers', JSON.stringify(revoked));
 
         // 3) Remove from all rosters so auto-generation cannot recreate
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = readAdminUsersObject('rosters');
         Object.keys(rosters).forEach(gid => {
             if (!Array.isArray(rosters[gid])) return;
             rosters[gid] = rosters[gid].filter(m => getUserIdentityToken(m) !== targetNorm);
@@ -1657,7 +1767,7 @@ async function remUser(username) {
 
         // 4) Purge common user-linked local data to prevent resurrection side-effects
         const purgeArray = (key, fields) => {
-            let arr = JSON.parse(localStorage.getItem(key) || '[]');
+            let arr = readAdminUsersArray(key);
             if (!Array.isArray(arr)) return;
             arr = arr.filter(item => {
                 return !fields.some(field => getUserIdentityToken((item && item[field]) || '') === targetNorm);
@@ -1676,7 +1786,7 @@ async function remUser(username) {
         purgeArray('retrain_archives', ['user']);
 
         const purgeObjectKey = (key) => {
-            const obj = JSON.parse(localStorage.getItem(key) || '{}');
+            const obj = readAdminUsersObject(key);
             if (!obj || typeof obj !== 'object') return;
             Object.keys(obj).forEach(k => {
                 if (getUserIdentityToken(k) === targetNorm) delete obj[k];
@@ -1707,7 +1817,7 @@ async function remUser(username) {
 }
 
 function openUserEdit(username) {
-    const users = JSON.parse(localStorage.getItem('users') || '[]'); 
+    const users = readAdminUsersArray('users');
     const targetNorm = getUserIdentityToken(username);
     // FIX: Find index by username
     const index = users.findIndex(u => getUserIdentityToken(u && (u.user || u.username)) === targetNorm);
@@ -1724,7 +1834,7 @@ function openUserEdit(username) {
     const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '';
     const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '';
     const status = isUserBlockedAccount(u) ? 'blocked' : 'active';
-    const groups = getUserGroupLabels(u.user, JSON.parse(localStorage.getItem('rosters') || '{}'));
+    const groups = getUserGroupLabels(u.user, readAdminUsersObject('rosters'));
     const groupDisplay = groups.length > 0 ? groups.join(', ') : 'No Group';
     const lastModified = u.lastModified ? new Date(u.lastModified).toLocaleString() : 'Unknown';
     const modifiedBy = u.modifiedBy || 'Unknown';
@@ -1800,7 +1910,7 @@ function openUserEdit(username) {
 
 window.unbindUserClient = async function(username) {
     if(!confirm("Remove Client ID binding? This allows the user to login from a new machine.")) return;
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = readAdminUsersArray('users');
     const targetNorm = getUserIdentityToken(username);
     const index = users.findIndex(u => getUserIdentityToken(u && (u.user || u.username)) === targetNorm);
     if (index === -1) return;
@@ -1818,7 +1928,7 @@ window.renameUser = async function(oldName) {
     if (!newName || newName === oldName) return;
     
     // Check if exists
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = readAdminUsersArray('users');
     if (findUserByIdentityIndex(users, newName) > -1) return alert("Username already exists.");
     
     if (!confirm(`Rename '${oldName}' to '${newName}'?\n\nThis will update all records, attendance, and reports associated with this user.`)) return;
@@ -1831,7 +1941,7 @@ window.renameUser = async function(oldName) {
     localStorage.setItem('users', JSON.stringify(users));
     
     // 2. Rosters
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = readAdminUsersObject('rosters');
     Object.keys(rosters).forEach(gid => {
         const idx = Array.isArray(rosters[gid])
             ? rosters[gid].findIndex(member => getUserIdentityToken(member) === oldToken)
@@ -1851,7 +1961,7 @@ window.renameUser = async function(oldName) {
     
     // 3. Records, Submissions, Attendance, etc.
     const migrate = (key, field) => {
-        const data = JSON.parse(localStorage.getItem(key) || '[]');
+        const data = readAdminUsersArray(key);
         let changed = false;
         data.forEach(item => {
             if (getUserIdentityToken(item && item[field]) === oldToken) {
@@ -1875,7 +1985,7 @@ window.renameUser = async function(oldName) {
     
     // Object keys (Agent Notes, Monitor Data)
     const migrateObj = (key) => {
-        const data = JSON.parse(localStorage.getItem(key) || '{}');
+        const data = readAdminUsersObject(key);
         let changed = false;
         Object.keys(data).forEach(existingKey => {
             if (getUserIdentityToken(existingKey) === oldToken && existingKey !== newName) {
@@ -1901,7 +2011,7 @@ window.renameUser = async function(oldName) {
 };
 
 async function saveUserEdit() {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = readAdminUsersArray('users');
     const targetNorm = getUserIdentityToken(editTargetUsername);
     const liveIndex = users.findIndex(u => getUserIdentityToken(u && (u.user || u.username)) === targetNorm);
     if (liveIndex === -1) {
@@ -1978,7 +2088,7 @@ function loadGraduatedAgents() {
     const container = document.getElementById('graduateList');
     if (!container) return;
 
-    const graduates = (JSON.parse(localStorage.getItem('graduated_agents') || '[]') || []).filter(g => !isRetrainArchiveEntry(g));
+    const graduates = readAdminUsersArray('graduated_agents').filter(g => !isRetrainArchiveEntry(g));
     const search = document.getElementById('graduateSearch') ? document.getElementById('graduateSearch').value.toLowerCase() : '';
 
     const filtered = graduates.filter(g => g.user.toLowerCase().includes(search));
@@ -2015,7 +2125,7 @@ function loadGraduatedAgents() {
 async function restoreAgent(username) {
     if(!confirm(`Restore ${username} to active duty?\n\nThis will move their data back to the active database and re-enable login access.`)) return;
 
-    const graduates = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+    const graduates = readAdminUsersArray('graduated_agents');
     const targetToken = getUserIdentityToken(username);
     const idx = graduates.findIndex(g => getUserIdentityToken(g && g.user) === targetToken);
     
@@ -2026,7 +2136,7 @@ async function restoreAgent(username) {
     // 1. Restore Data
     const restore = (key, data) => {
         if (!data || data.length === 0) return;
-        const current = JSON.parse(localStorage.getItem(key) || '[]');
+        const current = readAdminUsersArray(key);
         // Merge avoiding duplicates (simple ID check if available, else push)
         data.forEach(item => {
             if (item.id) {
@@ -2045,13 +2155,13 @@ async function restoreAgent(username) {
     restore('insightReviews', agentData.reviews);
     
     if (agentData.notes) {
-        const notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+        const notes = readAdminUsersObject('agentNotes');
         notes[username] = agentData.notes;
         localStorage.setItem('agentNotes', JSON.stringify(notes));
     }
 
     // 2. Restore User Account (Re-create)
-    let users = JSON.parse(localStorage.getItem('users') || '[]');
+    let users = readAdminUsersArray('users');
     if (findUserByIdentityIndex(users, username) === -1) {
         // Generate temp pin
         const pin = Math.floor(1000 + Math.random() * 9000).toString();
@@ -2061,7 +2171,7 @@ async function restoreAgent(username) {
     }
 
     // 3. Remove from Blacklist
-    let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+    let revoked = readAdminUsersArray('revokedUsers');
     const restoreToken = getUserIdentityToken(username);
     revoked = revoked.filter(u => getUserIdentityToken(u) !== restoreToken);
     localStorage.setItem('revokedUsers', JSON.stringify(revoked));
@@ -2096,7 +2206,7 @@ async function graduateTrainee(username) {
 
     try {
         const targetToken = getUserIdentityToken(username);
-        const existingAttempts = (JSON.parse(localStorage.getItem('graduated_agents') || '[]') || [])
+        const existingAttempts = readAdminUsersArray('graduated_agents')
             .filter(entry => getUserIdentityToken(entry && entry.user) === targetToken).length;
         const attemptNumber = existingAttempts + 1;
         // 1. ARCHIVE DATA (Snapshot)
@@ -2106,18 +2216,18 @@ async function graduateTrainee(username) {
             attemptNumber,
             attemptLabel: `Attempt ${attemptNumber}`,
             reason: 'Graduated',
-            records: (JSON.parse(localStorage.getItem('records') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            submissions: (JSON.parse(localStorage.getItem('submissions') || '[]')).filter(s => getUserIdentityToken(s && s.trainee) === targetToken),
-            attendance: (JSON.parse(localStorage.getItem('attendance_records') || '[]')).filter(r => getUserIdentityToken(r && r.user) === targetToken),
-            reports: (JSON.parse(localStorage.getItem('savedReports') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            reviews: (JSON.parse(localStorage.getItem('insightReviews') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            exemptions: (JSON.parse(localStorage.getItem('exemptions') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            liveBookings: (JSON.parse(localStorage.getItem('liveBookings') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            linkRequests: (JSON.parse(localStorage.getItem('linkRequests') || '[]')).filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
-            monitorHistory: (JSON.parse(localStorage.getItem('monitor_history') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.user_id)) === targetToken),
-            tlTaskSubmissions: (JSON.parse(localStorage.getItem('tl_task_submissions') || '[]')).filter(r => getUserIdentityToken(r && (r.user || r.trainee)) === targetToken),
+            records: readAdminUsersArray('records').filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            submissions: readAdminUsersArray('submissions').filter(s => getUserIdentityToken(s && s.trainee) === targetToken),
+            attendance: readAdminUsersArray('attendance_records').filter(r => getUserIdentityToken(r && r.user) === targetToken),
+            reports: readAdminUsersArray('savedReports').filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            reviews: readAdminUsersArray('insightReviews').filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            exemptions: readAdminUsersArray('exemptions').filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            liveBookings: readAdminUsersArray('liveBookings').filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            linkRequests: readAdminUsersArray('linkRequests').filter(r => getUserIdentityToken(r && r.trainee) === targetToken),
+            monitorHistory: readAdminUsersArray('monitor_history').filter(r => getUserIdentityToken(r && (r.user || r.user_id)) === targetToken),
+            tlTaskSubmissions: readAdminUsersArray('tl_task_submissions').filter(r => getUserIdentityToken(r && (r.user || r.trainee)) === targetToken),
             notes: (() => {
-                const allNotes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+                const allNotes = readAdminUsersObject('agentNotes');
                 const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
                 return key ? allNotes[key] : null;
             })(),
@@ -2138,13 +2248,13 @@ async function graduateTrainee(username) {
             });
         }
 
-        let archives = JSON.parse(localStorage.getItem('graduated_agents') || '[]');
+        let archives = readAdminUsersArray('graduated_agents');
         archives.push(archiveData);
         localStorage.setItem('graduated_agents', JSON.stringify(archives));
 
         // 2. WIPE ACTIVE DATA
         const wipe = (key, field) => {
-            let data = JSON.parse(localStorage.getItem(key) || '[]');
+            let data = readAdminUsersArray(key);
             const newData = data.filter(item => {
                 const val = item[field];
                 return !val || getUserIdentityToken(val) !== targetToken;
@@ -2163,31 +2273,31 @@ async function graduateTrainee(username) {
         wipe('monitor_history', 'user');
         wipe('tl_task_submissions', 'user');
         
-        let notes = JSON.parse(localStorage.getItem('agentNotes') || '{}');
+        let notes = readAdminUsersObject('agentNotes');
         Object.keys(notes).forEach(noteKey => {
             if (getUserIdentityToken(noteKey) === targetToken) delete notes[noteKey];
         });
         localStorage.setItem('agentNotes', JSON.stringify(notes));
 
-        let monitor = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        let monitor = readAdminUsersObject('monitor_data');
         Object.keys(monitor).forEach(monKey => {
             if (getUserIdentityToken(monKey) === targetToken) delete monitor[monKey];
         });
         localStorage.setItem('monitor_data', JSON.stringify(monitor));
 
         // 3. REMOVE USER & ROSTER
-        let users = JSON.parse(localStorage.getItem('users') || '[]');
+        let users = readAdminUsersArray('users');
         users = users.filter(u => getUserIdentityToken(u && (u.user || u.username)) !== targetToken);
         localStorage.setItem('users', JSON.stringify(users));
 
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = readAdminUsersObject('rosters');
         for (const gid in rosters) {
             rosters[gid] = rosters[gid].filter(m => getUserIdentityToken(m) !== targetToken);
         }
         localStorage.setItem('rosters', JSON.stringify(rosters));
 
         // 4. BLACKLIST (Prevent regeneration)
-        let revoked = JSON.parse(localStorage.getItem('revokedUsers') || '[]');
+        let revoked = readAdminUsersArray('revokedUsers');
         if(!revoked.some(entry => getUserIdentityToken(entry) === targetToken)) {
             revoked.push(username);
             localStorage.setItem('revokedUsers', JSON.stringify(revoked));

@@ -1,9 +1,31 @@
 /* ================= ASSESSMENT TRAINEE ================= */
 /* Test Taking, Scheduling, and Submission Logic */
 
+function assessmentReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (e) {
+        console.warn(`Assessment trainee ignored invalid local data for ${key}:`, e);
+        return fallback;
+    }
+}
+
+function assessmentReadArray(key) {
+    const value = assessmentReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function assessmentReadObject(key) {
+    const value = assessmentReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 function getCurrentTraineeGroupId() {
     if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || !CURRENT_USER.user) return null;
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = assessmentReadObject('rosters');
     for (const [gid, members] of Object.entries(rosters)) {
         if (!Array.isArray(members)) continue;
         if (members.some(m => String(m || '').trim().toLowerCase() === String(CURRENT_USER.user || '').trim().toLowerCase())) {
@@ -14,7 +36,7 @@ function getCurrentTraineeGroupId() {
 }
 
 function getLatestRetrainMoveDateForUser(userName) {
-    const archives = JSON.parse(localStorage.getItem('retrain_archives') || '[]');
+    const archives = assessmentReadArray('retrain_archives');
     const normalized = String(userName || '').trim().toLowerCase();
     const movedTimes = archives
         .filter(entry => String(entry?.user || '').trim().toLowerCase() === normalized)
@@ -26,7 +48,7 @@ function getLatestRetrainMoveDateForUser(userName) {
 
 function resolveSubmissionLinkedRecord(submission, allRecords) {
     if (!submission) return null;
-    const records = Array.isArray(allRecords) ? allRecords : JSON.parse(localStorage.getItem('records') || '[]');
+    const records = Array.isArray(allRecords) ? allRecords : assessmentReadArray('records');
     let record = records.find(r => r && r.submissionId === submission.id);
     if (record) return record;
     const subTestTitle = String(submission.testTitle || '').trim().toLowerCase();
@@ -81,7 +103,7 @@ function getAssessmentFeedbackRequestTooltip() {
         return window.getAssessmentFeedbackTooltipText();
     }
     try {
-        const config = JSON.parse(localStorage.getItem('assessment_feedback_config') || 'null');
+        const config = assessmentReadJson('assessment_feedback_config', null);
         const text = String((config && (config.tooltipText || config.message)) || '').trim();
         return text || DEFAULT_ASSESSMENT_FEEDBACK_TOOLTIP;
     } catch (error) {
@@ -99,7 +121,7 @@ function getAssessmentFeedbackTooltipAttributes() {
 
 function findAssessmentFeedbackRecord(submission, records = null) {
     if (!submission) return null;
-    const rows = Array.isArray(records) ? records : JSON.parse(localStorage.getItem('records') || '[]');
+    const rows = Array.isArray(records) ? records : assessmentReadArray('records');
     return rows.find(r => r && String(r.submissionId || '') === String(submission.id))
         || rows.find(r => r && String(r.id || '') === `record_${submission.id}`)
         || rows.find(r => r && submission.bookingId && String(r.bookingId || '') === String(submission.bookingId))
@@ -108,8 +130,8 @@ function findAssessmentFeedbackRecord(submission, records = null) {
 }
 
 function applyAssessmentFeedbackPatchToRows(submissionId, patch) {
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const subs = assessmentReadArray('submissions');
+    const records = assessmentReadArray('records');
     const sub = subs.find(s => s && String(s.id || '') === String(submissionId));
     if (!sub) return { changed: false, submission: null, record: null };
 
@@ -134,7 +156,7 @@ function applyAssessmentFeedbackPatchToRows(submissionId, patch) {
 
 function createAssessmentFeedbackAdminNotification(submission) {
     if (!submission || !submission.id) return;
-    const notifications = JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+    const notifications = assessmentReadArray('admin_notifications');
     const now = new Date().toISOString();
     const id = `assessment_feedback_${submission.id}`;
     const message = `${submission.trainee || 'A trainee'} requested feedback for ${submission.testTitle || 'an assessment'}.`;
@@ -170,7 +192,7 @@ async function syncAssessmentFeedbackDelta() {
 }
 
 window.requestAssessmentFeedback = async function(submissionId) {
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = assessmentReadArray('submissions');
     const sub = subs.find(s => s && String(s.id || '') === String(submissionId));
     if (!sub) {
         if (typeof showToast === 'function') showToast('Assessment feedback row not found.', 'error');
@@ -217,7 +239,7 @@ window.markAssessmentFeedbackGiven = async function(submissionId) {
         return;
     }
 
-    const notifications = JSON.parse(localStorage.getItem('admin_notifications') || '[]');
+    const notifications = assessmentReadArray('admin_notifications');
     notifications.forEach(n => {
         if (n && String(n.type || '') === 'assessment_feedback_request' && String(n.submissionId || '') === String(submissionId)) {
             n.status = 'closed';
@@ -437,12 +459,12 @@ function loadTraineeTests() {
     const container = document.getElementById('myTestsList');
     if (!container) return;
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const tests = assessmentReadArray('tests');
+    const submissions = assessmentReadArray('submissions');
 
-    const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const schedules = assessmentReadObject('schedules');
+    const rosters = assessmentReadObject('rosters');
+    const records = assessmentReadArray('records');
     const myGroupId = getCurrentTraineeGroupId();
     const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
 
@@ -462,7 +484,7 @@ function loadTraineeTests() {
     else visibleTests = tests.filter(t => allowedTestIds.has(t.id.toString()));
 
     if (CURRENT_USER.role === 'trainee') {
-        const liveBookings = JSON.parse(localStorage.getItem('liveBookings') || '[]');
+        const liveBookings = assessmentReadArray('liveBookings');
         const todayIso = new Date().toISOString().split('T')[0];
         const myLiveBookings = liveBookings
             .filter(b =>
@@ -645,7 +667,7 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     const activeSectionId = document.querySelector('section.active')?.id || '';
     const returnTab = String(launchOptions.returnTab || activeSectionId || '').trim();
 
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    const tests = assessmentReadArray('tests');
     const test = tests.find(t => t.id == testId);
     if (!test) return;
     const contentStudioContext = normalizeContentStudioContext(launchOptions.contentStudioContext, test);
@@ -690,14 +712,14 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     }
     // -------------------------------------------------------------
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = assessmentReadArray('submissions');
     
     const myGroupId = getCurrentTraineeGroupId();
     const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const records = assessmentReadArray('records');
 
     if (typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee' && !isArenaMode) {
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
+        const schedules = assessmentReadObject('schedules');
 
         let isScheduled = false;
         if (myGroupId) {
@@ -937,7 +959,8 @@ function restoreAssessmentDraft() {
     const draftStr = localStorage.getItem('draft_assessment');
     if (!draftStr) return;
     
-    const draft = JSON.parse(draftStr);
+    const draft = assessmentReadJson('draft_assessment', null);
+    if (!draft || typeof draft !== 'object') return;
     
     // CRITICAL: Ensure the draft belongs to the currently logged in user
     if (draft.user !== CURRENT_USER.user) return;
@@ -973,8 +996,8 @@ async function submitTest(forceSubmit = false, options = {}) {
     const btn = document.querySelector('button[onclick="submitTest()"], button[onclick*="submitTest(false"]');
     if(btn) { btn.disabled = true; btn.innerText = "Processing..."; }
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    const subs = assessmentReadArray('submissions');
+    const records = assessmentReadArray('records');
     const myGroupId = getCurrentTraineeGroupId();
     const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
     let localSubmissionSaved = false;
@@ -1063,7 +1086,7 @@ async function submitTest(forceSubmit = false, options = {}) {
         remappedAnswers[q._originalIndex] = ans;
     });
 
-    const originalTestDef = JSON.parse(localStorage.getItem('tests') || '[]').find(t => t.id == window.CURRENT_TEST.id);
+    const originalTestDef = assessmentReadArray('tests').find(t => t.id == window.CURRENT_TEST.id);
 
     const submissionTime = new Date().toISOString();
     const submission = {
@@ -1094,7 +1117,7 @@ async function submitTest(forceSubmit = false, options = {}) {
     localStorage.removeItem('draft_assessment');
 
     if (finalStatus === 'completed') {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = assessmentReadObject('rosters');
         let groupId = "Unknown";
         for (const [gid, members] of Object.entries(rosters)) {
             if (members.some(m => m.toLowerCase() === CURRENT_USER.user.toLowerCase())) { groupId = gid; break; }
@@ -1104,7 +1127,7 @@ async function submitTest(forceSubmit = false, options = {}) {
         if(typeof getTraineeCycle === 'function') cycleVal = getTraineeCycle(CURRENT_USER.user, groupId);
         const phaseVal = window.CURRENT_TEST.title.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
 
-        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        const records = assessmentReadArray('records');
         const recordId = `record_${submission.id}`;
         
         const existingIdx = records.findIndex(r =>

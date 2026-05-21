@@ -1,6 +1,28 @@
 /* ================= ADMIN: GRADING & RECORDS ================= */
 /* Responsibility: Manual Score Capture (Capture Tab) & History (Test Records Tab) */
 
+function gradingReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`Grading ignored invalid local data for ${key}:`, error);
+        return fallback;
+    }
+}
+
+function gradingReadArray(key) {
+    const value = gradingReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function gradingReadObject(key) {
+    const value = gradingReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 // --- SECTION 1: MANUAL SCORE CAPTURE (Physical/External) ---
 
 function loadGroupMembers() { 
@@ -9,8 +31,8 @@ function loadGroupMembers() {
     
     if(!gid) return t.innerHTML='<tr><td colspan="4">Select Group</td></tr>'; 
     
-    const rosters = JSON.parse(localStorage.getItem('rosters')||'{}'); 
-    const members = rosters[gid] || [];
+    const rosters = gradingReadObject('rosters');
+    const members = (rosters && Array.isArray(rosters[gid])) ? rosters[gid] : [];
     
     t.innerHTML = members.map(n => `
         <tr data-trainee="${n}">
@@ -26,15 +48,16 @@ function loadGroupMembers() {
 
 function updateAssessmentDropdown() { 
     const s = document.getElementById('assessment');
-    const arr = JSON.parse(localStorage.getItem('assessments')||'[]'); 
+    const arr = gradingReadArray('assessments');
     
     if(s) {
         const currentVal = s.value;
-        let html = arr.map(a => `<option value="${a.name}" data-video="${a.video}">${a.name}</option>`).join(''); 
+        const safeAssessments = Array.isArray(arr) ? arr : [];
+        let html = safeAssessments.map(a => `<option value="${a.name}" data-video="${a.video}">${a.name}</option>`).join('');
         
         // ROBUSTNESS: Ensure Vetting options exist for manual capture
-        if(!arr.some(a => a.name === '1st Vetting Test')) html += `<option value="1st Vetting Test">1st Vetting Test</option>`;
-        if(!arr.some(a => a.name === 'Final Vetting Test')) html += `<option value="Final Vetting Test">Final Vetting Test</option>`;
+        if(!safeAssessments.some(a => a.name === '1st Vetting Test')) html += `<option value="1st Vetting Test">1st Vetting Test</option>`;
+        if(!safeAssessments.some(a => a.name === 'Final Vetting Test')) html += `<option value="Final Vetting Test">Final Vetting Test</option>`;
         
         s.innerHTML = html;
         if(currentVal) s.value = currentVal;
@@ -54,8 +77,8 @@ function handlePhaseChange() {
 
     if (phase === '1st Vetting' || phase === 'Final Vetting') {
         vettingDiv.classList.remove('hidden');
-        const topics = JSON.parse(localStorage.getItem('vettingTopics') || '[]');
-        vettingSelect.innerHTML = '<option value="">-- Select Topic --</option>' + topics.map(t => `<option>${t}</option>`).join('');
+        const topics = gradingReadArray('vettingTopics');
+        vettingSelect.innerHTML = '<option value="">-- Select Topic --</option>' + (Array.isArray(topics) ? topics : []).map(t => `<option>${t}</option>`).join('');
     } else {
         vettingDiv.classList.add('hidden');
     }
@@ -102,7 +125,11 @@ async function saveScores() {
         finalAssessName = `${phase} - ${topic}`; 
     } 
     
-    const recs = JSON.parse(localStorage.getItem('records')||'[]'); 
+    const recs = gradingReadArray('records');
+    if (!Array.isArray(recs)) {
+        if (typeof showToast === 'function') showToast("Records cache is invalid. Refresh from server and try again.", "error");
+        return;
+    }
 
     // --- FAIL-SAFE: Check for existing scores to prevent overwrites ---
     const conflicts = [];
@@ -309,23 +336,23 @@ function dedupeVettingRows(items) {
 }
 
 function loadTestRecords() {
-    const allSubs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
+    const allSubs = gradingReadArray('submissions');
+    const allRecords = gradingReadArray('records');
     const records = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
-        ? filterRowsToCurrentTraineeLifecycle(allRecords)
-        : allRecords;
+        ? filterRowsToCurrentTraineeLifecycle(Array.isArray(allRecords) ? allRecords : [])
+        : (Array.isArray(allRecords) ? allRecords : []);
     const recordsBySubmissionId = new Map();
     records.forEach(r => {
         if (r && r.submissionId) recordsBySubmissionId.set(String(r.submissionId), r);
     });
-    const subs = allSubs.filter(s => {
+    const subs = (Array.isArray(allSubs) ? allSubs : []).filter(s => {
         const linkedRecord = recordsBySubmissionId.get(String(s && s.id));
         if (linkedRecord) return true;
         if (typeof isRowInCurrentTraineeLifecycle !== 'function') return true;
         return isRowInCurrentTraineeLifecycle(s);
     });
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const tests = gradingReadArray('tests');
+    const rosters = gradingReadObject('rosters');
     const tbody = document.querySelector('#testRecordsTable tbody');
     
     // Hide filters for Trainee to reduce clutter
@@ -359,7 +386,7 @@ function loadTestRecords() {
     // A. Digital Submissions (Vetting Only)
     subs.forEach(s => {
         // Check if it's a vetting test
-        const testDef = tests.find(t => t.id == s.testId || t.title === s.testTitle);
+        const testDef = (Array.isArray(tests) ? tests : []).find(t => t.id == s.testId || t.title === s.testTitle);
         const isVetting = (testDef && testDef.type === 'vetting') || s.testTitle.toLowerCase().includes('vetting');
         
         if (isVetting) {
@@ -420,7 +447,7 @@ function loadTestRecords() {
                 if (!testMap.has(key)) testMap.set(key, d.testTitle);
             });
             const uniqueTests = Array.from(testMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-            const uniqueGroups = Object.keys(rosters).sort().reverse();
+            const uniqueGroups = Object.keys(rosters || {}).sort().reverse();
 
             nameSelect.innerHTML = '<option value="">All Tests</option>';
             uniqueTests.forEach(([key, label]) => nameSelect.add(new Option(label, key)));
@@ -428,7 +455,7 @@ function loadTestRecords() {
 
             groupSelect.innerHTML = '<option value="">All Groups</option>';
             uniqueGroups.forEach(g => {
-                const label = (typeof getGroupLabel === 'function') ? getGroupLabel(g, rosters[g].length) : g;
+                const label = (typeof getGroupLabel === 'function') ? getGroupLabel(g, (rosters[g] || []).length) : g;
                 groupSelect.add(new Option(label, g));
             });
             if (groupFilter && uniqueGroups.includes(groupFilter)) groupSelect.value = groupFilter;
@@ -537,7 +564,8 @@ function loadTestRecords() {
 async function allowRetake(subId) {
     if(!confirm("Allow this user to retake the assessment? This will archive the current attempt.")) return;
     
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = gradingReadArray('submissions');
+    if (!Array.isArray(subs)) return;
     const sub = subs.find(s => s.id == subId);
     
     if(sub) {
@@ -548,7 +576,7 @@ async function allowRetake(subId) {
         
         // RESET VETTING SESSION STATUS IF APPLICABLE
         // This ensures the trainee can re-enter the Arena and isn't stuck on "Submitted"
-        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        const session = gradingReadObject('vettingSession');
         if (session.active && session.testId == sub.testId) {
             if (session.trainees && session.trainees[sub.trainee]) {
                 delete session.trainees[sub.trainee]; 
@@ -568,9 +596,11 @@ async function allowRetake(subId) {
 async function deleteSubmission(id) {
     if(!confirm("Delete submission?")) return;
 
-    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    let subs = gradingReadArray('submissions');
+    if (!Array.isArray(subs)) subs = [];
     const sub = subs.find(s => s.id == id);
-    let records = JSON.parse(localStorage.getItem('records') || '[]');
+    let records = gradingReadArray('records');
+    if (!Array.isArray(records)) records = [];
     const targetRecord = sub ? records.find(r => r.submissionId === sub.id)
         || records.find(r => r.id === `record_${sub.id}`)
         || records.find(r => sub.bookingId && r.bookingId === sub.bookingId)

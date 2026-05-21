@@ -2,6 +2,28 @@
 /* Handles LocalStorage and Cloud Sync for Team Projects */
 
 const DataService = {
+    readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (error) {
+            console.warn(`[Team Hub] Ignored invalid local data for ${key}:`, error);
+            return fallback;
+        }
+    },
+
+    readArray: function(key) {
+        const value = this.readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    readObject: function(key) {
+        const value = this.readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     // --- NEW: DATA FETCHER ---
     loadInitialData: async function() {
         if (!AppContext.supabase) return;
@@ -27,14 +49,14 @@ const DataService = {
     // Get Submission for specific date
     getSubmission: function(date) {
         if (!AppContext.user) return null;
-        const submissions = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+        const submissions = this.readArray('tl_task_submissions');
         return submissions.find(s => s.user === AppContext.user.user && s.date === date) || { data: {} };
     },
 
     // Save Submission (Local + Cloud)
     saveSubmission: function(date, data) {
         if (!AppContext.user) return;
-        const submissions = JSON.parse(localStorage.getItem('tl_task_submissions') || '[]');
+        const submissions = this.readArray('tl_task_submissions');
         const idx = submissions.findIndex(s => s.user === AppContext.user.user && s.date === date);
 
         const payload = {
@@ -55,7 +77,7 @@ const DataService = {
     // Get Personal Roster
     getMyTeam: function() {
         if (!AppContext.user) return [];
-        const lists = JSON.parse(localStorage.getItem('tl_personal_lists') || '{}');
+        const lists = this.readObject('tl_personal_lists');
         const list = lists[AppContext.user.user] || [];
         
         // Normalize legacy strings to objects with default role
@@ -65,7 +87,7 @@ const DataService = {
     // Save Personal Roster
     saveMyTeam: function(teamList) {
         if (!AppContext.user) return;
-        const lists = JSON.parse(localStorage.getItem('tl_personal_lists') || '{}');
+        const lists = this.readObject('tl_personal_lists');
         lists[AppContext.user.user] = teamList;
         localStorage.setItem('tl_personal_lists', JSON.stringify(lists));
         this.syncTable('tl_personal_lists', lists);
@@ -73,7 +95,7 @@ const DataService = {
 
     // --- BACKEND DATA (CONFIG) ---
     getBackendData: function() {
-        const parsed = JSON.parse(localStorage.getItem('tl_backend_data') || '{}');
+        const parsed = this.readObject('tl_backend_data');
         if (!Array.isArray(parsed.outage_areas)) parsed.outage_areas = [];
         if (!Array.isArray(parsed.bottleneck_types)) parsed.bottleneck_types = [];
         if (!Array.isArray(parsed.feedback_questions)) parsed.feedback_questions = [];
@@ -102,7 +124,7 @@ const DataService = {
 
     // --- AGENT FEEDBACK LOGS ---
     getAgentFeedback: function() {
-        return JSON.parse(localStorage.getItem('tl_agent_feedback') || '[]');
+        return this.readArray('tl_agent_feedback');
     },
 
     saveAgentFeedback: function(data) {

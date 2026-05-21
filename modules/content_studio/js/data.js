@@ -59,6 +59,28 @@ function buildScheduleKey(groupId, item) {
 const DataService = {
     _syncTimer: null,
 
+    _readJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (error) {
+            console.warn(`[Content Studio] Ignored invalid local data for ${key}:`, error);
+            return fallback;
+        }
+    },
+
+    _readArray: function(key) {
+        const value = this._readJson(key, []);
+        return Array.isArray(value) ? value : [];
+    },
+
+    _readObject: function(key) {
+        const value = this._readJson(key, {});
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    },
+
     _defaultStore: function() {
         return {
             entries: [],
@@ -313,17 +335,17 @@ const DataService = {
     },
 
     loadInitialData: async function() {
-        let local = this._normalizeStore(JSON.parse(localStorage.getItem(CONTENT_STUDIO_LOCAL_CACHE_KEY) || '{}'));
+        let local = this._normalizeStore(this._readObject(CONTENT_STUDIO_LOCAL_CACHE_KEY));
         if (!localStorage.getItem(CONTENT_STUDIO_LOCAL_CACHE_KEY)) {
             localStorage.setItem(CONTENT_STUDIO_LOCAL_CACHE_KEY, JSON.stringify(local));
         }
 
-        const localTests = this._normalizeTests(JSON.parse(localStorage.getItem(CONTENT_STUDIO_TESTS_CACHE_KEY) || '[]'));
+        const localTests = this._normalizeTests(this._readArray(CONTENT_STUDIO_TESTS_CACHE_KEY));
         if (!localStorage.getItem(CONTENT_STUDIO_TESTS_CACHE_KEY)) {
             localStorage.setItem(CONTENT_STUDIO_TESTS_CACHE_KEY, JSON.stringify(localTests));
         }
 
-        const localSubmissions = this._normalizeSubmissions(JSON.parse(localStorage.getItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY) || '[]'));
+        const localSubmissions = this._normalizeSubmissions(this._readArray(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY));
         if (!localStorage.getItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY)) {
             localStorage.setItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY, JSON.stringify(localSubmissions));
         }
@@ -397,15 +419,15 @@ const DataService = {
     },
 
     getStore: function() {
-        return this._normalizeStore(JSON.parse(localStorage.getItem(CONTENT_STUDIO_LOCAL_CACHE_KEY) || '{}'));
+        return this._normalizeStore(this._readObject(CONTENT_STUDIO_LOCAL_CACHE_KEY));
     },
 
     getTestsCache: function() {
-        return this._normalizeTests(JSON.parse(localStorage.getItem(CONTENT_STUDIO_TESTS_CACHE_KEY) || '[]'));
+        return this._normalizeTests(this._readArray(CONTENT_STUDIO_TESTS_CACHE_KEY));
     },
 
     getQuizSubmissionsCache: function() {
-        return this._normalizeSubmissions(JSON.parse(localStorage.getItem(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY) || '[]'));
+        return this._normalizeSubmissions(this._readArray(CONTENT_STUDIO_SUBMISSIONS_CACHE_KEY));
     },
 
     getQuizTests: function() {

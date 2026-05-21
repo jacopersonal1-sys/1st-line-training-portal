@@ -18,6 +18,22 @@ async function secureFormSave() {
     }
 }
 
+function formsReadArray(key) {
+    if (typeof safeLocalParse === 'function') {
+        const parsed = safeLocalParse(key, []);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.warn(`Forms ignored invalid local data for ${key}:`, error);
+        return [];
+    }
+}
+
 function getQuestionnaireIdentity(value) {
     let v = String(value || '').trim().toLowerCase();
     if (!v) return '';
@@ -26,7 +42,7 @@ function getQuestionnaireIdentity(value) {
 }
 
 function getCurrentQuestionnaireUser(usersInput) {
-    const users = Array.isArray(usersInput) ? usersInput : JSON.parse(localStorage.getItem('users') || '[]');
+    const users = Array.isArray(usersInput) ? usersInput : formsReadArray('users');
     const currentToken = getQuestionnaireIdentity(CURRENT_USER && CURRENT_USER.user);
     const idx = users.findIndex(u => getQuestionnaireIdentity(u && (u.user || u.username)) === currentToken);
     return { users, idx, user: idx > -1 ? users[idx] : null };
@@ -157,7 +173,7 @@ async function saveQuestionnaire() {
  * 3. EXEMPTION STATUS CHECKER
  */
 function isExempt(traineeName, assessmentName) {
-    const exemptions = JSON.parse(localStorage.getItem('exemptions') || '[]');
+    const exemptions = formsReadArray('exemptions');
     return exemptions.some(e => 
         e.trainee.toLowerCase() === traineeName.toLowerCase() && 
         e.assessment === assessmentName
@@ -168,7 +184,7 @@ function isExempt(traineeName, assessmentName) {
  * 4. DATA RETRIEVAL HELPERS
  */
 function getTraineePersonalData(username) {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = formsReadArray('users');
     const user = users.find(u => u.user === username);
     return user ? (user.traineeData || null) : null;
 }

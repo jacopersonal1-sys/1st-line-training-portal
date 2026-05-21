@@ -66,6 +66,28 @@
         return !!ca && ca === cb;
     }
 
+    function readVettingJson(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            return JSON.parse(raw);
+        } catch (e) {
+            console.warn(`[Vetting] ignored invalid local data for ${key}:`, e);
+            return fallback;
+        }
+    }
+
+    function readVettingArray(key) {
+        const value = readVettingJson(key, []);
+        return Array.isArray(value) ? value : [];
+    }
+
+    function readVettingObject(key, fallback = {}) {
+        const value = readVettingJson(key, fallback);
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+    }
+
     function getTraineeData(session, username) {
         if (!session || !session.trainees || !username) return null;
         if (session.trainees[username]) return session.trainees[username];
@@ -81,7 +103,7 @@
 
     function getLocalSession() {
         try {
-            return JSON.parse(localStorage.getItem('vettingSession') || '{"active":false,"trainees":{}}');
+            return readVettingObject('vettingSession', { active: false, trainees: {} });
         } catch (e) {
             return { active: false, trainees: {} };
         }
@@ -93,7 +115,7 @@
 
     function getAdminSessions() {
         try {
-            return JSON.parse(localStorage.getItem('adminVettingSessions') || '[]');
+            return readVettingArray('adminVettingSessions');
         } catch (e) {
             return [];
         }
@@ -118,7 +140,7 @@
     function getLatestAttemptSubmission(session, username) {
         if (!session || !username) return null;
         const testId = session.testId;
-        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const submissions = readVettingArray('submissions');
         const candidates = submissions.filter(s =>
             s &&
             !s.archived &&
@@ -227,7 +249,7 @@
 
     function getQueuedPatches() {
         try {
-            return JSON.parse(localStorage.getItem(PATCH_QUEUE_KEY) || '[]');
+            return readVettingArray(PATCH_QUEUE_KEY);
         } catch (e) {
             return [];
         }
@@ -325,7 +347,7 @@
         if (!session.targetGroup || session.targetGroup === 'all') return true;
         if (getTraineeData(session, username)) return true;
         try {
-            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+            const rosters = readVettingObject('rosters');
             const members = Array.isArray(rosters[session.targetGroup]) ? rosters[session.targetGroup] : [];
             return members.some(m => identitiesMatch(m, username));
         } catch (e) {
@@ -407,7 +429,7 @@
         const session = getLocalSession();
         const username = getUsername();
         const myData = getTraineeData(session, username);
-        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const cfg = readVettingObject('system_config');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         const isRelaxed = !!(myData && myData.relaxed && !forceGlobalKiosk);
 
@@ -436,7 +458,7 @@
                     await window.electronAPI.setContentProtection(true).catch(()=>{});
                 } catch(e){}
 
-                let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                let forbidden = readVettingArray('forbiddenApps');
                 if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') forbidden = window.DEFAULT_FORBIDDEN_APPS;
                 const apps = await window.electronAPI.getProcessList(forbidden).catch(()=>[]);
                 const screens = await window.electronAPI.getScreenCount().catch(()=>0);
@@ -461,7 +483,7 @@
                 ipcRenderer.invoke('set-kiosk-mode', true).catch(() => {});
                 ipcRenderer.invoke('set-content-protection', true).catch(() => {});
 
-                let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                let forbidden = readVettingArray('forbiddenApps');
                 if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') forbidden = window.DEFAULT_FORBIDDEN_APPS;
 
                 const [apps, screens] = await Promise.all([
@@ -506,7 +528,7 @@
         if (!session.trainees) session.trainees = {};
         if (!session.trainees[username]) session.trainees[username] = {};
 
-        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const cfg = readVettingObject('system_config');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         const isRelaxed = session.trainees[username].relaxed === true && !forceGlobalKiosk;
 
@@ -537,7 +559,7 @@
         if (timerStr) session.trainees[username].timer = timerStr;
 
         let securitySnapshot = null;
-        let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+        let forbidden = readVettingArray('forbiddenApps');
         if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
             forbidden = window.DEFAULT_FORBIDDEN_APPS;
         }
@@ -615,7 +637,7 @@
             const isOverridden = !!(myData && myData.override);
             const isRelaxed = !!(myData && myData.relaxed);
 
-            const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+            const cfg = readVettingObject('system_config');
             const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
             const effectiveRelaxed = isRelaxed && !forceGlobalKiosk;
 
@@ -637,7 +659,7 @@
                         const screenCount = await ipcInvoke('get-screen-count');
                         if (screenCount > 1) errors.push(`Multiple monitors detected (${screenCount}).`);
 
-                        let forbidden = JSON.parse(localStorage.getItem('forbiddenApps') || '[]');
+                        let forbidden = readVettingArray('forbiddenApps');
                         if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
                             forbidden = window.DEFAULT_FORBIDDEN_APPS;
                         }
@@ -731,7 +753,7 @@
         const myData = getTraineeData(session, getUsername());
         let isRelaxed = !!(myData && myData.relaxed);
 
-        const cfg = JSON.parse(localStorage.getItem('system_config') || '{}');
+        const cfg = readVettingObject('system_config');
         if (cfg.security && cfg.security.force_kiosk_global) isRelaxed = false;
 
         if (!isRelaxed && typeof require !== 'undefined') {
@@ -820,7 +842,7 @@
         }
 
         if (session.targetGroup && session.targetGroup !== 'all') {
-            const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+            const rosters = readVettingObject('rosters');
             const members = rosters[session.targetGroup] || [];
             const isMember = members.some(m => identitiesMatch(m, username));
             if (!isMember) {
@@ -879,7 +901,7 @@
             return;
         }
 
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const tests = readVettingArray('tests');
         const test = tests.find(t => t.id == session.testId);
 
         container.innerHTML = `

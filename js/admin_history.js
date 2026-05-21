@@ -1,6 +1,28 @@
 /* ================= ADMIN: COMPLETED ASSESSMENT HISTORY ================= */
 /* Handles the 'Completed Assessments' sub-menu in the Test Engine */
 
+function historyReadJson(key, fallback) {
+    if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`History ignored invalid local data for ${key}:`, error);
+        return fallback;
+    }
+}
+
+function historyReadArray(key) {
+    const value = historyReadJson(key, []);
+    return Array.isArray(value) ? value : [];
+}
+
+function historyReadObject(key) {
+    const value = historyReadJson(key, {});
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 function getHistorySubmissionTime(submission) {
     return new Date(submission.lastEditedDate || submission.lastModified || submission.createdAt || submission.date || 0).getTime() || 0;
 }
@@ -76,8 +98,8 @@ function loadFeedbackSessions() {
     if (!container) return;
 
     const filter = document.getElementById('feedbackSessionFilter') ? document.getElementById('feedbackSessionFilter').value : 'requested';
-    let submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const records = JSON.parse(localStorage.getItem('records') || '[]');
+    let submissions = historyReadArray('submissions');
+    const records = historyReadArray('records');
     submissions = (Array.isArray(submissions) ? submissions : []).filter(s => {
         if (!s || String(s.status || '').toLowerCase() !== 'completed' || s.archived) return false;
         if (!s.feedbackRequestLocked && getAssessmentFeedbackStatus(s) !== 'requested') return false;
@@ -145,14 +167,15 @@ function loadCompletedHistory() {
     const container = document.getElementById('completedHistoryList');
     if (!container) return;
 
-    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+    let subs = historyReadArray('submissions');
+    if (!Array.isArray(subs)) subs = [];
+    const tests = historyReadArray('tests');
     const testsById = {};
-    tests.forEach(t => { testsById[String(t.id)] = String(t.type || 'standard').toLowerCase(); });
-    const allRecords = JSON.parse(localStorage.getItem('records') || '[]');
+    (Array.isArray(tests) ? tests : []).forEach(t => { testsById[String(t.id)] = String(t.type || 'standard').toLowerCase(); });
+    const allRecords = historyReadArray('records');
     const records = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
-        ? filterRowsToCurrentTraineeLifecycle(allRecords)
-        : allRecords;
+        ? filterRowsToCurrentTraineeLifecycle(Array.isArray(allRecords) ? allRecords : [])
+        : (Array.isArray(allRecords) ? allRecords : []);
     const recordBySubmissionId = new Map();
     records.forEach(record => {
         if (!record || !record.submissionId) return;
@@ -236,7 +259,7 @@ function loadCompletedHistory() {
 
     // Apply Group Filter
     if (groupFilter) {
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const rosters = historyReadObject('rosters');
         const members = rosters[groupFilter] || [];
         // Check if trainee is in the selected group (Case Insensitive)
         completed = completed.filter(s => members.some(m => m.toLowerCase() === s.trainee.toLowerCase()));
@@ -360,7 +383,7 @@ function populateHistoryFilters() {
     const selTest = testSel.value;
 
     // 1. Groups
-    const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+    const rosters = historyReadObject('rosters');
     groupSel.innerHTML = '<option value="">All Groups</option>';
     Object.keys(rosters).sort().reverse().forEach(gid => {
         const label = (typeof getGroupLabel === 'function') ? getGroupLabel(gid, rosters[gid].length) : gid;
@@ -369,8 +392,8 @@ function populateHistoryFilters() {
     if (selGroup) groupSel.value = selGroup;
 
     // 2. Tests (From Submissions History to include deleted tests)
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const uniqueTests = [...new Set(subs.map(s => s.testTitle))].sort();
+    const subs = historyReadArray('submissions');
+    const uniqueTests = [...new Set((Array.isArray(subs) ? subs : []).map(s => s.testTitle))].sort();
     
     testSel.innerHTML = '<option value="">All Tests</option>';
     uniqueTests.forEach(t => {
@@ -382,7 +405,8 @@ function populateHistoryFilters() {
 async function deleteHistorySubmission(id) {
     if (!confirm("Permanently delete this submission? This will also remove the associated record from the database.")) return;
     
-    let subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    let subs = historyReadArray('submissions');
+    if (!Array.isArray(subs)) subs = [];
     const sub = subs.find(s => s.id === id);
     
     if (!sub) {
@@ -391,7 +415,8 @@ async function deleteHistorySubmission(id) {
     }
     
     // Identify associated record
-    let records = JSON.parse(localStorage.getItem('records') || '[]');
+    let records = historyReadArray('records');
+    if (!Array.isArray(records)) records = [];
     const targetRecord = records.find(r => r.submissionId === sub.id)
         || records.find(r => r.id === `record_${sub.id}`)
         || records.find(r => sub.bookingId && r.bookingId === sub.bookingId)
@@ -443,8 +468,9 @@ async function renameHistoryAssessmentTitle(subId) {
         return;
     }
 
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
-    const sub = subs.find(s => s && s.id === subId);
+    const subs = historyReadArray('submissions');
+    const safeSubs = Array.isArray(subs) ? subs : [];
+    const sub = safeSubs.find(s => s && s.id === subId);
     if (!sub) {
         if (typeof showToast === 'function') showToast("History entry not found.", "error");
         return;
@@ -471,7 +497,8 @@ async function renameHistoryAssessmentTitle(subId) {
 async function processHistoryRetake(subId) {
     if(!confirm("Allow retake? This archives the current submission and unlocks the test for the trainee.")) return;
     
-    const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+    const subs = historyReadArray('submissions');
+    if (!Array.isArray(subs)) return;
     const sub = subs.find(s => s.id == subId);
     
     if(sub) {
@@ -481,7 +508,7 @@ async function processHistoryRetake(subId) {
         
         // RESET VETTING SESSION STATUS IF APPLICABLE
         // This ensures the trainee can re-enter the Arena and isn't stuck on "Submitted"
-        const session = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+        const session = historyReadObject('vettingSession');
         if (session.active && session.testId == sub.testId) {
             if (session.trainees && session.trainees[sub.trainee]) {
                 delete session.trainees[sub.trainee]; 
@@ -556,10 +583,10 @@ function runUniversalSearch() {
     container.innerHTML = '<div style="text-align:center; padding:20px;"><i class="fas fa-circle-notch fa-spin"></i> Searching...</div>';
     
     setTimeout(() => {
-        const tests = JSON.parse(localStorage.getItem('tests') || '[]');
+        const tests = historyReadArray('tests');
         const results = [];
 
-        tests.forEach(test => {
+        (Array.isArray(tests) ? tests : []).forEach(test => {
             // 1. Check Title
             if (test.title.toLowerCase().includes(query)) {
                 results.push({ type: 'Title Match', test: test, match: test.title, qIdx: null });

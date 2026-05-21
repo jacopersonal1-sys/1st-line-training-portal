@@ -10,7 +10,9 @@
 
     function parseJson(key, fallback) {
         try {
-            const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            const parsed = JSON.parse(raw);
             return parsed === null || parsed === undefined ? fallback : parsed;
         } catch (error) {
             return fallback;
@@ -97,9 +99,8 @@
         };
     }
 
-    function getConfiguredItems(options = {}) {
+    function getConfiguredItemsFromConfig(cfg, options = {}) {
         const includeAuto = options.includeAuto !== false;
-        const cfg = parseJson(CONFIG_KEY, {});
         const map = new Map();
         if (includeAuto) AUTO_ITEMS.forEach(item => uniquePush(map, item));
         (Array.isArray(cfg.requiredItems) ? cfg.requiredItems : []).forEach(item => {
@@ -107,6 +108,16 @@
             if (normalized) uniquePush(map, normalized);
         });
         return sortItems(Array.from(map.values()));
+    }
+
+    function getConfiguredItems(options = {}) {
+        return getConfiguredItemsFromConfig(parseJson(CONFIG_KEY, {}), options);
+    }
+
+    function getOfficialItemsFromConfig(cfg, options = {}) {
+        const configured = getConfiguredItemsFromConfig(cfg && typeof cfg === 'object' ? cfg : {}, { includeAuto: options.includeAuto !== false });
+        if (configured.some(item => item.source !== 'auto')) return configured;
+        return sortItems(options.includeAuto === false ? [] : AUTO_ITEMS);
     }
 
     function addScheduleCandidates(map) {
@@ -241,12 +252,12 @@
             : { completed: false, source: 'missing' };
     }
 
-    function isItemExempt(username, groupID, itemName, data = {}) {
+    function isItemExempt(username, groupID, itemName, data = {}, options = {}) {
         const exemptions = Array.isArray(data.exemptions) ? data.exemptions : parseJson('exemptions', []);
         const targetGroup = String(groupID || '').trim();
         return exemptions.some(row => {
             if (!rowMatchesUser(row, username)) return false;
-            if (targetGroup && String(row.groupID || '').trim() !== targetGroup) return false;
+            if (!options.ignoreGroup && targetGroup && String(row.groupID || '').trim() !== targetGroup) return false;
             return namesMatch(row.item, itemName, { loose: false });
         });
     }
@@ -254,7 +265,9 @@
     function getTraineeProgress(username, groupID = '', options = {}) {
         const items = options.items || getOfficialItems({ includeAuto: options.includeAuto !== false });
         const checklist = items.map(item => {
-            const exempt = isItemExempt(username, groupID, item.name, options.data || {});
+            const exempt = isItemExempt(username, groupID, item.name, options.data || {}, {
+                ignoreGroup: options.ignoreExemptionGroup === true
+            });
             if (exempt) return { ...item, status: 'exempt', completed: true, evidenceSource: 'exemption' };
             const evidence = getItemEvidence(username, item, options.data || {});
             return {
@@ -285,6 +298,7 @@
         inferType,
         sanitizeReportSections,
         getConfiguredItems,
+        getOfficialItemsFromConfig,
         getCandidateItems,
         getOfficialItems,
         getItemEvidence,

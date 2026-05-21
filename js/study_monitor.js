@@ -31,19 +31,25 @@ const StudyMonitor = {
     studyNotesDockOpen: false,
     studyNotesPopup: null,
 
+    readLocalJson: function(key, fallback) {
+        if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null || raw === undefined || raw === 'undefined') return fallback;
+            return JSON.parse(raw);
+        } catch (error) {
+            return fallback;
+        }
+    },
+
     buildTabId: function() {
         this.tabCounter += 1;
         return `tab-${Date.now()}-${this.tabCounter}`;
     },
 
     loadLocalPageCache: function() {
-        try {
-            const cache = JSON.parse(localStorage.getItem(this.localPageCacheKey) || '{}');
-            if (cache && typeof cache === 'object') return cache;
-            return {};
-        } catch (e) {
-            return {};
-        }
+        const cache = this.readLocalJson(this.localPageCacheKey, {});
+        return cache && typeof cache === 'object' && !Array.isArray(cache) ? cache : {};
     },
 
     saveLocalPageCache: function(cache) {
@@ -656,14 +662,14 @@ const StudyMonitor = {
                 // Check unsynced first (crash/close recovery)
                 const unsynced = localStorage.getItem('monitor_unsynced');
                 if (unsynced) {
-                    const payload = JSON.parse(unsynced);
+                    const payload = (typeof safeParse === 'function') ? safeParse(unsynced, null) : JSON.parse(unsynced);
                     if (payload.user === CURRENT_USER.user && Array.isArray(payload.history)) {
                         this.history = payload.history;
                     }
                     localStorage.removeItem('monitor_unsynced');
                 } else {
                     // Normal restore
-                    const md = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                    const md = this.readLocalJson('monitor_data', {});
                     if (md[CURRENT_USER?.user] && Array.isArray(md[CURRENT_USER?.user]?.history)) {
                         this.history = md[CURRENT_USER?.user]?.history;
                     }
@@ -700,7 +706,8 @@ const StudyMonitor = {
                 // Save to emergency key to survive the next Cloud Pull
                 localStorage.setItem('monitor_unsynced', JSON.stringify(payload));
                 // Also try standard save just in case
-                let md = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+                let md = this.readLocalJson('monitor_data', {});
+                if (!md || typeof md !== 'object' || Array.isArray(md)) md = {};
                 md[CURRENT_USER?.user] = payload;
                 localStorage.setItem('monitor_data', JSON.stringify(md));
             }
@@ -748,9 +755,9 @@ const StudyMonitor = {
             const now = new Date();
             const hour = now.getHours();
             if (hour < 8 || hour >= 17 || hour === 12) return false;
-            const liveSessions = JSON.parse(localStorage.getItem('liveSessions') || '[]');
-            const myLive = liveSessions.find(s => s && CURRENT_USER && s.trainee === CURRENT_USER.user && s.active);
-            const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+            const liveSessions = this.readLocalJson('liveSessions', []);
+            const myLive = (Array.isArray(liveSessions) ? liveSessions : []).find(s => s && CURRENT_USER && s.trainee === CURRENT_USER.user && s.active);
+            const vSession = this.readLocalJson('vettingSession', {});
             const inVetting = vSession.active && vSession.trainees && CURRENT_USER && vSession.trainees[CURRENT_USER.user];
             return !myLive && !inVetting;
         } catch (error) {
@@ -778,7 +785,7 @@ const StudyMonitor = {
                     if (osIdleSeconds > 60) {
                         this.resetGraceTrackedActivities('idle');
                         // Allow idling if waiting in Vetting Arena after submission
-                        const vSession = JSON.parse(localStorage.getItem('vettingSession') || '{}');
+                        const vSession = this.readLocalJson('vettingSession', {});
                         if (vSession.active && vSession.trainees && CURRENT_USER && vSession.trainees[CURRENT_USER.user]?.status === 'completed') {
                              if (this.currentActivity !== 'Vetting: Waiting') this.track('Vetting: Waiting');
                              return;
@@ -816,7 +823,8 @@ const StudyMonitor = {
                                 'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com',
                                 'cp1.herotel.com', 'cp2.herotel.com', 'odoo.herotel.com'
                             ];
-                            const workSites = JSON.parse(localStorage.getItem('monitor_whitelist') || JSON.stringify(defaultSites));
+                            const configuredWorkSites = this.readLocalJson('monitor_whitelist', defaultSites);
+                            const workSites = Array.isArray(configuredWorkSites) ? configuredWorkSites : defaultSites;
 
                             // Ensure all training and program keywords are permitted OS-level
                             const trainingKeywords = ['sharepoint', '.pdf', 'training', 'course', 'document', 'word', 'excel', 'powerpoint', 'onenote', 'odoo', 'genially', 'macvendor', 'draw.io', 'drawio', 'diagrams.net', 'cpanel', 'webmail', 'herotel webmail'];
@@ -890,12 +898,8 @@ const StudyMonitor = {
     },
 
     getRawViolationReports: function() {
-        try {
-            const reports = JSON.parse(localStorage.getItem('violation_reports') || '[]');
-            return Array.isArray(reports) ? reports : [];
-        } catch (e) {
-            return [];
-        }
+        const reports = this.readLocalJson('violation_reports', []);
+        return Array.isArray(reports) ? reports : [];
     },
 
     getViolationReports: function() {
@@ -1115,7 +1119,8 @@ const StudyMonitor = {
             try {
                 // 1. Get current monitor data (Optimistic)
                 // Ensure we don't get null if localstorage was wiped
-                let monitorData = JSON.parse(localStorage.getItem('monitor_data')) || {};
+                let monitorData = this.readLocalJson('monitor_data', {}) || {};
+                if (!monitorData || typeof monitorData !== 'object' || Array.isArray(monitorData)) monitorData = {};
                 
                 // 2. Update my entry
                 monitorData[CURRENT_USER.user] = payload;
@@ -1142,7 +1147,8 @@ const StudyMonitor = {
 
     updateWhitelistCache: function() {
         // Filter out empty strings to prevent false positive matches
-        this.cachedWhitelist = (JSON.parse(localStorage.getItem('monitor_whitelist') || '[]')).filter(w => w && w.trim().length > 0);
+        const whitelist = this.readLocalJson('monitor_whitelist', []);
+        this.cachedWhitelist = (Array.isArray(whitelist) ? whitelist : []).filter(w => w && w.trim().length > 0);
     },
 
     buildInAppStudyLabel: function(label) {
@@ -1191,7 +1197,7 @@ const StudyMonitor = {
     },
 
     getLocalArchivedDay: function(agentName, dateStr) {
-        const historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        const historyLog = this.readLocalJson('monitor_history', []);
         return (Array.isArray(historyLog) ? historyLog : []).find(row =>
             this.namesMatch(row && (row.user || row.user_id || row.trainee), agentName)
             && String(row && row.date || '') === dateStr
@@ -1200,7 +1206,7 @@ const StudyMonitor = {
 
     cacheArchivedDay: function(day) {
         if (!day || !day.user || !day.date) return;
-        let historyLog = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+        let historyLog = this.readLocalJson('monitor_history', []);
         if (!Array.isArray(historyLog)) historyLog = [];
         const exists = historyLog.some(row =>
             this.namesMatch(row && (row.user || row.user_id || row.trainee), day.user)
@@ -1375,7 +1381,7 @@ const StudyMonitor = {
 
              totalMs += effectiveDuration;
              const category = this.getCategory(seg.activity);
-             const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+             const config = this.readLocalJson('system_config', {});
              const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
              
              if (category === 'material') {
@@ -1407,7 +1413,8 @@ const StudyMonitor = {
         if (!CURRENT_USER || CURRENT_USER.role === 'admin') return;
         this.updateWhitelistCache(); // Ensure we use latest rules for archiving
         
-        let monitorData = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        let monitorData = this.readLocalJson('monitor_data', {});
+        if (!monitorData || typeof monitorData !== 'object' || Array.isArray(monitorData)) monitorData = {};
         let myData = monitorData[CURRENT_USER.user];
         
         if (myData) {
@@ -1426,7 +1433,8 @@ const StudyMonitor = {
             
             if (lastDate !== today) {
                 console.log(`New Day Detected (${lastDate} -> ${today}). Archiving Activity Log...`);
-                let history = JSON.parse(localStorage.getItem('monitor_history') || '[]');
+                let history = this.readLocalJson('monitor_history', []);
+                if (!Array.isArray(history)) history = [];
                 
                 // Use memory history if available (most recent), else fallback to storage
                 const rawSegments = this.history.length > 0 ? this.history : (myData.history || []);
@@ -1856,7 +1864,8 @@ const StudyMonitor = {
             finalNote = `Context: "${selection.substring(0, 100)}"\nQuestion: ${finalNote}`;
         }
 
-        const allBookmarks = JSON.parse(localStorage.getItem('trainee_bookmarks') || '{}');
+        const allBookmarks = this.readLocalJson('trainee_bookmarks', {});
+        if (!allBookmarks || typeof allBookmarks !== 'object' || Array.isArray(allBookmarks)) return;
         const bookmarks = allBookmarks[CURRENT_USER.user] || [];
         bookmarks.push({
             id: Date.now(), url: url, title: title.substring(0, 50), note: finalNote, scrollY: scrollY, date: new Date().toISOString()
@@ -2198,14 +2207,14 @@ const StudyMonitor = {
 
     // --- WIDGET HELPER: GET SCHEDULED AGENTS ---
     getScheduledAgents: function() {
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const schedules = this.readLocalJson('schedules', {});
+        const rosters = this.readLocalJson('rosters', {});
         const scheduledAgents = new Set();
         
         // If isDateInRange is not available (schedule.js not loaded), fallback to all
         const hasDateCheck = typeof isDateInRange === 'function';
 
-        Object.values(schedules).forEach(sched => {
+        Object.values(schedules || {}).forEach(sched => {
             if (sched.assigned && rosters[sched.assigned]) {
                 // Check if this schedule is active TODAY
                 let isActiveToday = false;
@@ -2224,8 +2233,8 @@ const StudyMonitor = {
     },
 
     getAllTrainees: function() {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        return users
+        const users = this.readLocalJson('users', []);
+        return (Array.isArray(users) ? users : [])
             .filter(u => u && u.role === 'trainee' && u.user)
             .map(u => u.user)
             .sort((a, b) => a.localeCompare(b));
@@ -2266,11 +2275,11 @@ const StudyMonitor = {
     },
 
     getCurrentTaskForAgent: function(agentName) {
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const schedules = this.readLocalJson('schedules', {});
+        const rosters = this.readLocalJson('rosters', {});
         let myGroupId = null;
 
-        for (const [gid, members] of Object.entries(rosters)) {
+        for (const [gid, members] of Object.entries(rosters || {})) {
             if (Array.isArray(members) && members.some(m => String(m).toLowerCase() === String(agentName).toLowerCase())) {
                 myGroupId = gid;
                 break;
@@ -2462,7 +2471,7 @@ function renderActivityMonitorContent() {
         return;
     }
 
-    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const data = StudyMonitor.readLocalJson('monitor_data', {});
     const targetAgents = StudyMonitor.getVisibleAgents();
     const stats = StudyMonitor.getScopeSummaryStats(targetAgents, data);
 
@@ -2665,13 +2674,15 @@ StudyMonitor.toggleAgentHistory = function(safeId) {
 };
 
 function renderReviewQueue(container) {
-    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    const whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]').filter(s => s && s.trim());
-    const reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]').filter(s => s && s.trim());
+    const data = StudyMonitor.readLocalJson('monitor_data', {});
+    const whitelistRaw = StudyMonitor.readLocalJson('monitor_whitelist', []);
+    const reviewedRaw = StudyMonitor.readLocalJson('monitor_reviewed', []);
+    const whitelist = (Array.isArray(whitelistRaw) ? whitelistRaw : []).filter(s => s && s.trim());
+    const reviewed = (Array.isArray(reviewedRaw) ? reviewedRaw : []).filter(s => s && s.trim());
     const groups = {}; // Group by Process ID [proc]
     const ungrouped = new Set();
     
-    Object.values(data).forEach(userActivity => {
+    Object.values(data || {}).forEach(userActivity => {
         const processItem = (act) => {
             if ((act.startsWith('External: ') || act.startsWith('Violation: ')) && !act.includes('(Reclassified)')) {
                 const raw = act.replace(/^(External:\s*|Violation:\s*)/, '').trim();
@@ -2753,7 +2764,7 @@ function renderReviewQueue(container) {
 
 function renderActivitySummary(container) {
     StudyMonitor.updateWhitelistCache(); // Refresh cache before rendering
-    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const data = StudyMonitor.readLocalJson('monitor_data', {});
     const targetAgents = StudyMonitor.getVisibleAgents();
     
     // Ensure container has a grid wrapper if empty
@@ -2770,17 +2781,17 @@ function renderActivitySummary(container) {
     const activeIds = new Set();
     
     targetAgents.sort().forEach(agent => {
-        const activity = data[agent] || { history: [], current: 'No Data', since: Date.now() };
+        const activity = (data && data[agent]) || { history: [], current: 'No Data', since: Date.now() };
         const todayStr = StudyMonitor.getLocalDateString();
         const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
         
         // --- ADMIN UX: FETCH TODAY'S SCHEDULED TASK ---
-        const schedules = JSON.parse(localStorage.getItem('schedules') || '{}');
-        const rosters = JSON.parse(localStorage.getItem('rosters') || '{}');
+        const schedules = StudyMonitor.readLocalJson('schedules', {});
+        const rosters = StudyMonitor.readLocalJson('rosters', {});
         let todaysTask = "No Task Assigned";
         let myGroupId = null;
-        for (const [gid, members] of Object.entries(rosters)) {
-            if (members.some(m => m.toLowerCase() === agent.toLowerCase())) { myGroupId = gid; break; }
+        for (const [gid, members] of Object.entries(rosters || {})) {
+            if (Array.isArray(members) && members.some(m => m.toLowerCase() === agent.toLowerCase())) { myGroupId = gid; break; }
         }
         if (myGroupId) {
             const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
@@ -2811,7 +2822,7 @@ function renderActivitySummary(container) {
             
             // TOLERANCE: Activities < 3 mins are considered "Quick Checks" or "Thinking" (Productive)
             // Only > 3 mins counts as Distraction/Idle (Concern)
-            const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+            const config = StudyMonitor.readLocalJson('system_config', {});
             const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
             
             if (category === 'material') {
@@ -2930,7 +2941,7 @@ function renderActivitySummary(container) {
                 if (pct < 0.5) return; // Skip tiny slivers
                 
                 const cat = StudyMonitor.getCategory(seg.activity);
-                const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+                const config = StudyMonitor.readLocalJson('system_config', {});
                 const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
                 
                 let typeClass = 'seg-idle'; // Default
@@ -3069,8 +3080,8 @@ function renderActivitySummary(container) {
 
 StudyMonitor.forceShowAll = function() {
     // Temporary override to show all trainees
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const allTrainees = users.filter(u => u.role === 'trainee').map(u => u.user);
+    const users = StudyMonitor.readLocalJson('users', []);
+    const allTrainees = (Array.isArray(users) ? users : []).filter(u => u.role === 'trainee').map(u => u.user);
     
     // Monkey-patch getScheduledAgents temporarily
     this.originalGetScheduled = this.getScheduledAgents;
@@ -3080,8 +3091,8 @@ StudyMonitor.forceShowAll = function() {
 };
 
 StudyMonitor.getViolationSegmentsForAgent = function(agent) {
-    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
-    const activity = data[agent] || { history: [], current: 'No Data', since: Date.now() };
+    const data = StudyMonitor.readLocalJson('monitor_data', {});
+    const activity = (data && data[agent]) || { history: [], current: 'No Data', since: Date.now() };
     const todayStr = this.getLocalDateString();
     return this.getLiveSegmentsForDate(activity, todayStr)
         .map(seg => ({
@@ -3320,8 +3331,10 @@ StudyMonitor.confirmClassification = async function() {
     if (type === "1") {
         newPrefix = "Studying: ";
         // Add to whitelist for future
-        let whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
-        let reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]');
+        let whitelist = this.readLocalJson('monitor_whitelist', []);
+        let reviewed = this.readLocalJson('monitor_reviewed', []);
+        if (!Array.isArray(whitelist)) whitelist = [];
+        if (!Array.isArray(reviewed)) reviewed = [];
         if (whitelist.length === 0) whitelist = ['acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com', 'radius.herotel.com', 'app.preseem.com', 'hosting.herotel.com', 'cp1.herotel.com', 'cp2.herotel.com'];
         
         let wlChanged = false;
@@ -3347,8 +3360,10 @@ StudyMonitor.confirmClassification = async function() {
         newPrefix = (type === "2") ? "External: " : "Idle: ";
         
         // Add to 'reviewed' list so it doesn't pop up again
-        let reviewed = JSON.parse(localStorage.getItem('monitor_reviewed') || '[]');
-        let whitelist = JSON.parse(localStorage.getItem('monitor_whitelist') || '[]');
+        let reviewed = this.readLocalJson('monitor_reviewed', []);
+        let whitelist = this.readLocalJson('monitor_whitelist', []);
+        if (!Array.isArray(reviewed)) reviewed = [];
+        if (!Array.isArray(whitelist)) whitelist = [];
         let revChanged = false;
 
         topics.forEach(t => {
@@ -3373,10 +3388,10 @@ StudyMonitor.confirmClassification = async function() {
         return;
     }
     
-    const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+    const data = this.readLocalJson('monitor_data', {});
     let changed = false;
     
-    Object.keys(data).forEach(user => {
+    Object.keys(data || {}).forEach(user => {
         const activity = data[user];
         if (activity.history) {
             activity.history.forEach(h => {
@@ -3491,7 +3506,7 @@ StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
     let allSegments = [];
     
     if (queryDate === todayStr) {
-        const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        const data = StudyMonitor.readLocalJson('monitor_data', {});
         const activity = data[agentName];
         if (activity) {
             allSegments = StudyMonitor.getLiveSegmentsForDate(activity, queryDate);
@@ -3515,7 +3530,7 @@ StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
          totalMs += effectiveDuration;
 
          const category = StudyMonitor.getCategory(seg.activity);
-         const config = JSON.parse(localStorage.getItem('system_config') || '{}');
+         const config = StudyMonitor.readLocalJson('system_config', {});
          const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
          let typeClass = 'seg-idle';
          let catLabel = 'Idle';
@@ -3616,7 +3631,7 @@ StudyMonitor.analyzeWithAI = async function(agentName, dateStr) {
     const todayStr = this.getLocalDateString();
     let allSegments = [];
     if (dateStr === todayStr) {
-        const data = JSON.parse(localStorage.getItem('monitor_data') || '{}');
+        const data = this.readLocalJson('monitor_data', {});
         const activity = data[agentName];
         if (activity) {
             allSegments = this.getLiveSegmentsForDate(activity, dateStr);

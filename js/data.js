@@ -3550,14 +3550,31 @@ function setupPresenceChannel() {
 }
 
 // --- REALTIME LISTENERS (The Fix for Live Updates) ---
-function setupRealtimeListeners() {
+function setupRealtimeListeners(options = {}) {
     if (!window.supabaseClient) return;
+    const currentUserKey = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : 'guest';
+    const currentRole = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role) ? CURRENT_USER.role : 'guest';
+    const channelSignature = JSON.stringify({
+        target: localStorage.getItem('active_server_target') || 'cloud',
+        user: currentUserKey,
+        role: currentRole,
+        demo: !!IS_DEMO_MODE,
+        traineeScoped: isTraineeRuntime() && !IS_DEMO_MODE
+    });
+
+    const existingState = window.GLOBAL_CHANGES_CHANNEL && window.GLOBAL_CHANGES_CHANNEL.state;
+    const existingUsable = existingState === 'joining' || existingState === 'joined';
+    if (!options.force && window.REALTIME_CHANNEL_SIGNATURE === channelSignature && existingUsable) {
+        return;
+    }
+
     startRealtimeWatchdog();
 
     // Cleanup existing channel to prevent duplicate parallel listeners
     if (window.GLOBAL_CHANGES_CHANNEL) {
         window.supabaseClient.removeChannel(window.GLOBAL_CHANGES_CHANNEL).catch(()=>{});
     }
+    window.REALTIME_CHANNEL_SIGNATURE = channelSignature;
 
     const routeRealtimePayload = (payload) => {
             window.REALTIME_LAST_HEALTHY_AT = Date.now();
