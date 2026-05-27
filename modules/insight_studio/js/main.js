@@ -1976,6 +1976,55 @@ const InsightApp = {
         };
     },
 
+    buildInteractivePointOverlay: function(points, bounds, options = {}) {
+        const esc = this.escapeHtml;
+        const items = Array.isArray(points) ? points.filter(point =>
+            point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y))
+        ) : [];
+        if (!items.length || !bounds) return '';
+
+        const left = Number(bounds.left || 0);
+        const right = Number(bounds.right || 0);
+        const top = Number(bounds.top || 0);
+        const bottom = Number(bounds.bottom || 0);
+        const width = Math.max(1, right - left);
+        const tooltipWidth = Number(options.tooltipWidth || 270);
+        const rowHeight = Number(options.rowHeight || 17);
+        const markerRadius = Number(options.markerRadius || 5);
+
+        return items.map((point, idx) => {
+            const x = Number(point.x);
+            const y = Number(point.y);
+            const label = String(point.label || point.title || 'Point');
+            const value = String(point.valueLabel || `${point.score ?? ''}%`);
+            const detail = String(point.detail || '');
+            const series = String(point.series || '');
+            const date = String(point.date || '');
+            const tone = String(point.tone || '');
+            const lines = [series, label, value, date, detail]
+                .map(line => String(line || '').trim())
+                .filter(Boolean)
+                .slice(0, 5);
+            const boxHeight = 18 + (lines.length * rowHeight);
+            const tooltipX = x > (left + width * 0.64)
+                ? Math.max(left + 8, x - tooltipWidth - 18)
+                : Math.min(right - tooltipWidth - 8, x + 18);
+            const tooltipY = Math.max(top + 8, Math.min(bottom - boxHeight - 8, y - Math.round(boxHeight / 2)));
+            const safeId = `insHotspot${idx}`;
+            return `<g class="ins-chart-hotspot" tabindex="0" role="img" aria-label="${esc(lines.join(' | '))}">
+                <line x1="${x}" y1="${top}" x2="${x}" y2="${bottom}" class="ins-chart-crosshair"></line>
+                <line x1="${left}" y1="${y}" x2="${right}" y2="${y}" class="ins-chart-crosshair"></line>
+                <circle cx="${x}" cy="${y}" r="${markerRadius + 4}" class="ins-chart-focus-ring"></circle>
+                <rect x="${tooltipX}" y="${tooltipY}" width="${tooltipWidth}" height="${boxHeight}" rx="6" class="ins-chart-tooltip-box"></rect>
+                <text x="${tooltipX + 10}" y="${tooltipY + 17}" class="ins-chart-tooltip-text">
+                    ${lines.map((line, lineIdx) => `<tspan x="${tooltipX + 10}" dy="${lineIdx === 0 ? 0 : rowHeight}" class="${lineIdx === 0 ? 'title' : ''}">${esc(line)}</tspan>`).join('')}
+                </text>
+                <circle cx="${x}" cy="${y}" r="${markerRadius}" class="ins-chart-hotspot-dot ${esc(tone)}"></circle>
+                <circle cx="${x}" cy="${y}" r="${Number(options.hitRadius || 13)}" class="ins-chart-hit-target" aria-describedby="${safeId}"><title id="${safeId}">${esc(lines.join(' | '))}</title></circle>
+            </g>`;
+        }).join('');
+    },
+
     renderComparisonTrend: function(rows, category, title) {
         const chartRows = Array.isArray(rows) ? rows : [];
         const metricLabels = this.getBreakdownMetricLabels(chartRows, category || 'performance');
@@ -1996,10 +2045,11 @@ const InsightApp = {
         });
         const axisCount = metricLabels.length;
         const width = category === 'performance' ? 1040 : 860;
-        const height = category === 'performance' ? 380 : 240;
-        const pad = 44;
-        const bottomPad = compactPerformance ? 86 : pad;
-        const rightEdge = width - pad;
+        const height = category === 'performance' ? 430 : 240;
+        const pad = compactPerformance ? 72 : 44;
+        const bottomPad = compactPerformance ? 132 : pad;
+        const rightEdge = width - (compactPerformance ? 38 : pad);
+        const labelY = compactPerformance ? height - 48 : height - 15;
         const xFor = (idx) => axisCount <= 1 ? pad : pad + (idx * (rightEdge - pad) / (axisCount - 1));
         const yFor = (value) => (height - bottomPad) - ((this.clampPercent(value) || 0) * (height - bottomPad - pad) / 100);
         const esc = this.escapeHtml;
@@ -2031,6 +2081,15 @@ const InsightApp = {
             const lastPoint = available.length ? available[available.length - 1] : null;
             return { row, rowIdx, color: this.getComparisonLineColor(rowIdx), available, points, stats, lastPoint };
         }).filter(item => item.points);
+        const interactivePoints = pathRows.flatMap((item) => item.available.map(point => ({
+            x: xFor(point.idx),
+            y: yFor(point.score),
+            score: point.score,
+            series: item.row.label,
+            label: cleanAxisLabel(point.label),
+            valueLabel: `${point.score}%`,
+            detail: `Avg ${item.stats.avg === null ? '-' : `${item.stats.avg}%`} | Low ${item.stats.low === null ? '-' : `${item.stats.low}%`} | High ${item.stats.high === null ? '-' : `${item.stats.high}%`}`
+        })));
 
         return `
             <div class="ins-trend-scroll ${compactPerformance ? 'performance' : ''}">
@@ -2052,7 +2111,7 @@ const InsightApp = {
                     }).join('')}
                     <line x1="${pad}" y1="${height - bottomPad}" x2="${rightEdge}" y2="${height - bottomPad}" class="ins-chart-axis"></line>
                     <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - bottomPad}" class="ins-chart-axis"></line>
-                    ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${rightEdge}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="10" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
+                    ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${rightEdge}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="${Math.max(8, pad - 34)}" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
                     ${pathRows.map((item) => {
                         const titleText = `${item.row.label} | Avg ${item.stats.avg === null ? '-' : `${item.stats.avg}%`} | Low ${item.stats.low === null ? '-' : `${item.stats.low}%`} | High ${item.stats.high === null ? '-' : `${item.stats.high}%`}`;
                         return `<g class="ins-trend-series">
@@ -2061,9 +2120,10 @@ const InsightApp = {
                             ${item.available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.score)}" r="3.4" fill="${item.color}" stroke="rgba(8,13,22,0.82)" stroke-width="1.5"><title>${esc(item.row.label)} | ${esc(cleanAxisLabel(point.label))} | ${point.score}%</title></circle>`).join('')}
                         </g>`;
                     }).join('')}
+                    ${this.buildInteractivePointOverlay(interactivePoints, { left: pad, right: rightEdge, top: pad, bottom: height - bottomPad }, { tooltipWidth: 300, hitRadius: 14 })}
                     ${metricLabels.map((label, idx) => compactPerformance
-                        ? `<text x="${xFor(idx)}" y="${height - 18}" text-anchor="end" transform="rotate(-36 ${xFor(idx)} ${height - 18})" class="ins-chart-label ins-chart-label-assessment"><title>${esc(cleanAxisLabel(label))}</title>${esc(shortenAxisLabel(label))}</text>`
-                        : `<text x="${xFor(idx)}" y="${height - 15}" text-anchor="middle" class="ins-chart-label"><title>${esc(cleanAxisLabel(label))}</title>${esc(shortenAxisLabel(label, 16))}</text>`
+                        ? `<text x="${xFor(idx)}" y="${labelY}" text-anchor="middle" transform="rotate(-28 ${xFor(idx)} ${labelY})" class="ins-chart-label ins-chart-label-assessment"><title>${esc(cleanAxisLabel(label))}</title>${esc(shortenAxisLabel(label, 24))}</text>`
+                        : `<text x="${xFor(idx)}" y="${labelY}" text-anchor="middle" class="ins-chart-label"><title>${esc(cleanAxisLabel(label))}</title>${esc(shortenAxisLabel(label, 16))}</text>`
                     ).join('')}
                 </svg>
             </div>
@@ -2895,6 +2955,21 @@ const InsightApp = {
             if (dateDiff !== 0) return dateDiff;
             return String(a.trainee).localeCompare(String(b.trainee), undefined, { sensitivity: 'base' });
         });
+        const interactivePoints = pathRows.flatMap((item) => {
+            const avg = this.averagePercent(item.points.map(point => point.score));
+            const low = Math.min(...item.points.map(point => point.score));
+            const high = Math.max(...item.points.map(point => point.score));
+            return item.points.map(point => ({
+                x: point.x,
+                y: point.y,
+                score: point.score,
+                series: item.row.label,
+                label: `${this.getWeekdayShortLabel(point.dateKey)} ${point.dateKey}`,
+                date: point.dateKey,
+                valueLabel: `Focus ${point.score}%`,
+                detail: `Avg ${avg === null ? '-' : `${avg}%`} | Low ${low}% | High ${high}%`
+            }));
+        });
 
         return `
             <div class="ins-probation-scroll">
@@ -2911,6 +2986,7 @@ const InsightApp = {
                             ${item.points.map(point => `<circle cx="${point.x}" cy="${point.y}" r="3.2" fill="${item.color}" stroke="rgba(8,13,22,0.86)" stroke-width="1.3"><title>${esc(item.row.label)} | ${esc(point.dateKey)} | ${point.score}%</title></circle>`).join('')}
                         </g>`;
                     }).join('')}
+                    ${this.buildInteractivePointOverlay(interactivePoints, { left: pad, right: width - pad, top: pad, bottom: height - pad }, { tooltipWidth: 290, hitRadius: 13 })}
                 </svg>
             </div>
             <div class="ins-trend-summary">

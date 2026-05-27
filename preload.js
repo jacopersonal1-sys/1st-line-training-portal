@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         clearCache: () => ipcRenderer.invoke('clear-study-browser-cache'),
         openPopout: (payload) => ipcRenderer.invoke('open-study-popout', payload)
     },
+    activityMonitor: {
+        captureViolationScreenshots: () => ipcRenderer.invoke('capture-violation-screenshots')
+    },
     vettingSecurity: {
         getScreenCount: () => ipcRenderer.invoke('get-screen-count'),
         getProcessList: (forbidden) => ipcRenderer.invoke('get-process-list', forbidden),

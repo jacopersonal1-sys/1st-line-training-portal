@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor, Menu, MenuItem, Notification, session } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, screen, powerMonitor, Menu, MenuItem, Notification, session, desktopCapturer } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { exec } = require('child_process');
@@ -37,6 +37,7 @@ let suppressNextLatestYmlErrorToast = false;
 let studySessionConfigured = false;
 let isFlushingStudySession = false;
 let isSafeToQuit = false;
+let isScreenLocked = false;
 const studyPopoutWindows = new Set();
 const appPopoutWindows = new Set();
 const appWindowLaunchPayloads = new Map();
@@ -1017,7 +1018,18 @@ if (!gotTheLock) {
         powerMonitor.on('resume', () => {
             if (mainWindow) mainWindow.webContents.send('os-resume');
         });
+        powerMonitor.on('lock-screen', () => {
+            isScreenLocked = true;
+            if (mainWindow) {
+                mainWindow.webContents.send('activity-update', {
+                    osIdleSeconds: powerMonitor.getSystemIdleTime(),
+                    activeWindow: 'Lock Idle',
+                    isScreenLocked: true
+                });
+            }
+        });
         powerMonitor.on('unlock-screen', () => {
+            isScreenLocked = false;
             if (mainWindow) mainWindow.webContents.send('os-resume');
         });
 
@@ -1359,6 +1371,10 @@ ipcMain.on('start-activity-monitor', (event) => {
     activityMonitorInterval = setInterval(() => {
         if (!mainWindow) return;
         const osIdleSeconds = powerMonitor.getSystemIdleTime();
+        if (isScreenLocked) {
+            mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow: 'Lock Idle', isScreenLocked: true });
+            return;
+        }
         if (mainWindow.isFocused()) {
             mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow: '1st Line Training Portal [electron]' });
             return;
@@ -1382,6 +1398,35 @@ ipcMain.on('stop-activity-monitor', () => {
         clearInterval(activityMonitorInterval);
         activityMonitorInterval = null;
     }
+});
+
+ipcMain.handle('capture-violation-screenshots', async () => {
+    const displays = screen.getAllDisplays();
+    const maxWidth = Math.max(1280, ...displays.map(display => Math.ceil(display.size?.width || 0)));
+    const maxHeight = Math.max(720, ...displays.map(display => Math.ceil(display.size?.height || 0)));
+    const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: maxWidth, height: maxHeight }
+    });
+
+    const screenshots = sources.map((source, index) => {
+        const image = source.thumbnail;
+        const jpeg = image && !image.isEmpty() ? image.toJPEG(72) : Buffer.alloc(0);
+        return {
+            name: source.name || `Screen ${index + 1}`,
+            displayId: source.display_id || '',
+            width: image?.getSize?.().width || 0,
+            height: image?.getSize?.().height || 0,
+            mime: 'image/jpeg',
+            data: jpeg.toString('base64')
+        };
+    }).filter(item => item.data);
+
+    return {
+        capturedAt: new Date().toISOString(),
+        screenCount: screenshots.length,
+        screenshots
+    };
 });
 
 // --- NATIVE OS NOTIFICATIONS ---

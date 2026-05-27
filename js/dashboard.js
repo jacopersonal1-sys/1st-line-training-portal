@@ -1354,6 +1354,47 @@ function resizeWidget(id, dCol, dRow) {
     el.className = el.className.replace(/w-col-\d+/, `w-col-${col}`).replace(/w-row-\d+/, `w-row-${row}`);
     el.dataset.col = col;
     el.dataset.row = row;
+    persistDashboardLayoutFromGrid();
+}
+
+function isDashboardEditControl(target) {
+    if (!target || typeof target.closest !== 'function') return false;
+    if (target.closest('.widget-drag-grip')) return false;
+    return !!target.closest('button, a, input, textarea, select, label');
+}
+
+function getDashboardLayoutFromGrid() {
+    const grid = document.getElementById('dash-grid-container');
+    if (!grid) return getDashboardLayout();
+
+    const currentLayout = getDashboardLayout();
+    const hiddenItems = currentLayout.filter(item => item.hidden);
+    const layout = Array.from(grid.querySelectorAll('.dash-card[data-widget-id]')).map(card => ({
+        id: card.dataset.widgetId || card.id.replace('widget-', ''),
+        col: Math.max(1, Math.min(4, parseInt(card.dataset.col, 10) || 1)),
+        row: Math.max(1, Math.min(3, parseInt(card.dataset.row, 10) || 1)),
+        hidden: false
+    }));
+
+    hiddenItems.forEach(item => {
+        if (!layout.some(row => row.id === item.id)) layout.push(item);
+    });
+
+    return layout;
+}
+
+function persistDashboardLayoutFromGrid() {
+    setDashboardLayout(getDashboardLayoutFromGrid());
+}
+
+function swapDashboardWidgets(first, second) {
+    if (!first || !second || first === second || !first.parentNode || first.parentNode !== second.parentNode) return false;
+    const marker = document.createElement('span');
+    first.parentNode.insertBefore(marker, first);
+    second.parentNode.insertBefore(first, second);
+    marker.parentNode.insertBefore(second, marker);
+    marker.remove();
+    return true;
 }
 
 function enableDashEdit() {
@@ -1364,9 +1405,10 @@ function enableDashEdit() {
     cards.forEach(card => {
         card.classList.add('editing');
         card.setAttribute('draggable', 'true');
-        card.style.border = '2px dashed var(--primary)';
-        card.style.cursor = 'move';
-        card.onclick = (e) => e.preventDefault(); // Disable clicks
+        card.style.cursor = 'grab';
+        card.addEventListener('click', (e) => {
+            if (!isDashboardEditControl(e.target)) e.preventDefault();
+        });
     });
 
     if (grid.dataset.editBound === '1') return;
@@ -1375,16 +1417,34 @@ function enableDashEdit() {
     grid.addEventListener('dragstart', (e) => {
         const card = e.target.closest('.dash-card');
         if (!card || !grid.contains(card)) return;
+        if (isDashboardEditControl(e.target)) {
+            e.preventDefault();
+            return;
+        }
         e.dataTransfer.setData('text/plain', card.id);
-        card.style.opacity = '0.5';
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('dash-drag-source');
     });
 
     grid.addEventListener('dragend', (e) => {
         const card = e.target.closest('.dash-card');
-        if (card) card.style.opacity = '1';
+        if (card) card.classList.remove('dash-drag-source');
+        grid.querySelectorAll('.dash-drop-target').forEach(el => el.classList.remove('dash-drop-target'));
     });
 
-    grid.addEventListener('dragover', (e) => e.preventDefault());
+    grid.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const target = e.target.closest('.dash-card');
+        grid.querySelectorAll('.dash-drop-target').forEach(el => {
+            if (el !== target) el.classList.remove('dash-drop-target');
+        });
+        if (target && grid.contains(target)) target.classList.add('dash-drop-target');
+    });
+
+    grid.addEventListener('dragleave', (e) => {
+        const target = e.target.closest('.dash-card');
+        if (target && !target.contains(e.relatedTarget)) target.classList.remove('dash-drop-target');
+    });
 
     grid.addEventListener('drop', (e) => {
         e.preventDefault();
@@ -1393,37 +1453,22 @@ function enableDashEdit() {
         if (!draggable) return;
 
         const dropzone = e.target.closest('.dash-card');
+        grid.querySelectorAll('.dash-drop-target').forEach(el => el.classList.remove('dash-drop-target'));
         if (!dropzone || dropzone === draggable) {
             if (e.target === grid) grid.appendChild(draggable);
+            persistDashboardLayoutFromGrid();
             return;
         }
 
-        const rect = dropzone.getBoundingClientRect();
-        const next = (e.clientY - rect.top) / Math.max(rect.bottom - rect.top, 1) > 0.5;
-        grid.insertBefore(draggable, next ? dropzone.nextSibling : dropzone);
+        if (swapDashboardWidgets(draggable, dropzone)) {
+            persistDashboardLayoutFromGrid();
+            if (typeof showToast === 'function') showToast('Widget positions swapped.', 'success');
+        }
     });
 }
 
 function saveDashLayout() {
-    const grid = document.getElementById('dash-grid-container');
-    if (!grid) return;
-    const cards = grid.querySelectorAll('.dash-card');
-    const currentLayout = getDashboardLayout();
-    const hiddenItems = currentLayout.filter(item => item.hidden);
-    const layout = [];
-    
-    cards.forEach(c => {
-        const key = c.id.replace('widget-', '');
-        const col = parseInt(c.dataset.col) || 1;
-        const row = parseInt(c.dataset.row) || 1;
-        layout.push({ id: key, col: col, row: row, hidden: false });
-    });
-
-    hiddenItems.forEach(item => {
-        if (!layout.some(row => row.id === item.id)) layout.push(item);
-    });
-
-    setDashboardLayout(layout);
+    persistDashboardLayoutFromGrid();
     toggleDashEditMode(); // Exit edit mode
     if(typeof showToast === 'function') showToast("Dashboard layout saved.", "success");
 }
@@ -1451,6 +1496,10 @@ function toggleDashboardWidgetVisibility(id) {
 }
 
 window.toggleDashboardWidgetVisibility = toggleDashboardWidgetVisibility;
+window.toggleDashEditMode = toggleDashEditMode;
+window.resizeWidget = resizeWidget;
+window.saveDashLayout = saveDashLayout;
+window.resetDashLayout = resetDashLayout;
 
 function buildLinkRequestsWidget() {
     if (CURRENT_USER.role === 'special_viewer') {

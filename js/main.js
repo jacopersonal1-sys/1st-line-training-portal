@@ -4416,6 +4416,14 @@ function renderViewById(id, options = {}) {
         return;
     }
 
+    if (id === 'activity-monitor-view') {
+        if (window.StudyMonitor && typeof renderActivityMonitorContent === 'function') {
+            window.StudyMonitor.viewMode = 'summary';
+            renderActivityMonitorContent();
+        }
+        return;
+    }
+
     if (id === 'manage') {
         if (typeof loadRostersList === 'function') loadRostersList();
         if (typeof populateYearSelect === 'function') populateYearSelect();
@@ -4846,7 +4854,13 @@ function showTab(id, btn) {
 
       // --- ACTIVITY TRACKING ---
       if (!window.APP_PASSIVE_TAB_WINDOW && CURRENT_USER && CURRENT_USER.role === 'trainee' && typeof StudyMonitor !== 'undefined') {
-          StudyMonitor.track(`Navigating: ${id.replace(/-/g, ' ')}`);
+          if (id === 'live-execution') {
+              StudyMonitor.track('Live Assessment: Active');
+          } else if (id === 'vetting-arena') {
+              StudyMonitor.track('Vetting Arena: Security Check');
+          } else {
+              StudyMonitor.track(`Portal Navigation: ${id.replace(/-/g, ' ')}`);
+          }
       }
 
       // --- DYNAMIC DATA REFRESH ---
@@ -5527,17 +5541,7 @@ function checkForDrafts() {
 
 // --- RELEASE NOTES SYSTEM ---
 function checkReleaseNotes(currentVersion) {
-    const lastVersion = localStorage.getItem('last_seen_version');
-    const hasUsers = localStorage.getItem('users'); // Check if app was used before (not a fresh install)
-
-    // Show notes if:
-    // 1. We have a last version and it differs from current (Standard Update)
-    // 2. We have NO last version but we DO have users (Existing user getting this feature for the first time)
-    if ((lastVersion && lastVersion !== currentVersion) || (!lastVersion && hasUsers)) {
-        showReleaseNotes(currentVersion);
-    }
-    
-    // Update storage to current
+    // Release notes are intentionally suppressed for trainee-facing updates.
     localStorage.setItem('last_seen_version', currentVersion);
 }
 
@@ -5555,6 +5559,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.4": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Reliability:</strong> Internal release hardening improves monitored training workflows, session state reporting, and review cleanup paths.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Additional safeguards reduce stale state and improve consistency across admin-supervised trainee sessions.</li>
+                <li style="margin-bottom: 8px;"><strong>Release:</strong> Version bump to 2.7.4 for stable main-channel rollout.</li>
+            </ul>`,
         "2.7.3": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Vetting Grading:</strong> New Vetting Arena submissions now wait for admin grading instead of auto-skipping review, while historical completed Vetting records stay completed.</li>

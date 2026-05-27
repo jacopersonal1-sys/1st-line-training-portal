@@ -229,9 +229,24 @@ function getLiveQuestionMessage(session, qIdx) {
     return messages[String(qIdx)] || messages[qIdx] || null;
 }
 
-function renderLiveQuestionMessageBubble(session, qIdx, mode = 'trainee') {
+function isLiveQuestionMessageFromAdmin(session, msg) {
+    if (!msg || !String(msg.text || '').trim()) return false;
+    const role = String(msg.role || msg.fromRole || '').trim().toLowerCase();
+    if (['admin', 'super_admin', 'special_viewer', 'trainer'].includes(role)) return true;
+
+    const from = normalizeLiveText(msg.from || msg.sender || msg.user);
+    const trainer = normalizeLiveText(session && session.trainer);
+    return !!from && !!trainer && from === trainer;
+}
+
+function getAdminLiveQuestionMessage(session, qIdx) {
     const msg = getLiveQuestionMessage(session, qIdx);
+    return isLiveQuestionMessageFromAdmin(session, msg) ? msg : null;
+}
+
+function renderLiveQuestionMessageBubble(session, qIdx, mode = 'trainee') {
     const isAdmin = mode === 'admin';
+    const msg = isAdmin ? getLiveQuestionMessage(session, qIdx) : getAdminLiveQuestionMessage(session, qIdx);
     const emptyText = isAdmin
         ? 'No message sent for this question yet.'
         : 'No trainer message for this question yet.';
@@ -273,6 +288,8 @@ function renderAdminQuestionMessagePanel(session, qIdx) {
 }
 
 function renderTraineeQuestionMessagePanel(session, qIdx) {
+    const msg = getAdminLiveQuestionMessage(session, qIdx);
+    if (!msg) return '';
     return `
         <div id="trainee-live-question-message-panel" class="live-trainee-message-panel">
             <div class="live-message-title"><i class="fas fa-comment-dots"></i> Trainer Message</div>
@@ -294,8 +311,8 @@ function updateLiveQuestionMessageViews(session) {
         adminInput.value = msg && msg.text ? msg.text : '';
     }
 
-    const traineeDisplay = document.getElementById('trainee-live-question-message-display');
-    if (traineeDisplay) traineeDisplay.innerHTML = renderLiveQuestionMessageBubble(activeSession, qIdx, 'trainee');
+    const traineeSlot = document.getElementById('trainee-live-question-message-slot');
+    if (traineeSlot) traineeSlot.innerHTML = renderTraineeQuestionMessagePanel(activeSession, qIdx);
 }
 
 function bindLiveExecutionRealtimeHooks() {
@@ -1452,6 +1469,9 @@ function renderTraineeLivePanel(container) {
     const session = liveReadObject('liveSession', { active: false });
     
     if (!session.active || session.trainee !== CURRENT_USER.user) {
+        if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+            window.StudyMonitor.track('Live Assessment: Waiting');
+        }
         container.innerHTML = `
             <div style="text-align:center; padding:100px; color:var(--text-muted);">
                 <i class="fas fa-hourglass-half" style="font-size:5rem; margin-bottom:20px; opacity:0.5;"></i>
@@ -1536,6 +1556,9 @@ function renderTraineeLivePanel(container) {
     let btnText = '';
 
     if (session.currentQ === -1) {
+        if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+            window.StudyMonitor.track('Live Assessment: Waiting');
+        }
         const ruleContent = (typeof getLiveAssessmentRulesHtml === 'function' && getLiveAssessmentRulesHtml())
             ? getLiveAssessmentRulesHtml()
             : `<ul>${(typeof getLiveAssessmentRules === 'function' ? getLiveAssessmentRules() : [
@@ -1560,6 +1583,9 @@ function renderTraineeLivePanel(container) {
                 <div style="color:var(--text-muted); font-size:0.9rem;">Waiting for trainer to push the first question...</div>
             </div>`;
     } else {
+    if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+        window.StudyMonitor.track('Live Assessment: Active');
+    }
     q = test.questions[session.currentQ];
     let existingAns = session.answers[session.currentQ];
 
@@ -1608,7 +1634,7 @@ function renderTraineeLivePanel(container) {
                         <div class="live-question-main">${session.currentQ + 1}. ${q.text}</div>
                         <div class="live-question-meta">${refBtn}<span>(${q.points || 1} pts)</span></div>
                     </div>
-                    ${renderTraineeQuestionMessagePanel(session, session.currentQ)}
+                    <div id="trainee-live-question-message-slot">${renderTraineeQuestionMessagePanel(session, session.currentQ)}</div>
                 </div>
                 <div class="live-input-area live-trainee-answer-pane">
                     ${inputHtml}
@@ -1850,6 +1876,7 @@ async function sendLiveQuestionMessage(idx) {
     session.questionMessages[String(idx)] = {
         text,
         from: CURRENT_USER && CURRENT_USER.user ? CURRENT_USER.user : 'trainer',
+        role: CURRENT_USER && CURRENT_USER.role ? CURRENT_USER.role : 'admin',
         ts: Date.now()
     };
 

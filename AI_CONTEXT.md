@@ -40,7 +40,8 @@
 | `submissions` | Array | Row (`submissions`) | Digital test attempts (answers, timestamps). |
 | `auditLogs` | Array | Row (`audit_logs`) | Admin action history. |
 | `monitor_history` | Array | Row (`monitor_history`) | Daily activity logs (Pruned locally to 14 days). |
-| `violation_reports` | Array | Blob (`app_documents`) | Mandatory trainee explanations for external-app training-scope violations. Stores trigger, reason, platform, person informed, status, and review metadata. |
+| `violation_reports` | Array | Blob (`app_documents`) | Mandatory trainee explanations for external-app training-scope violations. Stores trigger, reason, platform, person informed, status, review metadata, and admin-only evidence metadata/paths only. Screenshot binaries must not be embedded here. |
+| `violation_evidence` | Table + private Storage bucket | Row (`violation_evidence`) + Supabase Storage (`violation_evidence`) | Admin-only screenshot evidence metadata and private image objects for violation review. Setup script: `ops/violation_evidence_storage_20260527.sql`. |
 | `insight_hr_evidence` | Array | Blob (`app_documents`) | HR Evidence captured for trainees from Insight, stored by canonical trainee name plus normalized trainee key and group for Insight Build evidence grids. |
 | `insight_progress_config` | Object | Blob (`app_documents`) | Agent Progress Builder checklist configuration. This is the canonical progress/scoring list for Insight Compare Viewer and Agent Search archive progress, including checklist type and Onboard Report section flags. |
 | `insight_rule_config` | Object | Blob (`app_documents`) | Insight severity/threshold trigger mapping. |
@@ -305,7 +306,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `startActivityPoller()`: **No Frontend Timers.** Listens to `activity-update` from the `electron-main.js` background thread.
     - **Security Model:** The internal study browser (`<webview>`) allows all navigation, as there is no URL bar. Violations are only triggered by the OS-level `startActivityPoller` when the user switches to an unauthorized external application. Trainee study links must route through `window.StudyMonitor.openStudyWindow(...)` so they stay inside the secured Electron overlay instead of using raw `window.open(...)`. The browser shell now uses a dedicated control deck above the `webview`, active overlay mode temporarily disables global floating controls, and inactive webviews are forced off-canvas/non-interactive to prevent embedded-page click dead zones. The Electron `persist:study_session` partition is intentionally kept persistent to improve Microsoft/SharePoint study-session reliability across restarts.
     - **Popout Browser:** `popOutActiveTab(...)` and `openStudyNotesPopout()` use `window.electronAPI.studyBrowser.openPopout(...)` to open the active study tab or notes page in a frameless BrowserWindow with custom minimize/maximize/close/navigation controls. Popout windows keep the `persist:study_session` partition so Microsoft/SharePoint auth continuity is preserved.
-    - **Mandatory Violation Capture:** `triggerExternalAppWarning(...)` now opens a blocking violation form that records the triggering external window, required reason, platform, and person informed (`Darren`, `Netta`, `Jaco`) into `violation_reports`. `openViolationReviewModal()` / `renderViolationReviewRows()` provide admin/teamleader review with filters, search, per-agent badges, notification counts, and `markViolationReviewed(...)`.
+    - **Mandatory Violation Capture:** `triggerExternalAppWarning(...)` now opens a blocking violation form that records the triggering external window, required reason, platform, and person informed (`Darren`, `Netta`, `Jaco`) into `violation_reports`. Screenshot binaries are stored separately in the private `violation_evidence` bucket/table, while `violation_reports` stores paths/metadata only. `openViolationReviewModal()` / `renderViolationReviewRows()` provide admin/teamleader review with filters, search, per-agent badges, notification counts, and `markViolationReviewed(...)`.
     - `startMarkForClarity()`: Interactive drawing engine overlay injected into the `<webview>` for precision bounding-box screenshots/bookmarks.
     - `track(activity)`: Logs current activity.
     - `sync()`: Pushes `monitor_data` to server.
@@ -448,9 +449,10 @@ Maps local `localStorage` keys to Supabase tables.
 ### B1. Violation Review Workflow
 1. **Detection:** During working hours, `StudyMonitor.startActivityPoller()` classifies unapproved external windows as `Violation: <window title>`.
 2. **Mandatory Capture:** The trainee cannot dismiss the prompt until they submit a reason, platform, and informed person. The informed-person dropdown is intentionally restricted to Darren, Netta, and Jaco.
-3. **Sync:** Entries are saved into `violation_reports` as an `app_documents` blob so no SQL migration/table is required.
-4. **Admin Review:** Activity Monitor shows pending counts in its toolbar, per-agent violation badges, a searchable review modal, and a notification-bell item for Admin/Teamleader/Super Admin users.
-5. **Review State:** `markViolationReviewed(...)` marks entries reviewed with reviewer and timestamp metadata.
+3. **Evidence Storage:** Screenshot binaries are uploaded to the private Supabase Storage bucket `violation_evidence`; `violation_reports` keeps metadata/paths only. Run `ops/violation_evidence_storage_20260527.sql` before release.
+4. **Sync:** Entries are saved into `violation_reports` as an `app_documents` blob. This blob must never contain screenshot base64, and trainee runtimes do not pull the shared blob back down.
+5. **Admin Review:** Activity Monitor shows pending counts in its toolbar, per-agent violation badges, a searchable review modal, and a notification-bell item for Admin/Teamleader/Super Admin users.
+6. **Review State:** `markViolationReviewed(...)` marks entries reviewed with reviewer and timestamp metadata. Approved violations delete stored screenshot evidence; not-approved violations retain evidence paths.
 
 ### C. Vetting Arena Security
 1.  **Entry:** Trainee clicks "Enter Arena".
@@ -496,6 +498,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.7.4 (Confidential Monitoring Hardening + Release Readiness, 2026-05-27):** Internal release hardening for monitored trainee workflows. Public release notes must stay generic and must not describe Agent Activity Monitor implementation details. Internally, this release aligns training activity categorization with controlled study/work-tool/portal/assessment/communication/idle/violation buckets, keeps Teams communication at an 8-minute grace window, stores admin-only violation evidence in the private `violation_evidence` bucket/table, and replaces the old modal monitor surface with the simplified full-page timeline workspace plus bulk violation cleanup.
 - **v2.7.3 (Insight + Vetting Grading Release, 2026-05-26):** Shipped the post-vetting reliability cleanup and Insight workflow improvements. Vetting Arena submissions now enter admin review intentionally, while historical completed Vetting attempts are no longer reopened just because they predate marking audit metadata; linked pending rows with permanent records are repaired back to completed. Insight Knowledge Gaps now separates individual missed-question detail from group aggregation: individual mode shows full question text, trainee answer, and awarded/max points for below-full-mark questions, and group mode aggregates failed questions by assessment with filtering. HR Evidence Capture now supports multiple evaluation triggers per incident, edit/delete actions, and trigger filtering while preserving old single-trigger rows. Insight Compare/Build graph polish replaces numeric-only assessment axes with readable assessment names, and the broader release includes the accumulated performance, stability, navigation, trainee login, Vetting Arena, Schedule Studio, and embedded module cleanup work. This ships as stable main-channel version `2.7.3`.
 - **v2.7.2 (Vetting Arena 2.0 Reliability + Release Polish, 2026-05-26):** Hardened the full Vetting Arena trainee/admin journey for release. Admin session setup now formats roster IDs as month/year group labels with member counts and previews, splits Vetting tests into 1st Vetting, Final Vetting, and Other Vetting sections, and shows per-group completion tracking before a session starts. Starting a session seeds the selected group as waiting and nudges targeted trainees; monitoring now preserves per-trainee status updates and shows waiting, ready, blocked, started, submitting, and completed states more clearly. Trainee pre-flight security checks now use the direct preload security APIs and no longer repaint the join screen during background scans, preventing the Enter Arena button from becoming unavailable after successful checks. Ending Vetting now sends an explicit release command to targeted trainees and ignores stale inactive session rows if server delete is delayed. Vetting admin and trainee surfaces now use a focused command-center/secure-exam visual profile, and stale standalone `vetting-rework` route references were cleaned up in favor of the official Vetting Arena route. This ships as stable main-channel version `2.7.2`.
 - **v2.7.1 (Live Arena Containment Hotfix, 2026-05-21):** Hotfixed the Live Assessment Arena CSS so `#live-execution` remains hidden unless the Live Arena route is the active section. This prevents the arena layout/background from bleeding into unrelated tabs for admin, super admin, teamleader, and trainee sessions. Also keeps the less intrusive active study-session return button and bottom spacing from the live layout polish. This ships as stable main-channel version `2.7.1`.
@@ -581,6 +584,14 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.1:** Preserved Microsoft/SharePoint links exactly as entered in schedule and study-browser URL handling, fixed trainee schedule/calendar scoping to only the assigned group, expanded trainee `Profile & Settings` personalization to include Experimental Theme/Custom Lab controls, and added a study-browser cache/session clear action for Microsoft sign-in recovery.
 - **v2.6.0:** Hardened user lifecycle integrity (`js/admin_users.js` + `js/data.js`) so deleted users/profile edits survive sync/restart, added chunked realtime queue processing to reduce UI typing lockups under heavy payloads, introduced local cached-copy fallback in the Study Browser (`js/study_monitor.js`) for failed SharePoint/material loads, and extended Experimental Custom Lab to support wallpaper URL configuration (`index.html` + `js/main.js` + `style.css`).
 - **v2.5.9:** Added a Live Booking Integrity Check + auto-repair flow in `js/schedule.js` to normalize duplicates/collisions and protect Live Arena and assessment breakdown consistency. Expanded Experimental Themes with app-wide motion styling and introduced a customizable `theme-custom-lab` profile with preview/save/reset controls.
+
+## v2.7.4 - 2026-05-27
+- Confidential: Public release notes for this version intentionally use generic reliability/stability wording and must not expose Agent Activity Monitor implementation details.
+- Internal Hardening: Training activity tracking now separates active study, inactive study, work-tool practice, portal navigation, controlled assessment/vetting, communication, idle/away, and violations.
+- Internal Hardening: Teams communication uses an 8-minute continuous grace window before violation capture.
+- Internal Hardening: Violation evidence capture records connected-display screenshots into the private `violation_evidence` bucket/table for admin review only; approving a violation clears stored screenshots, while not-approved reports retain evidence paths.
+- Internal UI: The monitor surface is now a full-page timeline workspace with trainee search, group filter, row-based summaries, and bulk violation deletion.
+- Release: Version bump to `2.7.4` for stable main-channel rollout.
 
 ## v2.7.3 - 2026-05-26
 
@@ -1130,7 +1141,7 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 
 2.  **Version + Changelog Rules:**
     *   Increment `version` in `package.json`.
-    *   Add one short changelog entry in `js/main.js` `getChangelog()` only.
+    *   Do not add trainee-facing release notes unless explicitly requested.
     *   Keep changelog wording concise: use only high-level labels such as `Bug Fix`, `Improvement`, `Feature Added` (no deep technical breakdown).
 
 3.  **Build Command Rules (Token-Based):**

@@ -1944,9 +1944,17 @@ window.performBlobToRowMigration = async function() {
         await uploadBatch('live_bookings', bookings, b => ({ id: b.id, trainee: b.trainee, data: b, updated_at: new Date().toISOString() }));
 
         // 5. Monitor History
+        const buildMonitorHistoryId = h => {
+            const safeUser = String(h.user || h.user_id || h.trainee || 'unknown')
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '') || 'unknown';
+            return `monitor_history_${safeUser}_${String(h.date || '').trim()}`;
+        };
         const history = adminSysReadArray('monitor_history');
-        if(mode === 'real') { history.forEach(h => { if(!h.id) h.id = Date.now()+'_'+Math.random().toString(36).substr(2,9); }); localStorage.setItem('monitor_history', JSON.stringify(history)); }
-        await uploadBatch('monitor_history', history, h => ({ id: Date.now()+'_'+Math.random().toString(36).substr(2,9), user_id: h.user, data: h, updated_at: new Date().toISOString() }));
+        if(mode === 'real') { history.forEach(h => { if(h && (h.user || h.user_id || h.trainee) && h.date) h.id = buildMonitorHistoryId(h); }); localStorage.setItem('monitor_history', JSON.stringify(history)); }
+        await uploadBatch('monitor_history', history, h => ({ id: (h && (h.user || h.user_id || h.trainee) && h.date) ? buildMonitorHistoryId(h) : (h.id || Date.now()+'_'+Math.random().toString(36).substr(2,9)), user_id: h.user || h.user_id || h.trainee, data: h, updated_at: new Date().toISOString() }));
 
         // 6. Attendance
         const att = adminSysReadArray('attendance_records');

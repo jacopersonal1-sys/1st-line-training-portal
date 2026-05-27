@@ -822,6 +822,9 @@
         }
 
         toggleSidebar(false);
+        if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+            window.StudyMonitor.track('Vetting Arena: Active Test');
+        }
         await updateTraineeStatus('started');
 
         if (testId && typeof window.openTestTaker === 'function') {
@@ -855,6 +858,9 @@
         }
 
         if (!keepLocked) toggleSidebar(true);
+        if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+            window.StudyMonitor.track('Vetting Arena: Submitted / Waiting');
+        }
         await updateTraineeStatus('completed');
 
         const activeTab = document.querySelector('section.active');
@@ -912,6 +918,9 @@
         const myData = getTraineeData(session, username);
 
         if (myData && myData.status === 'completed') {
+            if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+                window.StudyMonitor.track('Vetting Arena: Submitted / Waiting');
+            }
             stopTraineeLocalPollers();
             container.innerHTML = `
                 <div id="vetting-terminal-card" class="vetting-trainee-state vetting-trainee-state--complete">
@@ -927,6 +936,9 @@
         }
 
         if (myData && myData.status === 'submitting') {
+            if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+                window.StudyMonitor.track('Vetting Arena: Submitted / Waiting');
+            }
             stopTraineeLocalPollers();
             scheduleCompletionRetry();
             const gateReason = myData.completionGate && myData.completionGate.reason
@@ -947,10 +959,17 @@
         }
 
         if (myData && myData.status === 'started') {
+            if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+                window.StudyMonitor.track('Vetting Arena: Active Test');
+            }
             container.innerHTML = '<div id="arenaTestContainer"></div>';
             if (typeof window.openTestTaker === 'function') window.openTestTaker(session.testId, true);
             startActiveTestMonitoring();
             return;
+        }
+
+        if (window.StudyMonitor && typeof window.StudyMonitor.track === 'function') {
+            window.StudyMonitor.track('Vetting Arena: Security Check');
         }
 
         const tests = readVettingArray('tests');

@@ -11,13 +11,19 @@ const StudyMonitor = {
     activeWebview: null,
     viewMode: 'list', // 'list' or 'summary'
     monitorScope: 'scheduled', // 'scheduled' or 'all'
+    monitorSearch: '',
+    monitorGroupFilter: '',
     pendingTopic: null, // For classification modal
     activityPoller: null, // Track the interval for global activity monitoring
     queueSelection: new Set(), // Persist selections across refreshes
+    violationReviewSelection: new Set(),
     cachedWhitelist: [], // Cache for performance
     lastSyncedPayload: null, // OPTIMIZATION: Track last sync to prevent duplicate pushes
     pendingViolationPrompt: null,
     currentViolationReportId: null,
+    studyEngagementPoller: null,
+    lastStudyEngagementAt: 0,
+    lastStudyProbeSnapshot: null,
     // --- NEW: Tabbed Browser State ---
     browserState: {
         tabs: [],
@@ -304,7 +310,7 @@ const StudyMonitor = {
     openCpanelInSystemBrowser: function(url) {
         if (!url) return;
         this.openExternalUrl(url);
-        this.track('Studying: cPanel / Webmail (System Browser)');
+        this.track('Study Tool: Hosting/cPanel/Webmail (System Browser)');
         if (typeof showToast === 'function') {
             showToast('Opening cPanel/Webmail in your normal browser for compatibility.', 'info');
         }
@@ -481,7 +487,7 @@ const StudyMonitor = {
                 toggleBtn.innerHTML = '<i class="fas fa-note-sticky"></i> Hide Notes';
             }
             this.refreshStudyNotesDock();
-            this.track('Navigating: Study Notes (Docked)');
+            this.track('Study Tool: Study Notes (Docked)');
             return true;
         }
 
@@ -524,7 +530,7 @@ const StudyMonitor = {
         }
 
         this.studyNotesPopup = child;
-        this.track('Navigating: Study Notes (Second Screen)');
+        this.track('Study Tool: Study Notes (Second Screen)');
         return true;
     },
 
@@ -687,6 +693,18 @@ const StudyMonitor = {
         // --- START BULLETPROOF OS-LEVEL ACTIVITY POLLER ---
         if (CURRENT_USER && CURRENT_USER.role === 'trainee') {
             this.startActivityPoller();
+            if (!this.studyNotesInputListenerBound) {
+                this.studyNotesInputListenerBound = true;
+                document.addEventListener('input', (event) => {
+                    const target = event && event.target;
+                    if (target && typeof target.closest === 'function' && target.closest('#study-notes, #study-notes-dock')) {
+                        this.recordStudyEngagement('study-notes-input');
+                        if (!String(this.currentActivity || '').startsWith('Study Tool: Study Notes')) {
+                            this.track('Study Tool: Study Notes');
+                        }
+                    }
+                }, true);
+            }
         }
 
         // --- NEW: CAPTURE EXIT ---
@@ -738,8 +756,22 @@ const StudyMonitor = {
         }
     },
 
-    getTrainingScopeLimitMs: function() {
+    getIdleViolationLimitMs: function() {
         return 8 * 60 * 1000;
+    },
+
+    getTeamsLimitMs: function() {
+        return 8 * 60 * 1000;
+    },
+
+    getStudyEngagementIdleMs: function() {
+        const config = this.readLocalJson('system_config', {});
+        const configured = Number(config?.monitoring?.study_engagement_idle_ms);
+        return Number.isFinite(configured) && configured >= 60000 ? configured : 5 * 60 * 1000;
+    },
+
+    getTrainingScopeLimitMs: function() {
+        return this.getIdleViolationLimitMs();
     },
 
     isViolationReviewException: function(value) {
@@ -782,17 +814,35 @@ const StudyMonitor = {
                     const osIdleSeconds = data.osIdleSeconds;
                     const activeWindow = data.activeWindow;
                         
+                    if (data.isScreenLocked) {
+                        this.resetGraceTrackedActivities('idle');
+                        const lockIdleMs = Number(osIdleSeconds || 0) * 1000;
+                        if (lockIdleMs >= this.getIdleViolationLimitMs() && this.shouldCaptureTrainingScopeViolation()) {
+                            const lockTrigger = `Lock Idle for ${Math.floor(lockIdleMs / 60000)} minutes`;
+                            const violationLabel = `Violation: ${lockTrigger}`;
+                            if (!this.idleViolationPrompted && this.currentActivity !== violationLabel) {
+                                this.idleViolationPrompted = true;
+                                this.triggerExternalAppWarning(lockTrigger, violationLabel);
+                            }
+                            if (this.currentActivity !== violationLabel) this.track(violationLabel);
+                            return;
+                        }
+
+                        if (this.currentActivity !== 'Lock Idle') this.track('Lock Idle');
+                        return;
+                    }
+
                     if (osIdleSeconds > 60) {
                         this.resetGraceTrackedActivities('idle');
                         // Allow idling if waiting in Vetting Arena after submission
                         const vSession = this.readLocalJson('vettingSession', {});
                         if (vSession.active && vSession.trainees && CURRENT_USER && vSession.trainees[CURRENT_USER.user]?.status === 'completed') {
-                             if (this.currentActivity !== 'Vetting: Waiting') this.track('Vetting: Waiting');
+                             if (this.currentActivity !== 'Vetting Arena: Waiting for test to end') this.track('Vetting Arena: Waiting for test to end');
                              return;
                         }
 
                         const idleMs = Number(osIdleSeconds || 0) * 1000;
-                        if (idleMs >= this.getTrainingScopeLimitMs() && this.shouldCaptureTrainingScopeViolation()) {
+                        if (idleMs >= this.getIdleViolationLimitMs() && this.shouldCaptureTrainingScopeViolation()) {
                             const idleTrigger = `Idle / Away for ${Math.floor(idleMs / 60000)} minutes`;
                             const violationLabel = `Violation: ${idleTrigger}`;
                             if (!this.idleViolationPrompted && this.currentActivity !== violationLabel) {
@@ -815,8 +865,11 @@ const StudyMonitor = {
                         const normalizedWindow = activeWindow.toLowerCase();
                         if (normalizedWindow.includes('1st line training portal') || normalizedWindow.includes('msedgewebview2')) {
                             isPermitted = true;
-                            if (this.isStudyOpen) return; // Specific activity handled by webview events
-                            activityLabel = "Navigating Portal";
+                            if (this.isStudyOpen) {
+                                this.updateActiveStudyEngagementState();
+                                return;
+                            }
+                            activityLabel = "Portal Navigation: App";
                         } else {
                             const defaultSites = [
                                 'acs.herotel.systems', 'crm.herotel.com', 'herotel.qcontact.com',
@@ -834,15 +887,14 @@ const StudyMonitor = {
                             const matchedSite = allPermitted.find(site => site && normalizedWindow.includes(site.toLowerCase()));
                             
                             if (matchedSite) {
-                                // Classify as "Studying" (or Work) so it counts towards Focus Score
-                                activityLabel = `Studying: ${matchedSite} (Work System)`;
+                                activityLabel = this.buildWorkToolStudyLabel(matchedSite);
                                 isPermitted = true;
                             } else if (normalizedWindow.includes('teams') || normalizedWindow.includes('microsoft teams')) {
                                 isTeamsWindow = true;
-                                activityLabel = `Studying: MS Teams (Communication)`;
+                                activityLabel = `Communication: MS Teams`;
                                 isPermitted = true;
                             } else if (normalizedWindow.includes('outlook') || normalizedWindow.includes('mail')) {
-                                activityLabel = `Studying: Email (Communication)`;
+                                activityLabel = `Study Tool: Email`;
                                 isPermitted = true;
                             } else if (normalizedWindow.includes('taskmgr') || normalizedWindow.includes('task manager')) {
                                 activityLabel = `System: Task Manager`;
@@ -863,7 +915,7 @@ const StudyMonitor = {
                         const nowMs = Date.now();
                         if (!this.teamsFocusStart) this.teamsFocusStart = nowMs;
                         const teamsMs = nowMs - this.teamsFocusStart;
-                        if (teamsMs >= this.getTrainingScopeLimitMs() && this.shouldCaptureTrainingScopeViolation()) {
+                        if (teamsMs >= this.getTeamsLimitMs() && this.shouldCaptureTrainingScopeViolation()) {
                             activityLabel = `Violation: MS Teams over 8 minutes - ${activeWindow || 'Microsoft Teams'}`;
                             isPermitted = false;
                             if (this.currentActivity !== activityLabel) {
@@ -877,7 +929,7 @@ const StudyMonitor = {
                         const isViolation = this.shouldCaptureTrainingScopeViolation();
                         
                         if (isViolation) {
-                            if (!String(activityLabel || '').startsWith('Violation:')) activityLabel = `Violation: ${activeWindow}`;
+                            if (!String(activityLabel || '').startsWith('Violation:')) activityLabel = `Violation: External App - ${activeWindow}`;
                             if (this.currentActivity !== activityLabel) {
                                 this.triggerExternalAppWarning(activeWindow, activityLabel);
                             }
@@ -885,10 +937,10 @@ const StudyMonitor = {
                     }
 
                     // Track the state change
-                    if (this.currentActivity !== activityLabel && activityLabel !== "Navigating Portal") {
+                    if (this.currentActivity !== activityLabel && activityLabel !== "Portal Navigation: App") {
                         this.track(activityLabel);
-                    } else if (activityLabel === "Navigating Portal" && (this.currentActivity === 'Idle' || this.currentActivity.startsWith('External:') || this.currentActivity.startsWith('Violation:'))) {
-                        this.track("Navigating Portal");
+                    } else if (activityLabel === "Portal Navigation: App" && (this.currentActivity === 'Idle' || this.currentActivity.startsWith('External:') || this.currentActivity.startsWith('Violation:'))) {
+                        this.track("Portal Navigation: App");
                     }
                 } catch (e) { console.error("External Monitor Error:", e); }
             });
@@ -906,12 +958,104 @@ const StudyMonitor = {
         return this.getRawViolationReports().filter(report => !this.isViolationReviewException(report));
     },
 
+    getViolationReportTombstoneId: function(reportId) {
+        return `violation_report:${String(reportId || '').trim()}`;
+    },
+
+    addViolationReportTombstones: function(reportIds) {
+        const ids = (Array.isArray(reportIds) ? reportIds : [reportIds])
+            .map(id => String(id || '').trim())
+            .filter(Boolean);
+        if (!ids.length) return [];
+
+        const existing = this.readLocalJson('system_tombstones', []);
+        const tombstones = Array.isArray(existing) ? existing : [];
+        const seen = new Set(tombstones.map(item => String(item || '')));
+        let changed = false;
+        ids.forEach(id => {
+            const tombstone = this.getViolationReportTombstoneId(id);
+            if (!seen.has(tombstone)) {
+                tombstones.push(tombstone);
+                seen.add(tombstone);
+                changed = true;
+            }
+        });
+        if (changed) localStorage.setItem('system_tombstones', JSON.stringify(tombstones));
+        return tombstones;
+    },
+
+    getDeletedViolationReportIds: function() {
+        const tombstones = this.readLocalJson('system_tombstones', []);
+        const deleted = new Set();
+        (Array.isArray(tombstones) ? tombstones : []).forEach(item => {
+            const text = String(item || '').trim();
+            if (text.startsWith('violation_report:')) deleted.add(text.replace(/^violation_report:/, ''));
+        });
+        return deleted;
+    },
+
     writeViolationReports: function(reports) {
+        const deletedIds = this.getDeletedViolationReportIds();
         const clean = (Array.isArray(reports) ? reports : [])
             .filter(r => r && r.id && r.user)
+            .filter(r => !deletedIds.has(String(r.id || '')))
             .sort((a, b) => new Date(b.detectedAt || b.reportedAt || 0) - new Date(a.detectedAt || a.reportedAt || 0));
         localStorage.setItem('violation_reports', JSON.stringify(clean));
         return clean;
+    },
+
+    persistViolationReportDeletion: async function(remainingReports, deletedIds) {
+        const deletedSet = new Set((deletedIds || []).map(id => String(id || '')).filter(Boolean));
+        const tombstones = this.addViolationReportTombstones(Array.from(deletedSet));
+        const localRemaining = this.writeViolationReports(remainingReports);
+        const client = window.supabaseClient || (typeof window.initSupabaseClient === 'function' ? window.initSupabaseClient() : null);
+
+        if (!client?.from || deletedSet.size === 0) {
+            if (typeof saveToServer === 'function') await saveToServer(['violation_reports', 'system_tombstones'], true, true);
+            return localRemaining;
+        }
+
+        const remoteKey = localStorage.getItem('DEMO_MODE') === 'true' ? 'demo_violation_reports' : 'violation_reports';
+        const tombstoneKey = localStorage.getItem('DEMO_MODE') === 'true' ? 'demo_system_tombstones' : 'system_tombstones';
+        const { data: remoteRow, error: fetchErr } = await client
+            .from('app_documents')
+            .select('content')
+            .eq('key', remoteKey)
+            .maybeSingle();
+        if (fetchErr) throw fetchErr;
+
+        const byId = new Map();
+        localRemaining.forEach(report => {
+            if (report?.id && !deletedSet.has(String(report.id))) byId.set(String(report.id), report);
+        });
+        (Array.isArray(remoteRow?.content) ? remoteRow.content : []).forEach(report => {
+            const id = String(report?.id || '');
+            if (id && !deletedSet.has(id) && !byId.has(id)) byId.set(id, report);
+        });
+
+        const finalReports = this.writeViolationReports(Array.from(byId.values()));
+        const { data: savedData, error: saveErr } = await client
+            .from('app_documents')
+            .upsert({
+                key: remoteKey,
+                content: finalReports,
+                updated_at: new Date().toISOString()
+            })
+            .select();
+        if (saveErr) throw saveErr;
+        if (savedData && savedData[0]) localStorage.setItem('sync_ts_violation_reports', savedData[0].updated_at);
+
+        const { data: tombstoneData, error: tombstoneErr } = await client
+            .from('app_documents')
+            .upsert({
+                key: tombstoneKey,
+                content: tombstones,
+                updated_at: new Date().toISOString()
+            })
+            .select();
+        if (tombstoneErr) throw tombstoneErr;
+        if (tombstoneData && tombstoneData[0]) localStorage.setItem('sync_ts_system_tombstones', tombstoneData[0].updated_at);
+        return finalReports;
     },
 
     getViolationDropdownOptions: function() {
@@ -919,6 +1063,40 @@ const StudyMonitor = {
             platforms: ['Teams', 'WhatsApp', 'Phone Call', 'In Person'],
             contacts: ['Darren', 'Netta', 'Jaco']
         };
+    },
+
+    shouldSkipViolationEvidenceCapture: function(triggerWindow, activityLabel) {
+        const text = [triggerWindow, activityLabel]
+            .map(value => String(value || '').toLowerCase())
+            .join(' ');
+        return text.includes('lock idle')
+            || text.includes('locked idle')
+            || text.includes('screen locked')
+            || text.includes('lock-screen')
+            || text.includes('lock screen');
+    },
+
+    buildSkippedViolationEvidence: function(reason = 'Screenshot capture is not required for lock-idle violations.') {
+        return this.buildEmptyViolationEvidence({
+            capturedAt: new Date().toISOString(),
+            screenCount: 0,
+            screenshots: []
+        }, {
+            storage: 'skipped',
+            captureSkipped: true,
+            captureSkipReason: reason
+        });
+    },
+
+    normalizeSkippedViolationEvidence: async function(record, rawEvidence = {}) {
+        const skipped = this.buildSkippedViolationEvidence();
+        skipped.capturedAt = rawEvidence?.capturedAt || skipped.capturedAt;
+        skipped.capturedScreenCount = Number(rawEvidence?.screenCount || rawEvidence?.capturedScreenCount || 0);
+        const files = Array.isArray(rawEvidence?.files) ? rawEvidence.files : [];
+        if (files.length) {
+            await this.deleteViolationEvidenceFiles({ evidence: { files } }, 'lock_idle_capture_discarded');
+        }
+        return skipped;
     },
 
     triggerExternalAppWarning: function(triggerWindow, activityLabel) {
@@ -930,8 +1108,14 @@ const StudyMonitor = {
             id: promptId,
             trigger: String(triggerWindow || 'Unknown external app'),
             activity: String(activityLabel || `Violation: ${triggerWindow || 'Unknown external app'}`),
-            detectedAt
+            detectedAt,
+            evidence: null
         };
+        if (this.shouldSkipViolationEvidenceCapture(triggerWindow, activityLabel)) {
+            this.pendingViolationPrompt.evidence = this.buildSkippedViolationEvidence();
+        } else {
+            this.captureViolationEvidence(promptId);
+        }
         const options = this.getViolationDropdownOptions();
         const platformOptions = ['<option value="">-- Select Platform --</option>']
             .concat(options.platforms.map(p => `<option value="${this.escapeHtml(p)}">${this.escapeHtml(p)}</option>`))
@@ -973,6 +1157,173 @@ const StudyMonitor = {
         document.body.insertAdjacentHTML('beforeend', modalHtml);
     },
 
+    captureViolationEvidence: async function(promptId) {
+        try {
+            const prompt = this.pendingViolationPrompt;
+            if (!prompt || prompt.id !== promptId) return;
+            const captureFn = window.electronAPI?.activityMonitor?.captureViolationScreenshots
+                || (() => window.electronAPI?.ipcRenderer?.invoke?.('capture-violation-screenshots'));
+            if (typeof captureFn !== 'function') return;
+            const evidence = await captureFn();
+            if (!this.pendingViolationPrompt || this.pendingViolationPrompt.id !== promptId) return;
+            const screenshots = Array.isArray(evidence?.screenshots) ? evidence.screenshots : [];
+            this.pendingViolationPrompt.evidence = {
+                capturedAt: evidence?.capturedAt || new Date().toISOString(),
+                screenCount: Number(evidence?.screenCount || screenshots.length || 0),
+                screenshots,
+                visibility: 'admin_only',
+                traineeVisible: false
+            };
+        } catch (error) {
+            console.warn('Violation screenshot capture failed:', error);
+            if (this.pendingViolationPrompt && this.pendingViolationPrompt.id === promptId) {
+                this.pendingViolationPrompt.evidence = {
+                    capturedAt: new Date().toISOString(),
+                    screenCount: 0,
+                    screenshots: [],
+                    visibility: 'admin_only',
+                    traineeVisible: false,
+                    captureError: String(error && error.message || error || 'Unknown capture error')
+                };
+            }
+        }
+    },
+
+    getViolationEvidenceBucket: function() {
+        return 'violation_evidence';
+    },
+
+    getSafeEvidencePathPart: function(value) {
+        return String(value || 'unknown')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9._-]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 80) || 'unknown';
+    },
+
+    base64ToBlob: function(base64, mime = 'image/jpeg') {
+        const clean = String(base64 || '').replace(/^data:[^;]+;base64,/, '');
+        const binary = atob(clean);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new Blob([bytes], { type: mime });
+    },
+
+    buildEmptyViolationEvidence: function(rawEvidence = {}, extra = {}) {
+        const screenshots = Array.isArray(rawEvidence.screenshots) ? rawEvidence.screenshots : [];
+        return {
+            capturedAt: rawEvidence.capturedAt || new Date().toISOString(),
+            screenCount: 0,
+            capturedScreenCount: Number(rawEvidence.screenCount || screenshots.length || 0),
+            storage: extra.storage || rawEvidence.storage || 'none',
+            bucket: this.getViolationEvidenceBucket(),
+            visibility: 'admin_only',
+            traineeVisible: false,
+            screenshots: [],
+            files: [],
+            captureError: extra.captureError || rawEvidence.captureError || '',
+            captureSkipped: !!(extra.captureSkipped || rawEvidence.captureSkipped),
+            captureSkipReason: extra.captureSkipReason || rawEvidence.captureSkipReason || ''
+        };
+    },
+
+    uploadViolationEvidence: async function(record, rawEvidence = {}) {
+        if (this.shouldSkipViolationEvidenceCapture(record?.trigger, record?.activity)) {
+            return this.normalizeSkippedViolationEvidence(record, rawEvidence);
+        }
+
+        const screenshots = Array.isArray(rawEvidence?.screenshots) ? rawEvidence.screenshots : [];
+        if (!screenshots.length) return this.buildEmptyViolationEvidence(rawEvidence);
+
+        const client = window.supabaseClient;
+        const storage = client?.storage;
+        if (!storage?.from) {
+            return this.buildEmptyViolationEvidence(rawEvidence, {
+                storage: 'unavailable',
+                captureError: 'Evidence storage is unavailable in this client session.'
+            });
+        }
+
+        const bucket = this.getViolationEvidenceBucket();
+        const traineePart = this.getSafeEvidencePathPart(record.user);
+        const reportPart = this.getSafeEvidencePathPart(record.id);
+        const capturedAt = rawEvidence.capturedAt || new Date().toISOString();
+        const uploaded = [];
+
+        try {
+            for (let index = 0; index < screenshots.length; index++) {
+                const shot = screenshots[index] || {};
+                const mime = shot.mime || 'image/jpeg';
+                const blob = this.base64ToBlob(shot.data || '', mime);
+                const evidenceId = `evi_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 9)}`;
+                const extension = mime.includes('png') ? 'png' : 'jpg';
+                const path = `${traineePart}/${reportPart}/screen-${index + 1}-${evidenceId}.${extension}`;
+                const { error } = await storage.from(bucket).upload(path, blob, {
+                    contentType: mime,
+                    cacheControl: '3600',
+                    upsert: false
+                });
+                if (error) throw error;
+                uploaded.push({
+                    id: evidenceId,
+                    reportId: record.id,
+                    trainee: record.user,
+                    bucket,
+                    path,
+                    mime,
+                    name: shot.name || `Screen ${index + 1}`,
+                    screenIndex: index,
+                    capturedAt,
+                    width: Number(shot.width || 0),
+                    height: Number(shot.height || 0),
+                    sizeBytes: blob.size
+                });
+            }
+
+            if (client?.from && uploaded.length) {
+                const rows = uploaded.map(file => ({
+                    id: file.id,
+                    report_id: file.reportId,
+                    trainee: file.trainee,
+                    screen_index: file.screenIndex,
+                    bucket: file.bucket,
+                    path: file.path,
+                    mime: file.mime,
+                    width: file.width || null,
+                    height: file.height || null,
+                    size_bytes: file.sizeBytes || null,
+                    captured_at: file.capturedAt,
+                    status: 'active',
+                    metadata: { name: file.name }
+                }));
+                const { error: tableError } = await client.from('violation_evidence').upsert(rows, { onConflict: 'id' });
+                if (tableError) console.warn('Violation evidence metadata save failed:', tableError);
+            }
+
+            return {
+                capturedAt,
+                screenCount: uploaded.length,
+                capturedScreenCount: Number(rawEvidence.screenCount || screenshots.length || uploaded.length),
+                storage: 'supabase_storage',
+                bucket,
+                visibility: 'admin_only',
+                traineeVisible: false,
+                screenshots: [],
+                files: uploaded
+            };
+        } catch (error) {
+            if (uploaded.length) {
+                await this.deleteViolationEvidenceFiles({ evidence: { files: uploaded } });
+            }
+            console.warn('Violation evidence upload failed:', error);
+            return this.buildEmptyViolationEvidence(rawEvidence, {
+                storage: 'upload_failed',
+                captureError: String(error && error.message || error || 'Evidence upload failed')
+            });
+        }
+    },
+
     submitViolationReason: async function(promptId) {
         const prompt = this.pendingViolationPrompt;
         if (!prompt || prompt.id !== promptId) return;
@@ -986,6 +1337,11 @@ const StudyMonitor = {
 
         if (!reason) return alert("Please provide the reason for this violation.");
         if (!platform || !contact) return alert("Please specify how and who you informed.");
+
+        const skipEvidence = this.shouldSkipViolationEvidenceCapture(prompt.trigger, prompt.activity);
+        if (!prompt.evidence && !skipEvidence) {
+            await this.captureViolationEvidence(promptId);
+        }
 
         const reports = this.getViolationReports();
         const record = {
@@ -1003,8 +1359,12 @@ const StudyMonitor = {
             reviewed: false,
             reviewedAt: null,
             reviewedBy: '',
-            adminComment: ''
+            adminComment: '',
+            evidence: this.buildEmptyViolationEvidence(prompt.evidence || {})
         };
+        record.evidence = skipEvidence
+            ? await this.normalizeSkippedViolationEvidence(record, prompt.evidence || {})
+            : await this.uploadViolationEvidence(record, prompt.evidence || {});
 
         reports.push(record);
         this.writeViolationReports(reports);
@@ -1123,6 +1483,11 @@ const StudyMonitor = {
                 if (!monitorData || typeof monitorData !== 'object' || Array.isArray(monitorData)) monitorData = {};
                 
                 // 2. Update my entry
+                const existingMine = monitorData[CURRENT_USER.user];
+                if (existingMine && existingMine.date === payload.date) {
+                    payload.history = this.mergeActivitySegments(existingMine.history || [], payload.history || []);
+                    this.history = payload.history;
+                }
                 monitorData[CURRENT_USER.user] = payload;
                 localStorage.setItem('monitor_data', JSON.stringify(monitorData));
 
@@ -1153,7 +1518,122 @@ const StudyMonitor = {
 
     buildInAppStudyLabel: function(label) {
         const safeLabel = String(label || 'Study Material').trim();
-        return `In-App Study: ${safeLabel}`;
+        return `Study Material: ${safeLabel}`;
+    },
+
+    buildWorkToolStudyLabel: function(label) {
+        const raw = String(label || 'Work Tool').trim();
+        const lower = raw.toLowerCase();
+        let name = raw;
+        if (lower.includes('qcontact')) name = 'Q-Contact';
+        else if (lower.includes('crm')) name = 'CRM';
+        else if (lower.includes('radius')) name = 'Radius';
+        else if (lower.includes('preseem')) name = 'Preseem';
+        else if (lower.includes('acs')) name = 'ACS';
+        else if (lower.includes('odoo')) name = 'Odoo';
+        else if (lower.includes('cpanel') || lower.includes('cp1') || lower.includes('cp2') || lower.includes('hosting') || lower.includes('webmail')) name = 'Hosting/cPanel/Webmail';
+        return `Study Tool: ${name}`;
+    },
+
+    buildStudyContextLabel: function(tab) {
+        const webview = tab?.webview;
+        const title = String((webview && typeof webview.getTitle === 'function' ? webview.getTitle() : '') || tab?.title || 'Study Material').trim();
+        const url = String((webview && typeof webview.getURL === 'function' ? webview.getURL() : '') || tab?.url || '').trim();
+        const combined = `${title} ${url}`.toLowerCase();
+        const toolLabel = this.buildWorkToolStudyLabel(combined);
+        if (/(qcontact|crm|radius|preseem|acs|odoo|cpanel|cp1|cp2|hosting|webmail)/i.test(combined)) {
+            return toolLabel;
+        }
+        return this.buildInAppStudyLabel(title || url || 'Study Material');
+    },
+
+    recordStudyEngagement: function(reason = 'interaction') {
+        this.lastStudyEngagementAt = Date.now();
+        this.lastStudyProbeSnapshot = {
+            ...(this.lastStudyProbeSnapshot || {}),
+            lastReason: reason,
+            updatedAt: this.lastStudyEngagementAt
+        };
+        this.recordClick();
+    },
+
+    updateActiveStudyEngagementState: function() {
+        if (!this.isStudyOpen) return;
+        const tab = this.getActiveTab ? this.getActiveTab() : null;
+        if (!tab) return;
+        const baseLabel = this.buildStudyContextLabel(tab);
+        const lastAt = this.lastStudyEngagementAt || this.startTime || Date.now();
+        const inactiveMs = Date.now() - lastAt;
+        const label = inactiveMs >= this.getStudyEngagementIdleMs()
+            ? `${baseLabel} (Inactive - no page engagement)`
+            : baseLabel;
+        if (this.currentActivity !== label) this.track(label);
+    },
+
+    installStudyEngagementProbe: function(tab) {
+        const webview = tab?.webview;
+        if (!webview || !webview.isConnected || typeof webview.executeJavaScript !== 'function') return;
+        const script = `
+            (function() {
+                if (!window.__studyMonitorEngagement) {
+                    window.__studyMonitorEngagement = { count: 0, lastAt: Date.now(), lastType: 'load' };
+                    const mark = function(type) {
+                        window.__studyMonitorEngagement.count += 1;
+                        window.__studyMonitorEngagement.lastAt = Date.now();
+                        window.__studyMonitorEngagement.lastType = type;
+                    };
+                    let lastMouseAt = 0;
+                    ['click', 'keydown', 'input', 'scroll', 'wheel', 'touchstart'].forEach(function(type) {
+                        window.addEventListener(type, function() { mark(type); }, { passive: true, capture: true });
+                    });
+                    window.addEventListener('mousemove', function() {
+                        const now = Date.now();
+                        if (now - lastMouseAt > 5000) {
+                            lastMouseAt = now;
+                            mark('mousemove');
+                        }
+                    });
+                    document.addEventListener('visibilitychange', function() { mark('visibility'); }, true);
+                    Array.from(document.querySelectorAll('video,audio')).forEach(function(media) {
+                        ['play', 'playing', 'timeupdate', 'seeked'].forEach(function(type) {
+                            media.addEventListener(type, function() { mark('media-' + type); }, { passive: true });
+                        });
+                    });
+                }
+                return window.__studyMonitorEngagement;
+            })();
+        `;
+        webview.executeJavaScript(script, true)
+            .then(snapshot => {
+                if (snapshot && typeof snapshot.count === 'number') {
+                    tab.lastProbeCount = snapshot.count;
+                    this.recordStudyEngagement('page-load');
+                }
+            })
+            .catch(() => {});
+    },
+
+    startStudyEngagementPoller: function() {
+        if (this.studyEngagementPoller) clearInterval(this.studyEngagementPoller);
+        this.studyEngagementPoller = setInterval(() => {
+            const tab = this.getActiveTab ? this.getActiveTab() : null;
+            const webview = tab?.webview;
+            if (!this.isStudyOpen || !webview || !webview.isConnected || typeof webview.executeJavaScript !== 'function') return;
+            webview.executeJavaScript(`window.__studyMonitorEngagement || null`, true)
+                .then(snapshot => {
+                    if (snapshot && typeof snapshot.count === 'number' && snapshot.count !== tab.lastProbeCount) {
+                        tab.lastProbeCount = snapshot.count;
+                        this.recordStudyEngagement(snapshot.lastType || 'page-interaction');
+                    }
+                    this.updateActiveStudyEngagementState();
+                })
+                .catch(() => this.updateActiveStudyEngagementState());
+        }, 15000);
+    },
+
+    stopStudyEngagementPoller: function() {
+        if (this.studyEngagementPoller) clearInterval(this.studyEngagementPoller);
+        this.studyEngagementPoller = null;
     },
 
     getSegmentStartMs: function(seg) {
@@ -1187,39 +1667,119 @@ const StudyMonitor = {
         return (segments || []).filter(seg => this.getSegmentDateString(seg) === dateStr);
     },
 
+    getSegmentIdentity: function(seg) {
+        if (!seg) return '';
+        const start = this.getSegmentStartMs(seg);
+        const end = this.getSegmentEndMs(seg);
+        return [
+            String(start || ''),
+            String(end || ''),
+            String(seg.activity || '').trim().toLowerCase()
+        ].join('|');
+    },
+
+    mergeActivitySegments: function(...segmentGroups) {
+        const seen = new Map();
+        segmentGroups.flat().forEach(seg => {
+            if (!seg) return;
+            const start = this.getSegmentStartMs(seg);
+            const end = this.getSegmentEndMs(seg);
+            if (!start || !end || end <= start) return;
+            const normalized = {
+                ...seg,
+                start,
+                end,
+                duration: end - start
+            };
+            const identity = this.getSegmentIdentity(normalized);
+            if (!identity) return;
+            const existing = seen.get(identity);
+            if (!existing || (normalized.updatedAt || normalized.updated_at || 0) > (existing.updatedAt || existing.updated_at || 0)) {
+                seen.set(identity, normalized);
+            }
+        });
+        return Array.from(seen.values()).sort((a, b) => this.getSegmentStartMs(a) - this.getSegmentStartMs(b));
+    },
+
     namesMatch: function(left, right) {
         const clean = (value) => String(value || '')
             .trim()
             .toLowerCase()
             .replace(/[._-]+/g, ' ')
             .replace(/\s+/g, ' ');
-        return !!clean(left) && clean(left) === clean(right);
+        const leftClean = clean(left);
+        const rightClean = clean(right);
+        const token = (value) => clean(value).replace(/\s+/g, '');
+        return !!leftClean && !!rightClean && (
+            leftClean === rightClean ||
+            token(left) === token(right)
+        );
+    },
+
+    buildMonitorHistoryId: function(user, dateStr) {
+        const safeUser = String(user || 'unknown')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'unknown';
+        return `monitor_history_${safeUser}_${String(dateStr || '').trim()}`;
     },
 
     getLocalArchivedDay: function(agentName, dateStr) {
         const historyLog = this.readLocalJson('monitor_history', []);
-        return (Array.isArray(historyLog) ? historyLog : []).find(row =>
+        const matches = (Array.isArray(historyLog) ? historyLog : []).filter(row =>
             this.namesMatch(row && (row.user || row.user_id || row.trainee), agentName)
             && String(row && row.date || '') === dateStr
-        ) || null;
+        );
+        return this.mergeArchivedDayRows(matches, agentName, dateStr);
     },
 
     cacheArchivedDay: function(day) {
         if (!day || !day.user || !day.date) return;
         let historyLog = this.readLocalJson('monitor_history', []);
         if (!Array.isArray(historyLog)) historyLog = [];
-        const exists = historyLog.some(row =>
+        const existingRows = historyLog.filter(row =>
             this.namesMatch(row && (row.user || row.user_id || row.trainee), day.user)
             && String(row && row.date || '') === String(day.date || '')
         );
-        if (!exists) {
-            historyLog.push(day);
-            try {
-                localStorage.setItem('monitor_history', JSON.stringify(historyLog));
-            } catch (error) {
-                console.warn('Unable to cache archived monitor day locally.', error);
-            }
+        const mergedDay = this.mergeArchivedDayRows([...existingRows, day], day.user, day.date) || day;
+        const retained = historyLog.filter(row =>
+            !(this.namesMatch(row && (row.user || row.user_id || row.trainee), day.user)
+            && String(row && row.date || '') === String(day.date || ''))
+        );
+        retained.push(mergedDay);
+        try {
+            localStorage.setItem('monitor_history', JSON.stringify(retained));
+        } catch (error) {
+            console.warn('Unable to cache archived monitor day locally.', error);
         }
+    },
+
+    mergeArchivedDayRows: function(rows, agentName = '', dateStr = '') {
+        const matches = (Array.isArray(rows) ? rows : []).filter(Boolean);
+        if (!matches.length) return null;
+        const details = this.mergeActivitySegments(...matches.map(row =>
+            Array.isArray(row.details) ? row.details : (Array.isArray(row.history) ? row.history : [])
+        ));
+        const user = matches.find(row => row.user || row.user_id || row.trainee)?.user
+            || matches.find(row => row.user_id)?.user_id
+            || matches.find(row => row.trainee)?.trainee
+            || agentName;
+        const date = matches.find(row => row.date)?.date || dateStr;
+        const updatedAt = matches
+            .map(row => row.updated_at || row.updatedAt || row.lastModified || '')
+            .filter(Boolean)
+            .sort()
+            .pop() || new Date().toISOString();
+        return {
+            ...matches[matches.length - 1],
+            id: this.buildMonitorHistoryId(user || agentName, date),
+            user,
+            date,
+            summary: this.calculateDailyStats(details),
+            details,
+            updatedAt
+        };
     },
 
     fetchArchivedDayFromServer: async function(agentName, dateStr) {
@@ -1238,26 +1798,55 @@ const StudyMonitor = {
         };
 
         try {
-            let response = await client
+            const collected = [];
+            const addRows = (rows) => {
+                (Array.isArray(rows) ? rows : []).forEach(row => {
+                    if (!row || collected.some(existing => String(existing.id || '') === String(row.id || ''))) return;
+                    collected.push(row);
+                });
+            };
+
+            const direct = await client
                 .from('monitor_history')
                 .select('id,user_id,updated_at,data')
                 .ilike('user_id', agentName)
                 .eq('data->>date', dateStr)
                 .order('updated_at', { ascending: false })
-                .limit(5);
+                .limit(50);
 
-            if (response.error) {
-                console.warn('Archived monitor direct lookup failed, trying date fallback.', response.error);
-                response = await client
+            if (direct.error) console.warn('Archived monitor direct lookup failed, trying fallbacks.', direct.error);
+            else addRows(direct.data);
+
+            const canonicalId = this.buildMonitorHistoryId(agentName, dateStr);
+            const byId = await client
+                .from('monitor_history')
+                .select('id,user_id,updated_at,data')
+                .eq('id', canonicalId)
+                .limit(1);
+
+            if (byId.error) console.warn('Archived monitor canonical lookup failed.', byId.error);
+            else addRows(byId.data);
+
+            let rows = collected.map(normalizeRow);
+            let matchingRows = rows.filter(row => this.namesMatch(row.user, agentName) && row.date === dateStr);
+
+            if (!matchingRows.length) {
+                const fallback = await client
                     .from('monitor_history')
                     .select('id,user_id,updated_at,data')
                     .eq('data->>date', dateStr)
                     .order('updated_at', { ascending: false })
-                    .limit(100);
+                    .limit(500);
+                if (fallback.error) {
+                    console.warn('Archived monitor date fallback failed.', fallback.error);
+                } else {
+                    addRows(fallback.data);
+                }
+                rows = collected.map(normalizeRow);
+                matchingRows = rows.filter(row => this.namesMatch(row.user, agentName) && row.date === dateStr);
             }
 
-            const rows = Array.isArray(response.data) ? response.data.map(normalizeRow) : [];
-            const match = rows.find(row => this.namesMatch(row.user, agentName) && row.date === dateStr) || null;
+            const match = this.mergeArchivedDayRows(matchingRows, agentName, dateStr);
             if (match) this.cacheArchivedDay(match);
             return match;
         } catch (error) {
@@ -1268,7 +1857,9 @@ const StudyMonitor = {
 
     getArchivedSegmentsForDate: async function(agentName, dateStr) {
         const localDay = this.getLocalArchivedDay(agentName, dateStr);
-        const day = localDay || await this.fetchArchivedDayFromServer(agentName, dateStr);
+        const serverDay = await this.fetchArchivedDayFromServer(agentName, dateStr);
+        const day = this.mergeArchivedDayRows([localDay, serverDay].filter(Boolean), agentName, dateStr) || localDay || serverDay;
+        if (day) this.cacheArchivedDay(day);
         return day && Array.isArray(day.details) ? this.filterSegmentsByDate(day.details, dateStr) : [];
     },
 
@@ -1294,6 +1885,60 @@ const StudyMonitor = {
         return morningOverlap + afternoonOverlap;
     },
 
+    getTimelineAxisBounds: function(dateStr) {
+        const bounds = this.getWorkingWindowBounds(dateStr);
+        const todayStr = this.getLocalDateString();
+        const now = Date.now();
+        const isToday = String(dateStr || '') === todayStr;
+        let axisEnd = bounds.workEnd;
+        if (isToday) {
+            axisEnd = Math.max(bounds.workStart, Math.min(now, bounds.workEnd));
+        }
+        return {
+            start: bounds.workStart,
+            end: axisEnd,
+            workEnd: bounds.workEnd,
+            lunchStart: bounds.lunchStart,
+            lunchEnd: bounds.lunchEnd
+        };
+    },
+
+    getTimelineClockSlices: function(seg, dateStr, axisBounds = null) {
+        const segStart = this.getSegmentStartMs(seg);
+        const segEnd = this.getSegmentEndMs(seg);
+        if (!segStart || !segEnd) return [];
+
+        const bounds = this.getWorkingWindowBounds(dateStr);
+        const axis = axisBounds || this.getTimelineAxisBounds(dateStr);
+        const ranges = [
+            [bounds.workStart, bounds.lunchStart],
+            [bounds.lunchEnd, axis.end]
+        ];
+
+        return ranges.map(([rangeStart, rangeEnd]) => {
+            const start = Math.max(segStart, rangeStart, axis.start);
+            const end = Math.min(segEnd, rangeEnd, axis.end);
+            return end > start ? { start, end, duration: end - start } : null;
+        }).filter(Boolean);
+    },
+
+    buildTimelineTickHtml: function(dateStr, axisBounds = null) {
+        const axis = axisBounds || this.getTimelineAxisBounds(dateStr);
+        const total = Math.max(1, axis.end - axis.start);
+        const tickStep = 30 * 60 * 1000;
+        const ticks = [];
+        const firstTick = Math.ceil(axis.start / tickStep) * tickStep;
+
+        for (let ts = firstTick; ts <= axis.end; ts += tickStep) {
+            const left = ((ts - axis.start) / total) * 100;
+            const d = new Date(ts);
+            const label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            ticks.push(`<span class="timeline-clock-tick" style="left:${left}%;" title="${label}"><em>${label}</em></span>`);
+        }
+
+        return ticks.join('');
+    },
+
     getCurrentSegmentForDate: function(activity, dateStr) {
         if (!activity || !activity.since) return null;
         const currentDuration = Date.now() - activity.since;
@@ -1316,6 +1961,15 @@ const StudyMonitor = {
         return dateSegments.sort((a, b) => this.getSegmentStartMs(a) - this.getSegmentStartMs(b));
     },
 
+    getActivitySegmentsForDate: async function(agentName, dateStr) {
+        const data = this.readLocalJson('monitor_data', {});
+        const activity = data && data[agentName];
+        const liveSegments = activity ? this.getLiveSegmentsForDate(activity, dateStr) : [];
+        const archivedSegments = await this.getArchivedSegmentsForDate(agentName, dateStr);
+        return this.mergeActivitySegments(liveSegments, archivedSegments)
+            .filter(seg => this.getEffectiveDurationForDate(seg, dateStr) > 0);
+    },
+
     // --- HELPER: LOCAL DATE STRING (YYYY-MM-DD) ---
     getLocalDateString: function(date = new Date()) {
         const now = date instanceof Date ? date : new Date(date);
@@ -1334,7 +1988,13 @@ const StudyMonitor = {
 
         // 0. Violation is always external
         if (act.startsWith('violation:')) return 'external';
-        if (act.startsWith('in-app study:')) return 'material';
+        if (act.startsWith('assessment:') || act.startsWith('live assessment:') || act.startsWith('vetting arena:')) return 'assessment';
+        if (act.startsWith('portal navigation:') || act.startsWith('navigating:')) return 'portal';
+        if (act.startsWith('in-app study:') || act.startsWith('study material:')) {
+            return act.includes('(inactive') ? 'idle' : 'material';
+        }
+        if (act.startsWith('study tool:')) return 'tool';
+        if (act.startsWith('communication:')) return 'tool';
 
         // Define keywords
         const materialKeywords = ['.pdf', '.mp4', 'genially', 'sharepoint', 'course', 'document', 'standards', 'training', 'vetting', 'study material', 'assessment overview', 'draw.io', 'drawio', 'diagrams.net'];
@@ -1355,7 +2015,6 @@ const StudyMonitor = {
             // If it's marked as studying but didn't match above, it's likely a tool or misc work.
             return 'tool';
         }
-        if (act.startsWith('navigating:')) return 'tool';
         if (act.startsWith('system:')) return 'tool';
 
         // 4. Fallback for whitelisted items that didn't match keywords
@@ -1371,7 +2030,7 @@ const StudyMonitor = {
 
     // --- HELPER: CALCULATE DAILY STATS (Working Hours Only) ---
     calculateDailyStats: function(historySegments) {
-        let totalMs = 0, materialMs = 0, toolMs = 0, extMs = 0, idleMs = 0;
+        let totalMs = 0, materialMs = 0, toolMs = 0, assessmentMs = 0, portalMs = 0, extMs = 0, idleMs = 0;
         
         historySegments.forEach(seg => {
              const dateStr = this.getSegmentDateString(seg);
@@ -1388,6 +2047,10 @@ const StudyMonitor = {
                  materialMs += effectiveDuration;
              } else if (category === 'tool') {
                  toolMs += effectiveDuration;
+             } else if (category === 'assessment') {
+                 assessmentMs += effectiveDuration;
+             } else if (category === 'portal') {
+                 portalMs += effectiveDuration;
              } else if (category === 'external') {
                  if (effectiveDuration > TOLERANCE) {
                      toolMs += TOLERANCE;
@@ -1405,7 +2068,7 @@ const StudyMonitor = {
              }
         });
         
-        return { material: materialMs, tool: toolMs, study: materialMs + toolMs, external: extMs, idle: idleMs, total: totalMs };
+        return { material: materialMs, tool: toolMs, assessment: assessmentMs, portal: portalMs, study: materialMs + toolMs, external: extMs, idle: idleMs, total: totalMs };
     },
 
     // --- DAILY ARCHIVE LOGIC ---
@@ -1441,12 +2104,16 @@ const StudyMonitor = {
                 const segments = this.filterSegmentsByDate(rawSegments, lastDate);
                 const stats = this.calculateDailyStats(segments);
 
-                history.push({
+                this.cacheArchivedDay({
+                    id: this.buildMonitorHistoryId(CURRENT_USER.user, lastDate),
                     date: lastDate,
                     user: CURRENT_USER.user,
                     summary: stats,
-                    details: segments // Archive full details
+                    details: segments, // Archive full details
+                    updatedAt: new Date().toISOString()
                 });
+                history = this.readLocalJson('monitor_history', []);
+                if (!Array.isArray(history)) history = [];
                 
                 // NEW: Retention Policy (Keep last 30 days locally to prevent bloat)
                 if (history.length > 30) {
@@ -1515,8 +2182,10 @@ const StudyMonitor = {
         if (restoreBtn) restoreBtn.remove();
 
         this.isStudyOpen = true;
+        this.lastStudyEngagementAt = Date.now();
         this.track(this.buildInAppStudyLabel(title));
         this.browserState.homeUrl = this.cleanUrl(url);
+        this.startStudyEngagementPoller();
 
         // Build browser shell if it doesn't exist
         if (!document.getElementById('study-browser-shell')) {
@@ -1549,7 +2218,7 @@ const StudyMonitor = {
         if (overlay) overlay.classList.add('hidden');
         this.setStudyOverlayInteractionState(false);
         this.isStudyOpen = false;
-        this.track("Navigating: Dashboard (Study Minimized)");
+        this.track("Portal Navigation: Dashboard (Study Minimized)");
         
         // Add persistent floating button to return to tabs
         if (!document.getElementById('study-restore-btn')) {
@@ -1572,9 +2241,10 @@ const StudyMonitor = {
         
         const activeTab = this.browserState.tabs.find(t => t.id === this.browserState.activeTabId);
         if (activeTab) {
-            this.track(`Studying: ${activeTab.title}`);
+            this.recordStudyEngagement('restore');
+            this.track(this.buildStudyContextLabel(activeTab));
         } else {
-            this.track("Navigating: Study Browser");
+            this.track("Portal Navigation: Study Browser");
         }
         
         const btn = document.getElementById('study-restore-btn');
@@ -1592,12 +2262,13 @@ const StudyMonitor = {
         this.browserState.tabs = [];
         this.browserState.activeTabId = null;
         this.browserState.homeUrl = null;
+        this.stopStudyEngagementPoller();
         if (overlay) overlay.innerHTML = ''; // Destroy webviews and UI
 
         const btn = document.getElementById('study-restore-btn');
         if (btn) btn.remove();
 
-        this.track("Navigating: Schedule"); // Assume return to schedule
+        this.track("Portal Navigation: Schedule"); // Assume return to schedule
     },
 
     getBrowserShellHTML: function() {
@@ -1941,6 +2612,8 @@ const StudyMonitor = {
             setTimeout(() => {
                 try { activeTab.webview.focus(); } catch (e) {}
             }, 50);
+            this.recordStudyEngagement('tab-switch');
+            this.track(this.buildStudyContextLabel(activeTab));
         }
         this.renderTabs();
         this.updateBrowserChrome();
@@ -1996,6 +2669,7 @@ const StudyMonitor = {
             tab.usedCachedFallback = false;
             tab.cpanelRecoveryAttempted = false;
             tab.title = 'Loading...';
+            this.recordStudyEngagement('navigation-start');
             this.renderTabs();
             this.updateBrowserChrome();
         });
@@ -2016,6 +2690,8 @@ const StudyMonitor = {
             this.refreshTabNavigationState(tab);
             this.renderTabs();
             this.updateBrowserChrome();
+            this.installStudyEngagementProbe(tab);
+            this.recordStudyEngagement('page-loaded');
             if (!String(tab.url || '').startsWith('data:')) {
                 this.cacheStudyPageLocally(tab);
             }
@@ -2040,7 +2716,8 @@ const StudyMonitor = {
             this.updateBrowserChrome();
             
             if (this.browserState.activeTabId === tab.id) {
-                this.track(this.buildInAppStudyLabel(e.title.substring(0, 80)));
+                this.recordStudyEngagement('title-updated');
+                this.track(this.buildStudyContextLabel(tab));
             }
         });
 
@@ -2049,7 +2726,8 @@ const StudyMonitor = {
             if (!String(e.url || '').startsWith('data:')) tab.usedCachedFallback = false;
             this.refreshTabNavigationState(tab);
             this.updateBrowserChrome();
-            this.track(this.buildInAppStudyLabel((webview.getTitle() || tab.title).substring(0, 80)));
+            this.recordStudyEngagement('navigation');
+            this.track(this.buildStudyContextLabel(tab));
         });
 
         webview.addEventListener('did-navigate-in-page', (e) => {
@@ -2057,6 +2735,7 @@ const StudyMonitor = {
             if (!String(e.url || '').startsWith('data:')) tab.usedCachedFallback = false;
             this.refreshTabNavigationState(tab);
             this.updateBrowserChrome();
+            this.recordStudyEngagement('in-page-navigation');
         });
 
         webview.addEventListener('new-window', (e) => {
@@ -2109,6 +2788,7 @@ const StudyMonitor = {
         webview.addEventListener('dom-ready', () => {
             webview.dataset.domReady = '1';
             setTimeout(() => this.refreshTabNavigationState(tab), 100);
+            this.installStudyEngagementProbe(tab);
             webview.executeJavaScript(`
                 document.addEventListener('click', () => { console.log('__STUDY_CLICK__'); });
             `);
@@ -2116,7 +2796,7 @@ const StudyMonitor = {
 
         webview.addEventListener('console-message', (e) => {
             if (e.message === '__STUDY_CLICK__') {
-                this.recordClick();
+                this.recordStudyEngagement('click');
             } else if (typeof e.message === 'string' && e.message.startsWith('__MARK_CLARITY__:')) {
                 const dataStr = e.message.substring(17);
                 this.processMarkForClarity(dataStr, tab.id);
@@ -2240,13 +2920,67 @@ const StudyMonitor = {
             .sort((a, b) => a.localeCompare(b));
     },
 
+    getAgentGroupId: function(agentName) {
+        const rosters = this.readLocalJson('rosters', {});
+        const target = String(agentName || '').trim().toLowerCase();
+        if (!target) return '';
+        for (const [gid, members] of Object.entries(rosters || {})) {
+            if (Array.isArray(members) && members.some(m => String(m || '').trim().toLowerCase() === target)) {
+                return String(gid || '');
+            }
+        }
+        return '';
+    },
+
+    getGroupLabel: function(groupId) {
+        const raw = String(groupId || '').trim();
+        if (!raw) return 'No Group';
+        const schedules = this.readLocalJson('schedules', {});
+        const schedule = Object.values(schedules || {}).find(s => String(s?.assigned || '') === raw);
+        const explicitName = String(schedule?.groupName || schedule?.name || '').trim();
+        if (explicitName) return explicitName;
+        const match = raw.match(/^(\d{4})[-_/]?(\d{1,2})(?:[-_/]?([A-Z]))?$/i);
+        if (match) {
+            const year = match[1];
+            const monthIndex = Math.max(0, Math.min(11, Number(match[2]) - 1));
+            const month = new Date(Number(year), monthIndex, 1).toLocaleString('en-ZA', { month: 'short' });
+            return `${month} ${year}${match[3] ? ` Group ${match[3].toUpperCase()}` : ''}`;
+        }
+        return `Group ${raw}`;
+    },
+
+    getMonitorGroups: function() {
+        const rosters = this.readLocalJson('rosters', {});
+        return Object.entries(rosters || {})
+            .filter(([, members]) => Array.isArray(members) && members.length > 0)
+            .map(([id, members]) => ({ id: String(id), label: this.getGroupLabel(id), count: members.length }))
+            .sort((a, b) => a.label.localeCompare(b.label));
+    },
+
     getVisibleAgents: function() {
-        return this.monitorScope === 'all' ? this.getAllTrainees() : this.getScheduledAgents();
+        const baseAgents = this.monitorScope === 'all' ? this.getAllTrainees() : this.getScheduledAgents();
+        const search = String(this.monitorSearch || '').trim().toLowerCase();
+        const group = String(this.monitorGroupFilter || '').trim();
+        return baseAgents.filter(agent => {
+            if (search && !String(agent || '').toLowerCase().includes(search)) return false;
+            if (group && this.getAgentGroupId(agent) !== group) return false;
+            return true;
+        });
     },
 
     setMonitorScope: function(scope) {
         this.monitorScope = scope === 'all' ? 'all' : 'scheduled';
         this.forceRefresh = true;
+        renderActivityMonitorContent();
+    },
+
+    setMonitorSearch: function(value) {
+        this.monitorSearch = String(value || '');
+        renderActivityMonitorContent();
+    },
+
+    setMonitorGroupFilter: function(value) {
+        this.monitorGroupFilter = String(value || '');
         renderActivityMonitorContent();
     },
 
@@ -2301,14 +3035,14 @@ const StudyMonitor = {
     },
 
     simplifyActivityName: function(activityString) {
-        const raw = String(activityString || '').replace(/^(Studying:\s*|External:\s*|Violation:\s*|Idle:\s*|System:\s*|Navigating:\s*)/i, '').trim();
+        const raw = String(activityString || '').replace(/^(Studying:\s*|Study Material:\s*|Study Tool:\s*|Communication:\s*|Assessment:\s*|Live Assessment:\s*|Vetting Arena:\s*|Portal Navigation:\s*|External:\s*|Violation:\s*|Idle:\s*|System:\s*|Navigating:\s*)/i, '').trim();
         if (!raw) return 'No activity reported';
 
         if (raw.includes('sharepoint.com') || raw.includes('microsoftonline.com')) {
             if (raw.includes('.mp4') || raw.toLowerCase().includes('stream.aspx')) return 'SharePoint training video';
             return 'SharePoint training document';
         }
-        if (String(activityString || '').toLowerCase().startsWith('in-app study:')) {
+        if (/^(in-app study:|study material:|study tool:)/i.test(String(activityString || ''))) {
             return raw.replace(/\s*\[(.*?)\]\s*$/, '').trim();
         }
         if (raw.toLowerCase().includes('qcontact')) return 'Q-Contact';
@@ -2344,10 +3078,24 @@ const StudyMonitor = {
                 detail: 'The active app or window is not currently classified as training or work related.'
             };
         }
-        if (current.toLowerCase().startsWith('in-app study:')) {
+        if (current.toLowerCase().startsWith('study material:')) {
             return {
                 headline: `Trusted study: ${pretty}`,
-                detail: 'This activity happened inside the secured in-app study browser and is treated as valid study time.'
+                detail: current.toLowerCase().includes('(inactive')
+                    ? 'Study material is open, but no recent page engagement was detected.'
+                    : 'This activity happened inside the secured in-app study browser and is treated as active study time.'
+            };
+        }
+        if (category === 'assessment') {
+            return {
+                headline: `Assessment mode: ${pretty}`,
+                detail: 'Live assessment and vetting activity is tracked separately from study or idle time.'
+            };
+        }
+        if (category === 'portal') {
+            return {
+                headline: `Portal navigation: ${pretty}`,
+                detail: 'Moving through the app is valid activity, but it is not counted as active studying.'
             };
         }
         if (category === 'material') {
@@ -2381,7 +3129,9 @@ const StudyMonitor = {
         if (current === 'No Data') return { label: 'No Data Yet', className: 'status-fail', accent: '#95a5a6' };
         if (current.startsWith('Violation')) return { label: 'Attention Needed', className: 'status-fail', accent: '#ff5252' };
         if (current.startsWith('External')) return { label: 'Outside Work', className: 'status-improve', accent: '#f39c12' };
-        if (this.isProductiveCategory(category) || activity?.isStudyOpen) return { label: 'On Task', className: 'status-pass', accent: '#2ecc71' };
+        if (category === 'assessment') return { label: 'Assessment', className: 'status-pass', accent: '#8e44ad' };
+        if (this.isProductiveCategory(category)) return { label: 'On Task', className: 'status-pass', accent: '#2ecc71' };
+        if (category === 'portal') return { label: 'In Portal', className: 'status-improve', accent: '#f1c40f' };
         if (current.toLowerCase().includes('idle')) return { label: 'Away / Idle', className: 'status-fail', accent: '#95a5a6' };
         return { label: 'In Portal', className: 'status-improve', accent: '#f1c40f' };
     },
@@ -2395,7 +3145,7 @@ const StudyMonitor = {
             acc.total += 1;
             if (current === 'No Data') acc.noData += 1;
             else if (current.startsWith('Violation') || current.startsWith('External')) acc.attention += 1;
-            else if (this.isProductiveCategory(category) || activity.isStudyOpen) acc.onTask += 1;
+            else if (category === 'assessment' || this.isProductiveCategory(category)) acc.onTask += 1;
             else acc.idle += 1;
             return acc;
         }, { total: 0, onTask: 0, attention: 0, idle: 0, noData: 0 });
@@ -2432,11 +3182,18 @@ const StudyMonitor = {
                 ${pendingViolations > 0 ? `<span class="violation-review-count">${pendingViolations}</span>` : ''}
             </button>
         `;
+    },
+
+    renderMonitorGroupOptions: function() {
+        const groups = this.getMonitorGroups();
+        return ['<option value="">All Groups</option>']
+            .concat(groups.map(group => `<option value="${this.escapeHtml(group.id)}" ${this.monitorGroupFilter === group.id ? 'selected' : ''}>${this.escapeHtml(group.label)} (${group.count})</option>`))
+            .join('');
     }
 };
 
 StudyMonitor.toggleSummary = function() {
-    this.viewMode = this.viewMode === 'list' ? 'summary' : 'list';
+    this.viewMode = 'summary';
     renderActivityMonitorContent();
 };
 
@@ -2445,210 +3202,27 @@ StudyMonitor.toggleSummary = function() {
 let ACTIVITY_MONITOR_INTERVAL = null;
 
 window.openActivityMonitorModal = function() {
-    const modal = document.getElementById('activityMonitorModal');
-    if(modal) {
-        modal.classList.remove('hidden');
-        renderActivityMonitorContent();
-        // Start 30s auto-refresh
-        if(ACTIVITY_MONITOR_INTERVAL) clearInterval(ACTIVITY_MONITOR_INTERVAL);
-        ACTIVITY_MONITOR_INTERVAL = setInterval(renderActivityMonitorContent, 180000); // 3 Minutes
+    StudyMonitor.viewMode = 'summary';
+    if (typeof showTab === 'function' && document.getElementById('activity-monitor-view')) {
+        showTab('activity-monitor-view');
     }
+    renderActivityMonitorContent();
+    if(ACTIVITY_MONITOR_INTERVAL) clearInterval(ACTIVITY_MONITOR_INTERVAL);
+    ACTIVITY_MONITOR_INTERVAL = setInterval(renderActivityMonitorContent, 180000); // 3 Minutes
 };
 
 window.closeActivityMonitorModal = function() {
-    const modal = document.getElementById('activityMonitorModal');
-    if(modal) modal.classList.add('hidden');
+    const view = document.getElementById('activity-monitor-view');
+    if (view && view.classList.contains('active') && typeof showTab === 'function') {
+        showTab('dashboard-view');
+    }
     if(ACTIVITY_MONITOR_INTERVAL) clearInterval(ACTIVITY_MONITOR_INTERVAL);
 };
 
 function renderActivityMonitorContent() {
     const container = document.getElementById('activityMonitorContent');
     if(!container) return;
-
-    // Redirect to Summary View if active
-    if (StudyMonitor.viewMode === 'summary') {
-        renderActivitySummary(container);
-        return;
-    }
-
-    const data = StudyMonitor.readLocalJson('monitor_data', {});
-    const targetAgents = StudyMonitor.getVisibleAgents();
-    const stats = StudyMonitor.getScopeSummaryStats(targetAgents, data);
-
-    if (!container.querySelector('.activity-monitor-shell')) {
-        container.innerHTML = `
-            <div class="activity-monitor-shell">
-                <div class="activity-monitor-toolbar">
-                    <div>
-                        <h4 class="activity-monitor-title">Live Activity View</h4>
-                        <p class="activity-monitor-subtitle">Anything happening inside the secured study browser counts as trusted study time. The detailed concern path is what happens outside the app.</p>
-                    </div>
-                    <div class="activity-monitor-toolbar-actions">
-                        ${StudyMonitor.renderScopeControls()}
-                    </div>
-                </div>
-                <div class="activity-monitor-stats" id="activity-monitor-stats"></div>
-                <div class="monitor-grid"></div>
-            </div>
-        `;
-    } else {
-        const actions = container.querySelector('.activity-monitor-toolbar-actions');
-        if (actions) actions.innerHTML = StudyMonitor.renderScopeControls();
-    }
-
-    const statsEl = document.getElementById('activity-monitor-stats');
-    if (statsEl) {
-        statsEl.innerHTML = `
-            <div class="activity-monitor-stat-card">
-                <span class="activity-monitor-stat-label">Visible Agents</span>
-                <strong class="activity-monitor-stat-value">${stats.total}</strong>
-            </div>
-            <div class="activity-monitor-stat-card">
-                <span class="activity-monitor-stat-label">On Task</span>
-                <strong class="activity-monitor-stat-value" style="color:#2ecc71;">${stats.onTask}</strong>
-            </div>
-            <div class="activity-monitor-stat-card">
-                <span class="activity-monitor-stat-label">Attention Needed</span>
-                <strong class="activity-monitor-stat-value" style="color:#f39c12;">${stats.attention}</strong>
-            </div>
-            <div class="activity-monitor-stat-card">
-                <span class="activity-monitor-stat-label">Away or No Data</span>
-                <strong class="activity-monitor-stat-value" style="color:#95a5a6;">${stats.idle + stats.noData}</strong>
-            </div>
-        `;
-    }
-
-    const grid = container.querySelector('.monitor-grid');
-
-    if(targetAgents.length === 0) {
-        grid.innerHTML = StudyMonitor.monitorScope === 'scheduled'
-            ? `
-                <div class="activity-monitor-empty">
-                    <i class="fas fa-calendar-times"></i>
-                    <div>No agents are scheduled for today.</div>
-                    <button class="btn-secondary btn-sm" onclick="StudyMonitor.setMonitorScope('all')">Show All Trainees</button>
-                </div>`
-            : `
-                <div class="activity-monitor-empty">
-                    <i class="fas fa-users-slash"></i>
-                    <div>No trainee accounts were found.</div>
-                </div>`;
-        return;
-    }
-
-    const activeIds = new Set();
-
-    targetAgents.sort().forEach(agent => {
-        const activity = data[agent] || { current: 'No Data', since: Date.now(), isStudyOpen: false, history: [] };
-        const durationMs = activity.since ? (Date.now() - activity.since) : 0;
-        const durationStr = StudyMonitor.formatDuration(durationMs);
-        const startedAt = activity.since ? new Date(activity.since).toLocaleTimeString() : 'Unknown';
-        const taskLabel = StudyMonitor.getCurrentTaskForAgent(agent);
-        const readable = StudyMonitor.getReadableActivity(activity);
-        const status = StudyMonitor.getStatusMeta(activity);
-        const violationCounts = StudyMonitor.getViolationReportCountForAgent(agent);
-        
-        // Safe ID for DOM elements
-        const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
-        activeIds.add(`mon_card_${safeId}`);
-
-        // Check if card exists to update IN PLACE (prevents blinking)
-        let card = document.getElementById(`mon_card_${safeId}`);
-        
-        if (!card) {
-            // Create new card structure
-            card = document.createElement('div');
-            card.id = `mon_card_${safeId}`;
-            card.className = 'card monitor-card activity-monitor-card';
-            card.style.marginBottom = '0'; // Grid handles gap
-            card.style.padding = '20px';
-            card.style.borderLeft = '4px solid transparent';
-            card.style.transition = 'all 0.3s ease';
-
-            card.innerHTML = `
-                <div class="activity-monitor-card-top">
-                    <div style="display:flex; align-items:center; gap:10px;">
-                        <div class="activity-monitor-avatar">${StudyMonitor.escapeHtml(agent.charAt(0).toUpperCase())}</div>
-                        <div>
-                            <h4 style="margin:0; font-size:1.05rem;">${StudyMonitor.escapeHtml(agent)}</h4>
-                            <div class="activity-monitor-task"><i class="fas fa-bullseye"></i> ${StudyMonitor.escapeHtml(taskLabel)}</div>
-                        </div>
-                    </div>
-                    <div id="mon_badge_${safeId}"></div>
-                </div>
-                
-                <div class="activity-monitor-current-box">
-                    <div class="activity-monitor-current-label">Right now</div>
-                    <div id="mon_curr_${safeId}" class="activity-monitor-current-text"></div>
-                    <div id="mon_help_${safeId}" class="activity-monitor-help-text"></div>
-                </div>
-
-                <div class="activity-monitor-meta">
-                    <div><strong>Started:</strong> <span id="mon_start_${safeId}"></span></div>
-                    <div><strong>Duration:</strong> <span id="mon_duration_${safeId}"></span></div>
-                </div>
-
-                <button class="btn-secondary btn-sm" id="mon_toggle_${safeId}" style="width:100%;" onclick="StudyMonitor.toggleAgentHistory('${safeId}')">
-                    <i class="fas fa-history"></i> Show Recent Activity
-                </button>
-                
-                <div id="mon_det_${safeId}" class="hidden activity-monitor-history">
-                    <strong class="activity-monitor-history-title">Recent Activity</strong>
-                    <div id="mon_hist_${safeId}" style="max-height:180px; overflow-y:auto; padding-right:5px;"></div>
-                </div>
-            `;
-            grid.appendChild(card);
-        }
-
-        // Dynamic Border Color update
-        card.style.borderLeftColor = status.accent;
-
-        // Update Content
-        document.getElementById(`mon_curr_${safeId}`).innerHTML = `<strong>${StudyMonitor.escapeHtml(readable.headline)}</strong>`;
-        document.getElementById(`mon_help_${safeId}`).innerText = readable.detail;
-        document.getElementById(`mon_start_${safeId}`).innerText = startedAt;
-        document.getElementById(`mon_duration_${safeId}`).innerText = durationStr;
-        document.getElementById(`mon_badge_${safeId}`).innerHTML = `
-            <div style="display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
-                ${violationCounts.total > 0 ? `<button class="activity-monitor-violation-icon ${violationCounts.pending > 0 ? '' : 'reviewed'}" onclick="StudyMonitor.openViolationReviewModal('${agent.replace(/'/g, "\\'")}')" title="Review violation reports for ${StudyMonitor.escapeHtml(agent)}"><i class="fas fa-triangle-exclamation"></i>${violationCounts.pending > 0 ? violationCounts.pending : violationCounts.total}</button>` : ''}
-                <span class="status-badge ${status.className}">${StudyMonitor.escapeHtml(status.label)}</span>
-            </div>
-        `;
-
-        // Update History (Only if details are visible to save DOM ops, or always?)
-        // Let's update always for now so it's ready when expanded
-        const histContainer = document.getElementById(`mon_hist_${safeId}`);
-        if (activity.history && activity.history.length > 0) {
-            const recent = activity.history.slice().reverse().slice(0, 8);
-            let histHtml = `<ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
-                ${recent.map(h => {
-                    const dur = StudyMonitor.formatDuration(h.duration);
-                    const time = new Date(h.start).toLocaleTimeString();
-                    const isVio = h.activity.startsWith('Violation');
-                    return `<li class="activity-monitor-history-row ${isVio ? 'activity-monitor-history-row-warn' : ''}">
-                        <span>${isVio ? '<i class="fas fa-exclamation-triangle"></i> ' : ''}${StudyMonitor.escapeHtml(StudyMonitor.simplifyActivityName(h.activity))}</span>
-                        <span style="color:var(--text-muted); font-family:monospace;">${time} (${dur})</span>
-                    </li>`;
-                }).join('')}
-            </ul>`;
-            if (histContainer) {
-                const scrollPos = histContainer.scrollTop;
-                histContainer.innerHTML = histHtml;
-                histContainer.scrollTop = scrollPos;
-            }
-        } else {
-            if (histContainer) histContainer.innerHTML = '<div style="font-style:italic; color:var(--text-muted);">No history recorded yet.</div>';
-        }
-    });
-
-    // Cleanup Stale Cards (Agents no longer in filter)
-    Array.from(grid.children).forEach(child => {
-        if (child.id && child.id.startsWith('mon_card_') && !activeIds.has(child.id)) {
-            child.remove();
-        }
-    });
-    
-    StudyMonitor.forceRefresh = false; // Reset flag
+    renderActivitySummary(container);
 }
 
 // --- QUEUE SELECTION HELPERS ---
@@ -2762,7 +3336,206 @@ function renderReviewQueue(container) {
     container.innerHTML = html;
 }
 
+function renderActivityMonitorWorkspace(container) {
+    const data = StudyMonitor.readLocalJson('monitor_data', {});
+    const targetAgents = StudyMonitor.getVisibleAgents();
+    const stats = StudyMonitor.getScopeSummaryStats(targetAgents, data);
+    const todayStr = StudyMonitor.getLocalDateString();
+    const groupOptions = StudyMonitor.renderMonitorGroupOptions();
+    const searchValue = StudyMonitor.escapeHtml(StudyMonitor.monitorSearch || '');
+    const activeIds = new Set();
+
+    if (!container.querySelector('.activity-monitor-workspace')) {
+        container.innerHTML = `
+            <div class="activity-monitor-workspace">
+                <div class="activity-monitor-pagebar">
+                    <div>
+                        <div class="dash-eyebrow">Agent Activity Monitor</div>
+                        <h2>Live Activity Timeline</h2>
+                        <p>Focused timeline view for study, work tools, assessments, portal movement, idle time, and violations.</p>
+                    </div>
+                    <div class="activity-monitor-page-actions">
+                        <button class="btn-secondary btn-sm" onclick="renderActivityMonitorContent()"><i class="fas fa-rotate"></i> Refresh</button>
+                        <button class="btn-secondary btn-sm" onclick="StudyMonitor.openViolationReviewModal()"><i class="fas fa-triangle-exclamation"></i> Violations</button>
+                        <button class="btn-secondary btn-sm" onclick="StudyMonitor.archiveLog()"><i class="fas fa-broom"></i> Clear Live Feed</button>
+                        <button class="btn-secondary btn-sm" onclick="closeActivityMonitorModal()"><i class="fas fa-arrow-left"></i> Back</button>
+                    </div>
+                </div>
+                <div class="activity-monitor-controls">
+                    <label>
+                        <span>Search trainee</span>
+                        <input id="activityMonitorSearch" type="search" placeholder="Search by name..." value="${searchValue}" oninput="StudyMonitor.setMonitorSearch(this.value)">
+                    </label>
+                    <label>
+                        <span>Group</span>
+                        <select id="activityMonitorGroupFilter" onchange="StudyMonitor.setMonitorGroupFilter(this.value)">${groupOptions}</select>
+                    </label>
+                    <div class="activity-monitor-scope">
+                        ${StudyMonitor.renderScopeControls()}
+                    </div>
+                </div>
+                <div class="activity-monitor-stats" id="activity-monitor-stats"></div>
+                <div class="activity-monitor-list" id="activityMonitorList"></div>
+            </div>
+        `;
+    } else {
+        const search = document.getElementById('activityMonitorSearch');
+        if (search && search.value !== StudyMonitor.monitorSearch) search.value = StudyMonitor.monitorSearch || '';
+        const group = document.getElementById('activityMonitorGroupFilter');
+        if (group) group.innerHTML = groupOptions;
+        const scope = container.querySelector('.activity-monitor-scope');
+        if (scope) scope.innerHTML = StudyMonitor.renderScopeControls();
+    }
+
+    const statsEl = document.getElementById('activity-monitor-stats');
+    if (statsEl) {
+        statsEl.innerHTML = `
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">Visible Agents</span>
+                <strong class="activity-monitor-stat-value">${stats.total}</strong>
+            </div>
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">On Task</span>
+                <strong class="activity-monitor-stat-value" style="color:#2ecc71;">${stats.onTask}</strong>
+            </div>
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">Attention Needed</span>
+                <strong class="activity-monitor-stat-value" style="color:#f39c12;">${stats.attention}</strong>
+            </div>
+            <div class="activity-monitor-stat-card">
+                <span class="activity-monitor-stat-label">Away or No Data</span>
+                <strong class="activity-monitor-stat-value" style="color:#95a5a6;">${stats.idle + stats.noData}</strong>
+            </div>
+        `;
+    }
+
+    const list = document.getElementById('activityMonitorList');
+    if (!list) return;
+
+    if (targetAgents.length === 0) {
+        list.innerHTML = `
+            <div class="activity-monitor-empty">
+                <i class="fas fa-users-slash"></i>
+                <div>No trainees match the current filters.</div>
+            </div>`;
+        return;
+    }
+
+    const buildSummary = (agent, activity) => {
+        const allSegments = StudyMonitor.getLiveSegmentsForDate(activity, todayStr);
+        let totalMs = 0, materialMs = 0, toolMs = 0, assessmentMs = 0, portalMs = 0, extMs = 0, idleMs = 0;
+        let timelineHtml = '';
+        const config = StudyMonitor.readLocalJson('system_config', {});
+        const TOLERANCE = config.monitoring ? config.monitoring.tolerance_ms : 180000;
+
+        allSegments.forEach(seg => {
+            const effectiveDuration = StudyMonitor.getEffectiveDurationForDate(seg, todayStr);
+            if (effectiveDuration <= 0) return;
+            totalMs += effectiveDuration;
+            const category = StudyMonitor.getCategory(seg.activity);
+            if (category === 'material') materialMs += effectiveDuration;
+            else if (category === 'tool') toolMs += effectiveDuration;
+            else if (category === 'assessment') assessmentMs += effectiveDuration;
+            else if (category === 'portal') portalMs += effectiveDuration;
+            else if (category === 'external') {
+                if (effectiveDuration > TOLERANCE) extMs += (effectiveDuration - TOLERANCE);
+            } else if (effectiveDuration > TOLERANCE) {
+                idleMs += (effectiveDuration - TOLERANCE);
+            }
+        });
+
+        if (totalMs > 0) {
+            allSegments.forEach(seg => {
+                const effectiveDuration = StudyMonitor.getEffectiveDurationForDate(seg, todayStr);
+                if (effectiveDuration <= 0) return;
+                const pct = Math.max(0.75, (effectiveDuration / totalMs) * 100);
+                const category = StudyMonitor.getCategory(seg.activity);
+                let style = '';
+                let typeClass = 'seg-idle';
+                if (category === 'material') typeClass = 'seg-material';
+                else if (category === 'tool') typeClass = 'seg-tool';
+                else if (category === 'assessment') style = 'background:#8e44ad;';
+                else if (category === 'portal') style = 'background:#f1c40f;';
+                else if (category === 'external') typeClass = effectiveDuration > TOLERANCE ? 'seg-ext' : 'seg-tool';
+                timelineHtml += `<div class="timeline-seg ${typeClass}" style="width:${pct}%;${style}" title="${StudyMonitor.escapeHtml(seg.activity)} (${StudyMonitor.formatDuration(effectiveDuration)})"></div>`;
+            });
+        }
+
+        return {
+            totalMs,
+            materialMs,
+            toolMs,
+            assessmentMs,
+            portalMs,
+            extMs,
+            idleMs,
+            timelineHtml: timelineHtml || '<div class="activity-monitor-no-timeline">No working-hours activity</div>'
+        };
+    };
+
+    targetAgents.sort().forEach(agent => {
+        const activity = data[agent] || { current: 'No Data', since: Date.now(), isStudyOpen: false, history: [] };
+        const safeId = agent.replace(/[^a-zA-Z0-9]/g, '_');
+        const rowId = `activity_row_${safeId}`;
+        activeIds.add(rowId);
+        const groupId = StudyMonitor.getAgentGroupId(agent);
+        const groupLabel = StudyMonitor.getGroupLabel(groupId);
+        const taskLabel = StudyMonitor.getCurrentTaskForAgent(agent);
+        const readable = StudyMonitor.getReadableActivity(activity);
+        const status = StudyMonitor.getStatusMeta(activity);
+        const violationCounts = StudyMonitor.getViolationReportCountForAgent(agent);
+        const summary = buildSummary(agent, activity);
+        const durationMs = activity.since ? (Date.now() - activity.since) : 0;
+
+        let row = document.getElementById(rowId);
+        if (!row) {
+            row = document.createElement('article');
+            row.id = rowId;
+            row.className = 'activity-monitor-row';
+            list.appendChild(row);
+        }
+
+        row.style.borderLeftColor = status.accent;
+        row.innerHTML = `
+            <div class="activity-monitor-row-main">
+                <div class="activity-monitor-person">
+                    <div class="activity-monitor-avatar">${StudyMonitor.escapeHtml(agent.charAt(0).toUpperCase())}</div>
+                    <div>
+                        <h3>${StudyMonitor.escapeHtml(agent)}</h3>
+                        <div>${StudyMonitor.escapeHtml(groupLabel)} · ${StudyMonitor.escapeHtml(taskLabel)}</div>
+                    </div>
+                </div>
+                <div class="activity-monitor-now">
+                    <span class="status-badge ${status.className}">${StudyMonitor.escapeHtml(status.label)}</span>
+                    <strong>${StudyMonitor.escapeHtml(readable.headline)}</strong>
+                    <small>${StudyMonitor.escapeHtml(readable.detail)} · Current for ${StudyMonitor.formatDuration(durationMs)}</small>
+                </div>
+                <div class="activity-monitor-row-actions">
+                    ${violationCounts.total > 0 ? `<button class="activity-monitor-violation-icon ${violationCounts.pending > 0 ? '' : 'reviewed'}" onclick="StudyMonitor.openViolationReviewModal('${agent.replace(/'/g, "\\'")}')" title="Review violation reports for ${StudyMonitor.escapeHtml(agent)}"><i class="fas fa-triangle-exclamation"></i>${violationCounts.pending > 0 ? violationCounts.pending : violationCounts.total}</button>` : ''}
+                    <button class="btn-secondary btn-sm" onclick="StudyMonitor.expandTimeline('${agent.replace(/'/g, "\\'")}')"><i class="fas fa-chart-line"></i> Detail</button>
+                </div>
+            </div>
+            <div class="activity-monitor-row-metrics">
+                <span><strong>${Math.round(summary.materialMs / 60000)}m</strong> Material</span>
+                <span><strong>${Math.round(summary.toolMs / 60000)}m</strong> Tools</span>
+                <span><strong>${Math.round(summary.assessmentMs / 60000)}m</strong> Assess</span>
+                <span><strong>${Math.round(summary.portalMs / 60000)}m</strong> Portal</span>
+                <span><strong>${Math.round(summary.extMs / 60000)}m</strong> External</span>
+                <span><strong>${Math.round(summary.idleMs / 60000)}m</strong> Idle</span>
+            </div>
+            <div class="timeline-visual activity-monitor-row-timeline" onclick="StudyMonitor.expandTimeline('${agent.replace(/'/g, "\\'")}')" title="Open timeline detail">${summary.timelineHtml}</div>
+        `;
+    });
+
+    Array.from(list.children).forEach(child => {
+        if (child.id && child.id.startsWith('activity_row_') && !activeIds.has(child.id)) child.remove();
+    });
+}
+
 function renderActivitySummary(container) {
+    renderActivityMonitorWorkspace(container);
+    return;
+
     StudyMonitor.updateWhitelistCache(); // Refresh cache before rendering
     const data = StudyMonitor.readLocalJson('monitor_data', {});
     const targetAgents = StudyMonitor.getVisibleAgents();
@@ -2806,7 +3579,7 @@ function renderActivitySummary(container) {
         }
 
         // 1. Aggregate Data
-        let totalMs = 0, materialMs = 0, toolMs = 0, extMs = 0, idleMs = 0;
+        let totalMs = 0, materialMs = 0, toolMs = 0, assessmentMs = 0, portalMs = 0, extMs = 0, idleMs = 0;
         const topicMap = {};
         const allSegments = StudyMonitor.getLiveSegmentsForDate(activity, todayStr);
 
@@ -2827,7 +3600,7 @@ function renderActivitySummary(container) {
             
             if (category === 'material') {
                 materialMs += effectiveDuration;
-                let topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
+                let topic = seg.activity.replace(/^(Studying:\s*|Study Material:\s*)/i, '').split('(')[0].trim();
                 // URL CLEANUP
                 if (topic.includes('sharepoint.com') || topic.includes('microsoftonline.com')) {
                     if (topic.includes('.mp4') || topic.includes('stream.aspx')) topic = 'Training Video (SharePoint)';
@@ -2837,9 +3610,18 @@ function renderActivitySummary(container) {
                 topicMap[topic].ms += effectiveDuration;
             } else if (category === 'tool') {
                 toolMs += effectiveDuration;
-                let topic = seg.activity.replace('Studying: ', '').split('(')[0].trim();
-                if (topic.includes('System:') || topic.includes('Navigating:')) topic = 'Portal Navigation';
+                let topic = seg.activity.replace(/^(Studying:\s*|Study Tool:\s*|Communication:\s*)/i, '').split('(')[0].trim();
                 if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'tool' };
+                topicMap[topic].ms += effectiveDuration;
+            } else if (category === 'assessment') {
+                assessmentMs += effectiveDuration;
+                let topic = seg.activity.replace(/^(Assessment:\s*|Live Assessment:\s*|Vetting Arena:\s*)/i, '').split('(')[0].trim() || 'Assessment / Vetting';
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'assessment' };
+                topicMap[topic].ms += effectiveDuration;
+            } else if (category === 'portal') {
+                portalMs += effectiveDuration;
+                let topic = seg.activity.replace(/^(Portal Navigation:\s*|Navigating:\s*)/i, '').split('(')[0].trim() || 'Portal Navigation';
+                if (!topicMap[topic]) topicMap[topic] = { ms: 0, type: 'portal' };
                 topicMap[topic].ms += effectiveDuration;
             } else if (category === 'external') {
                 let topic = seg.activity.replace(/^(External:\s*|Violation:\s*)/i, '').trim();
@@ -2878,7 +3660,7 @@ function renderActivitySummary(container) {
         let scoreColor = 'var(--text-muted)'; // Default Grey
 
         if (totalMs > 0) {
-            focusScore = Math.round(((materialMs + toolMs) / totalMs) * 100);
+            focusScore = Math.round(((materialMs + toolMs + assessmentMs) / totalMs) * 100);
             materialScore = Math.round((materialMs / totalMs) * 100);
             scoreText = focusScore + '%';
             matText = materialScore + '%';
@@ -2890,12 +3672,16 @@ function renderActivitySummary(container) {
 
         const matTimeStr = Math.round(materialMs / 60000) + 'm';
         const toolTimeStr = Math.round(toolMs / 60000) + 'm';
+        const assessmentTimeStr = Math.round(assessmentMs / 60000) + 'm';
+        const portalTimeStr = Math.round(portalMs / 60000) + 'm';
         const extTimeStr = Math.round(extMs / 60000) + 'm';
         const idleTimeStr = Math.round(idleMs / 60000) + 'm';
 
         // 3. Precise Activity Breakdown
         const matTopics = Object.entries(topicMap).filter(t => t[1].type === 'material').sort((a,b)=>b[1].ms - a[1].ms);
         const toolTopics = Object.entries(topicMap).filter(t => t[1].type === 'tool').sort((a,b)=>b[1].ms - a[1].ms);
+        const assessmentTopics = Object.entries(topicMap).filter(t => t[1].type === 'assessment').sort((a,b)=>b[1].ms - a[1].ms);
+        const portalTopics = Object.entries(topicMap).filter(t => t[1].type === 'portal').sort((a,b)=>b[1].ms - a[1].ms);
         const extTopics = Object.entries(topicMap).filter(t => t[1].type === 'external').sort((a,b)=>b[1].ms - a[1].ms);
         const vioTopics = Object.entries(topicMap).filter(t => t[1].type === 'violation').sort((a,b)=>b[1].ms - a[1].ms);
 
@@ -2916,11 +3702,13 @@ function renderActivitySummary(container) {
         };
 
         breakdownHtml += renderList('Training Material', matTopics, '#3498db', 'fa-book-open');
-        breakdownHtml += renderList('Support Tools', toolTopics, '#2ecc71', 'fa-tools');
+        breakdownHtml += renderList('Study / Work Tools', toolTopics, '#2ecc71', 'fa-tools');
+        breakdownHtml += renderList('Live Assessment / Vetting', assessmentTopics, '#8e44ad', 'fa-clipboard-check');
+        breakdownHtml += renderList('Portal Navigation', portalTopics, '#f1c40f', 'fa-location-arrow');
         breakdownHtml += renderList('External / Browsing', extTopics, '#f39c12', 'fa-external-link-alt');
         breakdownHtml += renderList('Security Violations', vioTopics, '#ff5252', 'fa-exclamation-triangle');
         
-        if (matTopics.length===0 && toolTopics.length===0 && extTopics.length===0 && vioTopics.length===0) {
+        if (matTopics.length===0 && toolTopics.length===0 && assessmentTopics.length===0 && portalTopics.length===0 && extTopics.length===0 && vioTopics.length===0) {
             breakdownHtml += '<div style="color:var(--text-muted); font-style:italic; font-size:0.8rem; text-align:center; padding:10px;">No specific activities logged.</div>';
         }
 
@@ -2952,6 +3740,12 @@ function renderActivitySummary(container) {
                     typeClass = 'seg-material';
                 } else if (cat === 'tool') {
                     typeClass = 'seg-tool';
+                } else if (cat === 'assessment') {
+                    typeClass = 'seg-tool';
+                    style += `background:#8e44ad;`;
+                } else if (cat === 'portal') {
+                    typeClass = 'seg-tool';
+                    style += `background:#f1c40f;`;
                 } else if (cat === 'external') {
                     if (effectiveDuration > TOLERANCE) {
                         typeClass = 'seg-ext';
@@ -3005,14 +3799,22 @@ function renderActivitySummary(container) {
                         </div>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:8px; text-align:center; font-size:0.85rem; margin-bottom:15px;">
+                <div style="display:grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap:8px; text-align:center; font-size:0.85rem; margin-bottom:15px;">
                     <div style="background:rgba(52, 152, 219, 0.1); padding:8px; border-radius:6px; color:#3498db;">
                         <div id="sum_mat_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
                         <div style="font-size:0.65rem; opacity:0.8;">Material</div>
                     </div>
                     <div style="background:rgba(46, 204, 113, 0.1); padding:8px; border-radius:6px; color:#2ecc71;">
                         <div id="sum_tool_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
-                        <div style="font-size:0.65rem; opacity:0.8;">Tools/Notes</div>
+                        <div style="font-size:0.65rem; opacity:0.8;">Tools</div>
+                    </div>
+                    <div style="background:rgba(142, 68, 173, 0.1); padding:8px; border-radius:6px; color:#b882d8;">
+                        <div id="sum_assess_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
+                        <div style="font-size:0.65rem; opacity:0.8;">Assess</div>
+                    </div>
+                    <div style="background:rgba(241, 196, 15, 0.1); padding:8px; border-radius:6px; color:#f1c40f;">
+                        <div id="sum_portal_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
+                        <div style="font-size:0.65rem; opacity:0.8;">Portal</div>
                     </div>
                     <div style="background:rgba(231, 76, 60, 0.1); padding:8px; border-radius:6px; color:#e74c3c;">
                         <div id="sum_ext_${safeId}" style="font-weight:bold; font-size:1rem;"></div>
@@ -3053,6 +3855,10 @@ function renderActivitySummary(container) {
         if (sumMat) sumMat.innerText = matTimeStr;
         const sumTool = document.getElementById(`sum_tool_${safeId}`);
         if (sumTool) sumTool.innerText = toolTimeStr;
+        const sumAssess = document.getElementById(`sum_assess_${safeId}`);
+        if (sumAssess) sumAssess.innerText = assessmentTimeStr;
+        const sumPortal = document.getElementById(`sum_portal_${safeId}`);
+        if (sumPortal) sumPortal.innerText = portalTimeStr;
         const sumExt = document.getElementById(`sum_ext_${safeId}`);
         if (sumExt) sumExt.innerText = extTimeStr;
         const sumIdle = document.getElementById(`sum_idle_${safeId}`);
@@ -3140,6 +3946,7 @@ StudyMonitor.viewAgentViolations = function(agent) {
 };
 
 StudyMonitor.openViolationReviewModal = function(agent = '') {
+    if (CURRENT_USER && CURRENT_USER.role === 'trainee') return;
     const reports = this.getViolationReports();
     const users = Array.from(new Set(reports.map(r => r.user).filter(Boolean))).sort((a, b) => a.localeCompare(b));
     const safeAgent = String(agent || '');
@@ -3163,6 +3970,7 @@ StudyMonitor.openViolationReviewModal = function(agent = '') {
                         <option value="pending_review">Pending Review</option>
                         <option value="all">All Statuses</option>
                         <option value="reviewed">Reviewed</option>
+                        <option value="not_approved">Not Approved</option>
                     </select>
                 </div>
                 <div>
@@ -3177,6 +3985,11 @@ StudyMonitor.openViolationReviewModal = function(agent = '') {
                     <label>Search</label>
                     <input id="vioReviewSearch" type="text" placeholder="Trigger, reason, person..." oninput="StudyMonitor.renderViolationReviewRows()">
                 </div>
+            </div>
+            <div class="violation-review-bulkbar">
+                <label><input type="checkbox" id="vioReviewSelectAll" onchange="StudyMonitor.toggleAllViolationReviewSelection(this.checked)"> Select visible</label>
+                <span id="vioReviewSelectedCount">0 selected</span>
+                <button class="btn-danger btn-sm" id="vioReviewDeleteSelected" onclick="StudyMonitor.deleteSelectedViolationReports()" disabled><i class="fas fa-trash"></i> Delete Selected</button>
             </div>
             <div id="violationReviewRows" class="violation-review-list"></div>
         </div>
@@ -3197,7 +4010,7 @@ StudyMonitor.renderViolationReviewRows = function() {
     const search = String(document.getElementById('vioReviewSearch')?.value || '').trim().toLowerCase();
 
     const reports = this.getViolationReports().filter(report => {
-        const reportStatus = report.reviewed ? 'reviewed' : String(report.status || 'pending_review');
+        const reportStatus = String(report.status || (report.reviewed ? 'reviewed' : 'pending_review'));
         if (status !== 'all' && reportStatus !== status) return false;
         if (user && String(report.user || '').trim().toLowerCase() !== user) return false;
         if (date && String(report.date || '').trim() !== date) return false;
@@ -3210,21 +4023,39 @@ StudyMonitor.renderViolationReviewRows = function() {
         return true;
     });
 
+    const visibleIds = reports.map(report => String(report.id || '')).filter(Boolean);
+    this.visibleViolationReviewIds = visibleIds;
+    this.violationReviewSelection = new Set(Array.from(this.violationReviewSelection || []).filter(id => visibleIds.includes(id)));
+
     container.innerHTML = reports.map(report => {
         const detected = report.detectedAt ? new Date(report.detectedAt).toLocaleString() : (report.date || '-');
-        const isReviewed = !!report.reviewed || String(report.status || '') === 'reviewed';
+        const reportStatus = String(report.status || '');
+        const isReviewed = !!report.reviewed || reportStatus === 'reviewed' || reportStatus === 'not_approved';
+        const statusLabel = reportStatus === 'not_approved' ? 'Not Approved' : (isReviewed ? 'Reviewed' : 'Pending');
         const reviewedMeta = isReviewed
             ? [report.reviewedBy ? `By ${report.reviewedBy}` : '', report.reviewedAt ? new Date(report.reviewedAt).toLocaleString() : ''].filter(Boolean).join(' | ')
             : '';
         const safeId = encodeURIComponent(String(report.id || ''));
+        const checked = this.violationReviewSelection.has(String(report.id || '')) ? 'checked' : '';
+        const evidence = report.evidence && typeof report.evidence === 'object' ? report.evidence : {};
+        const evidenceFiles = Array.isArray(evidence.files) ? evidence.files : [];
+        const legacyScreenshots = Array.isArray(evidence.screenshots) ? evidence.screenshots : [];
+        const screenshotCount = evidenceFiles.length || legacyScreenshots.length || Number(evidence.screenCount || 0);
+        const hasEvidence = evidenceFiles.length > 0 || legacyScreenshots.length > 0;
+        const captureErrorText = String(evidence.captureError || '');
+        const bucketMissing = /bucket not found/i.test(captureErrorText);
+        const shouldIgnoreEvidence = this.shouldSkipViolationEvidenceCapture(report.trigger, report.activity);
         return `<article class="violation-review-card">
             <div class="violation-review-card-main">
                 <div class="violation-review-card-head">
-                    <div>
-                        <div class="violation-review-agent">${this.escapeHtml(report.user || '-')}</div>
-                        <div class="violation-review-meta">${this.escapeHtml(detected)}</div>
+                    <div style="display:flex; align-items:flex-start; gap:10px;">
+                        <input type="checkbox" class="violation-review-select" ${checked} onchange="StudyMonitor.toggleViolationReviewSelection(decodeURIComponent('${safeId}'), this.checked)" aria-label="Select violation report">
+                        <div>
+                            <div class="violation-review-agent">${this.escapeHtml(report.user || '-')}</div>
+                            <div class="violation-review-meta">${this.escapeHtml(detected)}</div>
+                        </div>
                     </div>
-                    <span class="status-badge ${isReviewed ? 'status-pass' : 'status-fail'}">${isReviewed ? 'Reviewed' : 'Pending'}</span>
+                    <span class="status-badge ${isReviewed ? (reportStatus === 'not_approved' ? 'status-fail' : 'status-pass') : 'status-fail'}">${statusLabel}</span>
                 </div>
                 <div class="violation-review-grid">
                     <div>
@@ -3241,27 +4072,256 @@ StudyMonitor.renderViolationReviewRows = function() {
                     <p>${this.escapeHtml(report.reason || '-')}</p>
                 </div>
                 ${report.adminComment ? `<div class="violation-review-reason"><span>Admin Note</span><p>${this.escapeHtml(report.adminComment)}</p></div>` : ''}
+                <div class="violation-review-reason">
+                    <span>Admin Evidence</span>
+                    <p>${shouldIgnoreEvidence
+                        ? 'Screenshot capture skipped: Not required for lock-idle violations.'
+                        : (hasEvidence
+                        ? `${screenshotCount} screenshot${screenshotCount === 1 ? '' : 's'} captured across connected display${screenshotCount === 1 ? '' : 's'}.`
+                        : (evidence.captureSkipped
+                            ? `Screenshot capture skipped: ${this.escapeHtml(evidence.captureSkipReason || 'Not required for lock-idle violations.')}`
+                            : (bucketMissing
+                                ? 'Screenshot evidence unavailable for this report. Existing reports captured before storage was available may not have screenshots attached.'
+                                : (captureErrorText ? `Screenshot capture failed: ${this.escapeHtml(captureErrorText)}` : 'No screenshot evidence attached.'))))
+                    }</p>
+                </div>
             </div>
             <div class="violation-review-actions">
+                ${hasEvidence && !shouldIgnoreEvidence ? `<button class="btn-secondary btn-sm" onclick="StudyMonitor.openViolationEvidence(decodeURIComponent('${safeId}'))"><i class="fas fa-image"></i> Evidence</button>` : ''}
                 ${isReviewed
                     ? `<span class="violation-review-meta">${this.escapeHtml(reviewedMeta || 'Reviewed')}</span>`
-                    : `<button class="btn-success btn-sm" onclick="StudyMonitor.markViolationReviewed(decodeURIComponent('${safeId}'))"><i class="fas fa-check"></i> Mark Reviewed</button>`}
+                    : `<button class="btn-success btn-sm" onclick="StudyMonitor.markViolationReviewed(decodeURIComponent('${safeId}'), 'approved')"><i class="fas fa-check"></i> Approve</button>
+                       <button class="btn-danger btn-sm" onclick="StudyMonitor.markViolationReviewed(decodeURIComponent('${safeId}'), 'not_approved')"><i class="fas fa-ban"></i> Not Approved</button>`}
             </div>
         </article>`;
     }).join('') || '<div class="violation-review-empty">No violation reports match the current filters.</div>';
+    this.updateViolationReviewBulkState();
 };
 
-StudyMonitor.markViolationReviewed = async function(reportId) {
+StudyMonitor.toggleViolationReviewSelection = function(reportId, checked) {
+    const id = String(reportId || '');
+    if (!id) return;
+    if (!this.violationReviewSelection) this.violationReviewSelection = new Set();
+    if (checked) this.violationReviewSelection.add(id);
+    else this.violationReviewSelection.delete(id);
+    this.updateViolationReviewBulkState();
+};
+
+StudyMonitor.toggleAllViolationReviewSelection = function(checked) {
+    if (!this.violationReviewSelection) this.violationReviewSelection = new Set();
+    const visible = Array.isArray(this.visibleViolationReviewIds) ? this.visibleViolationReviewIds : [];
+    visible.forEach(id => {
+        if (checked) this.violationReviewSelection.add(id);
+        else this.violationReviewSelection.delete(id);
+    });
+    document.querySelectorAll('.violation-review-select').forEach(box => { box.checked = !!checked; });
+    this.updateViolationReviewBulkState();
+};
+
+StudyMonitor.updateViolationReviewBulkState = function() {
+    const selected = this.violationReviewSelection ? this.violationReviewSelection.size : 0;
+    const count = document.getElementById('vioReviewSelectedCount');
+    if (count) count.textContent = `${selected} selected`;
+    const deleteBtn = document.getElementById('vioReviewDeleteSelected');
+    if (deleteBtn) deleteBtn.disabled = selected === 0;
+    const allBox = document.getElementById('vioReviewSelectAll');
+    const visible = Array.isArray(this.visibleViolationReviewIds) ? this.visibleViolationReviewIds : [];
+    if (allBox) {
+        allBox.checked = visible.length > 0 && visible.every(id => this.violationReviewSelection?.has(id));
+        allBox.indeterminate = visible.some(id => this.violationReviewSelection?.has(id)) && !allBox.checked;
+    }
+};
+
+StudyMonitor.deleteViolationEvidenceFiles = async function(report, reason = 'deleted') {
+    const evidence = report?.evidence && typeof report.evidence === 'object' ? report.evidence : {};
+    const files = Array.isArray(evidence.files) ? evidence.files : [];
+    if (!files.length) return;
+
+    const client = window.supabaseClient;
+    const storage = client?.storage;
+    const bucketGroups = files.reduce((acc, file) => {
+        const bucket = file.bucket || evidence.bucket || this.getViolationEvidenceBucket();
+        if (!file.path) return acc;
+        if (!acc[bucket]) acc[bucket] = [];
+        acc[bucket].push(file.path);
+        return acc;
+    }, {});
+
+    if (storage?.from) {
+        for (const [bucket, paths] of Object.entries(bucketGroups)) {
+            const { error } = await storage.from(bucket).remove(paths);
+            if (error) console.warn('Violation evidence storage delete failed:', error);
+        }
+    }
+
+    if (client?.from) {
+        const ids = files.map(file => file.id).filter(Boolean);
+        if (ids.length) {
+            const { error } = await client
+                .from('violation_evidence')
+                .update({
+                    status: 'deleted',
+                    deleted_at: new Date().toISOString(),
+                    reviewed_by: CURRENT_USER?.user || 'admin',
+                    reviewed_at: new Date().toISOString(),
+                    metadata: { deleted_reason: reason }
+                })
+                .in('id', ids);
+            if (error) console.warn('Violation evidence metadata delete failed:', error);
+        }
+    }
+};
+
+StudyMonitor.deleteSelectedViolationReports = async function() {
+    const selected = Array.from(this.violationReviewSelection || []);
+    if (selected.length === 0) return;
+    if (!confirm(`Delete ${selected.length} selected violation report${selected.length === 1 ? '' : 's'}? This will also remove any attached screenshot evidence.`)) return;
+    const selectedSet = new Set(selected);
+    const rawReports = this.getRawViolationReports();
+    const toDelete = rawReports.filter(report => selectedSet.has(String(report.id || '')));
+    for (const report of toDelete) await this.deleteViolationEvidenceFiles(report, 'report_deleted');
+    const reports = rawReports.filter(report => !selectedSet.has(String(report.id || '')));
+    this.violationReviewSelection.clear();
+    try {
+        await this.persistViolationReportDeletion(reports, selected);
+    } catch (error) {
+        console.error('Violation report delete sync failed:', error);
+        this.writeViolationReports(reports);
+        if (typeof showToast === 'function') showToast('Deleted locally, but cloud sync failed. Please sync again before refreshing.', 'error');
+        else alert('Deleted locally, but cloud sync failed. Please sync again before refreshing.');
+    }
+    this.renderViolationReviewRows();
+    renderActivityMonitorContent();
+    if (typeof updateNotifications === 'function') updateNotifications();
+};
+
+StudyMonitor.openViolationEvidence = async function(reportId) {
+    if (CURRENT_USER && CURRENT_USER.role === 'trainee') return;
+    const report = this.getRawViolationReports().find(r => String(r.id || '') === String(reportId || ''));
+    if (this.shouldSkipViolationEvidenceCapture(report?.trigger, report?.activity)) {
+        alert('Screenshot evidence is not captured for lock-idle violations.');
+        return;
+    }
+    const evidence = report?.evidence && typeof report.evidence === 'object' ? report.evidence : {};
+    const files = Array.isArray(evidence.files) ? evidence.files : [];
+    const screenshots = Array.isArray(evidence.screenshots) ? evidence.screenshots : [];
+    if (!files.length && !screenshots.length) {
+        alert('No screenshot evidence is attached to this violation.');
+        return;
+    }
+    const html = `<div class="modal-overlay" id="violationEvidenceModal" style="z-index:10010;">
+        <div class="modal-box violation-evidence-workspace">
+            <div class="violation-evidence-header">
+                <div>
+                    <h3 style="margin:0;"><i class="fas fa-image"></i> Violation Evidence</h3>
+                    <div style="font-size:0.82rem; color:var(--text-muted); margin-top:4px;">Admin-only screenshots for ${this.escapeHtml(report.user || '-')}.</div>
+                </div>
+                <div class="violation-evidence-toolbar">
+                    <button id="violationEvidenceZoomOut" class="btn-secondary btn-sm" type="button" title="Zoom out"><i class="fas fa-search-minus"></i></button>
+                    <button id="violationEvidenceZoomReset" class="btn-secondary btn-sm" type="button" title="Reset zoom"><i class="fas fa-compress-arrows-alt"></i> <span id="violationEvidenceZoomLabel">100%</span></button>
+                    <button id="violationEvidenceZoomIn" class="btn-secondary btn-sm" type="button" title="Zoom in"><i class="fas fa-search-plus"></i></button>
+                    <button id="violationEvidenceClose" class="btn-secondary btn-sm" type="button" title="Close"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div id="violationEvidenceBody" class="violation-evidence-body" data-zoom="1">
+                <div style="color:var(--text-muted);">Loading evidence...</div>
+            </div>
+        </div>
+    </div>`;
+    document.getElementById('violationEvidenceModal')?.remove();
+    document.body.insertAdjacentHTML('beforeend', html);
+    document.getElementById('violationEvidenceZoomOut')?.addEventListener('click', () => this.adjustViolationEvidenceZoom(-0.15));
+    document.getElementById('violationEvidenceZoomReset')?.addEventListener('click', () => this.resetViolationEvidenceZoom());
+    document.getElementById('violationEvidenceZoomIn')?.addEventListener('click', () => this.adjustViolationEvidenceZoom(0.15));
+    document.getElementById('violationEvidenceClose')?.addEventListener('click', () => document.getElementById('violationEvidenceModal')?.remove());
+    const body = document.getElementById('violationEvidenceBody');
+    if (!body) return;
+
+    try {
+        let items = [];
+        if (files.length) {
+            const client = window.supabaseClient;
+            if (!client?.storage?.from) throw new Error('Evidence storage is unavailable in this client session.');
+            items = await Promise.all(files.map(async (file, index) => {
+                const bucket = file.bucket || evidence.bucket || this.getViolationEvidenceBucket();
+                const { data, error } = await client.storage.from(bucket).createSignedUrl(file.path, 300);
+                if (error) throw error;
+                return {
+                    src: data.signedUrl,
+                    name: file.name || `Screen ${index + 1}`,
+                    index
+                };
+            }));
+        } else {
+            items = screenshots.map((shot, index) => ({
+                src: `data:${shot.mime || 'image/jpeg'};base64,${String(shot.data || '')}`,
+                name: shot.name || `Screen ${index + 1}`,
+                index
+            }));
+        }
+
+        body.innerHTML = items.map(item => `<figure class="violation-evidence-figure">
+            <div class="violation-evidence-image-frame">
+                <img class="violation-evidence-image" alt="Violation evidence screen ${item.index + 1}" src="${this.escapeHtml(item.src)}">
+            </div>
+            <figcaption>${this.escapeHtml(item.name)}</figcaption>
+        </figure>`).join('');
+        this.applyViolationEvidenceZoom(1);
+    } catch (error) {
+        body.innerHTML = `<div class="violation-review-empty">Could not load evidence: ${this.escapeHtml(error && error.message || error || 'Unknown error')}</div>`;
+    }
+};
+
+StudyMonitor.applyViolationEvidenceZoom = function(zoom) {
+    const body = document.getElementById('violationEvidenceBody');
+    if (!body) return;
+    const nextZoom = Math.max(0.5, Math.min(3, Number(zoom) || 1));
+    body.dataset.zoom = String(nextZoom);
+    body.querySelectorAll('.violation-evidence-image').forEach(img => {
+        img.style.width = `${nextZoom * 100}%`;
+        img.style.maxWidth = 'none';
+    });
+    const label = document.getElementById('violationEvidenceZoomLabel');
+    if (label) label.textContent = `${Math.round(nextZoom * 100)}%`;
+};
+
+StudyMonitor.adjustViolationEvidenceZoom = function(delta) {
+    const body = document.getElementById('violationEvidenceBody');
+    const current = Number(body?.dataset?.zoom || 1);
+    this.applyViolationEvidenceZoom(current + Number(delta || 0));
+};
+
+StudyMonitor.resetViolationEvidenceZoom = function() {
+    this.applyViolationEvidenceZoom(1);
+};
+
+StudyMonitor.markViolationReviewed = async function(reportId, decision = 'approved') {
     const reports = this.getRawViolationReports();
     const idx = reports.findIndex(r => String(r.id || '') === String(reportId || ''));
     if (idx < 0) return;
 
+    const approved = decision !== 'not_approved';
+    const nextEvidence = reports[idx].evidence && typeof reports[idx].evidence === 'object'
+        ? { ...reports[idx].evidence }
+        : {};
+    if (approved && ((Array.isArray(nextEvidence.screenshots) && nextEvidence.screenshots.length > 0) || (Array.isArray(nextEvidence.files) && nextEvidence.files.length > 0))) {
+        await this.deleteViolationEvidenceFiles(reports[idx], 'approved_by_admin');
+        nextEvidence.deletedAt = new Date().toISOString();
+        nextEvidence.deletedReason = 'approved_by_admin';
+        nextEvidence.deletedScreenshotCount = (nextEvidence.screenshots || []).length + (nextEvidence.files || []).length;
+        nextEvidence.screenshots = [];
+        nextEvidence.files = [];
+        nextEvidence.screenCount = 0;
+    }
+
     reports[idx] = {
         ...reports[idx],
         reviewed: true,
-        status: 'reviewed',
+        status: approved ? 'reviewed' : 'not_approved',
+        decision: approved ? 'approved' : 'not_approved',
         reviewedAt: new Date().toISOString(),
-        reviewedBy: CURRENT_USER?.user || 'admin'
+        reviewedBy: CURRENT_USER?.user || 'admin',
+        evidence: nextEvidence
     };
     this.writeViolationReports(reports);
     if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
@@ -3329,7 +4389,7 @@ StudyMonitor.confirmClassification = async function() {
     
     let newPrefix = "";
     if (type === "1") {
-        newPrefix = "Studying: ";
+        newPrefix = "Study Tool: ";
         // Add to whitelist for future
         let whitelist = this.readLocalJson('monitor_whitelist', []);
         let reviewed = this.readLocalJson('monitor_reviewed', []);
@@ -3430,11 +4490,6 @@ StudyMonitor.confirmClassification = async function() {
     renderActivityMonitorContent(); // Refresh UI
 };
 
-StudyMonitor.toggleReviewQueue = function() {
-    this.viewMode = 'summary';
-    renderActivityMonitorContent();
-};
-
 StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
     const todayStr = this.getLocalDateString();
     const queryDate = targetDateStr || todayStr;
@@ -3457,11 +4512,15 @@ StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
                     </div>
                 </div>
                 <div id="ai-analysis-result" class="hidden" style="margin-bottom: 20px; padding: 15px; background: var(--bg-input); border-left: 4px solid var(--primary); border-radius: 4px; font-size: 0.9rem; line-height: 1.5; max-height: 250px; overflow-y: auto;"></div>
+                <div id="tlDetailLoadingState" class="hidden" style="margin-bottom:12px; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input); color:var(--text-muted); font-size:0.86rem;">
+                    <i class="fas fa-circle-notch fa-spin"></i> Loading activity timeline...
+                </div>
                 <div style="margin-bottom:20px;">
-                    <div id="tlDetailVisual" class="timeline-visual" style="height:40px; border-radius:4px; overflow:hidden; display:flex;"></div>
+                    <div id="tlDetailVisual" class="timeline-visual timeline-clock-visual" style="height:40px; border-radius:4px;"></div>
+                    <div id="tlDetailTicks" class="timeline-clock-ticks"></div>
                     <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:var(--text-muted); margin-top:5px;">
                         <span>Start of Day</span>
-                        <span>Current Time</span>
+                        <span id="tlDetailAxisEndLabel">Current Time</span>
                     </div>
                 </div>
                 <div style="flex:1; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px;">
@@ -3497,37 +4556,36 @@ StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
     }
 
     const visualContainer = document.getElementById('tlDetailVisual');
+    const tickContainer = document.getElementById('tlDetailTicks');
+    const axisEndLabel = document.getElementById('tlDetailAxisEndLabel');
     const tableContainer = document.getElementById('tlDetailTable');
+    const loadingState = document.getElementById('tlDetailLoadingState');
     
-    visualContainer.innerHTML = '';
+    if (loadingState) {
+        loadingState.classList.remove('hidden');
+        loadingState.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> Loading ${queryDate === todayStr ? 'live and saved' : 'archived'} activity for ${StudyMonitor.escapeHtml(agentName)} on ${StudyMonitor.escapeHtml(queryDate)}...`;
+    }
+    visualContainer.innerHTML = '<div class="timeline-loading-fill"><i class="fas fa-circle-notch fa-spin"></i> Loading...</div>';
+    if (tickContainer) tickContainer.innerHTML = '';
     tableContainer.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:18px; color:var(--text-muted);"><i class="fas fa-circle-notch fa-spin"></i> Loading activity timeline...</td></tr>';
 
     // --- RECALCULATE SEGMENTS ---
     let allSegments = [];
     
-    if (queryDate === todayStr) {
-        const data = StudyMonitor.readLocalJson('monitor_data', {});
-        const activity = data[agentName];
-        if (activity) {
-            allSegments = StudyMonitor.getLiveSegmentsForDate(activity, queryDate);
-        }
-    } else {
-        allSegments = await StudyMonitor.getArchivedSegmentsForDate(agentName, queryDate);
-    }
+    allSegments = await StudyMonitor.getActivitySegmentsForDate(agentName, queryDate);
+    if (loadingState) loadingState.classList.add('hidden');
 
     tableContainer.innerHTML = '';
     allSegments.sort((a, b) => (a.start || 0) - (b.start || 0));
 
-    let totalMs = 0;
     const processedSegs = [];
+    const axis = StudyMonitor.getTimelineAxisBounds(queryDate);
     
     allSegments.forEach(seg => {
          const segStart = StudyMonitor.getSegmentStartMs(seg);
          const effectiveDuration = StudyMonitor.getEffectiveDurationForDate(seg, queryDate);
          
          if (effectiveDuration <= 0) return;
-
-         totalMs += effectiveDuration;
 
          const category = StudyMonitor.getCategory(seg.activity);
          const config = StudyMonitor.readLocalJson('system_config', {});
@@ -3543,6 +4601,12 @@ StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
          } else if (category === 'tool') {
              typeClass = ''; style = 'background:#2ecc71;';
              catLabel = 'Tool/Note'; rowColor = 'color:#2ecc71;';
+         } else if (category === 'assessment') {
+             typeClass = ''; style = 'background:#8e44ad;';
+             catLabel = 'Assessment / Vetting'; rowColor = 'color:#b882d8; font-weight:bold;';
+         } else if (category === 'portal') {
+             typeClass = ''; style = 'background:#f1c40f;';
+             catLabel = 'Portal Navigation'; rowColor = 'color:#f1c40f;';
          } else if (category === 'external') {
              if (effectiveDuration > TOLERANCE) {
                  typeClass = ''; style = 'background:#e74c3c;';
@@ -3580,10 +4644,17 @@ StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
     let visualHtml = '';
     let tableHtml = '';
 
-    if (totalMs > 0) {
+    if (processedSegs.length > 0) {
+        const axisDuration = Math.max(1, axis.end - axis.start);
         processedSegs.forEach(p => {
-            const pct = (p.duration / totalMs) * 100;
-            visualHtml += `<div class="timeline-seg" style="width:${pct}%; ${p.style}" title="${p.activity} (${Math.round(p.duration/1000)}s)"></div>`;
+            const slices = StudyMonitor.getTimelineClockSlices(p, queryDate, axis);
+            slices.forEach(slice => {
+                const left = ((slice.start - axis.start) / axisDuration) * 100;
+                const width = Math.max(0.15, ((slice.end - slice.start) / axisDuration) * 100);
+                const startLabel = new Date(slice.start).toLocaleTimeString();
+                const endLabel = new Date(slice.end).toLocaleTimeString();
+                visualHtml += `<div class="timeline-seg timeline-clock-seg" style="left:${left}%; width:${width}%; ${p.style}" title="${p.activity} (${startLabel} - ${endLabel}, ${Math.round(slice.duration/1000)}s)"></div>`;
+            });
             
             const timeStr = new Date(p.start).toLocaleTimeString();
             const mins = (p.duration / 60000).toFixed(1) + 'm';
@@ -3609,6 +4680,13 @@ StudyMonitor.expandTimeline = async function(agentName, targetDateStr = null) {
     }
 
     visualContainer.innerHTML = visualHtml;
+    if (tickContainer) tickContainer.innerHTML = StudyMonitor.buildTimelineTickHtml(queryDate, axis);
+    if (axisEndLabel) {
+        const endDate = new Date(axis.end);
+        axisEndLabel.textContent = queryDate === todayStr
+            ? `Current Time (${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')})`
+            : 'End of Day';
+    }
     tableContainer.innerHTML = tableHtml;
     
     modal.classList.remove('hidden');
@@ -3628,17 +4706,7 @@ StudyMonitor.analyzeWithAI = async function(agentName, dateStr) {
     }
 
     // 1. Gather Data
-    const todayStr = this.getLocalDateString();
-    let allSegments = [];
-    if (dateStr === todayStr) {
-        const data = this.readLocalJson('monitor_data', {});
-        const activity = data[agentName];
-        if (activity) {
-            allSegments = this.getLiveSegmentsForDate(activity, dateStr);
-        }
-    } else {
-        allSegments = await this.getArchivedSegmentsForDate(agentName, dateStr);
-    }
+    let allSegments = await this.getActivitySegmentsForDate(agentName, dateStr);
 
     if (allSegments.length === 0) {
         alert("No activity data to analyze for this date.");
@@ -3666,6 +4734,8 @@ As an analyst, provide a narrative summary of the employee's workday based on th
 2.  **Time Summary:** Explicitly state the total time spent on:
     - Training Material: ${toMins(stats.material)} minutes
     - Work Tools: ${toMins(stats.tool)} minutes
+    - Live Assessment / Vetting: ${toMins(stats.assessment || 0)} minutes
+    - Portal Navigation: ${toMins(stats.portal || 0)} minutes
     - External/Distractions: ${toMins(stats.external)} minutes
     - Idle: ${toMins(stats.idle)} minutes
 3.  **Idle Time Explanation:** If there is idle time, explain that "Idle time is tracked when there is no mouse or keyboard input for over 60 seconds. Short idle periods are considered 'thinking time' and are counted as productive."
@@ -3717,12 +4787,9 @@ ${promptData}
 
 // Hook for dashboard.js to trigger updates if modal is open
 StudyMonitor.updateWidget = function() {
-    const modal = document.getElementById('activityMonitorModal');
-    if (modal && !modal.classList.contains('hidden')) {
-        // Only refresh if we are NOT in queue mode (to prevent losing selections)
-        if (StudyMonitor.viewMode !== 'queue') {
-            renderActivityMonitorContent();
-        }
+    const page = document.getElementById('activity-monitor-view');
+    if (page && page.classList.contains('active')) {
+        renderActivityMonitorContent();
     }
 };
 

@@ -96,6 +96,68 @@ describe('Data Sync Module', () => {
         expect(merged.revokedUsers).toContain('DeletedUser');
     });
 
+    test('performSmartMerge merges same-day monitor history segments', () => {
+        const morning = { start: 1761721200000, end: 1761724800000, activity: 'Study Tool: Notes' };
+        const afternoon = { start: 1761746400000, end: 1761750000000, activity: 'Portal Navigation: dashboard' };
+        const server = {
+            monitor_history: [{
+                id: 'random_server_id',
+                user: 'Alice',
+                date: '2025-10-29',
+                details: [afternoon]
+            }]
+        };
+        const local = {
+            monitor_history: [{
+                id: 'random_local_id',
+                user: 'alice',
+                date: '2025-10-29',
+                details: [morning]
+            }]
+        };
+
+        const merged = DataModule.performSmartMerge(server, local, 'server_wins');
+
+        expect(merged.monitor_history).toHaveLength(1);
+        expect(merged.monitor_history[0].id).toBe('monitor_history_alice_2025-10-29');
+        expect(merged.monitor_history[0].details.map(s => s.activity)).toEqual([
+            'Study Tool: Notes',
+            'Portal Navigation: dashboard'
+        ]);
+    });
+
+    test('monitor history pull repair detects duplicate archived day rows', () => {
+        const merged = [{
+            id: 'monitor_history_alice_2025-10-29',
+            user: 'Alice',
+            date: '2025-10-29',
+            details: [
+                { start: 1761721200000, end: 1761724800000, activity: 'Study Tool: Notes' },
+                { start: 1761746400000, end: 1761750000000, activity: 'Portal Navigation: dashboard' }
+            ]
+        }];
+        const source = [
+            {
+                id: 'old_morning_random',
+                user: 'Alice',
+                date: '2025-10-29',
+                details: [{ start: 1761721200000, end: 1761724800000, activity: 'Study Tool: Notes' }]
+            },
+            {
+                id: 'old_afternoon_random',
+                user: 'alice',
+                date: '2025-10-29',
+                details: [{ start: 1761746400000, end: 1761750000000, activity: 'Portal Navigation: dashboard' }]
+            }
+        ];
+
+        const repairs = DataModule.getMonitorHistoryRepairRows(merged, source);
+
+        expect(repairs).toHaveLength(1);
+        expect(repairs[0].id).toBe('monitor_history_alice_2025-10-29');
+        expect(repairs[0].details).toHaveLength(2);
+    });
+
     test('saveToServer fails loudly for critical explicit row save errors', async () => {
         jest.spyOn(console, 'warn').mockImplementation(() => {});
         jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -128,5 +190,65 @@ describe('Data Sync Module', () => {
         expect(result).toBe(false);
         expect(upsertMock).toHaveBeenCalled();
         expect(localStorage.getItem('hash_map_records')).toBeNull();
+    });
+
+    test('violation report sync strips inline screenshot payloads', () => {
+        const reports = DataModule.sanitizeViolationReportsForSync([
+            {
+                id: 'vio_1',
+                user: 'Alice',
+                evidence: {
+                    screenCount: 1,
+                    screenshots: [{ data: 'base64-data', mime: 'image/jpeg' }],
+                    files: [{ path: 'alice/vio_1/screen.jpg' }]
+                }
+            }
+        ]);
+
+        expect(reports[0].evidence.screenshots).toEqual([]);
+        expect(reports[0].evidence.files).toEqual([{ path: 'alice/vio_1/screen.jpg' }]);
+        expect(reports[0].evidence.traineeVisible).toBe(false);
+        expect(reports[0].evidence.legacyScreenshotCount).toBe(1);
+    });
+
+    test('violation report sync respects deletion tombstones', () => {
+        localStorage.setItem('system_tombstones', JSON.stringify(['violation_report:vio_deleted']));
+
+        const reports = DataModule.sanitizeViolationReportsForSync([
+            { id: 'vio_deleted', user: 'Alice', evidence: {} },
+            { id: 'vio_active', user: 'Alice', evidence: {} }
+        ]);
+
+        expect(reports).toHaveLength(1);
+        expect(reports[0].id).toBe('vio_active');
+    });
+
+    test('trainee violation report cache hides evidence pointers', () => {
+        global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
+
+        const reports = DataModule.sanitizeViolationReportsForTrainee([
+            {
+                id: 'vio_1',
+                user: 'Alice',
+                evidence: {
+                    screenCount: 1,
+                    screenshots: [{ data: 'base64-data' }],
+                    files: [{ path: 'alice/vio_1/screen.jpg' }]
+                }
+            },
+            {
+                id: 'vio_2',
+                user: 'Bob',
+                evidence: {
+                    files: [{ path: 'bob/vio_2/screen.jpg' }]
+                }
+            }
+        ]);
+
+        expect(reports).toHaveLength(1);
+        expect(reports[0].user).toBe('Alice');
+        expect(reports[0].evidence.screenshots).toEqual([]);
+        expect(reports[0].evidence.files).toEqual([]);
+        expect(reports[0].evidence.hiddenFromTrainee).toBe(true);
     });
 });

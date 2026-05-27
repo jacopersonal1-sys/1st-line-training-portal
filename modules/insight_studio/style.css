@@ -509,7 +509,7 @@ body {
 }
 
 .ins-trend-scroll.performance .ins-line-chart {
-    height: clamp(250px, 32vw, 360px);
+    height: clamp(300px, 34vw, 410px);
 }
 
 .ins-radar-grid,
@@ -542,7 +542,7 @@ body {
 }
 
 .ins-chart-label-assessment {
-    font-size: 9px;
+    font-size: 9.5px;
     font-weight: 700;
 }
 
@@ -567,6 +567,76 @@ body {
 
 .ins-trend-series:hover polyline {
     stroke-width: 4;
+}
+
+.ins-chart-hotspot {
+    outline: none;
+}
+
+.ins-chart-crosshair,
+.ins-chart-focus-ring,
+.ins-chart-tooltip-box,
+.ins-chart-tooltip-text,
+.ins-chart-hotspot-dot {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+}
+
+.ins-chart-crosshair {
+    stroke: rgba(226, 232, 240, 0.65);
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+}
+
+.ins-chart-focus-ring {
+    fill: rgba(96, 165, 250, 0.12);
+    stroke: rgba(226, 232, 240, 0.9);
+    stroke-width: 1.5;
+}
+
+.ins-chart-tooltip-box {
+    fill: rgba(12, 16, 24, 0.94);
+    stroke: rgba(226, 232, 240, 0.22);
+    stroke-width: 1;
+    filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.38));
+}
+
+.ins-chart-tooltip-text {
+    fill: rgba(226, 232, 240, 0.9);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.ins-chart-tooltip-text .title {
+    fill: #fff;
+    font-weight: 800;
+}
+
+.ins-chart-hit-target {
+    fill: transparent;
+    stroke: transparent;
+    cursor: crosshair;
+    pointer-events: all;
+}
+
+.ins-chart-hotspot-dot {
+    fill: #fff;
+    stroke: rgba(8, 13, 22, 0.9);
+    stroke-width: 2;
+}
+
+.ins-chart-hotspot:hover .ins-chart-crosshair,
+.ins-chart-hotspot:hover .ins-chart-focus-ring,
+.ins-chart-hotspot:hover .ins-chart-tooltip-box,
+.ins-chart-hotspot:hover .ins-chart-tooltip-text,
+.ins-chart-hotspot:hover .ins-chart-hotspot-dot,
+.ins-chart-hotspot:focus .ins-chart-crosshair,
+.ins-chart-hotspot:focus .ins-chart-focus-ring,
+.ins-chart-hotspot:focus .ins-chart-tooltip-box,
+.ins-chart-hotspot:focus .ins-chart-tooltip-text,
+.ins-chart-hotspot:focus .ins-chart-hotspot-dot {
+    opacity: 1;
 }
 
 .ins-trend-summary {

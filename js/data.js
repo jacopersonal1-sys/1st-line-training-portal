@@ -69,6 +69,61 @@ if (IS_DEMO_MODE) {
     Object.keys(ROW_MAP).forEach(k => delete ROW_MAP[k]); // Force ALL data into isolated blobs
 }
 
+function sanitizeViolationReportEvidence(report, options = {}) {
+    if (!report || typeof report !== 'object') return report;
+    const copy = { ...report };
+    const evidence = copy.evidence && typeof copy.evidence === 'object' ? { ...copy.evidence } : null;
+    if (!evidence) return copy;
+
+    const legacyScreenshots = Array.isArray(evidence.screenshots) ? evidence.screenshots.length : 0;
+    evidence.capturedScreenCount = Number(evidence.capturedScreenCount || evidence.screenCount || legacyScreenshots || 0);
+    evidence.legacyScreenshotCount = Number(evidence.legacyScreenshotCount || legacyScreenshots || 0);
+    evidence.screenshots = [];
+    evidence.traineeVisible = false;
+    evidence.visibility = 'admin_only';
+
+    if (options.hideEvidencePointers) {
+        evidence.files = [];
+        evidence.screenCount = 0;
+        evidence.hiddenFromTrainee = true;
+    }
+
+    copy.evidence = evidence;
+    return copy;
+}
+
+function getViolationReportTombstoneSet() {
+    try {
+        const tombstones = safeLocalParse('system_tombstones', []);
+        const deleted = new Set();
+        (Array.isArray(tombstones) ? tombstones : []).forEach(item => {
+            const text = String(item || '').trim();
+            if (text.startsWith('violation_report:')) deleted.add(text.replace(/^violation_report:/, ''));
+        });
+        return deleted;
+    } catch (error) {
+        return new Set();
+    }
+}
+
+function sanitizeViolationReportsForSync(content, options = {}) {
+    if (!Array.isArray(content)) return [];
+    const deletedIds = getViolationReportTombstoneSet();
+    return content
+        .filter(report => !deletedIds.has(String(report?.id || '')))
+        .filter(report => !(options.omitTraineeHidden && report?.evidence?.hiddenFromTrainee))
+        .map(report => sanitizeViolationReportEvidence(report, { hideEvidencePointers: false }));
+}
+
+function sanitizeViolationReportsForTrainee(content) {
+    const currentUser = String((typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) || '').toLowerCase();
+    const deletedIds = getViolationReportTombstoneSet();
+    return (Array.isArray(content) ? content : [])
+        .filter(report => !deletedIds.has(String(report?.id || '')))
+        .filter(report => !currentUser || String(report?.user || '').toLowerCase() === currentUser)
+        .map(report => sanitizeViolationReportEvidence(report, { hideEvidencePointers: true }));
+}
+
 // --- SERVER AUTHORITY CONFIGURATION ---
 // Tables that must always reflect the exact state of the server (No Merging, Full Overwrite).
 // This fixes "Ghost Data" and synchronization lag for critical shared resources.
@@ -126,6 +181,7 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'admin_notifications',
     'test_integrity_overrides',
     'qa_data',
+    'violation_reports',
     'graduated_agents',
     'retrain_archives'
 ]);
@@ -149,7 +205,6 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'trainee_bookmarks',
     'monitor_whitelist',
     'monitor_reviewed',
-    'violation_reports',
     'training_rules_config',
     'course_progress_request_config',
     'admin_notifications',
@@ -162,7 +217,6 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
 const TRAINEE_DEFAULT_SAVE_KEYS = new Set([
     'monitor_data',
     'monitor_history',
-    'violation_reports',
     'trainee_notes',
     'trainee_bookmarks',
     'nps_responses'
@@ -484,7 +538,7 @@ async function loadFromServer(silent = false) {
         const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
         if (isTrainee) {
             // Security & memory hygiene for trainee-only runtime
-            ['agentNotes', 'tl_personal_lists', 'auditLogs', 'accessLogs', 'error_reports', 'network_diagnostics', 'savedReports', 'insightReviews']
+            ['agentNotes', 'tl_personal_lists', 'auditLogs', 'accessLogs', 'error_reports', 'network_diagnostics', 'savedReports', 'insightReviews', 'violation_reports']
                 .forEach(k => localStorage.removeItem(k));
         }
         
@@ -570,11 +624,17 @@ async function loadFromServer(silent = false) {
                     const serverObj = { [localKey]: doc.content };
                     const localObj = { [localKey]: localVal };
                     const merged = performSmartMerge(serverObj, localObj, strategy);
-                    localStorage.setItem(localKey, JSON.stringify(merged[localKey]));
+                    const mergedContent = localKey === 'violation_reports'
+                        ? sanitizeViolationReportsForSync(merged[localKey])
+                        : merged[localKey];
+                    localStorage.setItem(localKey, JSON.stringify(mergedContent));
                 } else {
                     // Fallback for primitives OR no-merge keys (Direct Overwrite)
                     // Ensure we never store the string "undefined" (causes JSON.parse failures)
-                    const serialized = (typeof doc.content === 'undefined') ? JSON.stringify(null) : JSON.stringify(doc.content);
+                    const docContent = localKey === 'violation_reports'
+                        ? sanitizeViolationReportsForSync(doc.content)
+                        : doc.content;
+                    const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
                     localStorage.setItem(localKey, serialized);
                 }
                 localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
@@ -595,6 +655,14 @@ async function loadFromServer(silent = false) {
                     bytesDone: pullBytesDone,
                     bytesTotal: pullBytesTotal
                 });
+            }
+
+            const fetchedLocalKeys = docs.map(doc => IS_DEMO_MODE ? doc.key.replace('demo_', '') : doc.key);
+            if (fetchedLocalKeys.includes('violation_reports') || fetchedLocalKeys.includes('system_tombstones')) {
+                const reports = sanitizeViolationReportsForSync(safeLocalParse('violation_reports', []));
+                localStorage.setItem('violation_reports', JSON.stringify(reports));
+                emitDataChange('violation_reports', 'tombstone_filter');
+                if (typeof updateNotifications === 'function') updateNotifications();
             }
             
             const configKey = IS_DEMO_MODE ? 'demo_system_config' : 'system_config';
@@ -875,6 +943,26 @@ async function loadFromServer(silent = false) {
                     const cutoff = new Date();
                     cutoff.setDate(cutoff.getDate() - 14); // Keep only last 14 days
                     merged[localKey] = merged[localKey].filter(h => new Date(h.date) > cutoff);
+                    const repairRows = getMonitorHistoryRepairRows(merged[localKey], [...safeServerItems, ...localItems]);
+                    if (repairRows.length > 0) {
+                        const repairedAt = new Date().toISOString();
+                        try {
+                            const rows = repairRows.map(item => ({
+                                id: item.id,
+                                user_id: item.user,
+                                data: item,
+                                updated_at: repairedAt
+                            }));
+                            const { error: repairErr } = await window.supabaseClient.from(tableName).upsert(rows);
+                            if (repairErr) throw repairErr;
+                            repairRows.forEach(item => {
+                                hashMap[item.id] = generateChecksum(JSON.stringify(item));
+                            });
+                            if (!silent) console.log(`[Sync] Repaired ${repairRows.length} monitor_history archive row(s).`);
+                        } catch (repairErr) {
+                            console.warn('[Sync] Monitor history pull repair skipped:', repairErr);
+                        }
+                    }
                 } else if (localKey === 'accessLogs') {
                     const cutoff = new Date();
                     cutoff.setDate(cutoff.getDate() - 30); // Keep last 30 days
@@ -960,14 +1048,14 @@ async function loadFromServer(silent = false) {
                 monRows.forEach(r => {
                     const isDeleted = pendingQueries.some(q => q.table === 'monitor_state' && q.col === 'user_id' && q.val === r.user_id);
                     if (!isDeleted) {
-                        monData[r.user_id] = r.data;
+                        monData[r.user_id] = mergeMonitorStateEntry(monData[r.user_id], r.data);
                     }
                 });
                 
                 // Preserve MY local state (Optimistic UI)
                 const currentLocal = safeLocalParse('monitor_data', {});
                 if (currentLocal[CURRENT_USER.user]) {
-                    monData[CURRENT_USER.user] = currentLocal[CURRENT_USER.user];
+                    monData[CURRENT_USER.user] = mergeMonitorStateEntry(monData[CURRENT_USER.user], currentLocal[CURRENT_USER.user]);
                 }
                 localStorage.setItem('monitor_data', JSON.stringify(monData));
                 const monitorBytes = estimateSyncPayloadSize(monRows.map(r => r && r.data ? r.data : null));
@@ -1684,6 +1772,18 @@ function normalizeIdentityValue(value) {
     return String(value).trim().toLowerCase();
 }
 
+function buildMonitorHistoryId(user, date) {
+    const safeUser = normalizeIdentityValue(user || 'unknown')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'unknown';
+    return `monitor_history_${safeUser}_${String(date || '').trim()}`;
+}
+
+function getMonitorHistoryUser(item) {
+    if (!item || typeof item !== 'object') return '';
+    return item.user || item.user_id || item.trainee || '';
+}
+
 const STRING_IDENTITY_KEYS = new Set(['vettingTopics', 'monitor_whitelist', 'monitor_reviewed', 'system_tombstones']);
 
 function identityFromStringItem(key, item) {
@@ -1736,7 +1836,7 @@ function getArrayItemIdentity(key, item) {
         graduated_agents: (value) => value.user ? `graduated:${normalizeIdentityValue(value.user)}` : null,
         retrain_archives: identityFromRetrainArchiveItem,
         linkRequests: (value) => value.recordId ? `link-request:${normalizeIdentityValue(value.recordId)}` : null,
-        monitor_history: (value) => value.user && value.date ? `monitor-history:${normalizeIdentityValue(value.user)}|${normalizeIdentityValue(value.date)}` : null
+        monitor_history: (value) => getMonitorHistoryUser(value) && value.date ? `monitor-history:${normalizeIdentityValue(getMonitorHistoryUser(value))}|${normalizeIdentityValue(value.date)}` : null
     };
 
     const handler = identityHandlers[key];
@@ -1804,7 +1904,124 @@ function getTimestampPreferenceValue(item) {
     return 0;
 }
 
+function getMonitorSegmentMs(seg, key) {
+    if (!seg || typeof seg !== 'object') return 0;
+    const value = seg[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getMonitorSegmentIdentity(seg) {
+    if (!seg || typeof seg !== 'object') return '';
+    const start = getMonitorSegmentMs(seg, 'start');
+    const end = getMonitorSegmentMs(seg, 'end') || (start && Number(seg.duration) ? start + Number(seg.duration) : 0);
+    return `${start}|${end}|${String(seg.activity || '').trim().toLowerCase()}`;
+}
+
+function mergeMonitorHistoryItems(existingItem, incomingItem) {
+    const existing = existingItem && typeof existingItem === 'object' ? existingItem : {};
+    const incoming = incomingItem && typeof incomingItem === 'object' ? incomingItem : {};
+    const existingDetails = Array.isArray(existing.details) ? existing.details : (Array.isArray(existing.history) ? existing.history : []);
+    const incomingDetails = Array.isArray(incoming.details) ? incoming.details : (Array.isArray(incoming.history) ? incoming.history : []);
+    const segmentMap = new Map();
+
+    [...existingDetails, ...incomingDetails].forEach(seg => {
+        const identity = getMonitorSegmentIdentity(seg);
+        if (!identity) return;
+        const normalized = {
+            ...seg,
+            start: getMonitorSegmentMs(seg, 'start'),
+            end: getMonitorSegmentMs(seg, 'end') || (getMonitorSegmentMs(seg, 'start') + Number(seg.duration || 0))
+        };
+        if (normalized.end <= normalized.start) return;
+        normalized.duration = normalized.end - normalized.start;
+        segmentMap.set(identity, normalized);
+    });
+
+    const preferred = resolveDuplicateArrayItem('__monitor_history_base__', existing, incoming, 'server_wins');
+    const user = getMonitorHistoryUser(preferred) || getMonitorHistoryUser(existing) || getMonitorHistoryUser(incoming);
+    const date = preferred.date || existing.date || incoming.date || '';
+    const details = Array.from(segmentMap.values()).sort((a, b) => getMonitorSegmentMs(a, 'start') - getMonitorSegmentMs(b, 'start'));
+
+    return {
+        ...existing,
+        ...incoming,
+        ...preferred,
+        id: buildMonitorHistoryId(user, date),
+        user,
+        date,
+        summary: preferred.summary || incoming.summary || existing.summary || {},
+        details
+    };
+}
+
+function getMonitorHistoryRepairRows(mergedItems, sourceItems) {
+    if (!Array.isArray(mergedItems) || !Array.isArray(sourceItems)) return [];
+
+    const sourceIdentityCounts = new Map();
+    const sourceNonCanonicalIds = new Set();
+    sourceItems.forEach(item => {
+        const identity = getArrayItemIdentity('monitor_history', item);
+        if (!identity) return;
+        sourceIdentityCounts.set(identity, (sourceIdentityCounts.get(identity) || 0) + 1);
+        const user = getMonitorHistoryUser(item);
+        const canonicalId = user && item.date ? buildMonitorHistoryId(user, item.date) : '';
+        if (canonicalId && item.id && String(item.id) !== canonicalId) {
+            sourceNonCanonicalIds.add(identity);
+        }
+    });
+
+    return mergedItems.filter(item => {
+        const identity = getArrayItemIdentity('monitor_history', item);
+        if (!identity) return false;
+        const user = getMonitorHistoryUser(item);
+        const canonicalId = user && item.date ? buildMonitorHistoryId(user, item.date) : '';
+        return canonicalId && (
+            String(item.id || '') !== canonicalId ||
+            (sourceIdentityCounts.get(identity) || 0) > 1 ||
+            sourceNonCanonicalIds.has(identity)
+        );
+    }).map(item => mergeMonitorHistoryItems({}, item));
+}
+
+function mergeMonitorStateEntry(existingEntry, incomingEntry) {
+    const existing = existingEntry && typeof existingEntry === 'object' ? existingEntry : {};
+    const incoming = incomingEntry && typeof incomingEntry === 'object' ? incomingEntry : {};
+    const existingDate = String(existing.date || '').trim();
+    const incomingDate = String(incoming.date || '').trim();
+    const canMergeHistory = existingDate && incomingDate && existingDate === incomingDate;
+    if (!canMergeHistory) return { ...existing, ...incoming };
+
+    const segmentMap = new Map();
+    [
+        ...(Array.isArray(existing.history) ? existing.history : []),
+        ...(Array.isArray(incoming.history) ? incoming.history : [])
+    ].forEach(seg => {
+        const identity = getMonitorSegmentIdentity(seg);
+        if (!identity) return;
+        const normalized = {
+            ...seg,
+            start: getMonitorSegmentMs(seg, 'start'),
+            end: getMonitorSegmentMs(seg, 'end') || (getMonitorSegmentMs(seg, 'start') + Number(seg.duration || 0))
+        };
+        if (normalized.end <= normalized.start) return;
+        normalized.duration = normalized.end - normalized.start;
+        segmentMap.set(identity, normalized);
+    });
+
+    return {
+        ...existing,
+        ...incoming,
+        history: Array.from(segmentMap.values()).sort((a, b) => getMonitorSegmentMs(a, 'start') - getMonitorSegmentMs(b, 'start'))
+    };
+}
+
 function resolveDuplicateArrayItem(key, existingItem, incomingItem, strategy = 'server_wins') {
+    if (key === 'monitor_history') {
+        return mergeMonitorHistoryItems(existingItem, incomingItem);
+    }
+
     if (key === 'users') {
         const existingId = String(existingItem && existingItem.id || '');
         const incomingId = String(incomingItem && incomingItem.id || '');
@@ -1996,6 +2213,11 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             const isCriticalExplicitSave = hasExplicitSaveRequest && CRITICAL_EXPLICIT_SAVE_KEYS.has(key);
             const keyForce = force || (isStrictServerKey && hasExplicitSaveRequest);
             let localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
+            if (key === 'violation_reports') {
+                localContent = sanitizeViolationReportsForSync(localContent, {
+                    omitTraineeHidden: isTraineeRuntime()
+                });
+            }
             if (key === 'users' && Array.isArray(localContent)) {
                 const dedupedUsers = dedupeArrayByIdentity(key, localContent, 'server_wins');
                 if (dedupedUsers.length !== localContent.length) {
@@ -2051,6 +2273,10 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                     localContent.forEach(item => {
                         if (isTraineeRuntime() && key === 'error_reports' && !isUserProblemReport(item)) {
                             return;
+                        }
+                        if (key === 'monitor_history' && getMonitorHistoryUser(item) && item.date) {
+                            item.user = getMonitorHistoryUser(item);
+                            item.id = buildMonitorHistoryId(item.user, item.date);
                         }
                         // Ensure ID exists
                         if (!item.id) {
@@ -2242,7 +2468,10 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
 
                 if (saveErr) throw saveErr;
                 
-                localStorage.setItem(key, JSON.stringify(finalContent));
+                const localStoreContent = key === 'violation_reports' && isTraineeRuntime()
+                    ? sanitizeViolationReportsForTrainee(finalContent)
+                    : finalContent;
+                localStorage.setItem(key, JSON.stringify(localStoreContent));
                 if(savedData && savedData[0]) localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
                 emitDataChange(key, 'save_to_server');
             }
@@ -2404,6 +2633,16 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 if (!exists) {
                     combined.push(localItem); // Keep local item if missing on server
                 } else {
+                    if (key === 'monitor_history') {
+                        const index = combined.findIndex(i => {
+                            const existingIdentity = getArrayItemIdentity(key, i);
+                            if (localIdentity && existingIdentity) return localIdentity === existingIdentity;
+                            return JSON.stringify(i) === JSON.stringify(localItem);
+                        });
+                        if (index > -1) combined[index] = mergeMonitorHistoryItems(combined[index], localItem);
+                        return;
+                    }
+
                     // CONFLICT RESOLUTION:
                     // If strategy is 'server_wins' (Pulling), we do NOTHING here.
                     // We keep the item currently in 'combined' (which is the Server version).
@@ -4818,7 +5057,10 @@ if (typeof module !== 'undefined' && module.exports) {
         notifyUnsavedChanges,
         logAuditAction,
         reportSystemError,
-        forceFullSync
+        forceFullSync,
+        sanitizeViolationReportsForSync,
+        sanitizeViolationReportsForTrainee,
+        getMonitorHistoryRepairRows
     };
 }
 

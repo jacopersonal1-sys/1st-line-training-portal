@@ -361,23 +361,6 @@
     </div>
 </div>
 
-<div id="activityMonitorModal" class="modal-overlay hidden" style="z-index: 3500;">
-    <div class="modal-box activity-monitor-modal">
-        <div class="modal-header">
-            <div>
-                <h3><i class="fas fa-binoculars"></i> Agent Activity Monitor</h3>
-                <div class="modal-subtitle">Live study activity, focus summaries, and recent learner movement.</div>
-            </div>
-            <div class="activity-monitor-modal-actions">
-                <button class="btn-primary btn-sm" onclick="StudyMonitor.toggleSummary()"><i class="fas fa-chart-pie"></i> Toggle Summary</button>
-                <button class="btn-secondary btn-sm" onclick="StudyMonitor.archiveLog()"><i class="fas fa-broom"></i> Clear Live Feed</button>
-                <button class="btn-secondary btn-sm" onclick="closeActivityMonitorModal()"><i class="fas fa-times"></i></button>
-            </div>
-        </div>
-        <div id="activityMonitorContent" class="activity-monitor-content"></div>
-    </div>
-</div>
-
 <!-- STUDY MONITOR OVERLAY -->
 <div id="study-overlay" class="hidden" style="position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-app); z-index:6000; display:flex; flex-direction:column;">
     <div style="padding:10px 20px; background:var(--bg-header); border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
@@ -569,6 +552,10 @@
       <div class="views-container">
 
         <section id="dashboard-view"></section>
+
+        <section id="activity-monitor-view" class="admin-only-section">
+            <div id="activityMonitorContent" class="activity-monitor-content activity-monitor-page"></div>
+        </section>
         
         <section id="trainee-portal">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
