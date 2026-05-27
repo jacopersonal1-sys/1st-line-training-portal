@@ -54,7 +54,7 @@
             if (!frame) return;
 
             // Fresh pull on-demand so Studio always opens with latest server state.
-            if (typeof loadFromServer === 'function') {
+            if (!window.APP_PASSIVE_TAB_WINDOW && typeof loadFromServer === 'function') {
                 try {
                     await loadFromServer(true);
                 } catch (error) {

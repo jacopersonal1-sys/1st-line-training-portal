@@ -38,6 +38,8 @@ let studySessionConfigured = false;
 let isFlushingStudySession = false;
 let isSafeToQuit = false;
 const studyPopoutWindows = new Set();
+const appPopoutWindows = new Set();
+const appWindowLaunchPayloads = new Map();
 const STUDY_SESSION_PARTITION = 'persist:study_session';
 const STUDY_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0';
 const UPDATE_RETRY_DELAY_MS = 15000;
@@ -718,6 +720,112 @@ function openStudyPopoutWindow(payload = {}) {
     return true;
 }
 
+function createAppWindowLaunchToken(payload = {}) {
+    const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    appWindowLaunchPayloads.set(token, {
+        ...payload,
+        launchedAt: new Date().toISOString()
+    });
+    return token;
+}
+
+function getLaunchTokenFromWebContents(contents) {
+    try {
+        const currentUrl = contents && typeof contents.getURL === 'function' ? contents.getURL() : '';
+        if (!currentUrl) return '';
+        const parsed = new URL(currentUrl);
+        return String(parsed.searchParams.get('app_window_token') || '').trim();
+    } catch (error) {
+        return '';
+    }
+}
+
+function isMainAppSender(contents) {
+    return !!(mainWindow && contents && !mainWindow.isDestroyed() && contents === mainWindow.webContents);
+}
+
+function openAppWindow(payload = {}) {
+    const mode = String(payload.mode || 'tab').trim().toLowerCase();
+    const user = payload.user && typeof payload.user === 'object' ? payload.user : null;
+    const actor = payload.actor && typeof payload.actor === 'object' ? payload.actor : user;
+    const actorRole = String(actor && actor.role || '').trim().toLowerCase();
+    const tabId = String(payload.tabId || '').trim();
+
+    if (!user || !user.user) throw new Error('No app user supplied.');
+    if (actorRole !== 'super_admin') throw new Error('Only Super Admin can open app windows.');
+    if (mode === 'tab' && !tabId) throw new Error('No app tab supplied.');
+
+    const token = createAppWindowLaunchToken({
+        mode,
+        user,
+        tabId,
+        title: payload.title || (mode === 'impersonate' ? `Impersonating ${user.user}` : 'App Window')
+    });
+
+    const child = new BrowserWindow({
+        width: mode === 'impersonate' ? 1500 : 1440,
+        height: mode === 'impersonate' ? 930 : 900,
+        minWidth: 980,
+        minHeight: 640,
+        title: payload.title || '1st Line Training Portal',
+        icon: path.join(__dirname, 'ico.ico'),
+        frame: false,
+        backgroundColor: '#121212',
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js'),
+            backgroundThrottling: false,
+            webviewTag: true,
+            devTools: !app.isPackaged
+        }
+    });
+
+    appPopoutWindows.add(child);
+    child.on('closed', () => {
+        appPopoutWindows.delete(child);
+        appWindowLaunchPayloads.delete(token);
+    });
+    child.setMenuBarVisibility(false);
+    child.webContents.setWindowOpenHandler(({ url }) => {
+        if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+            shell.openExternal(url);
+            return { action: 'deny' };
+        }
+        return { action: 'allow' };
+    });
+    child.webContents.on('will-navigate', (event, url) => {
+        if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+            event.preventDefault();
+            shell.openExternal(url);
+        }
+    });
+
+    child.loadFile('index.html', { query: { app_window_token: token } });
+    return true;
+}
+
+function normalizePingTarget(rawTarget) {
+    const target = String(rawTarget || '').trim();
+    if (!target || target.length > 253) return '';
+    if (/[^a-zA-Z0-9.-]/.test(target)) return '';
+    if (target.includes('..') || target.startsWith('.') || target.endsWith('.')) return '';
+
+    const isIpv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(target);
+    if (isIpv4) {
+        const parts = target.split('.').map(Number);
+        return parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255) ? target : '';
+    }
+
+    const labels = target.split('.');
+    const isHostname = labels.every(label => (
+        label.length > 0 &&
+        label.length <= 63 &&
+        /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label)
+    ));
+    return isHostname ? target : '';
+}
+
 // NEW: Catch Webview Window Spawns at OS Level (Fix for PDF Links)
 app.on('web-contents-created', (event, contents) => {
     if (contents.getType() === 'webview') {
@@ -760,6 +868,20 @@ app.on('web-contents-created', (event, contents) => {
 ipcMain.handle('open-study-popout', async (event, payload) => {
     openStudyPopoutWindow(payload);
     return true;
+});
+
+ipcMain.handle('open-app-window', async (event, payload) => {
+    if (!isMainAppSender(event.sender)) {
+        throw new Error('App windows can only be opened from the main app window.');
+    }
+    openAppWindow(payload);
+    return true;
+});
+
+ipcMain.handle('get-app-window-launch-payload', async (event) => {
+    const token = getLaunchTokenFromWebContents(event.sender);
+    if (!token) return null;
+    return appWindowLaunchPayloads.get(token) || null;
 });
 
 ipcMain.handle('open-external-url', async (event, rawUrl) => {
@@ -962,6 +1084,7 @@ ipcMain.on('set-update-channel', (event, channel) => {
 
 // IPC Listener for DevTools (Super Admin Only)
 ipcMain.on('open-devtools', () => {
+    if (app.isPackaged) return;
     if (mainWindow) mainWindow.webContents.openDevTools();
 });
 
@@ -1150,11 +1273,15 @@ ipcMain.handle('get-process-list', async (event, customTargets) => {
 // --- NETWORK DIAGNOSTICS IPC ---
 
 ipcMain.handle('perform-network-test', async (event, target) => {
+    const safeTarget = normalizePingTarget(target);
+    if (!safeTarget) {
+        return { success: false, time: null, output: 'Invalid network test target.' };
+    }
     return new Promise((resolve) => {
         // Windows uses -n, Linux/Mac uses -c. Timeout 1000ms.
-        const cmd = process.platform === 'win32' 
-            ? `ping -n 1 -w 1000 ${target}` 
-            : `ping -c 1 -W 1 ${target}`;
+        const cmd = process.platform === 'win32'
+            ? `ping -n 1 -w 1000 ${safeTarget}`
+            : `ping -c 1 -W 1 ${safeTarget}`;
             
         const start = Date.now();
         exec(cmd, (error, stdout, stderr) => {

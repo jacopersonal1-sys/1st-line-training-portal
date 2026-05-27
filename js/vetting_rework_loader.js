@@ -1,4 +1,4 @@
-/* ================= VETTING REWORK SANDBOX LOADER ================= */
+/* ================= VETTING ARENA MODULE LOADER ================= */
 /* HOST LOADER: Launches the isolated Vetting 2.0 Module */
 
 const VettingReworkLoader = {
@@ -13,7 +13,7 @@ const VettingReworkLoader = {
             const parsed = JSON.parse(raw);
             return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
         } catch (error) {
-            console.warn(`[Vetting Rework Loader] Ignored invalid local data for ${key}:`, error);
+            console.warn(`[Vetting Arena Loader] Ignored invalid local data for ${key}:`, error);
             return {};
         }
     },
@@ -46,11 +46,10 @@ const VettingReworkLoader = {
         return { url: normalizeUrl(cloud.url), key: cloud.key || '', target: 'cloud' };
     },
 
-    renderUI: function(targetContainerId = 'vetting-rework-content', options = {}) {
-        console.log("[Sandbox Loader] Activating Vetting Rework UI...");
+    renderUI: function(targetContainerId = 'vetting-arena-content', options = {}) {
         const container = document.getElementById(targetContainerId);
         if (!container) {
-            console.error(`[Sandbox Loader] Error: '${targetContainerId}' div not found in index.html`);
+            console.error(`[Vetting Arena Loader] Error: '${targetContainerId}' div not found in index.html`);
             return;
         }
 
@@ -58,11 +57,13 @@ const VettingReworkLoader = {
         const title = options.title || (mode === 'production' ? 'Vetting Arena 2.0 Active' : 'Sandbox Container Active');
         const badgeIcon = mode === 'production' ? 'fa-shield-alt' : 'fa-hammer';
         const partitionName = mode === 'production' ? 'persist:vetting_runtime_v2' : 'persist:vetting_sandbox';
+        const debugAction = mode === 'production'
+            ? ''
+            : `<button class="btn-secondary btn-sm" onclick="this.closest('section, div').querySelector('.vetting-arena-webview')?.openDevTools()"><i class="fas fa-bug"></i> Inspect Runtime</button>`;
 
         // Avoid re-rendering if already exists, but allow refresh
-        const existing = container.querySelector('.vetting-rework-webview');
+        const existing = container.querySelector('.vetting-arena-webview');
         if (existing && options.force !== true) {
-            console.log("[Sandbox Loader] Sandbox already active. Skipping re-render.");
             return; 
         }
 
@@ -78,8 +79,6 @@ const VettingReworkLoader = {
         const modulePath = basePath + '/modules/vetting_rework/index.html';
         const preloadPath = basePath + '/modules/vetting_rework/preload.js';
 
-        console.log(`[Sandbox Loader] Injecting Webview mapped to: ${modulePath} (target=${activeCreds.target})`);
-
         container.innerHTML = `
             <div class="embedded-program-shell">
             <div class="embedded-program-header">
@@ -88,11 +87,11 @@ const VettingReworkLoader = {
                     <div class="embedded-program-subtitle">Vetting runtime hosted inside an isolated module.</div>
                 </div>
                 <div class="embedded-program-actions">
-                    <button class="btn-secondary btn-sm" onclick="this.closest('section, div').querySelector('.vetting-rework-webview')?.openDevTools()"><i class="fas fa-bug"></i> Inspect Runtime</button>
+                    ${debugAction}
                 </div>
             </div>
             <webview 
-                class="vetting-rework-webview embedded-program-frame"
+                class="vetting-arena-webview embedded-program-frame"
                 src="${modulePath}?user=${userParam}&creds=${credsParam}&mode=${encodeURIComponent(mode)}" 
                 style="height:calc(100vh - 230px);"
                 webpreferences="nodeIntegration=no, contextIsolation=yes"
@@ -100,7 +99,7 @@ const VettingReworkLoader = {
                 partition="${partitionName}"
                 allowpopups></webview>
             </div>`;
-        const webview = container.querySelector('.vetting-rework-webview');
+        const webview = container.querySelector('.vetting-arena-webview');
         if (webview) {
             webview.addEventListener('dom-ready', () => {
                 if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);

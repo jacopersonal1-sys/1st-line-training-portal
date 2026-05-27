@@ -4086,6 +4086,33 @@ async function forceRefreshLiveSessionById(sessionId) {
 }
 window.forceRefreshLiveSessionById = forceRefreshLiveSessionById;
 
+function getVettingEndedSessionMap() {
+    const ended = safeLocalParse('vetting_arena_ended_sessions', {}) || {};
+    const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+    let changed = false;
+    Object.entries(ended).forEach(([id, endedAt]) => {
+        if (!Number(endedAt) || Number(endedAt) < cutoff) {
+            delete ended[id];
+            changed = true;
+        }
+    });
+    if (changed) localStorage.setItem('vetting_arena_ended_sessions', JSON.stringify(ended));
+    return ended;
+}
+
+function markVettingSessionEnded(sessionId) {
+    if (!sessionId) return;
+    const ended = getVettingEndedSessionMap();
+    ended[String(sessionId)] = Date.now();
+    localStorage.setItem('vetting_arena_ended_sessions', JSON.stringify(ended));
+}
+
+function isVettingSessionEnded(sessionId) {
+    if (!sessionId) return false;
+    const ended = getVettingEndedSessionMap();
+    return !!ended[String(sessionId)];
+}
+
 function applyVettingSessionNudgeCommand(rawAction) {
     try {
         const encoded = String(rawAction || '').replace(/^vetting_force:/, '');
@@ -4093,6 +4120,7 @@ function applyVettingSessionNudgeCommand(rawAction) {
 
         const payload = safeParse(decodeURIComponent(encoded), null);
         if (!payload || !payload.sessionId || !payload.active) return false;
+        if (isVettingSessionEnded(payload.sessionId)) return true;
 
         const currentUser = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.user : '';
         if (!currentUser) return false;
@@ -4154,6 +4182,39 @@ function applyVettingSessionNudgeCommand(rawAction) {
         return true;
     } catch (e) {
         console.warn('Failed to apply vetting force command:', e);
+        return false;
+    }
+}
+
+function applyVettingSessionEndCommand(rawAction) {
+    try {
+        const raw = String(rawAction || '').replace(/^vetting_end:/, '');
+        const sessionId = (() => {
+            try { return decodeURIComponent(raw); } catch (e) { return raw; }
+        })();
+        if (!sessionId) return false;
+        markVettingSessionEnded(sessionId);
+
+        let sessions = safeLocalParse('adminVettingSessions', []) || [];
+        sessions = Array.isArray(sessions) ? sessions : [];
+        sessions = sessions.filter(s => !s || String(s.sessionId || '') !== String(sessionId));
+        localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
+
+        const local = safeLocalParse('vettingSession', { active: false, trainees: {} }) || { active: false, trainees: {} };
+        if (String(local.sessionId || '') === String(sessionId)) {
+            local.active = false;
+            local.endedAt = Date.now();
+            local.trainees = {};
+            localStorage.setItem('vettingSession', JSON.stringify(local));
+            emitDataChange('vettingSession', 'command_end');
+        }
+
+        if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
+        if (typeof applyRolePermissions === 'function') applyRolePermissions();
+        safeRenderVettingArena();
+        return true;
+    } catch (e) {
+        console.warn('Failed to apply vetting end command:', e);
         return false;
     }
 }
@@ -4301,6 +4362,10 @@ function executePendingSessionAction(rawAction) {
     }
     if (action.startsWith('vetting_force:')) {
         applyVettingSessionNudgeCommand(action);
+        return true;
+    }
+    if (action.startsWith('vetting_end:')) {
+        applyVettingSessionEndCommand(action);
         return true;
     }
     if (action.startsWith('vetting_submit:')) {
@@ -4563,7 +4628,33 @@ function handleLiveSessionRealtime(payload) {
 function handleVettingRealtime(payload) {
     // INSTANT PROCESSING (Bypass Queue for Zero Latency)
     let sessions = safeLocalParse('adminVettingSessions', []) || [];
+    const mergeVettingSessionState = (current, incoming) => {
+        if (!current) return incoming;
+        if (!incoming) return current;
+        const merged = { ...current, ...incoming };
+        const trainees = { ...((current && current.trainees) || {}) };
+        const currentRowTs = Date.parse(current.updated_at || current.updatedAt || 0) || 0;
+        const incomingRowTs = Date.parse(incoming.updated_at || incoming.updatedAt || 0) || Date.now();
+        const normalize = (value) => String(value || '').trim().toLowerCase().replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const same = (a, b) => {
+            const na = normalize(a);
+            const nb = normalize(b);
+            return !!na && !!nb && (na === nb || na.replace(/\s+/g, '') === nb.replace(/\s+/g, ''));
+        };
+        Object.entries((incoming && incoming.trainees) || {}).forEach(([username, statusData]) => {
+            const matchingKey = Object.keys(trainees).find(key => same(key, username)) || username;
+            const existing = trainees[matchingKey] || {};
+            const existingTs = Date.parse(existing.statusUpdatedAt || existing.lastSeen || existing.updatedAt || 0) || currentRowTs;
+            const incomingTs = Date.parse(statusData.statusUpdatedAt || statusData.lastSeen || statusData.updatedAt || 0) || incomingRowTs;
+            trainees[matchingKey] = incomingTs >= existingTs
+                ? { ...existing, ...statusData }
+                : { ...statusData, ...existing };
+        });
+        merged.trainees = trainees;
+        return merged;
+    };
     if (payload.eventType === 'DELETE') {
+        if (payload.old && payload.old.id) markVettingSessionEnded(payload.old.id);
         sessions = sessions.filter(s => s.sessionId !== payload.old.id);
         const local = safeLocalParse('vettingSession', {}) || {};
         if (local.sessionId === payload.old.id && typeof handleVettingUpdate === 'function') {
@@ -4572,9 +4663,11 @@ function handleVettingRealtime(payload) {
     } else {
         const newData = payload.new.data;
         if (!newData) return;
+        if (newData.active === false) markVettingSessionEnded(newData.sessionId);
+        if (isVettingSessionEnded(newData.sessionId) && newData.active !== false) return;
         const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
         if (newData.active) {
-            if (idx > -1) sessions[idx] = newData;
+            if (idx > -1) sessions[idx] = mergeVettingSessionState(sessions[idx], newData);
             else sessions.push(newData);
         } else {
             sessions = sessions.filter(s => s.sessionId !== newData.sessionId);
@@ -4588,7 +4681,7 @@ function handleVettingRealtime(payload) {
 
 let _vettingRenderTimer = null;
 function safeRenderVettingArena() {
-    const runtimeV2 = document.querySelector('#vetting-arena-content .vetting-rework-webview');
+    const runtimeV2 = document.querySelector('#vetting-arena-content .vetting-arena-webview');
     if (runtimeV2) return; // Vetting Arena 2.0 owns this surface.
 
     const activeTab = document.querySelector('section.active');

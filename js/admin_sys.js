@@ -2316,18 +2316,37 @@ window.returnFromImpersonation = function() {
     return true;
 };
 
-window.impersonateUser = function(username) {
+window.impersonateUser = async function(username) {
     if (!CURRENT_USER || CURRENT_USER.role !== 'super_admin') {
         alert("Only Super Admin can impersonate users.");
         return;
     }
-    if (!confirm(`Impersonate ${username}? You will see exactly what they see.`)) return;
+    if (!confirm(`Open ${username}'s view in a separate window? Your Super Admin session will stay open.`)) return;
     
     const users = adminSysReadArray('users');
     const target = users.find(u => matchAdminIdentity(u && (u.user || u.username), username));
     
     if(!target) return alert("User not found.");
     if (matchAdminIdentity(target.user, CURRENT_USER.user)) return alert("You are already logged in as this user.");
+
+    if (window.electronAPI?.appWindows?.open) {
+        try {
+            await window.electronAPI.appWindows.open({
+                mode: 'impersonate',
+                actor: CURRENT_USER,
+                user: target,
+                title: `Impersonating ${target.user || username}`
+            });
+            if (typeof logAuditAction === 'function') {
+                logAuditAction(CURRENT_USER.user, 'Impersonation Window', `Opened separate view for ${target.user || username}`);
+            }
+            if (typeof showToast === 'function') showToast(`Opened ${target.user || username}'s view in a new window.`, 'success');
+            return;
+        } catch (error) {
+            console.error('Failed to open impersonation window:', error);
+            alert("Could not open the impersonation window. Falling back to the old in-place impersonation flow.");
+        }
+    }
     
     // Preserve original admin identity only once.
     if (!sessionStorage.getItem('real_admin_identity')) {

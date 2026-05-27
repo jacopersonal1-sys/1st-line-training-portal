@@ -27,6 +27,7 @@ function authReadObject(key, fallback = {}) {
 }
 
 function persistAppSession(user) {
+    if (window.APP_CHILD_WINDOW_MODE) return;
     if (!user) return;
     try {
         localStorage.setItem(window.PERSISTENT_SESSION_KEY, JSON.stringify({
@@ -108,6 +109,7 @@ function applySuccessfulLoginSession(validUser, options = {}) {
 }
 
 function runTraineePostLoginSync() {
+    if (window.APP_PASSIVE_TAB_WINDOW) return;
     if (!CURRENT_USER || CURRENT_USER.role !== 'trainee') return;
     if (window.__TRAINEE_POST_LOGIN_SYNC_RUNNING) return;
     window.__TRAINEE_POST_LOGIN_SYNC_RUNNING = true;
@@ -756,36 +758,45 @@ function nukeApplication() {
 }
 
 async function autoLogin() {
+  const isPassiveTabWindow = !!window.APP_PASSIVE_TAB_WINDOW;
   // --- IP ACCESS CONTROL CHECK (Double check for session restore) ---
-  const accessGranted = await checkAccessControl();
-  if(!accessGranted) return; 
+  if (!isPassiveTabWindow) {
+      const accessGranted = await checkAccessControl();
+      if(!accessGranted) return;
+  }
   // ---------------------------------------------------------------
 
   // --- COOL TRANSITION START ---
   const loginScreen = document.getElementById('login-screen');
   const appScreen = document.getElementById('app');
   
-  // Prepare App (Show it behind, invisible first)
-  appScreen.style.opacity = '0';
-  appScreen.style.display = 'flex';
-  
-  // Trigger Login Exit Animation
-  loginScreen.classList.add('login-exit-anim');
-  
-  // Fade In App
-  setTimeout(() => {
-      appScreen.style.transition = 'opacity 1.8s ease-in-out';
-      appScreen.style.opacity = '1';
-  }, 200);
-
-  // Cleanup after animation finishes
-  setTimeout(() => {
+  if (isPassiveTabWindow) {
       loginScreen.classList.add('hidden');
-      loginScreen.classList.remove('login-exit-anim');
-      appScreen.style.transition = ''; // Reset
-      appScreen.style.opacity = '';
+      appScreen.style.display = 'flex';
       if(typeof stopLoginParticles === 'function') stopLoginParticles();
-  }, 2000);
+  } else {
+      // Prepare App (Show it behind, invisible first)
+      appScreen.style.opacity = '0';
+      appScreen.style.display = 'flex';
+
+      // Trigger Login Exit Animation
+      loginScreen.classList.add('login-exit-anim');
+
+      // Fade In App
+      setTimeout(() => {
+          appScreen.style.transition = 'opacity 1.8s ease-in-out';
+          appScreen.style.opacity = '1';
+      }, 200);
+
+      // Cleanup after animation finishes
+      setTimeout(() => {
+          loginScreen.classList.add('hidden');
+          loginScreen.classList.remove('login-exit-anim');
+          appScreen.style.transition = ''; // Reset
+          appScreen.style.opacity = '';
+          if(typeof stopLoginParticles === 'function') stopLoginParticles();
+      }, 2000);
+  }
   // -----------------------------
 
   // Revert to Standard Footer (Profile moved to Header)
@@ -807,7 +818,7 @@ async function autoLogin() {
   }
   
   // LOG LOGIN
-  if(typeof logAccessEvent === 'function') logAccessEvent(CURRENT_USER.user, 'Login');
+  if(!isPassiveTabWindow && typeof logAccessEvent === 'function') logAccessEvent(CURRENT_USER.user, 'Login');
   
   // Apply Theme Immediately
   if (typeof applyUserTheme === 'function') applyUserTheme();
@@ -830,25 +841,25 @@ async function autoLogin() {
   if (typeof updateSidebarVisibility === 'function') updateSidebarVisibility();
   
   // MANDATORY: Check Attendance on Login
-  if (typeof checkAttendanceStatus === 'function') checkAttendanceStatus();
+  if (!isPassiveTabWindow && typeof checkAttendanceStatus === 'function') checkAttendanceStatus();
   
   // Trigger Notifications Calculation
-  if (typeof updateNotifications === 'function') updateNotifications();
+  if (!isPassiveTabWindow && typeof updateNotifications === 'function') updateNotifications();
   
   // CHECK FOR SAVED WORK (Inactivity Recovery)
-  if (typeof checkForDrafts === 'function') checkForDrafts();
+  if (!isPassiveTabWindow && typeof checkForDrafts === 'function') checkForDrafts();
 
   // RESTART SYNC ENGINE (To apply role-based polling rates)
-  if (typeof startRealtimeSync === 'function') startRealtimeSync();
+  if (!isPassiveTabWindow && typeof startRealtimeSync === 'function') startRealtimeSync();
 
   // --- START ACTIVITY MONITOR (Fresh Login) ---
   // Trainee runtime renders first and then starts monitoring/sync in the background.
-  if (typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
+  if (!isPassiveTabWindow && typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
       await StudyMonitor.init();
   }
   
   // --- START VETTING ENFORCER ---
-  if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
+  if (!isPassiveTabWindow && typeof initVettingEnforcer === 'function') initVettingEnforcer();
 
   // Redirect based on role
   if (window.RESTORE_TAB) {
@@ -863,7 +874,7 @@ async function autoLogin() {
   else if(CURRENT_USER.role === 'trainee') showTab('trainee-portal');
   else showTab('monthly'); // Team Leader
 
-  if (CURRENT_USER.role === 'trainee') {
+  if (!isPassiveTabWindow && CURRENT_USER.role === 'trainee') {
       runTraineePostLoginSync();
   }
 }
@@ -1170,6 +1181,11 @@ function applyRolePermissions() {
 }
 
 async function logout() { 
+  if (window.APP_CHILD_WINDOW_MODE && window.electronAPI?.windowControls?.close) {
+      window.electronAPI.windowControls.close();
+      return;
+  }
+
   const realAdminRaw = sessionStorage.getItem('real_admin_identity');
   if (realAdminRaw) {
       sessionStorage.setItem('currentUser', realAdminRaw);

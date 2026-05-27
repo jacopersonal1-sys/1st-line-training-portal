@@ -606,10 +606,77 @@ window.addEventListener('beforeunload', () => {
     if (typeof saveBuilderDraft === 'function') saveBuilderDraft();
 });
 
+async function readAppWindowLaunchPayload() {
+    if (!window.electronAPI?.appWindows?.getLaunchPayload) return null;
+    try {
+        const payload = await window.electronAPI.appWindows.getLaunchPayload();
+        return payload && typeof payload === 'object' ? payload : null;
+    } catch (error) {
+        console.warn('App child-window launch payload unavailable:', error);
+        return null;
+    }
+}
+
+function applyAppWindowLaunchPayload(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    const mode = String(payload.mode || '').trim().toLowerCase();
+    const user = payload.user && typeof payload.user === 'object' ? payload.user : null;
+    const tabId = String(payload.tabId || '').trim();
+
+    window.APP_WINDOW_LAUNCH = payload;
+    window.APP_CHILD_WINDOW_MODE = mode || 'tab';
+    window.APP_PASSIVE_TAB_WINDOW = mode === 'tab';
+    sessionStorage.setItem('app_child_window_mode', window.APP_CHILD_WINDOW_MODE);
+    sessionStorage.setItem('app_passive_tab_window', window.APP_PASSIVE_TAB_WINDOW ? 'true' : 'false');
+    sessionStorage.removeItem('real_admin_identity');
+    sessionStorage.removeItem('impersonating_user');
+
+    if (user && user.user) {
+        const normalizedRole = String(user.role || '').trim().toLowerCase();
+        const childUser = { ...user, role: normalizedRole || user.role };
+        const bootMode = normalizedRole === 'trainee' ? 'trainee' : 'admin';
+        sessionStorage.setItem('currentUser', JSON.stringify(childUser));
+        sessionStorage.setItem('boot_role_selection', bootMode);
+        window.APP_BOOT_MODE = bootMode;
+    }
+
+    if (tabId) window.RESTORE_TAB = tabId;
+}
+
+function ensureAppChildWindowChrome() {
+    if (!window.APP_CHILD_WINDOW_MODE || document.getElementById('app-child-window-controls')) return;
+    document.body.classList.add('app-child-window');
+    const header = document.querySelector('.top-header');
+    if (!header) return;
+
+    const controls = document.createElement('div');
+    controls.id = 'app-child-window-controls';
+    controls.className = 'app-window-controls';
+    controls.innerHTML = `
+        <button type="button" onclick="window.electronAPI?.windowControls?.minimize()" title="Minimize"><i class="fas fa-minus"></i></button>
+        <button type="button" onclick="window.electronAPI?.windowControls?.maximize()" title="Maximize"><i class="far fa-square"></i></button>
+        <button type="button" class="close" onclick="window.electronAPI?.windowControls?.close()" title="Close"><i class="fas fa-times"></i></button>
+    `;
+    header.appendChild(controls);
+
+    const brand = header.querySelector('.nav-brand');
+    if (brand) {
+        const label = window.APP_CHILD_WINDOW_MODE === 'impersonate'
+            ? `Impersonating ${CURRENT_USER?.user || 'User'}`
+            : 'Popout Window';
+        brand.setAttribute('title', label);
+    }
+}
+
 window.onload = async function() {
+    applyAppWindowLaunchPayload(await readAppWindowLaunchPayload());
+    if (window.APP_CHILD_WINDOW_MODE && typeof ensureAppChildWindowChrome === 'function') {
+        ensureAppChildWindowChrome();
+    }
     if (typeof refreshAdaptiveViewportLayout === 'function') {
         refreshAdaptiveViewportLayout();
     }
+    initSidebarHoverController();
     if (typeof applyUIDensity === 'function') applyUIDensity();
     if (typeof installResponsiveTableCards === 'function') installResponsiveTableCards();
     if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
@@ -1006,15 +1073,26 @@ window.onload = async function() {
             body.light-mode small { color: #444444 !important; font-weight: 600 !important; }
             body.light-mode ::placeholder { color: #444444 !important; opacity: 1; font-weight: 500; }
 
-            /* --- GLOBAL SMOOTHING --- */
-            body, .card, .dash-card, .modal-box, input, select, textarea, button, .nav-item, table, tr, td, th, .sidebar, .content-wrapper {
-                transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), color 0.4s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            /* --- THEME TOGGLE SMOOTHING --- */
+            body.theme-transitioning,
+            body.theme-transitioning .card,
+            body.theme-transitioning .dash-card,
+            body.theme-transitioning .modal-box,
+            body.theme-transitioning input,
+            body.theme-transitioning select,
+            body.theme-transitioning textarea,
+            body.theme-transitioning button,
+            body.theme-transitioning .nav-item,
+            body.theme-transitioning .sidebar,
+            body.theme-transitioning .content-wrapper {
+                transition: background-color 0.22s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.22s cubic-bezier(0.4, 0, 0.2, 1), color 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s cubic-bezier(0.4, 0, 0.2, 1);
             }
         `;
         document.head.appendChild(style);
     }
 
     const loader = document.getElementById('global-loader');
+    const isPassiveAppTabWindow = !!window.APP_PASSIVE_TAB_WINDOW;
 
     const startupBootRole = getStartupBootRoleMode();
     if (!startupBootRole) {
@@ -1034,7 +1112,7 @@ window.onload = async function() {
     if(loader) loader.classList.remove('hidden');
 
     // --- NATIVE DISK CACHE RECOVERY ---
-    if (window.electronAPI && window.electronAPI.disk) {
+    if (!isPassiveAppTabWindow && window.electronAPI && window.electronAPI.disk) {
         // If critical data is missing, the browser cache was likely wiped.
         if (!localStorage.getItem('users') || localStorage.length < 5) {
             console.warn("LocalStorage appears empty/wiped. Attempting native disk recovery...");
@@ -1078,11 +1156,11 @@ window.onload = async function() {
         versionApi.invoke('get-app-version').then(ver => {
             window.APP_VERSION = ver;
             // NEW: Check for release notes
-            if (typeof checkReleaseNotes === 'function') checkReleaseNotes(ver);
+            if (!window.APP_CHILD_WINDOW_MODE && typeof checkReleaseNotes === 'function') checkReleaseNotes(ver);
         });
 
         // NEW: Check if update is ALREADY waiting (Handle Reloads/Logouts)
-        versionApi.invoke('get-update-status').then(status => {
+        if (!isPassiveAppTabWindow) versionApi.invoke('get-update-status').then(status => {
             const isReady = (status && typeof status === 'object') ? !!status.ready : !!status;
             const readyChannel = (status && typeof status === 'object')
                 ? normalizeClientUpdateChannel(status.channel)
@@ -1118,7 +1196,7 @@ window.onload = async function() {
 
     // --- UPDATE CHANNEL CONFIGURATION ---
     // Main is default. Beta remains opt-in via profile selector, except staging which is always beta.
-    if (typeof require !== 'undefined') {
+    if (!isPassiveAppTabWindow && typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         const target = localStorage.getItem('active_server_target');
         const preferred = normalizeClientUpdateChannel(localStorage.getItem('profile_update_channel'));
@@ -1127,7 +1205,7 @@ window.onload = async function() {
     }
 
     // --- IMPERSONATION CHECK ---
-    const realAdmin = sessionStorage.getItem('real_admin_identity');
+    const realAdmin = isPassiveAppTabWindow ? null : sessionStorage.getItem('real_admin_identity');
     if (realAdmin) {
         const banner = document.createElement('div');
         banner.style.cssText = "position:fixed; top:0; left:0; width:100%; background:#e74c3c; color:white; text-align:center; padding:5px; z-index:99999; font-weight:bold; cursor:pointer;";
@@ -1162,13 +1240,22 @@ window.onload = async function() {
             if (!CURRENT_USER) throw new Error('Invalid early session payload');
             window.CURRENT_USER = CURRENT_USER;
             // Render Skeletons
-            if (typeof renderLoadingDashboard === 'function') renderLoadingDashboard();
+            if (!isPassiveAppTabWindow && typeof renderLoadingDashboard === 'function') renderLoadingDashboard();
             // Hide Loader immediately so user sees the skeleton UI
             if(loader) loader.classList.add('hidden');
         } catch(e) { console.error("Early render failed", e); }
     }
 
-    if (!isTraineeBootMode) {
+    if (isPassiveAppTabWindow) {
+        // Passive Super Admin tab popouts reuse the main client's local cache and
+        // deliberately skip boot sync/realtime/repair work to avoid acting like
+        // another full production client.
+        if (loader) loader.classList.add('hidden');
+        if (typeof migrateData === 'function') migrateData();
+        if(typeof populateYearSelect === 'function') populateYearSelect();
+        if(typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
+        if(typeof loadRostersList === 'function') loadRostersList();
+    } else if (!isTraineeBootMode) {
     // --- SERVER MIGRATION PROTOCOL ---
     // Detects if we've switched servers and forces a full re-sync/push to ensure data consistency.
     const currentTarget = localStorage.getItem('active_server_target') || 'cloud';
@@ -1360,40 +1447,41 @@ window.onload = async function() {
 
     const savedSession = sessionStorage.getItem('currentUser');
     if(savedSession) {
+        const restoreSavedSession = async () => {
+            CURRENT_USER = (typeof safeParse === 'function') ? safeParse(savedSession, null) : JSON.parse(savedSession);
+            if (!CURRENT_USER) {
+                sessionStorage.removeItem('currentUser');
+                if (!window.APP_CHILD_WINDOW_MODE && typeof clearPersistentAppSession === 'function') clearPersistentAppSession();
+                return;
+            }
+            window.CURRENT_USER = CURRENT_USER;
+            if (!window.APP_CHILD_WINDOW_MODE && !sessionStorage.getItem('real_admin_identity') && typeof persistAppSession === 'function') {
+                persistAppSession(CURRENT_USER);
+            }
+            applyUserTheme();
+
+            const expTheme = localStorage.getItem('experimental_theme');
+            if (expTheme) applyExperimentalTheme(expTheme);
+
+            updateSidebarVisibility();
+
+            if (!window.APP_PASSIVE_TAB_WINDOW && typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
+                await StudyMonitor.init();
+            }
+
+            if (!window.APP_PASSIVE_TAB_WINDOW && typeof initVettingEnforcer === 'function') initVettingEnforcer();
+
+            if (typeof autoLogin === 'function') autoLogin();
+        };
+
+        if (window.APP_PASSIVE_TAB_WINDOW) {
+            await restoreSavedSession();
+        }
         // Verify IP again on refresh to prevent session hijacking across locations
-        if (typeof checkAccessControl === 'function') {
+        else if (typeof checkAccessControl === 'function') {
             checkAccessControl().then(async allowed => {
                 if(allowed) {
-                    CURRENT_USER = (typeof safeParse === 'function') ? safeParse(savedSession, null) : JSON.parse(savedSession);
-                    if (!CURRENT_USER) {
-                        sessionStorage.removeItem('currentUser');
-                        if (typeof clearPersistentAppSession === 'function') clearPersistentAppSession();
-                        return;
-                    }
-                    window.CURRENT_USER = CURRENT_USER;
-                    if (!sessionStorage.getItem('real_admin_identity') && typeof persistAppSession === 'function') {
-                        persistAppSession(CURRENT_USER);
-                    }
-                    // --- NEW: Apply User Specific Theme Immediately ---
-                    applyUserTheme(); 
-                    
-                    // Check for experimental theme
-                    const expTheme = localStorage.getItem('experimental_theme');
-                    if (expTheme) applyExperimentalTheme(expTheme);
-                    
-                    // --------------------------------------------------
-                    // Update Sidebar based on Role
-                    updateSidebarVisibility();
-                    
-                    // --- START ACTIVITY MONITOR ---
-                    if (typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
-                        await StudyMonitor.init();
-                    }
-                    
-                    // --- START VETTING ENFORCER ---
-                    if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
-                    
-                    if (typeof autoLogin === 'function') autoLogin();
+                    await restoreSavedSession();
                 } else {
                     sessionStorage.removeItem('currentUser'); // Clear invalid session
                     if (typeof clearPersistentAppSession === 'function') clearPersistentAppSession();
@@ -1401,34 +1489,7 @@ window.onload = async function() {
             });
         } else {
             // Fallback if IP check isn't loaded
-             CURRENT_USER = (typeof safeParse === 'function') ? safeParse(savedSession, null) : JSON.parse(savedSession);
-             if (!CURRENT_USER) {
-                 sessionStorage.removeItem('currentUser');
-                 if (typeof clearPersistentAppSession === 'function') clearPersistentAppSession();
-                 if (typeof initLoginParticles === 'function') initLoginParticles();
-                 return;
-             }
-             window.CURRENT_USER = CURRENT_USER;
-             if (!sessionStorage.getItem('real_admin_identity') && typeof persistAppSession === 'function') {
-                 persistAppSession(CURRENT_USER);
-             }
-             applyUserTheme();
-             
-             // Check for experimental theme
-             const expTheme = localStorage.getItem('experimental_theme');
-             if (expTheme) applyExperimentalTheme(expTheme);
-
-             updateSidebarVisibility();
-             
-             // --- START ACTIVITY MONITOR ---
-             if (typeof StudyMonitor !== 'undefined' && CURRENT_USER.role !== 'trainee') {
-                 await StudyMonitor.init();
-             }
-             
-             // --- START VETTING ENFORCER ---
-             if (typeof initVettingEnforcer === 'function') initVettingEnforcer();
-
-             if (typeof autoLogin === 'function') autoLogin();
+             await restoreSavedSession();
         }
     } else {
         // --- CHECK REMEMBER ME ---
@@ -1482,18 +1543,18 @@ window.onload = async function() {
     }
 
     // Poll for notifications every minute
-    if (!window.__APP_NOTIFICATION_INTERVAL && typeof updateNotifications === 'function') {
+    if (!isPassiveAppTabWindow && !window.__APP_NOTIFICATION_INTERVAL && typeof updateNotifications === 'function') {
         window.__APP_NOTIFICATION_INTERVAL = setInterval(updateNotifications, 60000);
     }
     // Also run once immediately if logged in
-    if(savedSession) setTimeout(updateNotifications, 1000); 
+    if(!isPassiveAppTabWindow && savedSession) setTimeout(updateNotifications, 1000);
     if (!window.__APP_VIEW_SYNC_INDICATOR_INTERVAL && typeof updateViewSyncIndicators === 'function') {
         window.__APP_VIEW_SYNC_INDICATOR_INTERVAL = setInterval(updateViewSyncIndicators, 60000);
     }
 
     // --- NEW: AUTO-UPDATE POLLER ---
     // Actively check for updates every 30 minutes so the bell icon appears for open apps
-    if (typeof require !== 'undefined' && !window.__APP_UPDATE_CHECK_INTERVAL) {
+    if (!isPassiveAppTabWindow && typeof require !== 'undefined' && !window.__APP_UPDATE_CHECK_INTERVAL) {
         window.__APP_UPDATE_CHECK_INTERVAL = setInterval(() => {
             const { ipcRenderer } = require('electron');
             const target = localStorage.getItem('active_server_target');
@@ -1504,15 +1565,15 @@ window.onload = async function() {
     }
 
     // --- MANDATORY ATTENDANCE CHECK (Session Restore) ---
-    if (savedSession && typeof checkAttendanceStatus === 'function') {
+    if (!isPassiveAppTabWindow && savedSession && typeof checkAttendanceStatus === 'function') {
         setTimeout(checkAttendanceStatus, 1500); 
     }
 
     // --- LUNCH TIMER LOGIC ---
-    if (!window.__APP_LUNCH_TIMER_INTERVAL && typeof updateLunchTimer === 'function') {
+    if (!isPassiveAppTabWindow && !window.__APP_LUNCH_TIMER_INTERVAL && typeof updateLunchTimer === 'function') {
         window.__APP_LUNCH_TIMER_INTERVAL = setInterval(updateLunchTimer, 1000);
     }
-    updateLunchTimer();
+    if (!isPassiveAppTabWindow) updateLunchTimer();
 
     // --- DEMO SEED TRIGGER ---
     if (sessionStorage.getItem('SEED_DEMO') === 'true') {
@@ -2253,7 +2314,6 @@ function updateViewSyncIndicators() {
         'live-assessment',
         'manage',
         'capture',
-        'vetting-rework',
         'superadmin-studio',
         'opl-hub',
         'content-studio'
@@ -2689,6 +2749,8 @@ function applyExperimentalTheme(themeName, options = {}) {
 const ADMIN_NAV_VIEW_KEY = 'admin_nav_view';
 const ADMIN_NAV_ADVANCED = 'navigation-map';
 const ADMIN_NAV_ORDER_KEY = 'admin_nav_order';
+let SIDEBAR_EXPAND_TIMER = null;
+let SIDEBAR_COLLAPSE_TIMER = null;
 
 const ADVANCED_ADMIN_NAV_GROUPS = [
     {
@@ -2816,6 +2878,44 @@ function canUseAdminNavigationView() {
     return !!(CURRENT_USER && ['admin', 'super_admin', 'teamleader'].includes(CURRENT_USER.role));
 }
 
+function initSidebarHoverController() {
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar || sidebar.dataset.hoverControllerReady === '1') return;
+    sidebar.dataset.hoverControllerReady = '1';
+
+    const expand = () => {
+        if (SIDEBAR_COLLAPSE_TIMER) clearTimeout(SIDEBAR_COLLAPSE_TIMER);
+        SIDEBAR_COLLAPSE_TIMER = null;
+        SIDEBAR_EXPAND_TIMER = setTimeout(() => {
+            sidebar.classList.add('is-expanded');
+            document.body.classList.add('sidebar-expanded');
+        }, 170);
+    };
+
+    const collapse = () => {
+        if (SIDEBAR_EXPAND_TIMER) clearTimeout(SIDEBAR_EXPAND_TIMER);
+        SIDEBAR_EXPAND_TIMER = null;
+        SIDEBAR_COLLAPSE_TIMER = setTimeout(() => {
+            sidebar.classList.remove('is-expanded');
+            document.body.classList.remove('sidebar-expanded');
+            document.querySelectorAll('.nav-item-wrap.submenu-open').forEach(wrap => wrap.classList.remove('submenu-open'));
+        }, 260);
+    };
+
+    sidebar.addEventListener('pointerenter', expand);
+    sidebar.addEventListener('pointerleave', collapse);
+    sidebar.addEventListener('focusin', () => {
+        if (SIDEBAR_COLLAPSE_TIMER) clearTimeout(SIDEBAR_COLLAPSE_TIMER);
+        sidebar.classList.add('is-expanded');
+        document.body.classList.add('sidebar-expanded');
+    });
+    sidebar.addEventListener('focusout', () => {
+        setTimeout(() => {
+            if (!sidebar.contains(document.activeElement)) collapse();
+        }, 0);
+    });
+}
+
 function getStoredAdminNavigationView() {
     const raw = String(localStorage.getItem(ADMIN_NAV_VIEW_KEY) || '').trim();
     if (raw === 'classic') return 'classic';
@@ -2897,6 +2997,69 @@ function getNavigationSubItems(item) {
     return base;
 }
 
+function getNavigationSubItemIcon(sub) {
+    const type = String(sub && sub.type || '');
+    const view = String(sub && sub.view || '');
+    const key = `${type}:${view}`;
+    const exact = {
+        'admin:users': 'fas fa-users-gear',
+        'admin:assessments': 'fas fa-layer-group',
+        'admin:insight-rules': 'fas fa-sliders',
+        'admin:data': 'fas fa-database',
+        'admin:tool-hosting': 'fas fa-cloud-arrow-up',
+        'admin:access': 'fas fa-key',
+        'admin:status': 'fas fa-heart-pulse',
+        'admin:updates': 'fas fa-download',
+        'admin:theme': 'fas fa-palette',
+        'admin:graduates': 'fas fa-user-graduate',
+        'insight:triggers': 'fas fa-bolt',
+        'insight:progress': 'fas fa-list-check',
+        'insight:department': 'fas fa-building-user',
+        'insight:compare': 'fas fa-chart-simple',
+        'insight:build': 'fas fa-pen-ruler',
+        'insight:hr-evidence': 'fas fa-briefcase',
+        'insight:knowledge': 'fas fa-lightbulb',
+        'report:create': 'fas fa-file-circle-plus',
+        'report:saved': 'fas fa-folder-open',
+        'opl:opl_search': 'fas fa-magnifying-glass',
+        'opl:backend_data': 'fas fa-table-list',
+        'content-studio:view': 'fas fa-eye',
+        'content-studio:builder': 'fas fa-hammer',
+        'content-studio:engagement': 'fas fa-chart-pie',
+        'content-studio:files': 'fas fa-folder-tree',
+        'schedule-view:list': 'fas fa-timeline',
+        'schedule-view:calendar': 'fas fa-calendar-days',
+        'test-engine:overview': 'fas fa-gauge-high',
+        'test-engine:history': 'fas fa-clock-rotate-left',
+        'test-engine:feedback': 'fas fa-comments',
+        'test-engine:integrity': 'fas fa-shield-virus',
+        'test-engine:nps': 'fas fa-star-half-stroke',
+        'live-booking:grid': 'fas fa-table-cells-large',
+        'live-booking:controls': 'fas fa-toggle-on',
+        'live-booking:settings': 'fas fa-gear',
+        'live-booking:rules': 'fas fa-book',
+        'vetting-arena:tabbed': 'fas fa-table-columns',
+        'vetting-arena:split': 'fas fa-grip',
+        'teamleader-hub:timeline': 'fas fa-timeline',
+        'teamleader-hub:my_team': 'fas fa-people-group',
+        'teamleader-hub:overview': 'fas fa-chart-line',
+        'teamleader-hub:agent_feedback': 'fas fa-comment-dots',
+        'teamleader-hub:roster': 'fas fa-user-plus',
+        'teamleader-hub:backend_data': 'fas fa-table-list',
+        'superadmin-studio:overview': 'fas fa-command',
+        'superadmin-studio:people': 'fas fa-users',
+        'superadmin-studio:user-control': 'fas fa-user-lock',
+        'superadmin-studio:learning': 'fas fa-graduation-cap',
+        'superadmin-studio:operations': 'fas fa-diagram-project',
+        'superadmin-studio:system': 'fas fa-server',
+        'superadmin-studio:explorer': 'fas fa-magnifying-glass-chart'
+    };
+    if (exact[key]) return exact[key];
+    if (type === 'schedule-id') return 'fas fa-calendar-check';
+    if (type === 'live-schedule-id') return 'fas fa-video';
+    return 'fas fa-arrow-right';
+}
+
 function saveAdminNavigationOrder(ids) {
     const validIds = new Set(getDefaultAdminNavigationItems().map(item => item.id));
     const next = (Array.isArray(ids) ? ids : []).filter(id => validIds.has(id));
@@ -2926,6 +3089,56 @@ function refreshAdvancedNavigationMap() {
     if (active) setActiveNavigationTarget(active.id);
 }
 
+function canOpenAppPopoutWindows() {
+    return !!(
+        !window.APP_CHILD_WINDOW_MODE &&
+        CURRENT_USER &&
+        CURRENT_USER.role === 'super_admin' &&
+        window.electronAPI?.appWindows?.open
+    );
+}
+
+function getNavigationItemTitle(tabId) {
+    const item = getDefaultAdminNavigationItems().find(entry => entry.id === tabId);
+    return item ? (item.title || item.text || tabId) : String(tabId || 'App Window');
+}
+
+window.openAppTabWindow = async function openAppTabWindow(tabId, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    if (!canOpenAppPopoutWindows()) {
+        if (typeof showToast === 'function') showToast('Only Super Admin can open app tabs in a separate window.', 'warning');
+        return false;
+    }
+
+    const targetTab = String(tabId || '').trim();
+    if (!targetTab) return false;
+
+    try {
+        await window.electronAPI.appWindows.open({
+            mode: 'tab',
+            actor: CURRENT_USER,
+            user: CURRENT_USER,
+            tabId: targetTab,
+            title: `${getNavigationItemTitle(targetTab)} - 1st Line Training`
+        });
+        if (typeof showToast === 'function') showToast(`${getNavigationItemTitle(targetTab)} opened in a new window.`, 'success');
+        return true;
+    } catch (error) {
+        console.error('Failed to open app tab window:', error);
+        if (typeof showToast === 'function') showToast('Could not open that tab in a new window.', 'error');
+        else alert('Could not open that tab in a new window.');
+        return false;
+    }
+};
+
+window.openCurrentTabWindow = function openCurrentTabWindow(event) {
+    const active = document.querySelector('section.active');
+    return window.openAppTabWindow(active ? active.id : 'dashboard-view', event);
+};
+
 function buildAdvancedNavButton(item) {
     const classes = ['nav-item', item.featured ? 'nav-item--primary' : 'nav-item--compact'].concat(String(item.classes || '').split(/\s+/).filter(Boolean)).join(' ');
     const hasSubmenu = Array.isArray(item.subItems) && item.subItems.length;
@@ -2935,12 +3148,18 @@ function buildAdvancedNavButton(item) {
         : ` onclick="showTab('${escapeNavAttr(item.id)}')"`;
     const submenu = hasSubmenu
         ? `<div class="nav-inline-submenu" id="nav-submenu-${escapeNavAttr(item.id)}" aria-label="${escapeNavAttr(item.text)} quick links">
-                ${item.subItems.map(sub => `<button class="nav-subitem" onclick="navigateAdvancedSubMenu('${escapeNavAttr(item.id)}','${escapeNavAttr(sub.type)}','${escapeNavAttr(sub.view)}')">${escapeNavAttr(sub.label)}</button>`).join('')}
+                <div class="nav-inline-submenu-title"><i class="${escapeNavAttr(item.icon)}"></i><span>${escapeNavAttr(item.text)} shortcuts</span></div>
+                ${item.subItems.map(sub => `<button class="nav-subitem" onclick="navigateAdvancedSubMenu('${escapeNavAttr(item.id)}','${escapeNavAttr(sub.type)}','${escapeNavAttr(sub.view)}')"><i class="${escapeNavAttr(getNavigationSubItemIcon(sub))}"></i><span>${escapeNavAttr(sub.label)}</span></button>`).join('')}
            </div>`
         : '';
     const expand = hasSubmenu
         ? `<button type="button" class="nav-submenu-control" title="Show shortcuts" aria-label="${escapeNavAttr(item.text)} shortcuts" onclick="toggleAdvancedNavSubmenu('${escapeNavAttr(item.id)}', event)">
                 <i class="fas fa-chevron-down"></i>
+           </button>`
+        : '';
+    const popout = (canOpenAppPopoutWindows() && item.action !== 'network')
+        ? `<button type="button" class="nav-popout-control" title="Open in new window" aria-label="Open ${escapeNavAttr(item.text)} in new window" onclick="openAppTabWindow('${escapeNavAttr(item.id)}', event)">
+                <i class="fas fa-up-right-from-square"></i>
            </button>`
         : '';
     return `<div class="nav-item-wrap${hasSubmenu ? ' nav-item-wrap--has-submenu' : ''}" draggable="true" data-nav-id="${escapeNavAttr(item.id)}" title="Drag to reorder">
@@ -2949,6 +3168,7 @@ function buildAdvancedNavButton(item) {
                 <i class="${escapeNavAttr(item.icon)}"></i><span class="nav-text">${escapeNavAttr(item.text)}</span>
             </button>
             ${expand}
+            ${popout}
         </div>
         ${submenu}
     </div>`;
@@ -3019,7 +3239,7 @@ window.navigateAdvancedSubMenu = function navigateAdvancedSubMenu(tabId, type, v
 
 function navigateGenericWebviewScript(webviewId, script, attempts = 8) {
     const webview = document.getElementById(webviewId)
-        || (webviewId === 'vetting-arena-webview' ? document.querySelector('#vetting-arena-content .vetting-rework-webview') : null);
+        || (webviewId === 'vetting-arena-webview' ? document.querySelector('#vetting-arena-content .vetting-arena-webview') : null);
     if (webview && typeof webview.executeJavaScript === 'function') {
         webview.executeJavaScript(script, true).catch(() => {
             if (attempts > 0) setTimeout(() => navigateGenericWebviewScript(webviewId, script, attempts - 1), 180);
@@ -3371,6 +3591,7 @@ function updateSidebarVisibility() {
     const role = CURRENT_USER.role;
     const isTraineeRuntimeSession = role === 'trainee';
     document.body.classList.toggle('trainee-runtime', isTraineeRuntimeSession);
+    if (typeof ensureAppChildWindowChrome === 'function') ensureAppChildWindowChrome();
     applyConfiguredNavigationView();
     
     // --- DYNAMIC LABEL UPDATE ---
@@ -3394,9 +3615,11 @@ function updateSidebarVisibility() {
     // --- INJECT SUPER ADMIN BUTTON ---
     // Moved outside the loop to ensure it runs reliably
     const existingSaBtn = document.getElementById('btn-super-admin');
+    const existingPopoutBtn = document.getElementById('btn-popout-current-tab');
     
     // Force removal if not super admin
     if (role !== 'super_admin' && existingSaBtn) existingSaBtn.remove();
+    if (role !== 'super_admin' && existingPopoutBtn) existingPopoutBtn.remove();
 
     if (role === 'super_admin') {
         // Robust Retry logic for header injection
@@ -3433,12 +3656,23 @@ function updateSidebarVisibility() {
                 header.appendChild(indicator);
             }
 
-            if (document.getElementById('btn-super-admin')) return true;
-            
             const bubbleContent = document.querySelector('.control-bubble .bubble-content');
             const adminToolsBtn = document.getElementById('btn-admin-tools');
             
             if (bubbleContent) {
+                if (!window.APP_CHILD_WINDOW_MODE && !document.getElementById('btn-popout-current-tab') && window.electronAPI?.appWindows?.open) {
+                    const popBtn = document.createElement('button');
+                    popBtn.id = 'btn-popout-current-tab';
+                    popBtn.className = 'icon-btn';
+                    popBtn.title = 'Open current tab in new window';
+                    popBtn.innerHTML = '<i class="fas fa-up-right-from-square"></i>';
+                    popBtn.onclick = (event) => openCurrentTabWindow(event);
+                    const logoutBtn = bubbleContent.querySelector('.logout');
+                    bubbleContent.insertBefore(popBtn, logoutBtn || null);
+                }
+
+                if (document.getElementById('btn-super-admin')) return true;
+
                 const btn = document.createElement('button');
                 btn.id = 'btn-super-admin';
                 btn.className = 'icon-btn';
@@ -3516,7 +3750,7 @@ function updateSidebarVisibility() {
         }
 
         // Hide isolated super admin tools from everyone except Super Admin
-        if ((targetTab === 'vetting-rework' || targetTab === 'superadmin-studio') && role !== 'super_admin') {
+        if (targetTab === 'superadmin-studio' && role !== 'super_admin') {
             btn.classList.add('hidden');
             return;
         }
@@ -3530,7 +3764,7 @@ function updateSidebarVisibility() {
         if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'study-notes', 'live-assessment', 'live-execution', 'insight-studio', 'manage', 'capture', 'tl-hub', 'vetting-rework', 'superadmin-studio', 'content-studio', 'trainee-portal'];
+            const hiddenForTL = ['test-manage', 'my-tests', 'study-notes', 'live-assessment', 'live-execution', 'insight-studio', 'manage', 'capture', 'tl-hub', 'superadmin-studio', 'content-studio', 'trainee-portal'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -3731,7 +3965,6 @@ const HEAVY_EMBEDDED_VIEWS = new Set([
     'assessment-schedule',
     'superadmin-studio',
     'vetting-arena',
-    'vetting-rework',
     'first-line-troubleshooting',
     'trainee-portal',
     'study-notes'
@@ -4025,6 +4258,10 @@ function isHighPrioritySyncView(id) {
 }
 
 function applyRealtimeFailoverProfile(id) {
+    if (window.APP_PASSIVE_TAB_WINDOW) {
+        window.__HIGH_PRIORITY_VIEW_SYNC = false;
+        return;
+    }
     const highPriority = isHighPrioritySyncView(id);
     window.__HIGH_PRIORITY_VIEW_SYNC = highPriority;
 
@@ -4164,6 +4401,16 @@ function renderViewById(id, options = {}) {
     }
 
     if (id === 'dashboard-view') {
+        if (
+            source === 'switch' &&
+            typeof isDashboardRenderFresh === 'function' &&
+            isDashboardRenderFresh(20000)
+        ) {
+            if (typeof updateDashboardHealth === 'function') {
+                setTimeout(() => updateDashboardHealth(true), 80);
+            }
+            return;
+        }
         if (typeof scheduleDashboardRender === 'function') scheduleDashboardRender({ delay: 40 });
         else if (typeof renderDashboard === 'function') setTimeout(renderDashboard, 0);
         return;
@@ -4314,19 +4561,7 @@ function renderViewById(id, options = {}) {
         return;
     }
 
-    if (id === 'vetting-rework') {
-        console.log('[Router] Vetting Rework tab clicked.');
-        if (typeof VettingReworkLoader !== 'undefined' && typeof VettingReworkLoader.renderUI === 'function') {
-            console.log('[Router] Executing Loader...');
-            VettingReworkLoader.renderUI();
-        } else {
-            console.error('VettingReworkLoader module not loaded.');
-        }
-        return;
-    }
-
     if (id === 'superadmin-studio') {
-        console.log('[Router] Super Admin Data Studio tab clicked.');
         if (typeof SuperAdminDataStudioLoader !== 'undefined' && typeof SuperAdminDataStudioLoader.renderUI === 'function') {
             SuperAdminDataStudioLoader.renderUI();
         } else {
@@ -4379,6 +4614,7 @@ function scheduleNavigationDeferredWork(id, target) {
 }
 
 async function syncFreshDataForView(id) {
+    if (window.APP_PASSIVE_TAB_WINDOW) return;
     if (!isHighPrioritySyncView(id)) return;
     if (id === 'assessment-schedule') return;
     if (typeof loadFromServer !== 'function') return;
@@ -4437,7 +4673,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'qa-hub', 'manage', 'capture', 'vetting-rework', 'superadmin-studio', 'opl-hub', 'content-studio'];
+      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'qa-hub', 'manage', 'capture', 'superadmin-studio', 'opl-hub', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -4526,6 +4762,18 @@ function showTab(id, btn) {
           id = 'live-execution';
       }
   }
+
+  if (CURRENT_USER && CURRENT_USER.role === 'trainee' && id !== 'vetting-arena') {
+      const vettingGate = (typeof getTraineeVettingNotesGate === 'function')
+          ? getTraineeVettingNotesGate()
+          : { activeVetting: false, blocking: false };
+      if (vettingGate && vettingGate.activeVetting && vettingGate.blocking) {
+          if (typeof showToast === 'function') {
+              showToast("Vetting Arena is active. Complete or wait for Admin to end the session before leaving.", "warning");
+          }
+          id = 'vetting-arena';
+      }
+  }
   
   // --- ROGUE TIMER PREVENTION ---
   // If we are leaving the test view, kill the active timer to prevent background auto-submits
@@ -4569,7 +4817,7 @@ function showTab(id, btn) {
           if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
           return;
       }
-      syncFreshDataForView(id);
+      if (!window.APP_PASSIVE_TAB_WINDOW) syncFreshDataForView(id);
       if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
       return;
   }
@@ -4597,7 +4845,7 @@ function showTab(id, btn) {
       setActiveNavigationTarget(id);
 
       // --- ACTIVITY TRACKING ---
-      if (CURRENT_USER && CURRENT_USER.role === 'trainee' && typeof StudyMonitor !== 'undefined') {
+      if (!window.APP_PASSIVE_TAB_WINDOW && CURRENT_USER && CURRENT_USER.role === 'trainee' && typeof StudyMonitor !== 'undefined') {
           StudyMonitor.track(`Navigating: ${id.replace(/-/g, ' ')}`);
       }
 
@@ -4678,7 +4926,7 @@ async function flushEmbeddedRuntimeQueues() {
     }
 
     // Admin Vetting 2.0 module queue (isolated webview runtime)
-    const vettingWebview = document.querySelector('#vetting-arena-content .vetting-rework-webview');
+    const vettingWebview = document.querySelector('#vetting-arena-content .vetting-arena-webview');
     if (vettingWebview && typeof vettingWebview.executeJavaScript === 'function') {
         try {
             await vettingWebview.executeJavaScript(`
@@ -4710,6 +4958,12 @@ function clearSyncTimestampsForFreshPull() {
 
 async function refreshApp() {
     if (_isHardRefreshRunning) return;
+    if (window.APP_PASSIVE_TAB_WINDOW) {
+        if (typeof showToast === 'function') {
+            showToast('This is a passive popout view. Run full refresh from the main app window.', 'info');
+        }
+        return;
+    }
     _isHardRefreshRunning = true;
 
     const refreshBtn =
@@ -4777,6 +5031,7 @@ function triggerForceRestart() {
 }
 
 function toggleTheme() {
+    document.body.classList.add('theme-transitioning');
     document.body.classList.toggle('light-mode');
     // Save preference
     const isLight = document.body.classList.contains('light-mode');
@@ -4785,6 +5040,7 @@ function toggleTheme() {
         applyOneUiThemeVariables(getStoredLocalThemeConfig());
     }
     if (typeof scheduleEmbeddedThemeSync === 'function') scheduleEmbeddedThemeSync({ delay: 80 });
+    setTimeout(() => document.body.classList.remove('theme-transitioning'), 280);
 }
 
 /* ================= NOTIFICATIONS ================= */
@@ -5299,6 +5555,24 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.3": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Grading:</strong> New Vetting Arena submissions now wait for admin grading instead of auto-skipping review, while historical completed Vetting records stay completed.</li>
+                <li style="margin-bottom: 8px;"><strong>Grading Queue:</strong> Linked pending rows are repaired back to completed when a permanent record already exists, preventing old reviewed attempts from flooding the queue.</li>
+                <li style="margin-bottom: 8px;"><strong>Insight Knowledge Gaps:</strong> Individual view now shows each missed question with full question text, trainee answer, and awarded points; group view now aggregates failed questions by assessment and group.</li>
+                <li style="margin-bottom: 8px;"><strong>HR Evidence:</strong> One HR incident can now be linked to multiple evaluation triggers, with edit, delete, and trigger filtering for captured evidence.</li>
+                <li style="margin-bottom: 8px;"><strong>Insight Polish:</strong> Assessment breakdown graphs now show assessment names instead of numeric-only axis labels.</li>
+                <li style="margin-bottom: 8px;"><strong>Reliability:</strong> Additional cleanup hardens Vetting, Insight, Schedule Studio, dashboard, auth, sync, and embedded module paths used during release operations.</li>
+            </ul>`,
+        "2.7.2": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Vetting Arena:</strong> Admins now get clearer group selection with month/year names, member counts, and trainee previews before starting a session.</li>
+                <li style="margin-bottom: 8px;"><strong>Vetting Tests:</strong> Test selection is split into 1st Vetting, Final Vetting, and Other Vetting sections, with per-group completion tracking to avoid repeating the wrong stage.</li>
+                <li style="margin-bottom: 8px;"><strong>Reliability:</strong> Starting a Vetting session now seeds the selected group as waiting, nudges the targeted trainees, and keeps trainee status updates merged so admin monitoring remains accurate.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Flow:</strong> The secure pre-flight screen no longer re-renders during repeated scans, so passed trainees keep a stable Enter Arena button before taking and submitting the test.</li>
+                <li style="margin-bottom: 8px;"><strong>Session Ending:</strong> Ending Vetting now sends an explicit release command to targeted trainees and ignores stale inactive rows if server delete is delayed.</li>
+                <li style="margin-bottom: 8px;"><strong>Polish:</strong> Vetting admin and trainee views now use a more focused command-center and secure exam profile.</li>
+            </ul>`,
         "2.7.1": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Hotfix:</strong> Live Assessment Arena now stays hidden unless its own tab is active, preventing arena visuals from bleeding into other application views.</li>
@@ -5335,7 +5609,7 @@ function getChangelog(version) {
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Reporting, Agent Search, AI diagnostics, and Dashboard widgets now use defensive cache reads for saved reports, archives, link requests, notices, bookmarks, tips, and system-wide diagnostic data.</li>
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Assessment Admin marking, quick approve, history review, marking leases, and marker note updates now use defensive cache reads for submissions, records, tests, rosters, and sync hash maps.</li>
                 <li style="margin-bottom: 8px;"><strong>Stability:</strong> Main shell, NPS, Vetting runtimes, Insight rules, attendance, and admin assessment workflows now avoid raw local storage JSON parsing in their larger hot paths.</li>
-                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Login/auth, calendar, diagnostics, Content Studio, Team Hub, OPL Hub, Q&A Hub, Insight Studio helpers, and Vetting Rework now use guarded cache reads instead of direct local storage JSON parsing.</li>
+                <li style="margin-bottom: 8px;"><strong>Stability:</strong> Login/auth, calendar, diagnostics, Content Studio, Team Hub, OPL Hub, Q&A Hub, Insight Studio helpers, and Vetting Arena now use guarded cache reads instead of direct local storage JSON parsing.</li>
             </ul>`,
         "2.6.98": `
             <ul style="padding-left: 20px; margin: 0;">

@@ -1075,7 +1075,8 @@ async function submitTest(forceSubmit = false, options = {}) {
     const finalPercent = typeof clampAssessmentPercent === 'function'
         ? clampAssessmentPercent(autoResult.percent)
         : Math.max(0, Math.min(100, Math.round(Number(autoResult.percent) || 0)));
-    const finalStatus = autoResult.needsManual ? 'pending' : 'completed';
+    const isVettingAssessment = String(window.CURRENT_TEST?.type || '').toLowerCase() === 'vetting';
+    const finalStatus = (isVettingAssessment || autoResult.needsManual) ? 'pending' : 'completed';
     const quizMeta = String(window.CURRENT_TEST?.type || '').toLowerCase() === 'quiz'
         ? buildQuizSubmissionMeta(window.CURRENT_TEST, window.USER_ANSWERS, autoResult)
         : null;
@@ -1125,7 +1126,7 @@ async function submitTest(forceSubmit = false, options = {}) {
         
         let cycleVal = 'Digital Onboard';
         if(typeof getTraineeCycle === 'function') cycleVal = getTraineeCycle(CURRENT_USER.user, groupId);
-        const phaseVal = window.CURRENT_TEST.title.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+        const phaseVal = isVettingAssessment || window.CURRENT_TEST.title.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
 
         const records = assessmentReadArray('records');
         const recordId = `record_${submission.id}`;

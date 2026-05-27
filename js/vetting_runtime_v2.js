@@ -56,6 +56,24 @@
         return v;
     }
 
+    function escapeVettingHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function withVettingTimeout(promise, timeoutMs, label) {
+        return Promise.race([
+            Promise.resolve(promise),
+            new Promise((_, reject) => {
+                setTimeout(() => reject(new Error(`${label || 'Vetting scan'} timed out`)), timeoutMs);
+            })
+        ]);
+    }
+
     function identitiesMatch(a, b) {
         const na = normalizeIdentity(a);
         const nb = normalizeIdentity(b);
@@ -471,7 +489,18 @@
                             false
                         );
                     } else if (SECURITY_WARNING_COUNT >= 4) {
-                        await updateTraineeStatus('started');
+                        if (IS_SUBMITTING_VIOLATION) return;
+                        IS_SUBMITTING_VIOLATION = true;
+                        showSecurityViolationOverlay(
+                            `Security violation confirmed. Submitting and locking this attempt.<br><strong style="color:#f1c40f;">${(apps || []).join(', ') || 'Policy violation'}</strong>`,
+                            true
+                        );
+                        try {
+                            if (typeof window.submitTest === 'function') await window.submitTest(true);
+                            else await updateTraineeStatus('submitting');
+                        } finally {
+                            IS_SUBMITTING_VIOLATION = false;
+                        }
                     }
                 } else {
                     SECURITY_WARNING_COUNT = 0;
@@ -499,7 +528,18 @@
                             false
                         );
                     } else if (SECURITY_WARNING_COUNT >= 4) {
-                        await updateTraineeStatus('started');
+                        if (IS_SUBMITTING_VIOLATION) return;
+                        IS_SUBMITTING_VIOLATION = true;
+                        showSecurityViolationOverlay(
+                            `Security violation confirmed. Submitting and locking this attempt.<br><strong style="color:#f1c40f;">${(apps || []).join(', ') || 'Policy violation'}</strong>`,
+                            true
+                        );
+                        try {
+                            if (typeof window.submitTest === 'function') await window.submitTest(true);
+                            else await updateTraineeStatus('submitting');
+                        } finally {
+                            IS_SUBMITTING_VIOLATION = false;
+                        }
                     }
                 } else {
                     SECURITY_WARNING_COUNT = 0;
@@ -531,6 +571,7 @@
         const cfg = readVettingObject('system_config');
         const forceGlobalKiosk = !!(cfg.security && cfg.security.force_kiosk_global);
         const isRelaxed = session.trainees[username].relaxed === true && !forceGlobalKiosk;
+        const statusSeenAt = new Date().toISOString();
 
         let statusToPersist = status;
         if (status === 'completed') {
@@ -553,6 +594,8 @@
         }
 
         session.trainees[username].status = statusToPersist;
+        session.trainees[username].lastSeen = statusSeenAt;
+        session.trainees[username].statusUpdatedAt = statusSeenAt;
         if (statusToPersist === 'started' && !session.trainees[username].startedAt) {
             session.trainees[username].startedAt = Date.now();
         }
@@ -644,30 +687,39 @@
             const errors = [];
             let scannerWarning = '';
             if (!effectiveRelaxed) {
-                let ipcInvoke = null;
-                if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.invoke === 'function') {
-                    ipcInvoke = window.electronAPI.ipcRenderer.invoke;
-                } else if (typeof require !== 'undefined') {
-                    const { ipcRenderer } = require('electron');
-                    ipcInvoke = ipcRenderer.invoke.bind(ipcRenderer);
-                }
-
-                if (!ipcInvoke) {
-                    scannerWarning = 'Security scanner is not available in this runtime. Click Enter to run an immediate check.';
-                } else {
-                    try {
-                        const screenCount = await ipcInvoke('get-screen-count');
-                        if (screenCount > 1) errors.push(`Multiple monitors detected (${screenCount}).`);
-
-                        let forbidden = readVettingArray('forbiddenApps');
-                        if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
-                            forbidden = window.DEFAULT_FORBIDDEN_APPS;
-                        }
-                        const apps = await ipcInvoke('get-process-list', forbidden);
-                        if (apps.length > 0) errors.push(`Forbidden apps running: ${apps.join(', ')}`);
-                    } catch (e) {
-                        scannerWarning = 'Security scanner had a temporary error. Retrying in the background.';
+                try {
+                    let forbidden = readVettingArray('forbiddenApps');
+                    if (forbidden.length === 0 && typeof window.DEFAULT_FORBIDDEN_APPS !== 'undefined') {
+                        forbidden = window.DEFAULT_FORBIDDEN_APPS;
                     }
+
+                    if (window.electronAPI && typeof window.electronAPI.getScreenCount === 'function' && typeof window.electronAPI.getProcessList === 'function') {
+                        const [screenCount, apps] = await withVettingTimeout(Promise.all([
+                            window.electronAPI.getScreenCount(),
+                            window.electronAPI.getProcessList(forbidden)
+                        ]), 8000, 'Security scanner');
+                        if (screenCount > 1) errors.push(`Multiple monitors detected (${screenCount}).`);
+                        if (apps.length > 0) errors.push(`Forbidden apps running: ${apps.join(', ')}`);
+                    } else if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.invoke === 'function') {
+                        const [screenCount, apps] = await withVettingTimeout(Promise.all([
+                            window.electronAPI.ipcRenderer.invoke('get-screen-count'),
+                            window.electronAPI.ipcRenderer.invoke('get-process-list', forbidden)
+                        ]), 8000, 'Security scanner');
+                        if (screenCount > 1) errors.push(`Multiple monitors detected (${screenCount}).`);
+                        if (apps.length > 0) errors.push(`Forbidden apps running: ${apps.join(', ')}`);
+                    } else if (typeof require !== 'undefined') {
+                        const { ipcRenderer } = require('electron');
+                        const [screenCount, apps] = await withVettingTimeout(Promise.all([
+                            ipcRenderer.invoke('get-screen-count'),
+                            ipcRenderer.invoke('get-process-list', forbidden)
+                        ]), 8000, 'Security scanner');
+                        if (screenCount > 1) errors.push(`Multiple monitors detected (${screenCount}).`);
+                        if (apps.length > 0) errors.push(`Forbidden apps running: ${apps.join(', ')}`);
+                    } else {
+                        scannerWarning = 'Security scanner is not available in this runtime. Click Enter to run an immediate check.';
+                    }
+                } catch (e) {
+                    scannerWarning = 'Security scanner had a temporary error. Retrying in the background.';
                 }
             }
 
@@ -756,7 +808,7 @@
         const cfg = readVettingObject('system_config');
         if (cfg.security && cfg.security.force_kiosk_global) isRelaxed = false;
 
-        if (!isRelaxed && typeof require !== 'undefined') {
+        if (!isRelaxed) {
             try {
                 if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
                     await window.electronAPI.setKioskMode(true);
@@ -787,7 +839,7 @@
         if (!isTrainee()) return;
         stopTraineeLocalPollers();
 
-        if (!keepLocked && typeof require !== 'undefined') {
+        if (!keepLocked) {
             try {
                 if (window.electronAPI && typeof window.electronAPI.setKioskMode === 'function') {
                     await window.electronAPI.setKioskMode(false);
@@ -833,10 +885,10 @@
             stopTraineeLocalPollers();
 
             container.innerHTML = `
-                <div style="text-align:center; padding:50px;">
-                    <i class="fas fa-door-closed" style="font-size:4rem; color:var(--text-muted); margin-bottom:20px;"></i>
+                <div id="vetting-closed-card" class="vetting-trainee-state vetting-trainee-state--idle">
+                    <i class="fas fa-door-closed"></i>
                     <h3>Arena Closed</h3>
-                    <p style="color:var(--text-muted);">There is no active vetting session at this moment.</p>
+                    <p>There is no active vetting session at this moment.</p>
                 </div>`;
             return;
         }
@@ -848,10 +900,10 @@
             if (!isMember) {
                 stopTraineeLocalPollers();
                 container.innerHTML = `
-                    <div style="text-align:center; padding:50px;">
-                        <i class="fas fa-user-lock" style="font-size:4rem; color:var(--text-muted); margin-bottom:20px;"></i>
+                    <div id="vetting-not-assigned-card" class="vetting-trainee-state vetting-trainee-state--idle">
+                        <i class="fas fa-user-lock"></i>
                         <h3>Not Assigned</h3>
-                        <p style="color:var(--text-muted);">This vetting session is for a group you are not part of.</p>
+                        <p>This vetting session is for a group you are not part of.</p>
                     </div>`;
                 return;
             }
@@ -862,14 +914,14 @@
         if (myData && myData.status === 'completed') {
             stopTraineeLocalPollers();
             container.innerHTML = `
-                <div style="text-align:center; padding:50px; max-width:600px; margin:0 auto;">
-                    <i class="fas fa-lock" style="font-size:4rem; color:#f1c40f; margin-bottom:20px;"></i>
+                <div id="vetting-terminal-card" class="vetting-trainee-state vetting-trainee-state--complete">
+                    <i class="fas fa-lock"></i>
                     <h3>Assessment Submitted</h3>
-                    <p style="font-size:1.1rem; margin-bottom:30px;">Your test has been submitted securely.</p>
-                    <div style="display:inline-flex; align-items:center; gap:10px; padding:12px 25px; background:rgba(46,204,113,0.1); border:1px solid #2ecc71; border-radius:50px; color:#2ecc71; font-weight:bold;">
+                    <p>Your test has been submitted securely.</p>
+                    <div class="vetting-trainee-pill vetting-trainee-pill--ok">
                         <i class="fas fa-wifi"></i> Waiting for Admin to End Session...
                     </div>
-                    <div style="margin-top:30px; font-size:0.9rem; color:var(--text-muted);">Please remain seated. Your screen is still monitored.</div>
+                    <div class="vetting-trainee-footnote">Please remain seated. Your screen is still monitored.</div>
                 </div>`;
             return;
         }
@@ -881,13 +933,13 @@
                 ? myData.completionGate.reason
                 : 'Verifying submission pipeline with the server.';
             container.innerHTML = `
-                <div style="text-align:center; padding:50px; max-width:620px; margin:0 auto;">
-                    <i class="fas fa-cloud-upload-alt" style="font-size:4rem; color:#3498db; margin-bottom:20px;"></i>
+                <div id="vetting-submitting-card" class="vetting-trainee-state vetting-trainee-state--syncing">
+                    <i class="fas fa-cloud-upload-alt"></i>
                     <h3>Submission Sync In Progress</h3>
-                    <p style="font-size:1rem; margin-bottom:18px; color:var(--text-muted);">
+                    <p>
                         Your assessment is submitted. Final completion will unlock once the server confirms submission + record linkage.
                     </p>
-                    <div style="display:inline-flex; align-items:center; gap:10px; padding:12px 18px; background:rgba(52,152,219,0.1); border:1px solid #3498db; border-radius:10px; color:#3498db; font-weight:600;">
+                    <div class="vetting-trainee-pill vetting-trainee-pill--sync">
                         <i class="fas fa-circle-notch fa-spin"></i> ${gateReason}
                     </div>
                 </div>`;
@@ -905,33 +957,29 @@
         const test = tests.find(t => t.id == session.testId);
 
         container.innerHTML = `
-            <div class="card" style="text-align:center; padding:50px; max-width:600px; margin:0 auto;">
-                <i class="fas fa-shield-alt" style="font-size:4rem; color:var(--primary); margin-bottom:20px;"></i>
-                <h2 style="color:var(--primary);">Vetting Assessment Ready</h2>
-                <h3 style="margin-bottom:20px;">${test ? test.title : 'Assessment'}</h3>
-                <div style="background:rgba(255,82,82,0.1); border:1px solid #ff5252; padding:15px; border-radius:8px; text-align:left; margin-bottom:30px;">
-                    <strong style="color:#ff5252;">SECURITY PROTOCOLS:</strong>
-                    <ul style="margin:10px 0 0 20px; color:var(--text-main);">
-                        <li>Full-screen mode can be enforced.</li>
-                        <li>Screenshots and recording are blocked.</li>
-                        <li>Only one monitor is allowed.</li>
-                        <li>Background applications are monitored.</li>
-                        <li>Camera policy remains mandatory during vetting.</li>
-                    </ul>
+            <div id="vetting-preflight-card" class="vetting-trainee-preflight">
+                <div class="vetting-trainee-kicker"><i class="fas fa-shield-alt"></i> Secure Vetting Entry</div>
+                <h2>Vetting Assessment Ready</h2>
+                <h3>${escapeVettingHtml(test ? test.title : 'Assessment')}</h3>
+                <div class="vetting-protocol-grid">
+                    <span><i class="fas fa-display"></i> Single monitor</span>
+                    <span><i class="fas fa-lock"></i> Kiosk mode</span>
+                    <span><i class="fas fa-eye"></i> App scan</span>
+                    <span><i class="fas fa-camera"></i> Camera policy</span>
                 </div>
                 <div style="position:relative;">
-                    <div id="securityCheckLog" class="security-log-box" style="min-height:80px;">
-                        <div style="display:flex; align-items:center; gap:15px; padding:15px; color:var(--primary); background:var(--bg-input); border-radius:6px; border:1px dashed var(--primary);">
-                            <i class="fas fa-circle-notch fa-spin" style="font-size:1.8rem;"></i>
+                    <div id="securityCheckLog" class="security-log-box vetting-security-log">
+                        <div class="vetting-scan-row">
+                            <i class="fas fa-circle-notch fa-spin"></i>
                             <div>
-                                <strong style="font-size:1.1rem;">Scanning system...</strong>
-                                <div style="font-size:0.9rem; color:var(--text-muted);">Verifying security protocols</div>
+                                <strong>Scanning system...</strong>
+                                <div>Verifying security protocols</div>
                             </div>
                         </div>
                     </div>
                     <button class="btn-secondary btn-sm" style="position:absolute; top:5px; right:5px;" onclick="checkSystemCompliance()" title="Force Re-check"><i class="fas fa-sync"></i></button>
                 </div>
-                <button id="btnEnterArena" class="btn-primary btn-lg" disabled onclick="enterArena('${session.testId}')" style="margin-top:15px; opacity:0.5; cursor:not-allowed;">ENTER ARENA & START</button>
+                <button id="btnEnterArena" class="btn-primary btn-lg vetting-enter-btn" disabled onclick="enterArena('${session.testId}')">ENTER ARENA & START</button>
             </div>`;
 
         startTraineePreFlight(session.sessionId);
@@ -993,7 +1041,14 @@
 
         const activeTab = document.querySelector('section.active');
         if (activeTab && activeTab.id === 'vetting-arena' && !document.getElementById('arenaTestContainer')) {
-            renderTraineeArena();
+            const nextMyData = getTraineeData(next, username);
+            const nextStatus = String((nextMyData && nextMyData.status) || '').toLowerCase();
+            const preflightVisible = !!document.getElementById('vetting-preflight-card');
+            const mustRenderState = ['started', 'submitting', 'completed'].includes(nextStatus);
+            const sessionChanged = !sameSession || local.active !== next.active || local.testId !== next.testId || local.targetGroup !== next.targetGroup;
+            if (!preflightVisible || mustRenderState || sessionChanged) {
+                renderTraineeArena();
+            }
         }
 
         if (typeof window.applyRolePermissions === 'function') window.applyRolePermissions();
@@ -1076,7 +1131,12 @@
             } catch (policyErr) {}
 
             const activeTab = document.querySelector('section.active');
-            if (activeTab && activeTab.id === 'vetting-arena' && !document.getElementById('arenaTestContainer')) {
+            const stableTraineeShell = document.getElementById('vetting-preflight-card') ||
+                document.getElementById('vetting-closed-card') ||
+                document.getElementById('vetting-not-assigned-card') ||
+                document.getElementById('vetting-terminal-card') ||
+                document.getElementById('vetting-submitting-card');
+            if (activeTab && activeTab.id === 'vetting-arena' && !document.getElementById('arenaTestContainer') && !stableTraineeShell) {
                 renderTraineeArena();
             }
         } catch (e) {

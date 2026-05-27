@@ -29,6 +29,13 @@ function assessmentAdminReadObject(key) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function isVettingSubmission(submission) {
+    if (!submission) return false;
+    const testType = String(submission.testSnapshot?.type || submission.type || '').toLowerCase();
+    if (testType === 'vetting') return true;
+    return String(submission.testTitle || '').toLowerCase().includes('vetting');
+}
+
 /**
  * 1. ADMIN: ASSESSMENT DASHBOARD (OVERVIEW)
  */
@@ -169,7 +176,7 @@ function loadMarkingQueue() {
         traineeSubs.sort((a,b) => new Date(a.date) - new Date(b.date));
 
         const rowsHtml = traineeSubs.map(s => {
-            const tType = s.testSnapshot?.type || (s.testTitle.toLowerCase().includes('vetting') ? 'vetting' : 'standard');
+            const tType = s.testSnapshot?.type || (isVettingSubmission(s) ? 'vetting' : 'standard');
             const activeLock = getActiveMarkingLock(s);
             const isLockedByOther = activeLock && !isOwnMarkingLock(activeLock);
             const lockBadge = getMarkingLockBadgeHTML(s);
@@ -597,7 +604,7 @@ async function approveSubmission(subId) {
     }
 
     const recs = assessmentAdminReadArray('records');
-    const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+    const phaseVal = isVettingSubmission(sub) ? 'Vetting' : 'Assessment';
     const recordId = buildRecordIdForSubmission(sub);
 
     const existingIdx = recs.findIndex(r =>
@@ -1050,7 +1057,7 @@ async function finalizeAdminMarking(subId) {
     
     let cycleVal = 'Digital Onboard';
     if(typeof getTraineeCycle === 'function') cycleVal = getTraineeCycle(sub.trainee, groupId);
-    const phaseVal = sub.testTitle.toLowerCase().includes('vetting') ? 'Vetting' : 'Assessment';
+    const phaseVal = isVettingSubmission(sub) ? 'Vetting' : 'Assessment';
 
     const records = assessmentAdminReadArray('records');
     const recordId = buildRecordIdForSubmission(sub);

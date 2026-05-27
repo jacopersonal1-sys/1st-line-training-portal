@@ -1610,6 +1610,7 @@ const App = {
             if (
                 forcePull &&
                 AppContext.host &&
+                !AppContext.host.APP_PASSIVE_TAB_WINDOW &&
                 typeof AppContext.host.loadFromServer === 'function'
             ) {
                 const now = Date.now();
@@ -1643,6 +1644,7 @@ const App = {
 
     isHighPriorityHostSyncEnabled() {
         try {
+            if (AppContext.host && AppContext.host.APP_PASSIVE_TAB_WINDOW) return false;
             return !!(AppContext.host && AppContext.host.__HIGH_PRIORITY_VIEW_SYNC === true);
         } catch (error) {
             return false;

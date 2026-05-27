@@ -27,6 +27,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
         clearCache: () => ipcRenderer.invoke('clear-study-browser-cache'),
         openPopout: (payload) => ipcRenderer.invoke('open-study-popout', payload)
     },
+    vettingSecurity: {
+        getScreenCount: () => ipcRenderer.invoke('get-screen-count'),
+        getProcessList: (forbidden) => ipcRenderer.invoke('get-process-list', forbidden),
+        setKioskMode: (enabled) => ipcRenderer.invoke('set-kiosk-mode', enabled),
+        setContentProtection: (enabled) => ipcRenderer.invoke('set-content-protection', enabled)
+    },
+    getScreenCount: () => ipcRenderer.invoke('get-screen-count'),
+    getProcessList: (forbidden) => ipcRenderer.invoke('get-process-list', forbidden),
+    setKioskMode: (enabled) => ipcRenderer.invoke('set-kiosk-mode', enabled),
+    setContentProtection: (enabled) => ipcRenderer.invoke('set-content-protection', enabled),
+    appWindows: {
+        open: (payload) => ipcRenderer.invoke('open-app-window', payload),
+        getLaunchPayload: () => ipcRenderer.invoke('get-app-window-launch-payload')
+    },
     windowControls: {
         minimize: () => ipcRenderer.send('window-control', 'minimize'),
         maximize: () => ipcRenderer.send('window-control', 'maximize'),

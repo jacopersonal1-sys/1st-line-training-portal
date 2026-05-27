@@ -4,6 +4,7 @@ const DataService = {
     TABLE_PRIMARY: 'vetting_sessions_v2',
     TABLE_MIRROR: 'vetting_sessions',
     PENDING_KEY: 'vetting_rework_pending_ops',
+    ENDED_KEY: 'vetting_arena_ended_sessions',
     RETRY_MS: 1000,
     retryTimer: null,
 
@@ -31,7 +32,7 @@ const DataService = {
             if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
             return JSON.parse(raw);
         } catch (error) {
-            console.warn(`[Vetting Rework] Ignored invalid local data for ${key}:`, error);
+            console.warn(`[Vetting Arena] Ignored invalid local data for ${key}:`, error);
             return fallback;
         }
     },
@@ -71,7 +72,7 @@ const DataService = {
         if (rowUsers.length || docUsers.length) localStorage.setItem('users', JSON.stringify(rowUsers.length ? rowUsers : docUsers));
 
         [tests, rosters].forEach((res, idx) => {
-            if (res && res.error) console.warn(`[Vetting Rework] Failed to load ${idx === 0 ? 'tests' : 'rosters'}:`, res.error.message || res.error);
+            if (res && res.error) console.warn(`[Vetting Arena] Failed to load ${idx === 0 ? 'tests' : 'rosters'}:`, res.error.message || res.error);
         });
         this.startRetryLoop();
         await this.flushPendingOps();
@@ -142,6 +143,27 @@ const DataService = {
         localStorage.setItem(this.PENDING_KEY, JSON.stringify(ops || []));
     },
 
+    getEndedSessionMap: function() {
+        const ended = this.readObject(this.ENDED_KEY);
+        const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+        let changed = false;
+        Object.entries(ended).forEach(([id, endedAt]) => {
+            if (!Number(endedAt) || Number(endedAt) < cutoff) {
+                delete ended[id];
+                changed = true;
+            }
+        });
+        if (changed) localStorage.setItem(this.ENDED_KEY, JSON.stringify(ended));
+        return ended;
+    },
+
+    markSessionEnded: function(sessionId) {
+        if (!sessionId) return;
+        const ended = this.getEndedSessionMap();
+        ended[String(sessionId)] = Date.now();
+        localStorage.setItem(this.ENDED_KEY, JSON.stringify(ended));
+    },
+
     queueOp: function(op) {
         if (!op || !op.type) return;
         const ops = this.getPendingOps();
@@ -194,13 +216,17 @@ const DataService = {
             updated_at: new Date().toISOString()
         };
 
-        await AppContext.supabase.from(this.TABLE_PRIMARY).upsert(payload);
-        await AppContext.supabase.from(this.TABLE_MIRROR).upsert(payload);
+        for (const table of [this.TABLE_PRIMARY, this.TABLE_MIRROR]) {
+            const { error } = await AppContext.supabase.from(table).upsert(payload);
+            if (error) throw error;
+        }
     },
 
     deleteSessionFromTables: async function(sessionId) {
-        await AppContext.supabase.from(this.TABLE_PRIMARY).delete().eq('id', sessionId);
-        await AppContext.supabase.from(this.TABLE_MIRROR).delete().eq('id', sessionId);
+        for (const table of [this.TABLE_PRIMARY, this.TABLE_MIRROR]) {
+            const { error } = await AppContext.supabase.from(table).delete().eq('id', sessionId);
+            if (error) throw error;
+        }
     },
 
     patchSessionUserOnTables: async function(sessionId, username, patchData) {
@@ -247,12 +273,14 @@ const DataService = {
     nudgeTrainee: async function(username, action) {
         if (!AppContext.supabase || !username || !action) return;
         try {
-            await AppContext.supabase.from('sessions').upsert({ username: username, role: 'trainee', pending_action: action, lastSeen: new Date().toISOString() });
+            const { error } = await AppContext.supabase.from('sessions').upsert({ username: username, role: 'trainee', pending_action: action, lastSeen: new Date().toISOString() });
+            if (error) throw error;
         } catch (e) {
             try {
-                await AppContext.supabase.from('sessions').update({ pending_action: action, lastSeen: new Date().toISOString() }).eq('username', username);
+                const { error } = await AppContext.supabase.from('sessions').update({ pending_action: action, lastSeen: new Date().toISOString() }).eq('username', username);
+                if (error) throw error;
             } catch (err) {
-                console.warn(`[Vetting Rework] nudgeTrainee failed for ${username}`, err);
+                console.warn(`[Vetting Arena] nudgeTrainee failed for ${username}`, err);
                 throw err;
             }
         }
@@ -281,17 +309,45 @@ const DataService = {
             readTable(this.TABLE_MIRROR)
         ]);
 
+        const pickLatestTrainee = (current, next, currentRowTs = 0, nextRowTs = 0) => {
+            if (!current) return next;
+            if (!next) return current;
+            const currentTs = Date.parse(current.statusUpdatedAt || current.lastSeen || current.updatedAt || 0) || currentRowTs || 0;
+            const nextTs = Date.parse(next.statusUpdatedAt || next.lastSeen || next.updatedAt || 0) || nextRowTs || 0;
+            return nextTs >= currentTs ? { ...current, ...next } : { ...next, ...current };
+        };
+
         [...primaryRows, ...mirrorRows].forEach(row => {
-            if (!row?.data?.sessionId || !row.data.active) return;
+            if (!row?.data?.sessionId) return;
             const existing = mergedById[row.data.sessionId];
             const existingTs = existing?.updated_at ? new Date(existing.updated_at).getTime() : 0;
             const nextTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-            if (!existing || nextTs >= existingTs) mergedById[row.data.sessionId] = row;
+            if (!existing) {
+                mergedById[row.data.sessionId] = row;
+                return;
+            }
+
+            const base = nextTs >= existingTs ? { ...row.data } : { ...existing.data };
+            const mergedTrainees = { ...((existing.data && existing.data.trainees) || {}) };
+            Object.entries((row.data && row.data.trainees) || {}).forEach(([username, statusData]) => {
+                const matchingKey = Object.keys(mergedTrainees).find(key => this.identitiesMatch(key, username)) || username;
+                mergedTrainees[matchingKey] = pickLatestTrainee(mergedTrainees[matchingKey], statusData, existingTs, nextTs);
+            });
+            base.trainees = mergedTrainees;
+            mergedById[row.data.sessionId] = {
+                ...((nextTs >= existingTs) ? row : existing),
+                data: base,
+                updated_at: new Date(Math.max(existingTs, nextTs)).toISOString()
+            };
         });
 
-        let sessions = Object.values(mergedById).map(row => row.data);
+        const endedSessions = this.getEndedSessionMap();
+        let sessions = Object.values(mergedById)
+            .map(row => row.data)
+            .filter(session => session && session.active !== false && !endedSessions[String(session.sessionId || '')]);
         if (hadError && !sessions.length) {
-            sessions = this.readArray('adminVettingSessions');
+            sessions = this.readArray('adminVettingSessions')
+                .filter(session => session && session.active !== false && !endedSessions[String(session.sessionId || '')]);
         }
 
         localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
@@ -310,7 +366,7 @@ const DataService = {
 
         for (const session of activeSessions) {
             if (!serverIds.has(session.sessionId)) {
-                console.warn(`[Vetting Rework] Session ${session.sessionId} missing on primary table. Restoring...`);
+                console.warn(`[Vetting Arena] Session ${session.sessionId} missing on primary table. Restoring...`);
                 try {
                     await this.upsertSessionToTables(session);
                 } catch (e) {
@@ -321,16 +377,21 @@ const DataService = {
     },
 
     patchSessionUser: async function(sessionId, username, patchData) {
+        const patch = {
+            ...(patchData || {}),
+            lastSeen: new Date().toISOString(),
+            statusUpdatedAt: new Date().toISOString()
+        };
         if (!AppContext.supabase) {
-            this.queueOp({ type: 'patch_user', sessionId, username, patchData });
+            this.queueOp({ type: 'patch_user', sessionId, username, patchData: patch });
             return;
         }
 
         try {
-            await this.patchSessionUserOnTables(sessionId, username, patchData);
+            await this.patchSessionUserOnTables(sessionId, username, patch);
         } catch (e) {
-            console.warn("[Vetting Rework] patchSessionUser queued for retry:", e?.message || e);
-            this.queueOp({ type: 'patch_user', sessionId, username, patchData });
+            console.warn("[Vetting Arena] patchSessionUser queued for retry:", e?.message || e);
+            this.queueOp({ type: 'patch_user', sessionId, username, patchData: patch });
         }
     },
 
@@ -344,18 +405,21 @@ const DataService = {
 
         if (!AppContext.supabase) {
             this.queueOp({ type: 'upsert_session', sessionId: session.sessionId, session });
-            return;
+            return false;
         }
 
         try {
             await this.upsertSessionToTables(session);
+            return true;
         } catch (e) {
-            console.warn("[Vetting Rework] saveSessionDirectly queued for retry:", e?.message || e);
+            console.warn("[Vetting Arena] saveSessionDirectly queued for retry:", e?.message || e);
             this.queueOp({ type: 'upsert_session', sessionId: session.sessionId, session });
+            return false;
         }
     },
 
     deleteSession: async function(id) {
+        this.markSessionEnded(id);
         // Also update local cache
         let sessions = this.readArray('adminVettingSessions');
         sessions = sessions.filter(s => s.sessionId !== id);
@@ -363,14 +427,16 @@ const DataService = {
 
         if (!AppContext.supabase) {
             this.queueOp({ type: 'delete_session', sessionId: id });
-            return;
+            return false;
         }
 
         try {
             await this.deleteSessionFromTables(id);
+            return true;
         } catch (e) {
-            console.warn("[Vetting Rework] deleteSession queued for retry:", e?.message || e);
+            console.warn("[Vetting Arena] deleteSession queued for retry:", e?.message || e);
             this.queueOp({ type: 'delete_session', sessionId: id });
+            return false;
         }
     },
 
@@ -396,19 +462,37 @@ const DataService = {
 
         for (const username of resolvedTargets) {
             try {
-                await AppContext.supabase.from('sessions').upsert({
+                const { error } = await AppContext.supabase.from('sessions').upsert({
                     username,
                     role: 'trainee',
                     pending_action: action,
                     lastSeen: new Date().toISOString()
                 });
+                if (error) throw error;
             } catch (e) {
                 try {
-                    await AppContext.supabase
+                    const { error } = await AppContext.supabase
                         .from('sessions')
                         .update({ pending_action: action, lastSeen: new Date().toISOString() })
                         .eq('username', username);
+                    if (error) throw error;
                 } catch (_) {}
+            }
+        }
+    },
+
+    nudgeTraineesForSessionEnd: async function(session) {
+        if (!AppContext.supabase || !session) return;
+
+        const resolvedTargets = this.resolveSessionTargets(session);
+        if (!resolvedTargets.size) return;
+
+        const action = `vetting_end:${encodeURIComponent(String(session.sessionId || ''))}`;
+        for (const username of resolvedTargets) {
+            try {
+                await this.nudgeTrainee(username, action);
+            } catch (e) {
+                // Ending the session must continue even if one trainee nudge fails.
             }
         }
     },

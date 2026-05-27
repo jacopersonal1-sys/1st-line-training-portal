@@ -47,6 +47,7 @@ const ScheduleData = {
     },
 
     async init() {
+        if (AppContext.host && AppContext.host.APP_PASSIVE_TAB_WINDOW) return;
         if (AppContext.host && typeof AppContext.host.loadFromServer === 'function') {
             try {
                 await AppContext.host.loadFromServer(true);

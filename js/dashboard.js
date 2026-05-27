@@ -79,6 +79,7 @@ let DASHBOARD_PARSE_CACHE = null;
 let DASHBOARD_STORAGE_SIZE_CACHE = { value: 'Calculating...', at: 0, pending: false };
 let DASHBOARD_SCHEDULE_TIMER = null;
 let DASHBOARD_SCHEDULE_IDLE = null;
+let DASHBOARD_INTEGRITY_REVIEW_CACHE = { value: 0, at: 0, pending: false };
 
 function dashboardReadJson(key, fallback) {
     const cache = DASHBOARD_PARSE_CACHE;
@@ -306,6 +307,49 @@ function dashboardEscape(value) {
     if (typeof escapeHTML === 'function') return escapeHTML(raw);
     return raw.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag]));
 }
+
+function isDashboardRenderFresh(maxAge = 15000) {
+    const container = document.getElementById('dashboard-view');
+    return !!(
+        container &&
+        container.children.length > 0 &&
+        !DASH_EDIT_MODE &&
+        (Date.now() - DASHBOARD_LAST_RENDER_AT) < maxAge
+    );
+}
+
+function getCachedDashboardIntegrityReviewCount() {
+    const now = Date.now();
+    if ((now - DASHBOARD_INTEGRITY_REVIEW_CACHE.at) < 60000 || DASHBOARD_INTEGRITY_REVIEW_CACHE.pending) {
+        return DASHBOARD_INTEGRITY_REVIEW_CACHE.value || 0;
+    }
+
+    DASHBOARD_INTEGRITY_REVIEW_CACHE.pending = true;
+    const run = () => {
+        try {
+            const rows = (typeof buildTestIntegrityRows === 'function') ? buildTestIntegrityRows() : [];
+            const value = rows.filter(r => r && (r.verdict === 'invalid' || r.verdict === 'review')).length;
+            DASHBOARD_INTEGRITY_REVIEW_CACHE = { value, at: Date.now(), pending: false };
+            document.querySelectorAll('[data-dashboard-integrity-count]').forEach(el => {
+                if (el) el.textContent = String(value);
+            });
+            document.querySelectorAll('[data-dashboard-integrity-detail]').forEach(el => {
+                if (!el) return;
+                el.textContent = value
+                    ? `${value} integrity item${value === 1 ? '' : 's'}`
+                    : 'No urgent insight';
+            });
+        } catch (error) {
+            DASHBOARD_INTEGRITY_REVIEW_CACHE.pending = false;
+        }
+    };
+
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2500 });
+    else setTimeout(run, 300);
+    return DASHBOARD_INTEGRITY_REVIEW_CACHE.value || 0;
+}
+
+window.isDashboardRenderFresh = isDashboardRenderFresh;
 
 function renderDashboard() {
     const container = document.getElementById('dashboard-view');
@@ -887,13 +931,13 @@ function showUrgentModal(notice) {
 
 // --- ADMIN DASHBOARD ---
 function buildAdminCommandCenter(stats) {
-    const item = (icon, label, value, tone, action, note) => `
+    const item = (icon, label, value, tone, action, note, noteAttr = '') => `
         <button class="dash-command-item ${tone || ''}" onclick="${action}" type="button">
             <span class="dash-command-icon"><i class="fas ${icon}"></i></span>
             <span class="dash-command-copy">
                 <strong>${value}</strong>
                 <span>${label}</span>
-                ${note ? `<em>${note}</em>` : ''}
+                ${note ? `<em ${noteAttr}>${note}</em>` : ''}
             </span>
         </button>
     `;
@@ -916,7 +960,7 @@ function buildAdminCommandCenter(stats) {
             </div>
             <div class="dash-command-grid">
                 ${item('fa-highlighter', 'Pending marking', stats.pendingMarking, markingTone, "showTab('test-manage')", stats.pendingMarking ? 'Needs marking' : 'Queue clear')}
-                ${item('fa-search', 'Insight / integrity', stats.actionRequiredCount, insightTone, "showTab('insight-studio')", stats.integrityReviewRows ? `${stats.integrityReviewRows} integrity item${stats.integrityReviewRows === 1 ? '' : 's'}` : (stats.actionRequiredCount ? 'Review trainees' : 'No urgent insight'))}
+                ${item('fa-search', 'Insight / integrity', stats.actionRequiredCount, insightTone, "showTab('insight-studio')", stats.integrityReviewRows ? `${stats.integrityReviewRows} integrity item${stats.integrityReviewRows === 1 ? '' : 's'}` : (stats.actionRequiredCount ? 'Review trainees' : 'No urgent insight'), 'data-dashboard-integrity-detail')}
                 ${item('fa-calendar-check', 'Live today', stats.todaysLiveBookings, reviewTone, "showTab('live-assessment')", stats.activeLiveSessions ? `${stats.activeLiveSessions} active now` : (stats.bookingIssues ? `${stats.bookingIssues} booking issue${stats.bookingIssues === 1 ? '' : 's'}` : `${stats.newBookingsCount} upcoming`))}
                 ${item('fa-clock', 'Attendance review', stats.unconfirmedLates, lateTone, "openAttendanceRegister()", stats.openClockOuts ? `${stats.openClockOuts} open clock-out${stats.openClockOuts === 1 ? '' : 's'}` : 'No open clock-outs')}
                 ${item('fa-comments', 'Feedback / course', stats.pendingFeedbackRequests, feedbackTone, "if (typeof openAssessmentFeedbackSessions === 'function') openAssessmentFeedbackSessions();", stats.openCourseRequests ? `${stats.openCourseRequests} course request${stats.openCourseRequests === 1 ? '' : 's'}` : 'No feedback queue')}
@@ -968,33 +1012,33 @@ function buildAdminWidgets(container) {
     // FIX: Deduplicate failures per trainee (Highest Score Wins) to match Insight Dashboard logic
     // This prevents "Ghost Notifications" where retaken/passed tests still show as failures in the badge.
     const reviews = dashboardReadJson('insightReviews', []);
-    const uniqueTrainees = new Set(records.map(r => r.trainee));
+    const traineeScoreMap = new Map();
+    records.forEach(r => {
+        if (!r || !r.trainee || !r.assessment) return;
+        const trainee = String(r.trainee);
+        const key = String(r.assessment).trim().toLowerCase();
+        if (!key) return;
+        if (!traineeScoreMap.has(trainee)) traineeScoreMap.set(trainee, new Map());
+        const scores = traineeScoreMap.get(trainee);
+        const score = Number(r.score);
+        if (!Number.isFinite(score)) return;
+        if (!scores.has(key) || score > scores.get(key)) scores.set(key, score);
+    });
+    const reviewsByTrainee = new Map(reviews.map(r => [String(r && r.trainee || ''), r]).filter(([trainee]) => trainee));
     let actionRequiredCount = 0;
 
-    uniqueTrainees.forEach(trainee => {
+    traineeScoreMap.forEach((bestScores, trainee) => {
         if (!trainee) return;
         
         // 1. Check Manual Review Override (Admin decision overrides scores)
-        const review = reviews.find(r => r.trainee === trainee);
+        const review = reviewsByTrainee.get(trainee);
         if (review) {
             if (review.status !== 'Pass') actionRequiredCount++;
             return;
         }
 
-        // 2. Check Auto-Calc (Best Score Logic)
-        const myRecs = records.filter(r => r.trainee === trainee);
-        const bestScores = {};
-        
-        myRecs.forEach(r => {
-            if (!r.assessment) return;
-            const key = r.assessment.trim().toLowerCase();
-            if (bestScores[key] === undefined || r.score > bestScores[key]) {
-                bestScores[key] = r.score;
-            }
-        });
-        
         // If any assessment's BEST score is below limit, flag trainee
-        const hasFailure = Object.values(bestScores).some(score => score < IMPROVE_LIMIT);
+        const hasFailure = Array.from(bestScores.values()).some(score => score < IMPROVE_LIMIT);
         if (hasFailure) actionRequiredCount++;
     });
 
@@ -1031,9 +1075,7 @@ function buildAdminWidgets(container) {
     });
     const seenProblemReports = parseInt(localStorage.getItem('last_seen_problem_report_count') || '0', 10) || 0;
     const newProblemReports = Math.max(0, problemReports.length - seenProblemReports);
-    const integrityReviewRows = (typeof buildTestIntegrityRows === 'function')
-        ? buildTestIntegrityRows().filter(r => r && (r.verdict === 'invalid' || r.verdict === 'review')).length
-        : 0;
+    const integrityReviewRows = getCachedDashboardIntegrityReviewCount();
     const calendarTasks = (typeof CalendarModule !== 'undefined' && typeof CalendarModule.getTasks === 'function') ? CalendarModule.getTasks() : [];
     const bookingIssues = calendarTasks.filter(task => task.type === 'issue').length;
     const commandCenterHtml = buildAdminCommandCenter({
@@ -1093,12 +1135,12 @@ function buildAdminWidgets(container) {
         { icon: 'fa-arrow-right', label: 'Course move-on requests', value: openCourseRequests, action: "showTab('assessment-schedule')" },
         { icon: 'fa-triangle-exclamation', label: 'Violation reviews', value: pendingViolations, action: "if (typeof StudyMonitor !== 'undefined') StudyMonitor.openViolationReviewModal();" },
         { icon: 'fa-bug', label: 'New problem reports', value: newProblemReports, action: "if (typeof viewProblemReports === 'function') viewProblemReports();" },
-        { icon: 'fa-shield-halved', label: 'Integrity review', value: integrityReviewRows, action: "showTab('test-manage'); setTimeout(() => { const btn = document.querySelector('button[onclick*=\\'integrity\\']'); if (btn) showTestEngineSub('integrity', btn); }, 80);" },
+        { icon: 'fa-shield-halved', label: 'Integrity review', value: integrityReviewRows, action: "showTab('test-manage'); setTimeout(() => { const btn = document.querySelector('button[onclick*=\\'integrity\\']'); if (btn) showTestEngineSub('integrity', btn); }, 80);", countAttr: 'data-dashboard-integrity-count' },
         { icon: 'fa-link', label: 'Link requests', value: pendingLinkRequests, action: "showTab('dashboard-view')" }
     ].map(row => `
         <button class="dash-ops-row ${row.value > 0 ? 'needs-action' : ''}" onclick="${row.action}" type="button">
             <span><i class="fas ${row.icon}"></i> ${row.label}</span>
-            <strong>${row.value}</strong>
+            <strong ${row.countAttr || ''}>${row.value}</strong>
         </button>
     `).join('');
 

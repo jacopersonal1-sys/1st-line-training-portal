@@ -193,12 +193,14 @@ function getGroupLabel(groupId, count) {
 
 if (typeof window.toggleTheme !== 'function') {
     window.toggleTheme = function() {
+        document.body.classList.add('theme-transitioning');
         document.body.classList.toggle('light-mode');
         localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
         if (document.body.classList.contains('theme-one-ui') && typeof applyOneUiThemeVariables === 'function') {
             applyOneUiThemeVariables(typeof getStoredLocalThemeConfig === 'function' ? getStoredLocalThemeConfig() : {});
         }
         if (typeof syncThemeToEmbeddedPrograms === 'function') syncThemeToEmbeddedPrograms();
+        setTimeout(() => document.body.classList.remove('theme-transitioning'), 280);
     };
 }
 

@@ -91,7 +91,43 @@ describe('E2E: Trainee submit -> save flow', () => {
         const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
         expect(subs).toHaveLength(1);
         expect(subs[0].testId).toBe('V1');
+        expect(subs[0].status).toBe('pending');
         expect(window.exitArena).toHaveBeenCalledWith(true);
         expect(window.VettingRuntimeV2.renderTraineeArena).toHaveBeenCalled();
+    }, 20000);
+
+    test('vetting submissions wait in the grading queue even when auto-scorable', async () => {
+        const dataSrc = fs.readFileSync(path.resolve(__dirname, '../js/data.js'), 'utf8');
+        const assessmentSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+
+        eval(dataSrc);
+        eval(assessmentSrc);
+
+        window.CURRENT_USER = { user: 'alice', role: 'trainee' };
+        global.CURRENT_USER = window.CURRENT_USER;
+        localStorage.setItem('tests', JSON.stringify([{ id: 'V2', title: 'test test', questions: [], type: 'vetting' }]));
+        localStorage.setItem('rosters', JSON.stringify({ 'G1': ['alice'] }));
+
+        window.CURRENT_TEST = { id: 'V2', title: 'test test', questions: [], type: 'vetting', remainingSeconds: 0 };
+        window.USER_ANSWERS = {};
+        window.IS_LIVE_ARENA = true;
+        window.calculateAssessmentAutoResult = () => ({ autoPoints: 5, maxPoints: 5, percent: 100, needsManual: false });
+        window.saveToServer = jest.fn(async () => true);
+        global.saveToServer = window.saveToServer;
+        saveToServer = window.saveToServer;
+        window.exitArena = jest.fn(async () => true);
+        global.exitArena = window.exitArena;
+        exitArena = window.exitArena;
+
+        await submitTest(true);
+
+        const subs = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const records = JSON.parse(localStorage.getItem('records') || '[]');
+        expect(subs).toHaveLength(1);
+        expect(subs[0].testTitle).toBe('test test');
+        expect(subs[0].testSnapshot.type).toBe('vetting');
+        expect(subs[0].status).toBe('pending');
+        expect(records).toHaveLength(0);
+        expect(window.saveToServer).toHaveBeenCalledWith(['submissions', 'records'], true);
     }, 20000);
 });

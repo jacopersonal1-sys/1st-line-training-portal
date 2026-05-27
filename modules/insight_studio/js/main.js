@@ -26,6 +26,10 @@ const InsightApp = {
         loading: true,
         viewMode: 'triggers',
         knowledgeMode: 'assessment',
+        knowledgeAgentFilter: '',
+        knowledgeAssessmentFilter: '',
+        hrEvidenceEditingId: '',
+        hrEvidenceTriggerFilter: 'all',
         compareMode: 'person',
         compareAttemptScope: 'live',
         compareGraphLayout: 'single',
@@ -217,6 +221,16 @@ const InsightApp = {
         this.render();
     },
 
+    setKnowledgeAgentFilter: function(value) {
+        this.state.knowledgeAgentFilter = decodeURIComponent(String(value || '')).trim();
+        this.render();
+    },
+
+    setKnowledgeAssessmentFilter: function(value) {
+        this.state.knowledgeAssessmentFilter = decodeURIComponent(String(value || '')).trim();
+        this.render();
+    },
+
     setCompareMode: function(mode) {
         const normalized = String(mode || '').trim().toLowerCase();
         this.state.compareMode = normalized === 'group' && this.state.compareMode !== 'group' ? 'group' : 'person';
@@ -315,14 +329,17 @@ const InsightApp = {
 
     captureHrEvidence: async function() {
         const trainee = document.getElementById('hrEvidenceTrainee')?.value || '';
-        const trigger = document.getElementById('hrEvidenceTrigger')?.value || '';
+        const triggers = Array.from(document.querySelectorAll('.hrEvidenceTriggerCheck:checked'))
+            .map(input => input.value)
+            .filter(Boolean);
         const description = document.getElementById('hrEvidenceDescription')?.value || '';
         const proofUrl = document.getElementById('hrEvidenceProofUrl')?.value || '';
         const file = document.getElementById('hrEvidenceScreenshot')?.files?.[0] || null;
         const proof = await this.readHrEvidenceFile(file);
         const result = await InsightDataService.saveHrEvidenceEntry({
+            id: this.state.hrEvidenceEditingId,
             trainee,
-            trigger,
+            triggers,
             description,
             proofUrl,
             proofName: proof.name,
@@ -332,7 +349,40 @@ const InsightApp = {
             alert(result.message || 'Could not capture HR evidence.');
             return;
         }
+        this.state.hrEvidenceEditingId = '';
         this.invalidateCompiledViews('build');
+        this.render();
+    },
+
+    editHrEvidence: function(entryId) {
+        const id = decodeURIComponent(String(entryId || '')).trim();
+        const row = (InsightDataService.state.hrEvidence || []).find(item => String(item.id) === id);
+        if (!row) return;
+        this.state.hrEvidenceEditingId = id;
+        this.render();
+    },
+
+    cancelHrEvidenceEdit: function() {
+        this.state.hrEvidenceEditingId = '';
+        this.render();
+    },
+
+    deleteHrEvidence: async function(entryId) {
+        const id = decodeURIComponent(String(entryId || '')).trim();
+        if (!id) return;
+        if (!confirm('Delete this captured HR evidence entry?')) return;
+        const result = await InsightDataService.deleteHrEvidenceEntry(id);
+        if (!result.ok) {
+            alert(result.message || 'Could not delete HR evidence.');
+            return;
+        }
+        if (this.state.hrEvidenceEditingId === id) this.state.hrEvidenceEditingId = '';
+        this.invalidateCompiledViews('build');
+        this.render();
+    },
+
+    setHrEvidenceTriggerFilter: function(value) {
+        this.state.hrEvidenceTriggerFilter = String(value || 'all');
         this.render();
     },
 
@@ -951,12 +1001,31 @@ const InsightApp = {
         const data = InsightDataService.buildKnowledgeGaps({
             mode: mode === 'individual' ? 'individual' : 'all',
             groupFilter: this.state.groupFilter,
+            search: this.state.search,
+            agent: this.state.knowledgeAgentFilter,
+            assessmentFilter: this.state.knowledgeAssessmentFilter
+        });
+        const optionData = InsightDataService.buildKnowledgeGaps({
+            mode: 'all',
+            groupFilter: this.state.groupFilter,
             search: this.state.search
         });
         const stats = data.stats || {};
         const byAssessment = Array.isArray(data.byAssessment) ? data.byAssessment : [];
         const byIndividual = Array.isArray(data.byIndividual) ? data.byIndividual : [];
         const byGroup = Array.isArray(data.byGroup) ? data.byGroup : [];
+        const assessmentOptions = Array.isArray(optionData.assessmentOptions) ? optionData.assessmentOptions : [];
+        const agentOptions = this.getFilteredAgents().map(row => row.agent).filter(agent => agent && agent.name);
+        const selectedAgentRow = this.state.knowledgeAgentFilter
+            ? byIndividual.find(row => insMatch(row.agent, this.state.knowledgeAgentFilter))
+            : null;
+
+        const assessmentFilterHtml = `
+            <select onchange="InsightApp.setKnowledgeAssessmentFilter(this.value)" style="margin:0; min-width:240px;">
+                <option value="" ${this.state.knowledgeAssessmentFilter ? '' : 'selected'}>All Assessments</option>
+                ${assessmentOptions.map(assessment => `<option value="${encodeURIComponent(assessment)}" ${this.state.knowledgeAssessmentFilter === assessment ? 'selected' : ''}>${esc(assessment)}</option>`).join('')}
+            </select>
+        `;
 
         const assessmentHtml = byAssessment.length ? byAssessment.map(row => `
             <div class="ins-card full">
@@ -985,40 +1054,72 @@ const InsightApp = {
 
         const individualHtml = byIndividual.length ? `
             <div class="ins-card full">
-                <h3>Individual Knowledge Gaps</h3>
-                <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
-                    <table class="ins-table ins-table-compact">
-                        <thead><tr><th>Agent</th><th>Group</th><th>Failed Questions</th><th>Assessments</th></tr></thead>
-                        <tbody>
-                            ${byIndividual.map(row => `
-                                <tr>
-                                    <td>${esc(row.agent)}</td>
-                                    <td>${esc(row.group || 'Ungrouped')}</td>
-                                    <td class="ins-metric">${row.failedCount}</td>
-                                    <td>${(row.assessments || []).slice(0, 5).map(item => `${esc(item.assessment)} (${item.failCount})`).join('<br>')}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
+                <div class="ins-item-top">
+                    <h3 style="margin:0;">Individual Knowledge Gaps</h3>
+                    <span class="ins-status semi">${selectedAgentRow ? `${selectedAgentRow.failedCount} question${selectedAgentRow.failedCount === 1 ? '' : 's'} below full marks` : `${byIndividual.length} agents`}</span>
                 </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 12px;">
+                    <select onchange="InsightApp.setKnowledgeAgentFilter(this.value)" style="margin:0; min-width:240px;">
+                        <option value="" ${this.state.knowledgeAgentFilter ? '' : 'selected'}>All Agents</option>
+                        ${agentOptions.map(agent => `<option value="${encodeURIComponent(agent.name)}" ${this.state.knowledgeAgentFilter === agent.name ? 'selected' : ''}>${esc(agent.name)} - ${esc(agent.group || 'Ungrouped')}</option>`).join('')}
+                    </select>
+                    ${assessmentFilterHtml}
+                </div>
+                ${selectedAgentRow ? `
+                    <div class="ins-gap-list">
+                        ${(selectedAgentRow.questions || []).map(question => `
+                            <div class="ins-gap-question">
+                                <div class="ins-gap-question-top">
+                                    <strong>${esc(question.assessment)}${question.index ? ` | Q${esc(question.index)}` : ''}</strong>
+                                    <span class="ins-status critical">${esc(question.scoreLabel || `${question.earned}/${question.max}`)} pts</span>
+                                </div>
+                                <div class="ins-gap-question-text">${esc(question.question)}</div>
+                                <div class="ins-gap-answer"><span>Trainee answer</span><p>${esc(question.answer || 'No response')}</p></div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : `
+                    <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
+                        <table class="ins-table ins-table-compact">
+                            <thead><tr><th>Agent</th><th>Group</th><th>Failed Questions</th><th>Assessments</th></tr></thead>
+                            <tbody>
+                                ${byIndividual.map(row => `
+                                    <tr>
+                                        <td>${esc(row.agent)}</td>
+                                        <td>${esc(row.group || 'Ungrouped')}</td>
+                                        <td class="ins-metric">${row.failedCount}</td>
+                                        <td>${(row.assessments || []).slice(0, 5).map(item => `${esc(item.assessment)} (${item.failCount})`).join('<br>')}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `}
             </div>
         ` : '<div class="ins-card full">No individual failed question detail found for this scope.</div>';
 
         const groupHtml = byGroup.length ? `
             <div class="ins-card full">
-                <h3>All Groups Knowledge Gaps</h3>
+                <div class="ins-item-top">
+                    <h3 style="margin:0;">Group Knowledge Gaps</h3>
+                    <span class="ins-status improvement">${this.state.knowledgeAssessmentFilter ? esc(this.state.knowledgeAssessmentFilter) : 'All assessments'}</span>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 12px;">
+                    ${assessmentFilterHtml}
+                </div>
                 <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
                     <table class="ins-table ins-table-compact">
-                        <thead><tr><th>Group</th><th>Agents</th><th>Failed Questions</th><th>Top Assessments</th></tr></thead>
+                        <thead><tr><th>Group</th><th>Assessment</th><th>Question</th><th>Agents Failed</th><th>Total Fails</th></tr></thead>
                         <tbody>
-                            ${byGroup.map(row => `
-                                <tr>
-                                    <td>${esc(row.group || 'Ungrouped')}</td>
-                                    <td class="ins-metric">${row.agentCount}</td>
-                                    <td class="ins-metric">${row.failedCount}</td>
-                                    <td>${(row.assessments || []).slice(0, 6).map(item => `${esc(item.assessment)} (${item.failCount})`).join('<br>')}</td>
-                                </tr>
-                            `).join('')}
+                            ${byGroup.flatMap(row => (row.questions || []).map(question => `
+                                    <tr>
+                                        <td>${esc(row.group || 'Ungrouped')}</td>
+                                        <td>${esc(question.assessment || '')}</td>
+                                        <td>${esc(question.question || '')}</td>
+                                        <td class="ins-metric">${question.agentCount || 0}</td>
+                                        <td class="ins-metric">${question.failCount || 0}</td>
+                                    </tr>
+                                `)).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -1039,7 +1140,7 @@ const InsightApp = {
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
                         <button class="sub-tab-btn ${mode === 'assessment' ? 'active' : ''}" onclick="InsightApp.setKnowledgeMode('assessment')">Per Assessment</button>
                         <button class="sub-tab-btn ${mode === 'individual' ? 'active' : ''}" onclick="InsightApp.setKnowledgeMode('individual')">Individual</button>
-                        <button class="sub-tab-btn ${mode === 'group' ? 'active' : ''}" onclick="InsightApp.setKnowledgeMode('group')">All Groups</button>
+                        <button class="sub-tab-btn ${mode === 'group' ? 'active' : ''}" onclick="InsightApp.setKnowledgeMode('group')">Group</button>
                     </div>
                 </div>
                 ${mode === 'individual' ? individualHtml : (mode === 'group' ? groupHtml : assessmentHtml)}
@@ -1879,6 +1980,11 @@ const InsightApp = {
         const chartRows = Array.isArray(rows) ? rows : [];
         const metricLabels = this.getBreakdownMetricLabels(chartRows, category || 'performance');
         const compactPerformance = String(category || 'performance') === 'performance';
+        const cleanAxisLabel = (label) => String(label || '').replace(/^(Assessment|Vetting|Live|Test|Attendance|Focus):\s*/i, '');
+        const shortenAxisLabel = (label, max = 22) => {
+            const text = cleanAxisLabel(label);
+            return text.length > max ? `${text.slice(0, Math.max(4, max - 1))}...` : text;
+        };
         const rowPointSets = chartRows.map((row) => {
             return metricLabels
                 .map((label) => ({
@@ -1888,15 +1994,14 @@ const InsightApp = {
                 }))
                 .filter(point => point.score !== null);
         });
-        const axisCount = compactPerformance
-            ? Math.max(1, ...rowPointSets.map(points => points.length))
-            : metricLabels.length;
+        const axisCount = metricLabels.length;
         const width = category === 'performance' ? 1040 : 860;
-        const height = category === 'performance' ? 330 : 240;
+        const height = category === 'performance' ? 380 : 240;
         const pad = 44;
+        const bottomPad = compactPerformance ? 86 : pad;
         const rightEdge = width - pad;
         const xFor = (idx) => axisCount <= 1 ? pad : pad + (idx * (rightEdge - pad) / (axisCount - 1));
-        const yFor = (value) => height - pad - ((this.clampPercent(value) || 0) * (height - pad * 2) / 100);
+        const yFor = (value) => (height - bottomPad) - ((this.clampPercent(value) || 0) * (height - bottomPad - pad) / 100);
         const esc = this.escapeHtml;
         const ruleState = (typeof InsightDataService !== 'undefined' && InsightDataService.state) ? InsightDataService.state : {};
         const improveThreshold = this.clampPercent(ruleState.ruleConfig && ruleState.ruleConfig.defaultScoreThreshold) || 60;
@@ -1917,13 +2022,10 @@ const InsightApp = {
         }
 
         const pathRows = chartRows.map((row, rowIdx) => {
-            const available = (compactPerformance ? rowPointSets[rowIdx] : rowPointSets[rowIdx].map((point) => ({
+            const available = rowPointSets[rowIdx].map((point) => ({
                 ...point,
                 idx: metricLabels.indexOf(point.label)
-            }))).map((point, pointIdx) => ({
-                ...point,
-                idx: compactPerformance ? pointIdx : point.idx
-            }));
+            })).filter(point => point.idx >= 0);
             const points = available.map(point => `${xFor(point.idx)},${yFor(point.score)}`).join(' ');
             const stats = this.getTrendRowStats(row, metricLabels);
             const lastPoint = available.length ? available[available.length - 1] : null;
@@ -1939,7 +2041,7 @@ const InsightApp = {
                             <stop offset="100%" stop-color="rgba(255,255,255,0.01)"></stop>
                         </linearGradient>
                     </defs>
-                    <rect x="${pad}" y="${pad}" width="${rightEdge - pad}" height="${height - pad * 2}" rx="10" fill="url(#insChartWash)"></rect>
+                    <rect x="${pad}" y="${pad}" width="${rightEdge - pad}" height="${height - bottomPad - pad}" rx="10" fill="url(#insChartWash)"></rect>
                     ${performanceBands.map((band) => {
                         const yTop = yFor(band.to);
                         const yBottom = yFor(band.from);
@@ -1948,18 +2050,21 @@ const InsightApp = {
                             <text x="${rightEdge - 8}" y="${yTop + 16}" text-anchor="end" class="ins-chart-label">${esc(band.label)}</text>
                         </g>`;
                     }).join('')}
-                    <line x1="${pad}" y1="${height - pad}" x2="${rightEdge}" y2="${height - pad}" class="ins-chart-axis"></line>
-                    <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" class="ins-chart-axis"></line>
+                    <line x1="${pad}" y1="${height - bottomPad}" x2="${rightEdge}" y2="${height - bottomPad}" class="ins-chart-axis"></line>
+                    <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - bottomPad}" class="ins-chart-axis"></line>
                     ${[25,50,75,100].map(mark => `<line x1="${pad}" y1="${yFor(mark)}" x2="${rightEdge}" y2="${yFor(mark)}" class="ins-chart-grid"></line><text x="10" y="${yFor(mark) + 4}" class="ins-chart-label">${mark}%</text>`).join('')}
                     ${pathRows.map((item) => {
                         const titleText = `${item.row.label} | Avg ${item.stats.avg === null ? '-' : `${item.stats.avg}%`} | Low ${item.stats.low === null ? '-' : `${item.stats.low}%`} | High ${item.stats.high === null ? '-' : `${item.stats.high}%`}`;
                         return `<g class="ins-trend-series">
                             <title>${esc(titleText)}</title>
                             <polyline points="${item.points}" fill="none" stroke="${item.color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></polyline>
-                            ${item.available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.score)}" r="3.4" fill="${item.color}" stroke="rgba(8,13,22,0.82)" stroke-width="1.5"><title>${esc(item.row.label)} | ${esc(point.label.replace(/^(Assessment|Vetting|Live|Test):\s*/i, ''))} | ${point.score}%</title></circle>`).join('')}
+                            ${item.available.map(point => `<circle cx="${xFor(point.idx)}" cy="${yFor(point.score)}" r="3.4" fill="${item.color}" stroke="rgba(8,13,22,0.82)" stroke-width="1.5"><title>${esc(item.row.label)} | ${esc(cleanAxisLabel(point.label))} | ${point.score}%</title></circle>`).join('')}
                         </g>`;
                     }).join('')}
-                    ${Array.from({ length: axisCount }, (_, idx) => `<text x="${xFor(idx)}" y="${height - 15}" text-anchor="middle" class="ins-chart-label">${idx + 1}</text>`).join('')}
+                    ${metricLabels.map((label, idx) => compactPerformance
+                        ? `<text x="${xFor(idx)}" y="${height - 18}" text-anchor="end" transform="rotate(-36 ${xFor(idx)} ${height - 18})" class="ins-chart-label ins-chart-label-assessment"><title>${esc(cleanAxisLabel(label))}</title>${esc(shortenAxisLabel(label))}</text>`
+                        : `<text x="${xFor(idx)}" y="${height - 15}" text-anchor="middle" class="ins-chart-label"><title>${esc(cleanAxisLabel(label))}</title>${esc(shortenAxisLabel(label, 16))}</text>`
+                    ).join('')}
                 </svg>
             </div>
             <div class="ins-trend-summary">
@@ -1973,8 +2078,8 @@ const InsightApp = {
             </div>
             <div class="ins-axis-key">
                 ${compactPerformance
-                    ? '<span><strong>1...N</strong> Actual scored assessment/test order per person. Lines stop where that person has no further scored item.</span>'
-                    : metricLabels.map((label, idx) => `<span><strong>${idx + 1}</strong> ${esc(label.replace(/^(Assessment|Vetting|Live|Test|Attendance|Focus):\s*/i, ''))}</span>`).join('')}
+                    ? '<span><strong>Axis</strong> Assessment/test names are shown directly on the graph. Hover points for full names and scores.</span>'
+                    : metricLabels.map((label) => `<span><strong>Axis</strong> ${esc(cleanAxisLabel(label))}</span>`).join('')}
             </div>
         `;
     },
@@ -2595,7 +2700,7 @@ const InsightApp = {
     getManualPerformanceEvidenceRows: function(primaryAgent) {
         if (!primaryAgent) return [];
         return InsightDataService.getHrEvidenceForAgent(primaryAgent.name).map(row => ({
-            area: row.trigger,
+            area: (Array.isArray(row.triggers) && row.triggers.length ? row.triggers : [row.trigger]).filter(Boolean).join(', '),
             evidence: row.description || row.proofUrl || row.proofName || 'Captured HR evidence',
             signal: 'Manual HR evidence',
             proofUrl: row.proofUrl,
@@ -3569,6 +3674,11 @@ const InsightApp = {
         const esc = this.escapeHtml;
         const selectedGroup = String(this.state.groupFilter || 'all');
         const search = String(this.state.search || '').trim().toLowerCase();
+        const editingRow = this.state.hrEvidenceEditingId
+            ? (InsightDataService.state.hrEvidence || []).find(row => String(row.id) === String(this.state.hrEvidenceEditingId))
+            : null;
+        const editingTriggers = new Set((editingRow && Array.isArray(editingRow.triggers) ? editingRow.triggers : [editingRow && editingRow.trigger]).filter(Boolean));
+        const triggerFilter = String(this.state.hrEvidenceTriggerFilter || 'all');
         const agents = InsightDataService.getAllAgents()
             .filter(agent => this.isTraineeRole(agent.role) && !agent.blocked)
             .filter(agent => selectedGroup === 'all' || String(agent.group || '') === selectedGroup)
@@ -3582,10 +3692,13 @@ const InsightApp = {
                     const resolvedGroup = rowGroup || (agent && agent.group) || '';
                     if (String(resolvedGroup || '') !== selectedGroup) return false;
                 }
+                const rowTriggers = Array.isArray(row.triggers) && row.triggers.length ? row.triggers : [row.trigger].filter(Boolean);
+                if (triggerFilter !== 'all' && !rowTriggers.some(trigger => String(trigger) === triggerFilter)) return false;
                 return !search
                     || String(row.trainee || '').toLowerCase().includes(search)
                     || String(row.traineeKey || '').toLowerCase().includes(search.replace(/\s+/g, ''))
-                    || String(row.trigger || '').toLowerCase().includes(search);
+                    || rowTriggers.some(trigger => String(trigger || '').toLowerCase().includes(search))
+                    || String(row.description || '').toLowerCase().includes(search);
             })
             .sort((a, b) => this.safeDateTs(b.createdAt) - this.safeDateTs(a.createdAt));
 
@@ -3598,46 +3711,60 @@ const InsightApp = {
                         <label>
                             <span class="ins-subtle">Trainee</span>
                             <select id="hrEvidenceTrainee" style="width:100%; margin-top:4px;">
-                                ${agents.length ? agents.map(agent => `<option value="${esc(agent.name)}">${esc(agent.name)} (${esc(agent.group || 'Ungrouped')})</option>`).join('') : '<option value="">No trainees found</option>'}
+                                ${agents.length ? agents.map(agent => `<option value="${esc(agent.name)}" ${editingRow && insMatch(editingRow.trainee, agent.name) ? 'selected' : ''}>${esc(agent.name)} (${esc(agent.group || 'Ungrouped')})</option>`).join('') : '<option value="">No trainees found</option>'}
                             </select>
                         </label>
-                        <label>
-                            <span class="ins-subtle">Evaluation Trigger</span>
-                            <select id="hrEvidenceTrigger" style="width:100%; margin-top:4px;">
-                                ${this.hrEvidenceTriggers.map(item => `<option value="${esc(item)}">${esc(item)}</option>`).join('')}
-                            </select>
-                        </label>
+                        <div>
+                            <span class="ins-subtle">Evaluation Triggers</span>
+                            <div class="ins-hr-trigger-grid">
+                                ${this.hrEvidenceTriggers.map(item => `
+                                    <label class="ins-hr-trigger-option">
+                                        <input class="hrEvidenceTriggerCheck" type="checkbox" value="${esc(item)}" ${editingTriggers.has(item) ? 'checked' : ''}>
+                                        <span>${esc(item)}</span>
+                                    </label>
+                                `).join('')}
+                            </div>
+                        </div>
                     </div>
                     <label style="display:block; margin-top:12px;">
                         <span class="ins-subtle">Description</span>
-                        <textarea id="hrEvidenceDescription" rows="5" placeholder="Add the HR incident or supporting review note..." style="width:100%; margin-top:4px;"></textarea>
+                        <textarea id="hrEvidenceDescription" rows="5" placeholder="Add the HR incident or supporting review note..." style="width:100%; margin-top:4px;">${esc(editingRow ? editingRow.description || '' : '')}</textarea>
                     </label>
                     <div class="ins-mini-grid" style="margin-top:12px;">
                         <label>
                             <span class="ins-subtle">Proof Link</span>
-                            <input id="hrEvidenceProofUrl" type="url" placeholder="https://... SharePoint evidence link" style="width:100%; margin-top:4px;">
+                            <input id="hrEvidenceProofUrl" type="url" placeholder="https://... SharePoint evidence link" value="${esc(editingRow ? editingRow.proofUrl || '' : '')}" style="width:100%; margin-top:4px;">
                         </label>
                         <label>
-                            <span class="ins-subtle">Screenshot</span>
+                            <span class="ins-subtle">Screenshot${editingRow && editingRow.proofDataUrl ? ` (${esc(editingRow.proofName || 'existing file retained')})` : ''}</span>
                             <input id="hrEvidenceScreenshot" type="file" accept="image/*" style="width:100%; margin-top:4px;">
                         </label>
                     </div>
-                    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
-                        <button class="btn-primary btn-sm" onclick="InsightApp.captureHrEvidence()"><i class="fas fa-plus"></i> Capture Trigger</button>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+                        ${editingRow ? '<button class="btn-secondary btn-sm" onclick="InsightApp.cancelHrEvidenceEdit()">Cancel Edit</button>' : ''}
+                        <button class="btn-primary btn-sm" onclick="InsightApp.captureHrEvidence()"><i class="fas fa-plus"></i> ${editingRow ? 'Update Evidence' : 'Capture Evidence'}</button>
                     </div>
                 </div>
 
                 <div class="ins-card full">
-                    <h3>Captured HR Evidence</h3>
+                    <div class="ins-item-top">
+                        <h3 style="margin:0;">Captured HR Evidence</h3>
+                        <select onchange="InsightApp.setHrEvidenceTriggerFilter(this.value)" style="margin:0; min-width:220px;">
+                            <option value="all" ${triggerFilter === 'all' ? 'selected' : ''}>All Triggers</option>
+                            ${this.hrEvidenceTriggers.map(item => `<option value="${esc(item)}" ${triggerFilter === item ? 'selected' : ''}>${esc(item)}</option>`).join('')}
+                        </select>
+                    </div>
                     <div class="table-responsive" style="max-height:520px; overflow-y:auto;">
                         <table class="ins-table ins-table-compact">
-                            <thead><tr><th>Date</th><th>Trainee</th><th>Trigger</th><th>Description</th><th>Proof</th><th>By</th></tr></thead>
+                            <thead><tr><th>Date</th><th>Trainee</th><th>Triggers</th><th>Description</th><th>Proof</th><th>By</th><th>Actions</th></tr></thead>
                             <tbody>
-                                ${evidenceRows.length ? evidenceRows.map(row => `
+                                ${evidenceRows.length ? evidenceRows.map(row => {
+                                    const rowTriggers = Array.isArray(row.triggers) && row.triggers.length ? row.triggers : [row.trigger].filter(Boolean);
+                                    return `
                                     <tr>
                                         <td>${esc(String(row.createdAt || '').slice(0, 10))}</td>
                                         <td><strong>${esc(row.trainee)}</strong></td>
-                                        <td><span class="ins-badge">${esc(row.trigger)}</span></td>
+                                        <td>${rowTriggers.map(trigger => `<span class="ins-badge">${esc(trigger)}</span>`).join(' ')}</td>
                                         <td>${esc(row.description || '-')}</td>
                                         <td>
                                             ${row.proofUrl ? `<a href="${esc(row.proofUrl)}" target="_blank" rel="noopener">Link</a>` : ''}
@@ -3645,8 +3772,12 @@ const InsightApp = {
                                             ${!row.proofUrl && !row.proofDataUrl ? '-' : ''}
                                         </td>
                                         <td>${esc(row.createdBy || '-')}</td>
+                                        <td>
+                                            <button class="btn-secondary btn-sm" onclick="InsightApp.editHrEvidence('${encodeURIComponent(row.id)}')"><i class="fas fa-pen"></i></button>
+                                            <button class="btn-danger btn-sm" onclick="InsightApp.deleteHrEvidence('${encodeURIComponent(row.id)}')"><i class="fas fa-trash"></i></button>
+                                        </td>
                                     </tr>
-                                `).join('') : '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No HR evidence captured for this scope.</td></tr>'}
+                                `; }).join('') : '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No HR evidence captured for this scope.</td></tr>'}
                             </tbody>
                         </table>
                     </div>

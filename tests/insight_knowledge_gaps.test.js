@@ -22,6 +22,7 @@ describe('Insight Knowledge Gaps', () => {
                 testTitle: 'Course 1',
                 status: 'completed',
                 scores: { 0: 1, 1: 1 },
+                answers: { 0: 'A', 1: 'B' },
                 testSnapshot: {
                     title: 'Course 1',
                     questions: [
@@ -37,6 +38,7 @@ describe('Insight Knowledge Gaps', () => {
                 testTitle: 'Course 1',
                 status: 'completed',
                 scores: { 0: 1, 1: 0 },
+                answers: { 0: 'A', 1: 'Wrong answer' },
                 testSnapshot: {
                     title: 'Course 1',
                     questions: [
@@ -57,6 +59,44 @@ describe('Insight Knowledge Gaps', () => {
         expect(gaps.byAssessment[0].questions[0].failCount).toBe(1);
         expect(gaps.byAssessment[0].questions[0].failRate).toBe(50);
         expect(gaps.byAssessment[0].questions[0].agentCount).toBe(1);
+        expect(gaps.byIndividual[0].agent).toBe('Agent B');
+        expect(gaps.byIndividual[0].questions[0].answer).toBe('Wrong answer');
+        expect(gaps.byIndividual[0].questions[0].scoreLabel).toBe('0/1');
+        expect(gaps.byGroup[0].questions[0].question).toBe('Hard Question');
+        expect(gaps.byGroup[0].questions[0].agentCount).toBe(1);
+    });
+
+    test('filters group knowledge gaps by assessment', () => {
+        localStorage.setItem('rosters', JSON.stringify({ G1: ['Agent A', 'Agent B'] }));
+        localStorage.setItem('submissions', JSON.stringify([
+            {
+                id: 'sub-a',
+                trainee: 'Agent A',
+                testTitle: 'Course 1',
+                status: 'completed',
+                scores: { 0: 0 },
+                answers: { 0: 'Wrong' },
+                testSnapshot: { title: 'Course 1', questions: [{ text: 'Course 1 Question', points: 1 }] }
+            },
+            {
+                id: 'sub-b',
+                trainee: 'Agent B',
+                testTitle: 'Course 2',
+                status: 'completed',
+                scores: { 0: 0 },
+                answers: { 0: 'Wrong' },
+                testSnapshot: { title: 'Course 2', questions: [{ text: 'Course 2 Question', points: 1 }] }
+            }
+        ]));
+
+        InsightDataService.hydrateFromLocalStorage();
+        const gaps = InsightDataService.buildKnowledgeGaps({ groupFilter: 'G1', assessmentFilter: 'Course 2' });
+
+        expect(gaps.byGroup).toHaveLength(1);
+        expect(gaps.byGroup[0].questions).toHaveLength(1);
+        expect(gaps.byGroup[0].questions[0].assessment).toBe('Course 2');
+        expect(gaps.byGroup[0].questions[0].question).toBe('Course 2 Question');
+        expect(gaps.byGroup[0].questions[0].agentCount).toBe(1);
     });
 
     test('HR evidence saves against canonical trainee identity', async () => {
@@ -68,7 +108,7 @@ describe('Insight Knowledge Gaps', () => {
         InsightDataService.hydrateFromLocalStorage();
         const result = await InsightDataService.saveHrEvidenceEntry({
             trainee: 'themba   tatsi',
-            trigger: 'Communication',
+            triggers: ['Communication', 'Dependability'],
             description: 'Needs clearer handover notes.'
         });
 
@@ -79,6 +119,24 @@ describe('Insight Knowledge Gaps', () => {
 
         const rows = InsightDataService.getHrEvidenceForAgent('Themba Tatsi');
         expect(rows).toHaveLength(1);
+        expect(rows[0].triggers).toEqual(['Communication', 'Dependability']);
         expect(rows[0].description).toContain('handover');
+
+        const update = await InsightDataService.saveHrEvidenceEntry({
+            id: rows[0].id,
+            trainee: 'Themba Tatsi',
+            triggers: ['Communication'],
+            description: 'Updated note.'
+        });
+        expect(update.ok).toBe(true);
+
+        const updatedRows = InsightDataService.getHrEvidenceForAgent('Themba Tatsi');
+        expect(updatedRows).toHaveLength(1);
+        expect(updatedRows[0].triggers).toEqual(['Communication']);
+        expect(updatedRows[0].description).toBe('Updated note.');
+
+        const deleted = await InsightDataService.deleteHrEvidenceEntry(updatedRows[0].id);
+        expect(deleted.ok).toBe(true);
+        expect(InsightDataService.getHrEvidenceForAgent('Themba Tatsi')).toHaveLength(0);
     });
 });

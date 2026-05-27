@@ -259,6 +259,14 @@ function normalizeSubmissionText(value) {
     return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+function isDigitalVettingSubmission(submission, testDef) {
+    if (!submission) return false;
+    const submissionType = String(submission.type || submission.testSnapshot?.type || '').toLowerCase();
+    if (submissionType === 'vetting') return true;
+    if (testDef && String(testDef.type || '').toLowerCase() === 'vetting') return true;
+    return String(submission.testTitle || '').toLowerCase().includes('vetting');
+}
+
 function canonicalizeVettingTestTitle(rawTitle) {
     const original = String(rawTitle || '').trim();
     if (!original) return '';
@@ -387,7 +395,7 @@ function loadTestRecords() {
     subs.forEach(s => {
         // Check if it's a vetting test
         const testDef = (Array.isArray(tests) ? tests : []).find(t => t.id == s.testId || t.title === s.testTitle);
-        const isVetting = (testDef && testDef.type === 'vetting') || s.testTitle.toLowerCase().includes('vetting');
+        const isVetting = isDigitalVettingSubmission(s, testDef);
         
         if (isVetting) {
             const canonicalTitle = canonicalizeVettingTestTitle(s.testTitle);

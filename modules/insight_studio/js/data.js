@@ -682,20 +682,27 @@ const InsightDataService = {
         return (rows || []).map((row) => {
             const base = row && typeof row === 'object' && row.data && typeof row.data === 'object' ? row.data : (row || {});
             const trainee = String(base.trainee || base.user || base.agent || base.name || row.user_id || '').trim();
+            const triggers = Array.isArray(base.triggers)
+                ? base.triggers.map(item => String(item || '').trim()).filter(Boolean)
+                : String(base.trigger || base.area || '').split('|').map(item => String(item || '').trim()).filter(Boolean);
+            const triggerList = triggers.length ? Array.from(new Set(triggers)) : [];
             return {
                 id: String(base.id || row.id || `hr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`).trim(),
                 trainee,
                 traineeKey: String(base.traineeKey || base.trainee_key || insToken(trainee)).trim(),
                 groupID: String(base.groupID || base.groupId || base.group || '').trim(),
-                trigger: String(base.trigger || base.area || '').trim(),
+                trigger: triggerList[0] || '',
+                triggers: triggerList,
                 description: String(base.description || base.comment || '').trim(),
                 proofUrl: String(base.proofUrl || base.proof || base.link || '').trim(),
                 proofName: String(base.proofName || '').trim(),
                 proofDataUrl: String(base.proofDataUrl || '').trim(),
                 createdAt: String(base.createdAt || base.date || row.updated_at || new Date().toISOString()).trim(),
-                createdBy: String(base.createdBy || '').trim()
+                createdBy: String(base.createdBy || '').trim(),
+                updatedAt: String(base.updatedAt || '').trim(),
+                updatedBy: String(base.updatedBy || '').trim()
             };
-        }).filter(item => !!item.trainee && !!item.trigger);
+        }).filter(item => !!item.trainee && Array.isArray(item.triggers) && item.triggers.length > 0);
     },
 
     resolveHrEvidenceTrainee: function(traineeName) {
@@ -1554,6 +1561,46 @@ const InsightDataService = {
             ));
         };
 
+        const answerSources = [base.answers, base.userAnswers, base.responses, base.markedAnswers, base.quizMeta && base.quizMeta.answers]
+            .filter(value => value && typeof value === 'object');
+
+        const getAnswerForIndex = (questionIndex) => {
+            for (const source of answerSources) {
+                if (source[questionIndex] !== undefined) return source[questionIndex];
+                if (source[String(questionIndex)] !== undefined) return source[String(questionIndex)];
+            }
+            return undefined;
+        };
+
+        const formatAnswer = (question, answer) => {
+            if (answer === undefined || answer === null || answer === '') return 'No response';
+            const row = question && typeof question === 'object' ? question : {};
+            const type = String(row.type || '').toLowerCase();
+            if ((type === 'multiple_choice' || type === 'multiple-choice') && Array.isArray(row.options)) {
+                const idx = Number(answer);
+                return Number.isFinite(idx) && row.options[idx] !== undefined ? String(row.options[idx]) : String(answer);
+            }
+            if ((type === 'multi_select' || type === 'multi-select') && Array.isArray(row.options) && Array.isArray(answer)) {
+                return answer.map(item => {
+                    const idx = Number(item);
+                    return Number.isFinite(idx) && row.options[idx] !== undefined ? String(row.options[idx]) : String(item);
+                }).join(', ') || 'No response';
+            }
+            if (type === 'matching' && Array.isArray(row.pairs) && answer && typeof answer === 'object') {
+                return row.pairs.map((pair, idx) => `${pair.left || `Item ${idx + 1}`}: ${answer[idx] || answer[String(idx)] || '-'}`).join(' | ');
+            }
+            if (type === 'matrix' && Array.isArray(row.rows) && Array.isArray(row.cols) && answer && typeof answer === 'object') {
+                return row.rows.map((label, idx) => {
+                    const colIdx = Number(answer[idx] !== undefined ? answer[idx] : answer[String(idx)]);
+                    const value = Number.isFinite(colIdx) && row.cols[colIdx] !== undefined ? row.cols[colIdx] : '-';
+                    return `${label}: ${value}`;
+                }).join(' | ');
+            }
+            if (Array.isArray(answer)) return answer.map(item => String(item)).join(', ');
+            if (typeof answer === 'object') return JSON.stringify(answer);
+            return String(answer);
+        };
+
         const scoreRows = (() => {
             const scoreSources = [base.scores, base.questionScores, base.marks, base.manualScores]
                 .filter(value => value && typeof value === 'object' && !Array.isArray(value));
@@ -1564,11 +1611,13 @@ const InsightDataService = {
                 .map((key, rowIdx) => {
                     const questionIndex = Number.isFinite(Number(key)) ? Number(key) : rowIdx;
                     const question = questionDefs[questionIndex] || {};
+                    const answer = getAnswerForIndex(questionIndex);
                     return {
                         text: questionTextFromDef(question, questionIndex),
                         earned: normalizeScoreValue(mergedScores[key]),
                         max: maxFromDef(question),
-                        index: questionIndex + 1
+                        index: questionIndex + 1,
+                        answer: formatAnswer(question, answer)
                     };
                 })
                 .filter(row => !!row.text);
@@ -1623,7 +1672,8 @@ const InsightDataService = {
                 text,
                 earned,
                 max: Math.max(1, max),
-                index: idx + 1
+                index: idx + 1,
+                answer: row.answer || row.response || row.value || row.userAnswer || row.selected || 'No response'
             };
         }).filter(row => !!row.text);
     },
@@ -2113,9 +2163,12 @@ const InsightDataService = {
         const groupFilter = String(scope.groupFilter || 'all').trim();
         const searchText = insNormalize(scope.search || '');
         const agentFilter = String(scope.agent || '').trim();
+        const assessmentFilter = String(scope.assessmentFilter || '').trim();
+        const assessmentFilterKey = insNormalize(assessmentFilter);
         const assessmentMap = {};
         const individualMap = {};
         const groupMap = {};
+        const assessmentOptionMap = {};
 
         (this.state.submissions || []).forEach((submission) => {
             const agent = String(submission.trainee || '').trim();
@@ -2124,9 +2177,11 @@ const InsightDataService = {
             if (!agent || !assessment) return;
             if (groupFilter !== 'all' && group !== groupFilter) return;
             if (mode === 'individual' && agentFilter && !insMatch(agent, agentFilter)) return;
+            if (assessmentFilterKey && insNormalize(assessment) !== assessmentFilterKey) return;
             if (searchText && !insNormalize(`${agent} ${group} ${assessment}`).includes(searchText)) return;
 
             const assessmentKey = insNormalize(assessment);
+            if (!assessmentOptionMap[assessmentKey]) assessmentOptionMap[assessmentKey] = assessment;
             if (!assessmentMap[assessmentKey]) {
                 assessmentMap[assessmentKey] = { assessment, failedCount: 0, attempts: 0, agents: new Set(), questions: {} };
             }
@@ -2159,6 +2214,7 @@ const InsightDataService = {
                 assessmentMap[assessmentKey].agents.add(agent);
                 assessmentMap[assessmentKey].questions[questionKey] = assessmentMap[assessmentKey].questions[questionKey] || {
                     question: questionText,
+                    assessment,
                     failCount: 0,
                     agents: new Set(),
                     lowestScore: max
@@ -2172,8 +2228,16 @@ const InsightDataService = {
 
                 groupMap[groupKey].failedCount += 1;
                 groupMap[groupKey].agents.add(agent);
-                groupMap[groupKey].assessments[assessmentKey] = groupMap[groupKey].assessments[assessmentKey] || { assessment, failCount: 0 };
+                groupMap[groupKey].assessments[assessmentKey] = groupMap[groupKey].assessments[assessmentKey] || { assessment, failCount: 0, questions: {} };
                 groupMap[groupKey].assessments[assessmentKey].failCount += 1;
+                groupMap[groupKey].assessments[assessmentKey].questions[questionKey] = groupMap[groupKey].assessments[assessmentKey].questions[questionKey] || {
+                    assessment,
+                    question: questionText,
+                    failCount: 0,
+                    agents: new Set()
+                };
+                groupMap[groupKey].assessments[assessmentKey].questions[questionKey].failCount += 1;
+                groupMap[groupKey].assessments[assessmentKey].questions[questionKey].agents.add(agent);
 
                 individualMap[agentKey].failedCount += 1;
                 individualMap[agentKey].assessments[assessmentKey] = individualMap[agentKey].assessments[assessmentKey] || {
@@ -2183,8 +2247,13 @@ const InsightDataService = {
                 };
                 individualMap[agentKey].assessments[assessmentKey].failCount += 1;
                 individualMap[agentKey].assessments[assessmentKey].questions.push({
+                    assessment,
+                    index: question.index || '',
                     question: questionText,
-                    scoreLabel: `${earned}/${max}`
+                    earned,
+                    max,
+                    scoreLabel: `${earned}/${max}`,
+                    answer: question.answer || 'No response'
                 });
             });
         });
@@ -2218,21 +2287,41 @@ const InsightDataService = {
                 agent: row.agent,
                 group: row.group,
                 failedCount: row.failedCount,
-                assessments: Object.values(row.assessments || {}).sort((a, b) => insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0))
+                assessments: Object.values(row.assessments || {}).sort((a, b) => insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0)),
+                questions: Object.values(row.assessments || {})
+                    .flatMap(item => (item.questions || []).map(question => ({ ...question, assessment: item.assessment })))
+                    .sort((a, b) => String(a.assessment || '').localeCompare(String(b.assessment || ''), undefined, { sensitivity: 'base' })
+                        || insToNumber(a.index, 0) - insToNumber(b.index, 0))
             }))
             .sort((a, b) => insToNumber(b.failedCount, 0) - insToNumber(a.failedCount, 0));
 
         const byGroup = Object.values(groupMap)
-            .map(row => ({
-                group: row.group,
-                failedCount: row.failedCount,
-                agentCount: row.agents.size,
-                assessments: Object.values(row.assessments || {}).sort((a, b) => insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0))
-            }))
+            .map(row => {
+                const assessments = Object.values(row.assessments || {}).map(item => ({
+                    assessment: item.assessment,
+                    failCount: item.failCount,
+                    questions: Object.values(item.questions || {}).map(question => ({
+                        assessment: question.assessment,
+                        question: question.question,
+                        failCount: question.failCount,
+                        agentCount: question.agents ? question.agents.size : 0
+                    })).sort((a, b) => insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0)
+                        || String(a.question || '').localeCompare(String(b.question || ''), undefined, { numeric: true, sensitivity: 'base' }))
+                })).sort((a, b) => insToNumber(b.failCount, 0) - insToNumber(a.failCount, 0));
+
+                return {
+                    group: row.group,
+                    failedCount: row.failedCount,
+                    agentCount: row.agents.size,
+                    assessments,
+                    questions: assessments.flatMap(item => (item.questions || []).map(question => ({ ...question, assessment: item.assessment })))
+                };
+            })
             .sort((a, b) => insToNumber(b.failedCount, 0) - insToNumber(a.failedCount, 0));
 
         return {
-            scope: { mode, groupFilter, searchText, agentFilter },
+            scope: { mode, groupFilter, searchText, agentFilter, assessmentFilter },
+            assessmentOptions: Object.values(assessmentOptionMap).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })),
             stats: {
                 failedQuestionCount: byAssessment.reduce((acc, row) => acc + insToNumber(row.failedCount, 0), 0),
                 assessmentCount: byAssessment.length,
@@ -2437,36 +2526,16 @@ const InsightDataService = {
             .sort((a, b) => insToTs(b.createdAt) - insToTs(a.createdAt));
     },
 
-    saveHrEvidenceEntry: async function(entry) {
-        const nowIso = new Date().toISOString();
-        const currentUser = AppContext.user && (AppContext.user.user || AppContext.user.username || AppContext.user.email);
-        const traineeIdentity = this.resolveHrEvidenceTrainee(entry && entry.trainee);
-        const payload = this.normalizeHrEvidence([{
-            id: entry && entry.id ? entry.id : `hr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            trainee: traineeIdentity && traineeIdentity.name,
-            traineeKey: traineeIdentity && traineeIdentity.key,
-            groupID: traineeIdentity && traineeIdentity.group,
-            trigger: entry && entry.trigger,
-            description: entry && entry.description,
-            proofUrl: entry && entry.proofUrl,
-            proofName: entry && entry.proofName,
-            proofDataUrl: entry && entry.proofDataUrl,
-            createdAt: entry && entry.createdAt ? entry.createdAt : nowIso,
-            createdBy: currentUser || ''
-        }])[0];
-        if (!payload) return { ok: false, message: 'Choose a trainee and trigger before capturing evidence.' };
-        if (!payload.description && !payload.proofUrl && !payload.proofDataUrl) {
-            return { ok: false, message: 'Add a description, proof link, or screenshot before capturing evidence.' };
-        }
-
-        const nextRows = [payload, ...(this.state.hrEvidence || [])];
+    persistHrEvidenceRows: async function(rows, timestamp) {
+        const nextRows = this.normalizeHrEvidence(rows);
+        const updatedAt = timestamp || new Date().toISOString();
         if (AppContext.supabase) {
             const { error } = await AppContext.supabase
                 .from('app_documents')
                 .upsert({
                     key: INSIGHT_HR_EVIDENCE_KEY,
                     content: nextRows,
-                    updated_at: nowIso
+                    updated_at: updatedAt
                 }, { onConflict: 'key' });
             if (error) {
                 console.warn('[Insight] Failed saving HR evidence:', error);
@@ -2478,7 +2547,56 @@ const InsightDataService = {
         localStorage.setItem(INSIGHT_HR_EVIDENCE_KEY, JSON.stringify(nextRows));
         this.resetIndexes();
         this.saveCache();
+        return { ok: true };
+    },
+
+    saveHrEvidenceEntry: async function(entry) {
+        const nowIso = new Date().toISOString();
+        const currentUser = AppContext.user && (AppContext.user.user || AppContext.user.username || AppContext.user.email);
+        const traineeIdentity = this.resolveHrEvidenceTrainee(entry && entry.trainee);
+        const triggers = Array.isArray(entry && entry.triggers)
+            ? entry.triggers
+            : [entry && entry.trigger];
+        const existing = entry && entry.id
+            ? (this.state.hrEvidence || []).find(row => String(row.id) === String(entry.id))
+            : null;
+        const payload = this.normalizeHrEvidence([{
+            id: entry && entry.id ? entry.id : `hr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            trainee: traineeIdentity && traineeIdentity.name,
+            traineeKey: traineeIdentity && traineeIdentity.key,
+            groupID: traineeIdentity && traineeIdentity.group,
+            triggers,
+            description: entry && entry.description,
+            proofUrl: entry && entry.proofUrl,
+            proofName: entry && entry.proofName ? entry.proofName : (existing && existing.proofName),
+            proofDataUrl: entry && entry.proofDataUrl ? entry.proofDataUrl : (existing && existing.proofDataUrl),
+            createdAt: existing && existing.createdAt ? existing.createdAt : (entry && entry.createdAt ? entry.createdAt : nowIso),
+            createdBy: existing && existing.createdBy ? existing.createdBy : (currentUser || ''),
+            updatedAt: existing ? nowIso : '',
+            updatedBy: existing ? (currentUser || '') : ''
+        }])[0];
+        if (!payload) return { ok: false, message: 'Choose a trainee and trigger before capturing evidence.' };
+        if (!payload.description && !payload.proofUrl && !payload.proofDataUrl) {
+            return { ok: false, message: 'Add a description, proof link, or screenshot before capturing evidence.' };
+        }
+
+        const currentRows = Array.isArray(this.state.hrEvidence) ? this.state.hrEvidence : [];
+        const nextRows = existing
+            ? currentRows.map(row => String(row.id) === String(payload.id) ? payload : row)
+            : [payload, ...currentRows];
+        const saved = await this.persistHrEvidenceRows(nextRows, nowIso);
+        if (!saved.ok) return saved;
+
         return { ok: true, entry: payload };
+    },
+
+    deleteHrEvidenceEntry: async function(entryId) {
+        const id = String(entryId || '').trim();
+        if (!id) return { ok: false, message: 'Missing HR evidence id.' };
+        const currentRows = Array.isArray(this.state.hrEvidence) ? this.state.hrEvidence : [];
+        const nextRows = currentRows.filter(row => String(row.id) !== id);
+        if (nextRows.length === currentRows.length) return { ok: false, message: 'HR evidence entry was not found.' };
+        return this.persistHrEvidenceRows(nextRows, new Date().toISOString());
     }
 };
 

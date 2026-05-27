@@ -159,6 +159,100 @@ describe('Test engine edge cases', () => {
         expect(global.saveToServer).toHaveBeenCalledWith(['submissions'], false, true);
     });
 
+    test('marking queue does not reopen historical completed vetting submissions', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(src);
+
+        const container = { innerHTML: '' };
+        const badge = {
+            innerText: '',
+            classList: { remove: jest.fn(), add: jest.fn() }
+        };
+        global.document = {
+            getElementById: jest.fn((id) => {
+                if (id === 'markingList') return container;
+                if (id === 'markingCountBadge') return badge;
+                return null;
+            })
+        };
+        window.document = global.document;
+        global.saveToServer = jest.fn();
+        window.saveToServer = global.saveToServer;
+
+        localStorage.setItem('submissions', JSON.stringify([
+            {
+                id: 'sub_vetting_auto',
+                trainee: 'Alice',
+                testId: 'vetting_custom',
+                testTitle: 'test test',
+                testSnapshot: { type: 'vetting', title: 'test test', questions: [] },
+                status: 'completed',
+                archived: false,
+                score: 100,
+                date: '2026-05-19'
+            }
+        ]));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'record_sub_vetting_auto', submissionId: 'sub_vetting_auto', trainee: 'Alice', assessment: 'test test', score: 100, phase: 'Assessment' }
+        ]));
+
+        loadMarkingQueue();
+
+        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        expect(submissions[0].status).toBe('completed');
+        expect(submissions[0].archived).toBe(false);
+        expect(badge.innerText).toBe(0);
+        expect(container.innerHTML).toContain('No assessments awaiting review');
+        expect(global.saveToServer).not.toHaveBeenCalled();
+    });
+
+    test('marking queue repairs linked pending vetting submissions back to completed', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(src);
+
+        const container = { innerHTML: '' };
+        const badge = {
+            innerText: '',
+            classList: { remove: jest.fn(), add: jest.fn() }
+        };
+        global.document = {
+            getElementById: jest.fn((id) => {
+                if (id === 'markingList') return container;
+                if (id === 'markingCountBadge') return badge;
+                return null;
+            })
+        };
+        window.document = global.document;
+        global.saveToServer = jest.fn();
+        window.saveToServer = global.saveToServer;
+
+        localStorage.setItem('submissions', JSON.stringify([
+            {
+                id: 'sub_vetting_reopened',
+                trainee: 'Alice',
+                testId: 'vetting_old',
+                testTitle: '1st Vetting - VoIP 1st Vetting test',
+                testSnapshot: { type: 'vetting', title: '1st Vetting - VoIP 1st Vetting test', questions: [] },
+                status: 'pending',
+                archived: false,
+                score: 84,
+                date: '2026-03-19'
+            }
+        ]));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'record_sub_vetting_reopened', submissionId: 'sub_vetting_reopened', trainee: 'Alice', assessment: '1st Vetting - VoIP 1st Vetting test', score: 84, phase: 'Vetting' }
+        ]));
+
+        loadMarkingQueue();
+
+        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        expect(submissions[0].status).toBe('completed');
+        expect(submissions[0].archived).toBe(false);
+        expect(submissions[0].score).toBe(84);
+        expect(badge.innerText).toBe(0);
+        expect(global.saveToServer).toHaveBeenCalledWith(['submissions'], false, true);
+    });
+
     test('deleting a submission does not delete an unrelated same-title record', async () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../js/admin_history.js'), 'utf8');
         eval(src);

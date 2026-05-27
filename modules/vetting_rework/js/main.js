@@ -30,6 +30,25 @@ const App = {
         preflightSessionKey: ''
     },
 
+    shouldRenderTraineeSession: function(previousSession, nextSession) {
+        const existingShell = document.getElementById('btnEnterSandbox') ||
+            document.getElementById('sandbox-active-card') ||
+            document.getElementById('sandbox-terminal-card') ||
+            document.getElementById('sandbox-submitting-card') ||
+            document.getElementById('sandbox-closed-card');
+        if (!existingShell) return true;
+        if (!previousSession || !nextSession) return true;
+        if (previousSession.sessionId !== nextSession.sessionId) return true;
+        if (previousSession.testId !== nextSession.testId) return true;
+        if (previousSession.targetGroup !== nextSession.targetGroup) return true;
+
+        const previousData = this.getMyTraineeData(previousSession);
+        const nextData = this.getMyTraineeData(nextSession);
+        const previousStatus = String((previousData && previousData.status) || '').toLowerCase();
+        const nextStatus = String((nextData && nextData.status) || '').toLowerCase();
+        return previousStatus !== nextStatus;
+    },
+
     resolveCurrentUser: function() {
         if (AppContext.user && AppContext.user.user) return AppContext.user;
         if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) return CURRENT_USER;
@@ -49,7 +68,7 @@ const App = {
             if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
             return JSON.parse(raw);
         } catch (e) {
-            console.warn(`[Vetting Rework] ignored invalid local data for ${key}:`, e);
+            console.warn(`[Vetting Arena] ignored invalid local data for ${key}:`, e);
             return fallback;
         }
     },
@@ -126,25 +145,16 @@ const App = {
         // 3. Setup Realtime Listener
         let realtimeRenderDebounce = null;
         this.state.realtimeUnsub = DataService.setupRealtime((payload) => {
-            let sessions = this.readArray('adminVettingSessions');
-            if (payload.eventType === 'DELETE') {
-                sessions = sessions.filter(s => s.sessionId !== payload.old.id);
-                if (this.state.activeTabId === payload.old.id) this.state.activeTabId = null;
-            } else if (payload.new && payload.new.data) {
-                const newData = payload.new.data;
-                const idx = sessions.findIndex(s => s.sessionId === newData.sessionId);
-                if (newData.active) {
-                    if (idx > -1) sessions[idx] = newData;
-                    else sessions.push(newData);
-                } else {
-                    sessions = sessions.filter(s => s.sessionId !== newData.sessionId);
-                }
-            }
-            localStorage.setItem('adminVettingSessions', JSON.stringify(sessions));
-            
             // BATCH RENDER: Prevent UI Freeze on mass trainee connections
             if (realtimeRenderDebounce) clearTimeout(realtimeRenderDebounce);
-            realtimeRenderDebounce = setTimeout(() => this.render(), 100);
+            realtimeRenderDebounce = setTimeout(async () => {
+                if (payload.eventType === 'DELETE' && this.state.activeTabId === payload.old.id) this.state.activeTabId = null;
+                if (payload.new && payload.new.data && payload.new.data.active === false && typeof DataService.markSessionEnded === 'function') {
+                    DataService.markSessionEnded(payload.new.data.sessionId);
+                }
+                await DataService.pollSessions();
+                this.render();
+            }, 100);
         });
 
         // 4. Hard backup poller - keeps sessions moving even if realtime tunnel degrades.
@@ -170,6 +180,15 @@ const App = {
         if (!na || !nb) return false;
         if (na === nb) return true;
         return na.replace(/\s+/g, '') === nb.replace(/\s+/g, '');
+    },
+
+    withTimeout: function(promise, timeoutMs, label) {
+        return Promise.race([
+            Promise.resolve(promise),
+            new Promise((_, reject) => {
+                setTimeout(() => reject(new Error(`${label || 'Operation'} timed out`)), timeoutMs);
+            })
+        ]);
     },
 
     // ==========================================
@@ -239,8 +258,11 @@ const App = {
             if (isTarget) { mySession = s; break; }
         }
 
+        const previousSession = this.state.traineeSession;
         this.state.traineeSession = mySession;
-        this.renderTrainee();
+        if (this.shouldRenderTraineeSession(previousSession, mySession)) {
+            this.renderTrainee();
+        }
     },
 
     renderTrainee: function() {
@@ -250,10 +272,10 @@ const App = {
         if (!this.state.traineeSession) {
             this.stopTraineePollers();
             container.innerHTML = `
-                <div style="text-align:center; padding:50px;">
-                    <i class="fas fa-door-closed" style="font-size:4rem; color:var(--text-muted); margin-bottom:20px;"></i>
+                <div id="sandbox-closed-card" class="vt-trainee-state vt-trainee-state--idle">
+                    <i class="fas fa-door-closed"></i>
                     <h3>Arena Closed</h3>
-                    <p style="color:var(--text-muted);">There is no active Sandbox session for your group.</p>
+                    <p>There is no active Sandbox session for your group.</p>
                 </div>`;
             return;
         }
@@ -264,10 +286,10 @@ const App = {
         if (myData && myData.status === 'completed') {
             this.stopTraineePollers();
             container.innerHTML = `
-                <div style="text-align:center; padding:50px;">
-                    <i class="fas fa-lock" style="font-size:4rem; color:#f1c40f; margin-bottom:20px;"></i>
+                <div id="sandbox-terminal-card" class="vt-trainee-state vt-trainee-state--complete">
+                    <i class="fas fa-lock"></i>
                     <h3>Assessment Submitted</h3>
-                    <p style="font-size:1.1rem; margin-bottom:30px;">Your sandbox test has been securely submitted.</p>
+                    <p>Your sandbox test has been securely submitted.</p>
                 </div>`;
             return;
         }
@@ -278,11 +300,11 @@ const App = {
                 ? myData.completionGate.reason
                 : 'Verifying server-side submission and record state.';
             container.innerHTML = `
-                <div style="text-align:center; padding:50px;">
-                    <i class="fas fa-cloud-upload-alt" style="font-size:4rem; color:#3498db; margin-bottom:20px;"></i>
+                <div id="sandbox-submitting-card" class="vt-trainee-state vt-trainee-state--syncing">
+                    <i class="fas fa-cloud-upload-alt"></i>
                     <h3>Submission Sync In Progress</h3>
-                    <p style="font-size:1rem; margin-bottom:20px; color:var(--text-muted);">Please stay on this screen while final sync checks complete.</p>
-                    <div style="display:inline-flex; align-items:center; gap:10px; padding:10px 14px; border-radius:8px; border:1px solid #3498db; background:rgba(52,152,219,0.1); color:#3498db; font-weight:600;">
+                    <p>Please stay on this screen while final sync checks complete.</p>
+                    <div class="vt-trainee-pill vt-trainee-pill--sync">
                         <i class="fas fa-circle-notch fa-spin"></i> ${gateReason}
                     </div>
                 </div>`;
@@ -292,9 +314,10 @@ const App = {
         if (myData && myData.status === 'started') {
             // Kiosk In-Progress View
             container.innerHTML = `
-                <div class="card" style="border-left:5px solid #2ecc71; text-align:center;">
-                    <h2><i class="fas fa-hammer" style="color:var(--primary);"></i> Sandbox Test Active</h2>
-                    <p style="color:var(--text-muted); margin-bottom:30px;">You are locked in the Sandbox Arena. Security monitors are active.</p>
+                <div id="sandbox-active-card" class="vt-trainee-active-card">
+                    <div class="vt-trainee-active-icon"><i class="fas fa-hammer"></i></div>
+                    <h2>Sandbox Test Active</h2>
+                    <p>You are locked in the Sandbox Arena. Security monitors are active.</p>
                     <button class="btn-danger btn-lg" onclick="App.exitArena()">Submit & Exit Sandbox</button>
                 </div>`;
             this.startActiveTestMonitoring();
@@ -306,18 +329,22 @@ const App = {
         const test = tests.find(t => t.id == session.testId);
 
         container.innerHTML = `
-            <div class="card" style="text-align:center; max-width:600px; margin:0 auto;">
-                <i class="fas fa-shield-alt" style="font-size:4rem; color:var(--primary); margin-bottom:20px;"></i>
-                <h2 style="color:var(--primary);">Sandbox Assessment Ready</h2>
-                <h3 style="margin-bottom:20px;">${test ? test.title : 'Assessment'}</h3>
-                
-                <div style="position:relative;">
-                    <div id="sandboxSecurityLog" style="background:var(--bg-input); padding:15px; border-radius:6px; border:1px solid var(--border-color); text-align:left; min-height:80px; margin-bottom:20px;">
-                        <div style="color:var(--primary);"><i class="fas fa-circle-notch fa-spin"></i> Scanning system...</div>
+            <div id="sandbox-preflight-card" class="vt-trainee-preflight">
+                <div class="vt-trainee-kicker"><i class="fas fa-shield-alt"></i> Secure Vetting Entry</div>
+                <h2>Sandbox Assessment Ready</h2>
+                <h3>${this.escapeHtml(test ? test.title : 'Assessment')}</h3>
+                <div class="vt-protocol-list">
+                    <span><i class="fas fa-display"></i> Single screen</span>
+                    <span><i class="fas fa-lock"></i> Kiosk lock</span>
+                    <span><i class="fas fa-eye"></i> App scan</span>
+                </div>
+                <div class="vt-preflight-log-wrap">
+                    <div id="sandboxSecurityLog" class="vt-security-log">
+                        <div class="vt-scan-row"><i class="fas fa-circle-notch fa-spin"></i> Scanning system...</div>
                     </div>
                 </div>
 
-                <button id="btnEnterSandbox" class="btn-primary btn-lg" disabled style="opacity:0.5; cursor:not-allowed;" onclick="App.enterArena()">ENTER SANDBOX KIOSK</button>
+                <button id="btnEnterSandbox" class="btn-primary btn-lg vt-enter-btn" disabled onclick="App.enterArena()">ENTER SANDBOX KIOSK</button>
             </div>
         `;
         
@@ -378,7 +405,7 @@ const App = {
                 dynHtml += `<div style="display:flex; gap:10px; margin-top:20px; margin-bottom:15px; overflow-x:auto; padding-bottom:5px;">`;
                 activeSessions.forEach((s, idx) => {
                     const isActive = this.state.activeTabId === s.sessionId ? 'background:var(--primary); color:white; box-shadow:0 4px 10px rgba(243, 112, 33, 0.3); border-color:var(--primary);' : '';
-                    const groupName = s.targetGroup === 'all' ? 'All Groups' : s.targetGroup;
+                    const groupName = this.formatGroupName(s.targetGroup || 'all');
                     const activeCount = Object.values(s.trainees || {}).filter(t => t.status === 'started').length;
 
                     dynHtml += `
@@ -415,32 +442,189 @@ const App = {
     },
 
     // --- HTML GENERATORS ---
+    escapeHtml: function(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    normalizeTestTitle: function(value) {
+        return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    },
+
+    getVettingTestStage: function(test) {
+        const title = this.normalizeTestTitle(test && (test.title || test.name));
+        if (title.includes('final') || title.includes('test 2') || title.includes('second vetting')) return 'final';
+        if (title.includes('1st') || title.includes('first') || title.includes('test 1')) return 'first';
+        return 'other';
+    },
+
+    getVettingStageLabel: function(stage) {
+        if (stage === 'first') return '1st Vetting';
+        if (stage === 'final') return 'Final Vetting';
+        return 'Other Vetting';
+    },
+
+    formatGroupName: function(groupId) {
+        const raw = String(groupId || '').trim();
+        if (!raw || raw === 'all') return 'All Groups';
+        const match = raw.match(/^(\d{4})-(\d{2})(?:-([A-Za-z0-9]+))?$/);
+        if (!match) return raw;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const suffix = match[3] ? ` Group ${match[3]}` : '';
+        const date = new Date(year, month - 1, 1);
+        const monthName = date.toLocaleString('en-ZA', { month: 'long' });
+        return `${monthName} ${year}${suffix}`;
+    },
+
+    getGroupMembers: function(groupId) {
+        const rosters = DataService.getRosters();
+        if (!groupId || groupId === 'all') {
+            return DataService.getUsers()
+                .filter(user => String((user && user.role) || '').toLowerCase() === 'trainee')
+                .map(user => String(user.user || '').trim())
+                .filter(Boolean);
+        }
+        const members = Array.isArray(rosters[groupId]) ? rosters[groupId] : [];
+        return members.map(member => String(member || '').trim()).filter(Boolean);
+    },
+
+    renderGroupOptionLabel: function(groupId) {
+        const members = this.getGroupMembers(groupId);
+        const preview = members.slice(0, 3).join(', ');
+        const extra = members.length > 3 ? `, +${members.length - 3} more` : '';
+        const memberText = members.length ? ` - ${members.length}: ${preview}${extra}` : ' - no trainees';
+        return `${this.formatGroupName(groupId)}${memberText}`;
+    },
+
+    getCompletedMembersForTest: function(groupId, test) {
+        const members = this.getGroupMembers(groupId);
+        const memberTokens = new Set(members.map(member => DataService.normalizeIdentity(member)).filter(Boolean));
+        const completed = new Set();
+        const testId = String(test && test.id || '');
+        const testTitle = this.normalizeTestTitle(test && (test.title || test.name));
+        const titleMatches = (value) => {
+            const normalized = this.normalizeTestTitle(value);
+            return !!normalized && normalized === testTitle;
+        };
+
+        this.readArray('records').forEach(record => {
+            if (!record) return;
+            const trainee = DataService.normalizeIdentity(record.trainee);
+            if (!memberTokens.has(trainee)) return;
+            if (groupId && groupId !== 'all' && record.groupID && String(record.groupID) !== String(groupId)) return;
+            if (titleMatches(record.assessment) || String(record.testId || '') === testId) {
+                completed.add(trainee);
+            }
+        });
+
+        this.readArray('submissions').forEach(submission => {
+            if (!submission || String(submission.status || '').toLowerCase() !== 'completed' || submission.archived) return;
+            const trainee = DataService.normalizeIdentity(submission.trainee);
+            if (!memberTokens.has(trainee)) return;
+            if (String(submission.testId || '') === testId || titleMatches(submission.testTitle)) {
+                completed.add(trainee);
+            }
+        });
+
+        return completed;
+    },
+
+    renderVettingTrackerHtml: function(groupId, selectedTestId = '') {
+        const tests = DataService.getTests().filter(t => t && t.type === 'vetting');
+        const members = this.getGroupMembers(groupId);
+        const grouped = { first: [], final: [], other: [] };
+        tests.forEach(test => grouped[this.getVettingTestStage(test)].push(test));
+
+        const renderBucket = (stage) => {
+            const rows = grouped[stage].map(test => {
+                const done = this.getCompletedMembersForTest(groupId, test);
+                const total = members.length;
+                const isSelected = String(test.id || '') === String(selectedTestId || '');
+                const statusClass = total > 0 && done.size >= total ? 'complete' : (done.size > 0 ? 'partial' : 'empty');
+                const missing = members.filter(member => !done.has(DataService.normalizeIdentity(member)));
+                const detail = total === 0
+                    ? 'No trainees in group'
+                    : `${done.size}/${total} completed${missing.length ? ` - missing: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? `, +${missing.length - 4}` : ''}` : ''}`;
+                return `
+                    <div class="vt-tracker-row ${statusClass} ${isSelected ? 'selected' : ''}">
+                        <div>
+                            <strong>${this.escapeHtml(test.title || test.name || 'Untitled Vetting')}</strong>
+                            <div>${this.escapeHtml(detail)}</div>
+                        </div>
+                        <span>${total ? Math.round((done.size / total) * 100) : 0}%</span>
+                    </div>`;
+            }).join('');
+
+            return `
+                <div class="vt-tracker-bucket">
+                    <h4>${this.getVettingStageLabel(stage)}</h4>
+                    ${rows || '<div class="vt-tracker-empty">No tests in this section.</div>'}
+                </div>`;
+        };
+
+        const groupTitle = this.formatGroupName(groupId);
+        const people = members.length
+            ? `${members.length} trainees: ${members.slice(0, 6).join(', ')}${members.length > 6 ? `, +${members.length - 6} more` : ''}`
+            : 'No trainees found for this group.';
+
+        return `
+            <div class="vt-selection-intel">
+                <div class="vt-selection-head">
+                    <div>
+                        <strong>${this.escapeHtml(groupTitle)}</strong>
+                        <span>${this.escapeHtml(people)}</span>
+                    </div>
+                    <div class="vt-selection-note">Use this to avoid repeating the wrong vetting stage.</div>
+                </div>
+                <div class="vt-tracker-grid">
+                    ${renderBucket('first')}
+                    ${renderBucket('final')}
+                    ${renderBucket('other')}
+                </div>
+            </div>`;
+    },
+
+    refreshSelectionIntel: function() {
+        const groupSel = document.getElementById('rwGroupSelect');
+        const testSel = document.getElementById('rwTestSelect');
+        const host = document.getElementById('rwSelectionIntel');
+        if (!groupSel || !testSel || !host) return;
+        host.innerHTML = this.renderVettingTrackerHtml(groupSel.value || 'all', testSel.value || '');
+    },
+
     renderIdleShell: function(isCompact) {
         const isViewer = AppContext.user && AppContext.user.role === 'special_viewer';
         const runtimeLabel = AppContext.mode === 'production' ? 'Vetting Arena 2.0' : 'Sandbox';
         
-        let displayStyle = isCompact ? 'display:flex; align-items:center; gap:15px; padding:15px;' : 'text-align:center; padding:50px;';
+        let displayStyle = isCompact ? 'padding:15px;' : 'text-align:center; padding:50px;';
         let iconStyle = isCompact ? 'font-size:2rem; margin:0;' : 'font-size:3rem; margin-bottom:20px;';
         let formLayout = isCompact ? 'display:flex; gap:10px; align-items:flex-end; flex:1;' : 'max-width:500px; margin:0 auto; display:flex; flex-direction:column; gap:10px;';
 
         return `
-            <div class="card" style="${displayStyle} background:rgba(0,0,0,0.1); border:1px dashed var(--primary);">
+            <div class="vt-launch-card ${isCompact ? 'is-compact' : ''}" style="${displayStyle}">
                 ${isCompact ? '' : `<i class="fas fa-hammer" style="color:var(--primary); ${iconStyle}"></i>`}
                 <div style="${isCompact ? 'min-width:200px;' : ''}">
-                    <h3 style="margin:0; ${isCompact?'font-size:1.1rem;':''}"><i class="fas fa-rocket" style="color:var(--primary);"></i> Start ${runtimeLabel} Session</h3>
+                    <div class="vt-admin-kicker"><i class="fas fa-shield-halved"></i> Controlled Exam Runtime</div>
+                    <h3 style="margin:0; ${isCompact?'font-size:1.1rem;':''}">Start ${runtimeLabel} Session</h3>
                     ${isCompact ? '' : '<p style="color:var(--text-muted); margin-bottom:20px;">Select a test and group to initialize the vetting runtime with strict security rules.</p>'}
                 </div>
                 <div style="${formLayout}">
                     <div style="${isCompact ? 'flex:1;' : ''}">
                         <label style="text-align:left; font-weight:bold; font-size:0.85rem;">Select Test</label>
-                        <select id="rwTestSelect" class="va-select"><option value="">Loading...</option></select>
+                        <select id="rwTestSelect" class="va-select" onchange="App.refreshSelectionIntel()"><option value="">Loading...</option></select>
                     </div>
                     <div style="${isCompact ? 'flex:1;' : ''}">
                         <label style="text-align:left; font-weight:bold; font-size:0.85rem;">Select Group</label>
-                        <select id="rwGroupSelect" class="va-select" ${isViewer ? 'disabled' : ''}><option value="">Loading...</option></select>
+                        <select id="rwGroupSelect" class="va-select" onchange="App.refreshSelectionIntel()" ${isViewer ? 'disabled' : ''}><option value="">Loading...</option></select>
                     </div>
                     <button class="btn-primary" style="height:42px; ${isCompact?'padding:0 25px;':'margin-top:10px;'}" onclick="App.startSession()" ${isViewer ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>START SESSION</button>
                 </div>
+                <div id="rwSelectionIntel" class="vt-selection-intel-host"></div>
             </div>
         `;
     },
@@ -449,35 +633,36 @@ const App = {
         const tests = DataService.getTests();
         const activeTest = tests.find(t => t.id == session.testId);
         const title = activeTest ? activeTest.title : "Unknown Test";
-        const targetGroup = session.targetGroup === 'all' || !session.targetGroup ? 'All Groups' : session.targetGroup;
+        const targetGroup = this.formatGroupName(session.targetGroup || 'all');
         const sessionTitle = indexLabel ? `Session ${indexLabel}: ${title}` : title;
         const isViewer = AppContext.user && AppContext.user.role === 'special_viewer';
         
         return `
-            <div class="card" style="border-left:5px solid #2ecc71; background: linear-gradient(to right, rgba(46, 204, 113, 0.05), transparent); padding:20px; margin-bottom:15px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <div style="display:flex; align-items:center; gap:15px;">
-                        <div style="width:50px; height:50px; background:#2ecc71; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:1.5rem; box-shadow:0 4px 10px rgba(46, 204, 113, 0.3);">
+            <div class="vt-session-card">
+                <div class="vt-session-header">
+                    <div class="vt-session-title-wrap">
+                        <div class="vt-session-icon">
                             <i class="fas fa-shield-alt"></i>
                         </div>
                         <div>
-                            <h3 style="margin:0; color:#2ecc71; display:flex; align-items:center;">${sessionTitle} <span class="pulse-dot" title="Live Session Active"></span></h3>
-                            <p style="margin:5px 0 0 0; color:var(--text-muted);">Target: <strong>${targetGroup}</strong></p>
+                            <div class="vt-admin-kicker">Live Vetting Session</div>
+                            <h3>${this.escapeHtml(sessionTitle)} <span class="pulse-dot" title="Live Session Active"></span></h3>
+                            <p>Target: <strong>${this.escapeHtml(targetGroup)}</strong></p>
                         </div>
                     </div>
                     ${isViewer ? '' : `<button class="btn-danger" onclick="App.endSession('${session.sessionId}')"><i class="fas fa-stop-circle"></i> END SESSION</button>`}
                 </div>
                 
-                <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px;">
-                    <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold;" id="stat_expected_${session.sessionId}">-</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Expected</div></div>
-                    <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#2ecc71;" id="stat_active_${session.sessionId}">-</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">In Progress</div></div>
-                    <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#ff5252;" id="stat_blocked_${session.sessionId}">-</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Blocked</div></div>
-                    <div style="text-align:center;"><div style="font-size:1.5rem; font-weight:bold; color:#3498db;" id="stat_completed_${session.sessionId}">-</div><div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Completed</div></div>
+                <div class="vt-session-stats">
+                    <div><div id="stat_expected_${session.sessionId}">-</div><span>Expected</span></div>
+                    <div><div class="stat-active" id="stat_active_${session.sessionId}">-</div><span>In Progress</span></div>
+                    <div><div class="stat-blocked" id="stat_blocked_${session.sessionId}">-</div><span>Blocked</span></div>
+                    <div><div class="stat-complete" id="stat_completed_${session.sessionId}">-</div><span>Completed</span></div>
                 </div>
             </div>
             
-            <div class="card" style="padding:0; overflow:hidden;">
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 15px; border-bottom:1px solid var(--border-color); background:var(--bg-input);">
+            <div class="vt-monitor-card">
+                <div class="vt-monitor-toolbar">
                     <strong><i class="fas fa-desktop"></i> Live Monitor</strong>
                     <button class="btn-secondary btn-sm" onclick="App.forceRefreshSession('${session.sessionId}')"><i class="fas fa-sync"></i> Force Refresh</button>
                 </div>
@@ -649,11 +834,28 @@ const App = {
         if (!testSel || !groupSel) return;
 
         const vettingTests = tests.filter(t => t.type === 'vetting');
-        testSel.innerHTML = '<option value="">-- Select Vetting Test --</option>' + 
-            (vettingTests.length > 0 ? vettingTests.map(t => `<option value="${t.id}">${t.title}</option>`).join('') : '<option disabled>No Tests Found</option>');
+        const buckets = { first: [], final: [], other: [] };
+        vettingTests.forEach(test => buckets[this.getVettingTestStage(test)].push(test));
+        const renderTestOptions = (stage) => {
+            const options = buckets[stage]
+                .sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
+                .map(t => `<option value="${this.escapeHtml(t.id)}">${this.escapeHtml(t.title || t.name || 'Untitled Vetting')}</option>`)
+                .join('');
+            return options ? `<optgroup label="${this.getVettingStageLabel(stage)}">${options}</optgroup>` : '';
+        };
 
-        groupSel.innerHTML = '<option value="all">All Groups</option>' + 
-            Object.keys(rosters).sort().reverse().map(gid => `<option value="${gid}">${gid}</option>`).join('');
+        testSel.innerHTML = '<option value="">-- Select Vetting Test --</option>' +
+            (vettingTests.length > 0
+                ? `${renderTestOptions('first')}${renderTestOptions('final')}${renderTestOptions('other')}`
+                : '<option disabled>No Tests Found</option>');
+
+        groupSel.innerHTML = `<option value="all">${this.escapeHtml(this.renderGroupOptionLabel('all'))}</option>` +
+            Object.keys(rosters)
+                .sort()
+                .reverse()
+                .map(gid => `<option value="${this.escapeHtml(gid)}">${this.escapeHtml(this.renderGroupOptionLabel(gid))}</option>`)
+                .join('');
+        this.refreshSelectionIntel();
     },
 
     // --- ACTIONS ---
@@ -691,8 +893,12 @@ const App = {
         this.state.activeTabId = session.sessionId;
         if (activeSessions.length > 1) this.state.viewMode = 'split';
 
-        await DataService.saveSessionDirectly(session);
-        await DataService.nudgeTraineesForSession(session);
+        const savedLive = await DataService.saveSessionDirectly(session);
+        if (savedLive === false) {
+            alert("Vetting session was saved locally but could not be confirmed on the server. Trainees may not see it until the connection recovers.");
+        } else {
+            await DataService.nudgeTraineesForSession(session);
+        }
         // No render needed, realtime will trigger it
     },
 
@@ -704,7 +910,18 @@ const App = {
         
         if (session) {
             session.active = false;
-            await DataService.deleteSession(sessionId); // Now async
+            if (typeof DataService.markSessionEnded === 'function') DataService.markSessionEnded(sessionId);
+            try {
+                await DataService.saveSessionDirectly(session);
+                await DataService.nudgeTraineesForSessionEnd(session);
+                await DataService.flushPendingOps();
+            } catch (e) {
+                console.warn('End-session nudge failed:', e);
+            }
+            const deletedLive = await DataService.deleteSession(sessionId); // Now async
+            if (deletedLive === false) {
+                alert("Session ended locally, but the server delete is queued. Trainees may remain locked until sync recovers or you force refresh.");
+            }
         }
         
         activeSessions = activeSessions.filter(s => s.sessionId !== sessionId);
@@ -873,26 +1090,33 @@ const App = {
             // Call the core Electron IPC (Inherits WhatsApp/Edge logic automatically)
             if (!isRelaxed) {
                 try {
-                    let ipcInvoke = null;
-                    if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.invoke === 'function') {
-                        ipcInvoke = window.electronAPI.ipcRenderer.invoke;
+                    const forbidden = this.readArray('forbiddenApps');
+                    const scanList = forbidden.length > 0 ? forbidden : null;
+                    let screenCount = 0;
+                    let apps = [];
+
+                    if (window.electronAPI && typeof window.electronAPI.getScreenCount === 'function' && typeof window.electronAPI.getProcessList === 'function') {
+                        [screenCount, apps] = await this.withTimeout(Promise.all([
+                            window.electronAPI.getScreenCount(),
+                            window.electronAPI.getProcessList(scanList)
+                        ]), 8000, 'Security scanner');
+                    } else if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.invoke === 'function') {
+                        [screenCount, apps] = await this.withTimeout(Promise.all([
+                            window.electronAPI.ipcRenderer.invoke('get-screen-count'),
+                            window.electronAPI.ipcRenderer.invoke('get-process-list', scanList)
+                        ]), 8000, 'Security scanner');
                     } else if (typeof require !== 'undefined') {
                         const { ipcRenderer } = require('electron');
-                        ipcInvoke = ipcRenderer.invoke.bind(ipcRenderer);
-                    }
-
-                    if (!ipcInvoke) {
-                        scannerWarning = 'Security scanner unavailable. Click Enter to run an immediate check.';
+                        [screenCount, apps] = await this.withTimeout(Promise.all([
+                            ipcRenderer.invoke('get-screen-count'),
+                            ipcRenderer.invoke('get-process-list', scanList)
+                        ]), 8000, 'Security scanner');
                     } else {
-                    let screenCount = 0;
-                    screenCount = await ipcInvoke('get-screen-count');
-                    if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
-
-                    const forbidden = this.readArray('forbiddenApps');
-                    let apps = [];
-                    apps = await ipcInvoke('get-process-list', forbidden.length > 0 ? forbidden : null);
-                    if (apps && apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
+                        scannerWarning = 'Security scanner unavailable. Click Enter to run an immediate check.';
                     }
+
+                    if (screenCount > 1) errors.push(`Multiple Monitors Detected (${screenCount}). Unplug external screens.`);
+                    if (apps && apps.length > 0) errors.push(`Forbidden Apps Running: ${apps.join(', ')}`);
                 } catch (e) {
                     scannerWarning = 'Security scanner failed temporarily. Rechecking in the background.';
                 }
