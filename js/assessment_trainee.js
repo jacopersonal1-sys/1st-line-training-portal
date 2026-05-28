@@ -49,15 +49,37 @@ function getLatestRetrainMoveDateForUser(userName) {
 function resolveSubmissionLinkedRecord(submission, allRecords) {
     if (!submission) return null;
     const records = Array.isArray(allRecords) ? allRecords : assessmentReadArray('records');
-    let record = records.find(r => r && r.submissionId === submission.id);
+    let record = records.find(r =>
+        r &&
+        (
+            String(r.submissionId || '') === String(submission.id || '') ||
+            String(r.id || '') === `record_${submission.id || ''}`
+        )
+    );
     if (record) return record;
     const subTestTitle = String(submission.testTitle || '').trim().toLowerCase();
     const subTrainee = String(submission.trainee || '').trim().toLowerCase();
-    return records.find(r =>
+    const candidates = records.filter(r =>
         r &&
+        !r.submissionId &&
         String(r.trainee || '').trim().toLowerCase() === subTrainee &&
         String(r.assessment || '').trim().toLowerCase() === subTestTitle
-    ) || null;
+    );
+    if (candidates.length === 1) return candidates[0];
+    if (candidates.length === 0) return null;
+
+    const subDate = String(submission.date || '').slice(0, 10);
+    const dated = subDate ? candidates.filter(r => String(r.date || '').slice(0, 10) === subDate) : [];
+    if (dated.length === 1) return dated[0];
+
+    const subScore = Number(submission.score);
+    if (Number.isFinite(subScore)) {
+        const scorePool = dated.length > 0 ? dated : candidates;
+        const scored = scorePool.filter(r => Number(r.score) === subScore);
+        if (scored.length === 1) return scored[0];
+    }
+
+    return null;
 }
 
 function isLegacySubmissionForCurrentAttempt(submission, currentGroupId, latestMoveTs, recordsCache) {

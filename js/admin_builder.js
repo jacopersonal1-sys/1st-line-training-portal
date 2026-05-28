@@ -124,6 +124,7 @@ window.renameAssessmentEverywhere = async function(oldTitle, newTitle, testId = 
     const submissions = builderReadArray('submissions');
     const records = builderReadArray('records');
     const targetTestId = testId !== null && testId !== undefined ? String(testId) : null;
+    const allowRecordTitleFallback = !targetTestId;
     const affectedSubmissionIds = new Set();
 
     tests.forEach(test => {
@@ -154,10 +155,10 @@ window.renameAssessmentEverywhere = async function(oldTitle, newTitle, testId = 
         if (!record) return;
         const linkedSubmission = record.submissionId && affectedSubmissionIds.has(String(record.submissionId));
         const assessmentMatch = normalizeAssessmentTitle(record.assessment || record.testTitle || record.title) === oldKey;
-        if (!linkedSubmission && !assessmentMatch) return;
+        if (!linkedSubmission && !(allowRecordTitleFallback && assessmentMatch)) return;
         if (record.assessment !== undefined) record.assessment = cleanNew;
         if (record.testTitle !== undefined) record.testTitle = cleanNew;
-        if (record.title !== undefined && assessmentMatch) record.title = cleanNew;
+        if (record.title !== undefined && (linkedSubmission || assessmentMatch)) record.title = cleanNew;
         record.lastModified = new Date().toISOString();
         keys.add('records');
     });
@@ -845,7 +846,8 @@ async function saveTest() {
         }
     } else {
         // Check for duplicates by Title if creating new
-        const existingIdx = tests.findIndex(t => t.title === linked);
+        const linkedKey = normalizeAssessmentTitle(linked);
+        const existingIdx = tests.findIndex(t => normalizeAssessmentTitle(t.title || t.name) === linkedKey);
         if(existingIdx > -1) {
              if(!confirm("A test with this name already exists. Overwrite?")) return;
              tests[existingIdx].type = type;

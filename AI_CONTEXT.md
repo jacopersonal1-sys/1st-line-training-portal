@@ -164,6 +164,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `saveTest()`: Saves the test definition to `tests` array/table.
     - `loadManageTests()`: Renders the "Assessment Manager" list.
     - `uploadImage(idx, input)`: Converts images/PDFs to Base64 Data URIs.
+    - `renameAssessmentEverywhere(oldTitle, newTitle, testId)`: ID-first when a `testId` is supplied. Linked submissions and their linked records are renamed, but unrelated same-title records are left untouched to avoid history drift when duplicate titles exist.
 
 #### `js/assessment_trainee.js` (Test Taker)
 - **Responsibility:** Trainee interface for taking tests.
@@ -171,6 +172,7 @@ Maps local `localStorage` keys to Supabase tables.
     - `openTestTaker(id)`: Initializes a test session. Handles shuffling.
     - `renderTestPaper()`: Renders questions.
     - `submitTest()`: Grades auto-scored questions, saves to `submissions`, and syncs.
+    - `resolveSubmissionLinkedRecord(submission, records)`: Links a submission to its final record by `submissionId` or `record_${submission.id}` first. Legacy trainee+assessment-title fallback is intentionally conservative and returns no match when multiple unlinked same-title records are present, preventing old history rows from being treated as the current attempt.
 
 #### `js/assessment_admin.js` (Grading)
 - **Responsibility:** Marking queue and manual grading.

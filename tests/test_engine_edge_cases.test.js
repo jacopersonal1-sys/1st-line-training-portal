@@ -373,6 +373,57 @@ describe('Test engine edge cases', () => {
         expect(global.hardDelete).not.toHaveBeenCalledWith('records', 'record_other');
     });
 
+    test('renaming one assessment by id does not rename unrelated same-title history records', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/admin_builder.js'), 'utf8');
+        eval(src);
+
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        global.refreshAllDropdowns = jest.fn();
+        window.refreshAllDropdowns = global.refreshAllDropdowns;
+
+        localStorage.setItem('tests', JSON.stringify([
+            { id: 'test_1', title: 'Assessment A' },
+            { id: 'test_2', title: 'Assessment A' }
+        ]));
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_1', testId: 'test_1', testTitle: 'Assessment A', trainee: 'Alice' }
+        ]));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'record_sub_1', submissionId: 'sub_1', trainee: 'Alice', assessment: 'Assessment A' },
+            { id: 'record_other', submissionId: 'sub_other', trainee: 'Bob', assessment: 'Assessment A' }
+        ]));
+
+        const result = await window.renameAssessmentEverywhere('Assessment A', 'Assessment A Renamed', 'test_1');
+
+        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+        const records = JSON.parse(localStorage.getItem('records') || '[]');
+
+        expect(result.keys).toEqual(expect.arrayContaining(['tests', 'submissions', 'records']));
+        expect(submissions[0].testTitle).toBe('Assessment A Renamed');
+        expect(records.find(r => r.id === 'record_sub_1').assessment).toBe('Assessment A Renamed');
+        expect(records.find(r => r.id === 'record_other').assessment).toBe('Assessment A');
+    });
+
+    test('trainee attempt matching ignores ambiguous unlinked same-title records', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+        eval(src);
+
+        const submission = {
+            id: 'sub_current',
+            trainee: 'Alice',
+            testTitle: 'Assessment A',
+            score: 80,
+            date: '2026-05-20'
+        };
+        const records = [
+            { id: 'record_old', trainee: 'Alice', assessment: 'Assessment A', score: 70, date: '2026-05-19', groupID: 'old_group' },
+            { id: 'record_other', trainee: 'Alice', assessment: 'Assessment A', score: 90, date: '2026-05-21', groupID: 'new_group' }
+        ];
+
+        expect(resolveSubmissionLinkedRecord(submission, records)).toBeNull();
+    });
+
     test('special viewer cannot save test builder changes locally or remotely', async () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../js/admin_builder.js'), 'utf8');
         eval(src);
