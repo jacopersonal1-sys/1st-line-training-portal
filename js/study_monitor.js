@@ -1004,6 +1004,12 @@ const StudyMonitor = {
         return clean;
     },
 
+    pruneDeletedViolationReports: function() {
+        const before = this.getRawViolationReports();
+        const after = this.writeViolationReports(before);
+        return before.length !== after.length;
+    },
+
     persistViolationReportDeletion: async function(remainingReports, deletedIds) {
         const deletedSet = new Set((deletedIds || []).map(id => String(id || '')).filter(Boolean));
         const tombstones = this.addViolationReportTombstones(Array.from(deletedSet));
@@ -1033,6 +1039,17 @@ const StudyMonitor = {
             if (id && !deletedSet.has(id) && !byId.has(id)) byId.set(id, report);
         });
 
+        const { data: tombstoneData, error: tombstoneErr } = await client
+            .from('app_documents')
+            .upsert({
+                key: tombstoneKey,
+                content: tombstones,
+                updated_at: new Date().toISOString()
+            })
+            .select();
+        if (tombstoneErr) throw tombstoneErr;
+        if (tombstoneData && tombstoneData[0]) localStorage.setItem('sync_ts_system_tombstones', tombstoneData[0].updated_at);
+
         const finalReports = this.writeViolationReports(Array.from(byId.values()));
         const { data: savedData, error: saveErr } = await client
             .from('app_documents')
@@ -1044,17 +1061,6 @@ const StudyMonitor = {
             .select();
         if (saveErr) throw saveErr;
         if (savedData && savedData[0]) localStorage.setItem('sync_ts_violation_reports', savedData[0].updated_at);
-
-        const { data: tombstoneData, error: tombstoneErr } = await client
-            .from('app_documents')
-            .upsert({
-                key: tombstoneKey,
-                content: tombstones,
-                updated_at: new Date().toISOString()
-            })
-            .select();
-        if (tombstoneErr) throw tombstoneErr;
-        if (tombstoneData && tombstoneData[0]) localStorage.setItem('sync_ts_system_tombstones', tombstoneData[0].updated_at);
         return finalReports;
     },
 
@@ -3947,6 +3953,7 @@ StudyMonitor.viewAgentViolations = function(agent) {
 
 StudyMonitor.openViolationReviewModal = function(agent = '') {
     if (CURRENT_USER && CURRENT_USER.role === 'trainee') return;
+    this.pruneDeletedViolationReports();
     const reports = this.getViolationReports();
     const users = Array.from(new Set(reports.map(r => r.user).filter(Boolean))).sort((a, b) => a.localeCompare(b));
     const safeAgent = String(agent || '');

@@ -590,6 +590,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Confidential: Trainee-facing release notes remain suppressed for this release.
 - Internal Evidence Rule: Normal idle/away violations and Teams-over-8-minute violations keep screenshot evidence for admin review.
 - Internal Evidence Rule: Screenshot capture is skipped only for lock-idle/screen-locked violations.
+- Internal Deletion Guard: Violation review deletes now make `system_tombstones` authoritative during pull, realtime, and review-modal render paths so deleted violation reports cannot be rehydrated from stale `violation_reports` blobs.
 - Release: Version bump to `2.7.6` for stable main-channel rollout.
 
 ## v2.7.4 - 2026-05-27

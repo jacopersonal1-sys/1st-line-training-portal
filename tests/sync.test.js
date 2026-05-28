@@ -223,6 +223,76 @@ describe('Data Sync Module', () => {
         expect(reports[0].id).toBe('vio_active');
     });
 
+    test('loadFromServer fetches tombstones with violation reports before merging', async () => {
+        const mockMeta = [
+            { key: 'violation_reports', updated_at: '2026-05-28T08:00:00.000Z' },
+            { key: 'system_tombstones', updated_at: '2026-05-28T07:00:00.000Z' }
+        ];
+        const mockContent = [
+            {
+                key: 'violation_reports',
+                updated_at: '2026-05-28T08:00:00.000Z',
+                content: [
+                    { id: 'vio_deleted', user: 'Alice', evidence: {} },
+                    { id: 'vio_active', user: 'Alice', evidence: {} }
+                ]
+            },
+            {
+                key: 'system_tombstones',
+                updated_at: '2026-05-28T07:00:00.000Z',
+                content: ['violation_report:vio_deleted']
+            }
+        ];
+
+        const buildRowQuery = (rows = []) => {
+            const chain = {
+                gt: jest.fn(() => chain),
+                order: jest.fn(() => chain),
+                eq: jest.fn(() => chain),
+                ilike: jest.fn(() => chain),
+                limit: jest.fn().mockResolvedValue({ data: rows, error: null })
+            };
+            return chain;
+        };
+
+        const appDocumentsSelect = jest.fn((columns) => {
+            if (columns === 'key, updated_at') {
+                return {
+                    not: jest.fn().mockResolvedValue({ data: mockMeta, error: null }),
+                    like: jest.fn().mockResolvedValue({ data: mockMeta, error: null })
+                };
+            }
+
+            if (columns === 'key, content, updated_at') {
+                return {
+                    in: jest.fn().mockResolvedValue({ data: mockContent, error: null })
+                };
+            }
+
+            throw new Error(`Unexpected app_documents select: ${columns}`);
+        });
+
+        global.window.supabaseClient.from = jest.fn((table) => {
+            if (table === 'app_documents') {
+                return { select: appDocumentsSelect };
+            }
+
+            return {
+                select: jest.fn(() => buildRowQuery())
+            };
+        });
+
+        localStorage.setItem('sync_ts_violation_reports', '2026-05-27T00:00:00.000Z');
+        localStorage.setItem('sync_ts_system_tombstones', '2026-05-28T07:00:00.000Z');
+
+        await DataModule.loadFromServer(true);
+
+        const reports = JSON.parse(localStorage.getItem('violation_reports') || '[]');
+        expect(reports).toHaveLength(1);
+        expect(reports[0].id).toBe('vio_active');
+        expect(JSON.parse(localStorage.getItem('system_tombstones') || '[]')).toEqual(['violation_report:vio_deleted']);
+    });
+
     test('trainee violation report cache hides evidence pointers', () => {
         global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
 

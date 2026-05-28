@@ -124,6 +124,17 @@ function sanitizeViolationReportsForTrainee(content) {
         .map(report => sanitizeViolationReportEvidence(report, { hideEvidencePointers: true }));
 }
 
+function pruneLocalViolationReportsByTombstones() {
+    const current = safeLocalParse('violation_reports', []);
+    if (!Array.isArray(current) || current.length === 0) return false;
+    const clean = sanitizeViolationReportsForSync(current);
+    if (clean.length === current.length) return false;
+    localStorage.setItem('violation_reports', JSON.stringify(clean));
+    emitDataChange('violation_reports', 'tombstone_prune');
+    if (typeof updateNotifications === 'function') updateNotifications();
+    return true;
+}
+
 // --- SERVER AUTHORITY CONFIGURATION ---
 // Tables that must always reflect the exact state of the server (No Merging, Full Overwrite).
 // This fixes "Ghost Data" and synchronization lag for critical shared resources.
@@ -586,6 +597,15 @@ async function loadFromServer(silent = false) {
             }
         });
 
+        const remoteViolationKey = IS_DEMO_MODE ? 'demo_violation_reports' : 'violation_reports';
+        const remoteTombstoneKey = IS_DEMO_MODE ? 'demo_system_tombstones' : 'system_tombstones';
+        if (keysToFetch.includes(remoteViolationKey) && meta.some(row => row.key === remoteTombstoneKey) && !keysToFetch.includes(remoteTombstoneKey)) {
+            keysToFetch.unshift(remoteTombstoneKey);
+        }
+        if (keysToFetch.includes(remoteTombstoneKey) && meta.some(row => row.key === remoteViolationKey) && !keysToFetch.includes(remoteViolationKey)) {
+            keysToFetch.push(remoteViolationKey);
+        }
+
         // Fetch Stale Blobs
         pullProgressTotal += keysToFetch.length;
         updateSyncDiagnostics({
@@ -606,6 +626,14 @@ async function loadFromServer(silent = false) {
                 .in('key', keysToFetch);
             
             if (fetchErr) throw fetchErr;
+
+            docs.sort((a, b) => {
+                const aKey = IS_DEMO_MODE ? a.key.replace('demo_', '') : a.key;
+                const bKey = IS_DEMO_MODE ? b.key.replace('demo_', '') : b.key;
+                if (aKey === 'system_tombstones' && bKey !== 'system_tombstones') return -1;
+                if (bKey === 'system_tombstones' && aKey !== 'system_tombstones') return 1;
+                return 0;
+            });
 
             for (const doc of docs) {
                 const localKey = IS_DEMO_MODE ? doc.key.replace('demo_', '') : doc.key;
@@ -659,10 +687,7 @@ async function loadFromServer(silent = false) {
 
             const fetchedLocalKeys = docs.map(doc => IS_DEMO_MODE ? doc.key.replace('demo_', '') : doc.key);
             if (fetchedLocalKeys.includes('violation_reports') || fetchedLocalKeys.includes('system_tombstones')) {
-                const reports = sanitizeViolationReportsForSync(safeLocalParse('violation_reports', []));
-                localStorage.setItem('violation_reports', JSON.stringify(reports));
-                emitDataChange('violation_reports', 'tombstone_filter');
-                if (typeof updateNotifications === 'function') updateNotifications();
+                pruneLocalViolationReportsByTombstones();
             }
             
             const configKey = IS_DEMO_MODE ? 'demo_system_config' : 'system_config';
@@ -2457,6 +2482,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                     }
                 }
 
+                if (key === 'violation_reports') {
+                    finalContent = sanitizeViolationReportsForSync(finalContent, {
+                        omitTraineeHidden: isTraineeRuntime()
+                    });
+                } else if (key === 'system_tombstones') {
+                    pruneLocalViolationReportsByTombstones();
+                }
+
                 const { data: savedData, error: saveErr } = await window.supabaseClient
                     .from('app_documents')
                     .upsert({ 
@@ -4155,10 +4188,19 @@ function processIncomingDataQueue() {
                     
                     if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(key)) {
                         const merged = performSmartMerge({[key]: content}, {[key]: localVal}, 'server_wins');
-                        localStorage.setItem(key, JSON.stringify(merged[key]));
+                        const mergedContent = key === 'violation_reports'
+                            ? sanitizeViolationReportsForSync(merged[key])
+                            : merged[key];
+                        localStorage.setItem(key, JSON.stringify(mergedContent));
                     } else {
-                        const serialized = (typeof content === 'undefined') ? JSON.stringify(null) : JSON.stringify(content);
+                        const docContent = key === 'violation_reports'
+                            ? sanitizeViolationReportsForSync(content)
+                            : content;
+                        const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
                         localStorage.setItem(key, serialized);
+                    }
+                    if (key === 'system_tombstones' || key === 'violation_reports') {
+                        pruneLocalViolationReportsByTombstones();
                     }
                     if (p.new.updated_at) localStorage.setItem('sync_ts_' + key, p.new.updated_at);
                     emitDataChange(key, 'realtime');
