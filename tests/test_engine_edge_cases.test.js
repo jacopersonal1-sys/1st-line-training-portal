@@ -91,6 +91,38 @@ describe('Test engine edge cases', () => {
         expect(container.innerHTML).not.toContain('Assessment Available');
     });
 
+    test('completed history shows feedback provided action for open feedback rows', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/admin_history.js'), 'utf8');
+        eval(src);
+
+        const container = { innerHTML: '' };
+        const filters = {
+            completedHistoryList: container,
+            historySearch: { value: '' },
+            historyGroupFilter: { value: '' },
+            historyTestFilter: { value: '' },
+            historyPhaseFilter: { value: '' },
+            historyFeedbackFilter: { value: '' }
+        };
+        global.document = {
+            getElementById: jest.fn((id) => filters[id] || null)
+        };
+        window.document = global.document;
+        global.markAssessmentFeedbackGiven = jest.fn();
+        window.markAssessmentFeedbackGiven = global.markAssessmentFeedbackGiven;
+
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_requested', trainee: 'Alice', testTitle: 'Assessment Requested', status: 'completed', archived: false, score: 80, date: '2026-05-20', feedbackStatus: 'requested', feedbackRequestLocked: true },
+            { id: 'sub_given', trainee: 'Bob', testTitle: 'Assessment Given', status: 'completed', archived: false, score: 85, date: '2026-05-21', feedbackStatus: 'given', feedbackRequestLocked: true }
+        ]));
+
+        loadCompletedHistory();
+
+        expect(container.innerHTML).toContain("markAssessmentFeedbackGiven('sub_requested')");
+        expect(container.innerHTML).toContain('Feedback Provided');
+        expect(container.innerHTML).toContain('Provided</button>');
+    });
+
     test('marking queue keeps actively marked linked pending submissions visible', () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
         eval(src);

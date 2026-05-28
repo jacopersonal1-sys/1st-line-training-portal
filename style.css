@@ -5586,6 +5586,15 @@ body.theme-one-ui .badge-count {
     width: 100%;
     min-width: 0;
 }
+.history-feedback-cell {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.history-feedback-cell .btn-sm {
+    white-space: nowrap;
+}
 .assessment-feedback-action[data-tooltip] {
     position: relative;
 }

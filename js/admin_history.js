@@ -25,6 +25,15 @@ function historyReadObject(key) {
 
 function historyEscapeHtml(value) {
     if (typeof escapeHtml === 'function') return escapeHtml(value);
+    if (!document || typeof document.createElement !== 'function') {
+        return String(value ?? '').replace(/[&<>'"]/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            "'": '&#39;',
+            '"': '&quot;'
+        }[char]));
+    }
     const div = document.createElement('div');
     div.textContent = String(value ?? '');
     return div.innerHTML;
@@ -53,6 +62,25 @@ function getHistoryFeedbackFilterState(submission) {
     if (submission && submission.feedbackRequestLocked) return 'given';
     return 'available';
 }
+
+function renderCompletedHistoryFeedbackCell(submission) {
+    const badge = (typeof renderAssessmentFeedbackBadge === 'function')
+        ? renderAssessmentFeedbackBadge(submission)
+        : historyEscapeHtml(getHistoryFeedbackFilterState(submission));
+    const state = getHistoryFeedbackFilterState(submission);
+    if (state === 'given') {
+        return `<div class="history-feedback-cell">${badge}<button class="btn-secondary btn-sm" disabled><i class="fas fa-check-circle"></i> Provided</button></div>`;
+    }
+    if (typeof markAssessmentFeedbackGiven !== 'function') {
+        return `<div class="history-feedback-cell">${badge}</div>`;
+    }
+    return `
+        <div class="history-feedback-cell">
+            ${badge}
+            <button class="btn-primary btn-sm" onclick="markAssessmentFeedbackGiven('${submission.id}')"><i class="fas fa-check"></i> Feedback Provided</button>
+        </div>`;
+}
+
 
 function showTestEngineSub(viewName, btn) {
     // Toggle Views
@@ -418,7 +446,7 @@ function loadCompletedHistory() {
                     ${attemptHtml}${auditHtml}
                 </td>
                 <td><span style="font-weight:bold; color:${scoreColor};">${s.score}%</span></td>
-                <td>${typeof renderAssessmentFeedbackBadge === 'function' ? renderAssessmentFeedbackBadge(s) : '-'}</td>
+                <td>${renderCompletedHistoryFeedbackCell(s)}</td>
                 <td>${editedBy}</td>
                 <td>
                     <button class="btn-primary btn-sm" onclick="openAdminMarking('${s.id}')" title="Raw Edit Score"><i class="fas fa-pen"></i> Edit</button>
