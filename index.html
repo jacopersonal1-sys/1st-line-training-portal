@@ -769,9 +769,18 @@
             <div id="engine-view-history" class="hidden">
                 <div class="card">
                     <h3>Completed Assessments</h3>
-                    <div class="grid-3" style="margin-bottom:15px;">
+                    <div class="grid-3 history-filter-grid" style="margin-bottom:15px;">
                         <div><label>Filter by Group</label><select id="historyGroupFilter" onchange="loadCompletedHistory()"><option value="">All</option></select></div>
                         <div><label>Filter by Test</label><select id="historyTestFilter" onchange="loadCompletedHistory()"><option value="">All</option></select></div>
+                        <div>
+                            <label>Filter by Feedback</label>
+                            <select id="historyFeedbackFilter" onchange="loadCompletedHistory()">
+                                <option value="">All Feedback</option>
+                                <option value="requested">Requested</option>
+                                <option value="given">Given / Closed</option>
+                                <option value="available">Available to Request</option>
+                            </select>
+                        </div>
                         <div><label>Search Trainee</label><input type="text" id="historySearch" placeholder="Name..." onkeyup="loadCompletedHistory()" style="margin-bottom:0;"></div>
                     </div>
                     <div class="table-responsive" style="max-height:600px; overflow-y:auto;">

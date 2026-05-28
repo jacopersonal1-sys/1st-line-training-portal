@@ -5578,6 +5578,14 @@ body.theme-one-ui .badge-count {
     min-width: 0;
     margin: 0;
 }
+.history-filter-grid {
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+.history-filter-grid select,
+.history-filter-grid input {
+    width: 100%;
+    min-width: 0;
+}
 .assessment-feedback-action[data-tooltip] {
     position: relative;
 }
@@ -5637,9 +5645,15 @@ body.theme-one-ui .assessment-feedback-action[data-tooltip]::after {
         max-width: none;
         flex-basis: 100%;
     }
+    .history-filter-grid {
+        grid-template-columns: 1fr 1fr;
+    }
 }
 @media (max-width: 560px) {
     .feedback-session-controls {
+        grid-template-columns: 1fr;
+    }
+    .history-filter-grid {
         grid-template-columns: 1fr;
     }
 }

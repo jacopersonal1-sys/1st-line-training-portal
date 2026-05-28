@@ -45,6 +45,15 @@ function getAttemptInfoForSubmission(submission, allSubmissions) {
     };
 }
 
+function getHistoryFeedbackFilterState(submission) {
+    const status = (typeof getAssessmentFeedbackStatus === 'function')
+        ? getAssessmentFeedbackStatus(submission)
+        : String(submission && submission.feedbackStatus || '').trim().toLowerCase();
+    if (status === 'requested') return 'requested';
+    if (submission && submission.feedbackRequestLocked) return 'given';
+    return 'available';
+}
+
 function showTestEngineSub(viewName, btn) {
     // Toggle Views
     document.getElementById('engine-view-overview').classList.add('hidden');
@@ -302,6 +311,7 @@ function loadCompletedHistory() {
     const groupFilter = document.getElementById('historyGroupFilter') ? document.getElementById('historyGroupFilter').value : '';
     const testFilter = document.getElementById('historyTestFilter') ? document.getElementById('historyTestFilter').value : '';
     const phaseFilter = document.getElementById('historyPhaseFilter') ? document.getElementById('historyPhaseFilter').value : '';
+    const feedbackFilter = document.getElementById('historyFeedbackFilter') ? document.getElementById('historyFeedbackFilter').value : '';
 
     const getSubmissionType = (submission) => {
         const snapshotType = String(submission?.testSnapshot?.type || '').toLowerCase();
@@ -344,6 +354,11 @@ function loadCompletedHistory() {
     // Apply Test Filter
     if (testFilter) {
         completed = completed.filter(s => s.testTitle === testFilter);
+    }
+
+    // Apply Feedback Filter
+    if (feedbackFilter) {
+        completed = completed.filter(s => getHistoryFeedbackFilterState(s) === feedbackFilter);
     }
 
     // Apply Search

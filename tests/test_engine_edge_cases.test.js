@@ -60,6 +60,37 @@ describe('Test engine edge cases', () => {
         expect(container.innerHTML).toContain('live_2');
     });
 
+    test('completed history filters by feedback state', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/admin_history.js'), 'utf8');
+        eval(src);
+
+        const container = { innerHTML: '' };
+        const filters = {
+            completedHistoryList: container,
+            historySearch: { value: '' },
+            historyGroupFilter: { value: '' },
+            historyTestFilter: { value: '' },
+            historyPhaseFilter: { value: '' },
+            historyFeedbackFilter: { value: 'requested' }
+        };
+        global.document = {
+            getElementById: jest.fn((id) => filters[id] || null)
+        };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_requested', trainee: 'Alice', testTitle: 'Assessment Requested', status: 'completed', archived: false, score: 80, date: '2026-05-20', feedbackStatus: 'requested', feedbackRequestLocked: true },
+            { id: 'sub_given', trainee: 'Bob', testTitle: 'Assessment Given', status: 'completed', archived: false, score: 85, date: '2026-05-21', feedbackStatus: 'given', feedbackRequestLocked: true },
+            { id: 'sub_available', trainee: 'Cara', testTitle: 'Assessment Available', status: 'completed', archived: false, score: 90, date: '2026-05-22', feedbackStatus: 'given', feedbackRequestLocked: false }
+        ]));
+
+        loadCompletedHistory();
+
+        expect(container.innerHTML).toContain('Assessment Requested');
+        expect(container.innerHTML).not.toContain('Assessment Given');
+        expect(container.innerHTML).not.toContain('Assessment Available');
+    });
+
     test('marking queue keeps actively marked linked pending submissions visible', () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
         eval(src);
