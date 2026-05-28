@@ -791,11 +791,22 @@
                             <h3 style="margin:0;">Assessment Feedback Sessions</h3>
                             <p class="test-engine-subtitle" style="margin:4px 0 0;">Track trainee feedback requests and close them once feedback has been given.</p>
                         </div>
-                        <select id="feedbackSessionFilter" onchange="loadFeedbackSessions()" style="width:auto; min-width:180px; margin:0;">
-                            <option value="requested">Requested Feedback</option>
-                            <option value="given">Feedback Given</option>
-                            <option value="all">All Feedback Sessions</option>
-                        </select>
+                        <div class="feedback-session-controls">
+                            <input id="feedbackSessionTraineeSearch" type="search" placeholder="Search trainee" oninput="loadFeedbackSessions()">
+                            <select id="feedbackSessionAssessmentFilter" onchange="loadFeedbackSessions()">
+                                <option value="">All Assessments</option>
+                            </select>
+                            <select id="feedbackSessionScoreSort" onchange="loadFeedbackSessions()">
+                                <option value="recent">Newest Requests</option>
+                                <option value="score_desc">Score High to Low</option>
+                                <option value="score_asc">Score Low to High</option>
+                            </select>
+                            <select id="feedbackSessionFilter" onchange="loadFeedbackSessions()">
+                                <option value="requested">Requested Feedback</option>
+                                <option value="given">Feedback Given</option>
+                                <option value="all">All Feedback Sessions</option>
+                            </select>
+                        </div>
                     </div>
                     <div id="feedbackSessionsList"></div>
                 </div>

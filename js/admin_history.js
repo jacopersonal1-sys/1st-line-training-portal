@@ -23,6 +23,13 @@ function historyReadObject(key) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function historyEscapeHtml(value) {
+    if (typeof escapeHtml === 'function') return escapeHtml(value);
+    const div = document.createElement('div');
+    div.textContent = String(value ?? '');
+    return div.innerHTML;
+}
+
 function getHistorySubmissionTime(submission) {
     return new Date(submission.lastEditedDate || submission.lastModified || submission.createdAt || submission.date || 0).getTime() || 0;
 }
@@ -93,14 +100,46 @@ function getFeedbackSessionTime(submission) {
     ).getTime() || 0;
 }
 
+function getFeedbackSessionAssessmentName(submission) {
+    return String(submission?.testTitle || submission?.assessment || submission?.title || '').trim();
+}
+
+function getFeedbackSessionScoreValue(submission) {
+    const score = Number(submission?.score);
+    return Number.isFinite(score) ? score : null;
+}
+
+function updateFeedbackSessionAssessmentFilter(submissions, selectedValue) {
+    const select = document.getElementById('feedbackSessionAssessmentFilter');
+    if (!select) return;
+
+    const names = Array.from(new Set((Array.isArray(submissions) ? submissions : [])
+        .map(getFeedbackSessionAssessmentName)
+        .filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b));
+
+    select.innerHTML = ['<option value="">All Assessments</option>']
+        .concat(names.map(name => {
+            const safeValue = encodeURIComponent(name);
+            const selected = name === selectedValue ? 'selected' : '';
+            return `<option value="${safeValue}" ${selected}>${historyEscapeHtml(name)}</option>`;
+        }))
+        .join('');
+}
+
 function loadFeedbackSessions() {
     const container = document.getElementById('feedbackSessionsList');
     if (!container) return;
 
     const filter = document.getElementById('feedbackSessionFilter') ? document.getElementById('feedbackSessionFilter').value : 'requested';
+    const traineeSearch = String(document.getElementById('feedbackSessionTraineeSearch')?.value || '').trim().toLowerCase();
+    const selectedAssessment = document.getElementById('feedbackSessionAssessmentFilter')
+        ? decodeURIComponent(String(document.getElementById('feedbackSessionAssessmentFilter').value || ''))
+        : '';
+    const scoreSort = String(document.getElementById('feedbackSessionScoreSort')?.value || 'recent');
     let submissions = historyReadArray('submissions');
     const records = historyReadArray('records');
-    submissions = (Array.isArray(submissions) ? submissions : []).filter(s => {
+    const allFeedbackSubmissions = (Array.isArray(submissions) ? submissions : []).filter(s => {
         if (!s || String(s.status || '').toLowerCase() !== 'completed' || s.archived) return false;
         if (!s.feedbackRequestLocked && getAssessmentFeedbackStatus(s) !== 'requested') return false;
         const status = getAssessmentFeedbackStatus(s);
@@ -109,7 +148,29 @@ function loadFeedbackSessions() {
         return true;
     });
 
-    submissions.sort((a, b) => getFeedbackSessionTime(b) - getFeedbackSessionTime(a));
+    updateFeedbackSessionAssessmentFilter(allFeedbackSubmissions, selectedAssessment);
+
+    submissions = allFeedbackSubmissions.filter(s => {
+        if (traineeSearch && !String(s.trainee || '').toLowerCase().includes(traineeSearch)) return false;
+        if (selectedAssessment && getFeedbackSessionAssessmentName(s) !== selectedAssessment) return false;
+        return true;
+    });
+
+    submissions.sort((a, b) => {
+        if (scoreSort === 'score_desc' || scoreSort === 'score_asc') {
+            const aScore = getFeedbackSessionScoreValue(a);
+            const bScore = getFeedbackSessionScoreValue(b);
+            const aMissing = aScore === null;
+            const bMissing = bScore === null;
+            if (aMissing && bMissing) return getFeedbackSessionTime(b) - getFeedbackSessionTime(a);
+            if (aMissing) return 1;
+            if (bMissing) return -1;
+            return scoreSort === 'score_desc'
+                ? bScore - aScore || getFeedbackSessionTime(b) - getFeedbackSessionTime(a)
+                : aScore - bScore || getFeedbackSessionTime(b) - getFeedbackSessionTime(a);
+        }
+        return getFeedbackSessionTime(b) - getFeedbackSessionTime(a);
+    });
 
     if (submissions.length === 0) {
         container.innerHTML = `${typeof getTableStateHtml === 'function'
@@ -124,7 +185,8 @@ function loadFeedbackSessions() {
         const requestedAt = sub.feedbackRequestedAt ? new Date(sub.feedbackRequestedAt).toLocaleString() : '-';
         const givenAt = sub.feedbackGivenAt ? new Date(sub.feedbackGivenAt).toLocaleString() : '-';
         const group = record?.groupID || sub.groupID || '-';
-        const score = Number.isFinite(Number(sub.score)) ? `${Number(sub.score)}%` : '-';
+        const scoreValue = getFeedbackSessionScoreValue(sub);
+        const score = scoreValue !== null ? `${scoreValue}%` : '-';
         const action = status === 'requested'
             ? `<button class="btn-primary btn-sm" onclick="markAssessmentFeedbackGiven('${sub.id}')"><i class="fas fa-check"></i> Feedback Given</button>`
             : `<button class="btn-secondary btn-sm" disabled><i class="fas fa-lock"></i> Closed</button>`;
