@@ -206,6 +206,55 @@ describe('Test engine edge cases', () => {
         expect(global.saveToServer).not.toHaveBeenCalled();
     });
 
+    test('completed script view does not spread total score across auto-marked questions', async () => {
+        const coreSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_core.js'), 'utf8');
+        const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(coreSrc);
+        eval(adminSrc);
+
+        const stack = { innerHTML: '' };
+        const modal = { classList: { remove: jest.fn(), add: jest.fn() } };
+        const submitBtn = { style: {}, dataset: {}, onclick: null, innerText: '' };
+        const container = { innerHTML: '' };
+
+        global.document = {
+            getElementById: jest.fn((id) => {
+                if (id === 'markingModal') return modal;
+                if (id === 'markingContainer') return container;
+                if (id === 'markingQuestionStack') return stack;
+                if (id === 'markingSubmitBtn') return submitBtn;
+                if (id === 'markingLeaseBanner') return { className: '', innerHTML: '', classList: { add: jest.fn(), remove: jest.fn() } };
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([{
+            id: 'sub_auto_old',
+            trainee: 'Alice',
+            testId: 'test_auto',
+            testTitle: 'Auto Assessment',
+            status: 'completed',
+            score: 50,
+            answers: { 0: 0, 1: 1 },
+            testSnapshot: {
+                id: 'test_auto',
+                title: 'Auto Assessment',
+                questions: [
+                    { text: 'Correct auto question', type: 'multiple_choice', points: 1, options: ['A', 'B'], correct: 0 },
+                    { text: 'Wrong auto question', type: 'multiple_choice', points: 1, options: ['A', 'B'], correct: 0 }
+                ]
+            }
+        }]));
+
+        await openAdminMarking('sub_auto_old', { claim: false, readOnly: true });
+
+        expect(stack.innerHTML).toContain('Score: 1 / 1');
+        expect(stack.innerHTML).toContain('Score: 0 / 1');
+        expect(stack.innerHTML).not.toContain('Score: 0.5 / 1');
+    });
+
     test('marking queue repairs linked pending vetting submissions back to completed', () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
         eval(src);

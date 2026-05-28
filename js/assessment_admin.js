@@ -233,6 +233,26 @@ function buildRecordIdForSubmission(submission) {
     return submission?.id ? `record_${submission.id}` : `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function getSubmissionQuestionScore(submission, questionIndex, fallbackKey = questionIndex) {
+    const scores = submission?.scores;
+    if (!scores || typeof scores !== 'object') return undefined;
+    if (scores[fallbackKey] !== undefined && scores[fallbackKey] !== null) return scores[fallbackKey];
+    if (scores[String(fallbackKey)] !== undefined && scores[String(fallbackKey)] !== null) return scores[String(fallbackKey)];
+    if (scores[questionIndex] !== undefined && scores[questionIndex] !== null) return scores[questionIndex];
+    if (scores[String(questionIndex)] !== undefined && scores[String(questionIndex)] !== null) return scores[String(questionIndex)];
+    return undefined;
+}
+
+function getSubmissionQuestionComment(submission, questionIndex, fallbackKey = questionIndex) {
+    const comments = submission?.comments;
+    if (!comments || typeof comments !== 'object') return '';
+    return comments[fallbackKey] || comments[String(fallbackKey)] || comments[questionIndex] || comments[String(questionIndex)] || '';
+}
+
+function hasSavedQuestionScores(submission) {
+    return !!(submission?.scores && typeof submission.scores === 'object' && Object.keys(submission.scores).length > 0);
+}
+
 async function ensureMarkedAssessmentRowsOnServer(submission, record = null) {
     if (!window.supabaseClient || !submission?.id) return;
 
@@ -714,7 +734,9 @@ async function openAdminMarking(subId, options = {}) {
     const container = document.getElementById('markingContainer');
     modal.classList.remove('hidden');
     
-    const isLocked = sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin';
+    const isReadOnlyReview = options.readOnly === true || (options.claim === false && sub.status === 'completed');
+    const isLocked = isReadOnlyReview || (sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin');
+    const missingSavedScores = sub.status === 'completed' && !hasSavedQuestionScores(sub);
 
     container.innerHTML = `
         <div class="marking-workbench-header">
@@ -737,7 +759,7 @@ async function openAdminMarking(subId, options = {}) {
             <aside class="marking-side-panel">
                 <div class="marking-side-card">
                     <div class="marking-side-label">Marker Safety</div>
-                    <p>Opening this review reserves it for you through the realtime tunnel. Other admins see it as locked while the lease is active.</p>
+                    <p>${isReadOnlyReview ? 'This script is opened read-only, using the submitted snapshot and saved answer data.' : 'Opening this review reserves it for you through the realtime tunnel. Other admins see it as locked while the lease is active.'}</p>
                 </div>
                 <div class="marking-side-card">
                     <div class="marking-side-label">Audit Trail</div>
@@ -747,10 +769,18 @@ async function openAdminMarking(subId, options = {}) {
         </div>
     `;
     const questionStack = document.getElementById('markingQuestionStack');
+    if (missingSavedScores) {
+        questionStack.innerHTML += `
+            <div class="marking-lease-banner warning" style="display:block; margin-bottom:16px;">
+                <i class="fas fa-triangle-exclamation"></i>
+                This older completed submission does not contain saved per-question marks. Auto-marked questions are recalculated from the submitted answers and snapshot; manual question marks cannot be reconstructed unless they were saved previously.
+            </div>`;
+    }
 
     test.questions.forEach((q, idx) => {
         // FIX: Use original index if available (handles shuffled snapshots), else loop index
         const lookupIdx = (q._originalIndex !== undefined) ? q._originalIndex : idx;
+        const scoreKey = String(lookupIdx);
         
         // Robust retrieval: try lookupIdx as number and string
         let userAns = undefined;
@@ -783,11 +813,11 @@ async function openAdminMarking(subId, options = {}) {
         const refBtn = q.imageLink ? `<button class="btn-secondary btn-sm" onclick="openReferenceViewer('${q.imageLink}')" style="float:right; margin-left:10px;"><i class="fas fa-image"></i> View Reference</button>` : '';
 
         // Comment/Note Logic (Shared for ALL types)
-        const currentComment = (sub.comments && sub.comments[idx]) ? sub.comments[idx] : '';
+        const currentComment = getSubmissionQuestionComment(sub, idx, scoreKey);
         const commentHtml = `
             <div style="margin-top:10px;">
                 <label style="font-size:0.8rem; color:var(--text-muted);">Trainer Note / Comment:</label>
-                <textarea class="q-comment" data-idx="${idx}" placeholder="Add feedback..." spellcheck="true" style="width:100%; height:50px; font-size:0.85rem; margin-top:5px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" ${isLocked ? 'disabled' : ''}>${currentComment}</textarea>
+                <textarea class="q-comment" data-idx="${idx}" data-score-key="${scoreKey}" placeholder="Add feedback..." spellcheck="true" style="width:100%; height:50px; font-size:0.85rem; margin-top:5px; border:1px solid var(--border-color); background:var(--bg-card); color:var(--text-main);" ${isLocked ? 'disabled' : ''}>${currentComment}</textarea>
             </div>
         `;
 
@@ -802,15 +832,16 @@ async function openAdminMarking(subId, options = {}) {
                     
                     ${(() => {
                         let val = 0;
-                        if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) {
-                            val = sub.scores[idx];
+                        const savedScore = getSubmissionQuestionScore(sub, idx, scoreKey);
+                        if (savedScore !== undefined) {
+                            val = savedScore;
                         } else {
                             val = 0; 
                         }
                         return `
                     <div style="display:flex; align-items:center; gap:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
                         <label style="font-weight:bold;">Score (Max ${pointsMax}):</label>
-                        <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${val}" style="width:80px; padding:5px;" ${isLocked ? 'disabled' : ''}>
+                        <input type="number" class="q-mark" data-idx="${idx}" data-score-key="${scoreKey}" min="0" max="${pointsMax}" step="0.5" value="${val}" style="width:80px; padding:5px;" ${isLocked ? 'disabled' : ''}>
                     </div>`;
                     })()}
                     ${commentHtml}
@@ -882,10 +913,9 @@ async function openAdminMarking(subId, options = {}) {
             }
 
             let currentVal = autoScore;
-            if (sub.scores && sub.scores[idx] !== undefined && sub.scores[idx] !== null) {
-                currentVal = sub.scores[idx];
-            } else if (sub.status === 'completed' && !sub.scores) {
-                currentVal = Math.round(((sub.score || 0) / 100) * pointsMax * 2) / 2;
+            const savedScore = getSubmissionQuestionScore(sub, idx, scoreKey);
+            if (savedScore !== undefined) {
+                currentVal = savedScore;
             }
 
             markHtml = `
@@ -898,11 +928,11 @@ async function openAdminMarking(subId, options = {}) {
                             `<div style="display:flex; align-items:center; gap:10px; width:100%;">
                                 <span style="margin-right:auto; color:var(--text-muted); font-weight:normal; font-size:0.8rem;">(Auto: ${autoScore})</span>
                                 <label>Score:</label>
-                                <input type="number" class="q-mark" data-idx="${idx}" min="0" max="${pointsMax}" step="0.5" value="${currentVal}" style="width:80px; padding:5px;">
+                                <input type="number" class="q-mark" data-idx="${idx}" data-score-key="${scoreKey}" min="0" max="${pointsMax}" step="0.5" value="${currentVal}" style="width:80px; padding:5px;">
                                 <span style="color:var(--text-muted); font-weight:normal;">/ ${pointsMax}</span>
                              </div>` 
                             : 
-                            `<span>Score: ${currentVal} / ${pointsMax}</span><input type="hidden" class="q-mark" data-idx="${idx}" value="${currentVal}">`
+                            `<span>Score: ${currentVal} / ${pointsMax}</span><input type="hidden" class="q-mark" data-idx="${idx}" data-score-key="${scoreKey}" value="${currentVal}">`
                         }
                     </div>
                     ${commentHtml}
@@ -962,7 +992,7 @@ function viewCompletedTest(submissionId, arg2, arg3) {
         return;
     }
     
-    openAdminMarking(sub.id, { claim: mode !== 'view' });
+    openAdminMarking(sub.id, { claim: mode !== 'view', readOnly: mode === 'view' });
     
     setTimeout(() => {
         const btn = document.getElementById('markingSubmitBtn');
@@ -1010,17 +1040,17 @@ async function finalizeAdminMarking(subId) {
 
     markInputs.forEach(input => {
         const questionIdx = input.getAttribute('data-idx');
+        const scoreKey = input.getAttribute('data-score-key') || questionIdx;
         const question = test && Array.isArray(test.questions) && questionIdx !== null ? test.questions[Number(questionIdx)] : null;
         const pointsMax = question ? parseFloat(question.points || 1) : maxScore;
         const rawVal = parseFloat(input.value) || 0;
         const val = Math.max(0, Math.min(Number.isFinite(pointsMax) ? pointsMax : rawVal, rawVal));
         earnedPoints += val;
-        const idx = questionIdx;
-        if (idx !== null) specificScores[idx] = val;
+        if (scoreKey !== null) specificScores[scoreKey] = val;
     });
     
     commentInputs.forEach(input => {
-        const idx = input.getAttribute('data-idx');
+        const idx = input.getAttribute('data-score-key') || input.getAttribute('data-idx');
         if (idx !== null) specificComments[idx] = input.value;
     });
 

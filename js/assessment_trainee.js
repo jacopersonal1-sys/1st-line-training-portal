@@ -1082,12 +1082,23 @@ async function submitTest(forceSubmit = false, options = {}) {
         : null;
 
     const remappedAnswers = {};
+    const remappedScores = {};
     window.CURRENT_TEST.questions.forEach((q, currentIdx) => {
         const ans = window.USER_ANSWERS[currentIdx];
-        remappedAnswers[q._originalIndex] = ans;
+        const originalIdx = q._originalIndex !== undefined ? q._originalIndex : currentIdx;
+        remappedAnswers[originalIdx] = ans;
+        if (autoResult.questionScores && autoResult.questionScores[currentIdx] !== undefined) {
+            remappedScores[originalIdx] = autoResult.questionScores[currentIdx];
+        }
     });
 
     const originalTestDef = assessmentReadArray('tests').find(t => t.id == window.CURRENT_TEST.id);
+    const submittedSnapshot = JSON.parse(JSON.stringify(window.CURRENT_TEST));
+    if (submittedSnapshot) {
+        submittedSnapshot.quizRuntimeState = null;
+        delete submittedSnapshot.remainingSeconds;
+        submittedSnapshot.originalDefinition = originalTestDef || null;
+    }
 
     const submissionTime = new Date().toISOString();
     const submission = {
@@ -1099,7 +1110,8 @@ async function submitTest(forceSubmit = false, options = {}) {
         answers: remappedAnswers, 
         status: finalStatus, 
         score: finalStatus === 'completed' ? finalPercent : 0,
-        testSnapshot: originalTestDef || window.CURRENT_TEST,
+        scores: remappedScores,
+        testSnapshot: submittedSnapshot || originalTestDef || window.CURRENT_TEST,
         quizMeta: quizMeta,
         contentStudioContext: window.CURRENT_TEST_CONTEXT || null,
         feedbackStatus: 'given',
