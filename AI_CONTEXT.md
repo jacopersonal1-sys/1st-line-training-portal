@@ -592,7 +592,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - Internal Evidence Rule: Screenshot capture is skipped only for lock-idle/screen-locked violations.
 - Internal Deletion Guard: Violation review deletes now make `system_tombstones` authoritative during pull, realtime, and review-modal render paths so deleted violation reports cannot be rehydrated from stale `violation_reports` blobs.
 - Admin UI: Test Engine & History > Feedback Sessions now supports trainee search, assessment filtering, and score-based ordering for admin review queues.
-- Test Integrity: Completed script review no longer spreads a total percentage back across individual questions when saved per-question marks are missing; future submissions store submitted snapshots and per-question auto scores for safer historical review.
+- Test Integrity: Completed script review no longer spreads a total percentage back across individual questions when saved per-question marks are missing; legacy completed scripts without per-question marks are view-only to prevent reconstructed values overwriting official scores. Future submissions store submitted snapshots and per-question auto scores, and shuffled-question marker-note edits update snapshots by original question index.
 - Release: Version bump to `2.7.7` for stable main-channel rollout.
 
 ## v2.7.4 - 2026-05-27

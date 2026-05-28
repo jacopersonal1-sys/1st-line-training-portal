@@ -253,6 +253,48 @@ describe('Test engine edge cases', () => {
         expect(stack.innerHTML).toContain('Score: 1 / 1');
         expect(stack.innerHTML).toContain('Score: 0 / 1');
         expect(stack.innerHTML).not.toContain('Score: 0.5 / 1');
+        expect(stack.innerHTML).not.toContain('Edit Note');
+    });
+
+    test('completed legacy scripts without per-question scores cannot be overwritten from reconstructed marks', async () => {
+        const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(adminSrc);
+
+        global.confirm = jest.fn(() => true);
+        global.alert = jest.fn();
+        global.saveToServer = jest.fn();
+        window.saveToServer = global.saveToServer;
+        global.HTMLElement = function HTMLElement() {};
+        global.document = {
+            activeElement: null,
+            querySelectorAll: jest.fn(() => [
+                { value: '1', getAttribute: (name) => name === 'data-idx' ? '0' : '0' }
+            ])
+        };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([{
+            id: 'sub_legacy',
+            trainee: 'Alice',
+            testId: 'test_auto',
+            testTitle: 'Auto Assessment',
+            status: 'completed',
+            score: 50,
+            answers: { 0: 0 },
+            testSnapshot: {
+                id: 'test_auto',
+                title: 'Auto Assessment',
+                questions: [{ text: 'Question', type: 'multiple_choice', points: 1, options: ['A'], correct: 0 }]
+            }
+        }]));
+
+        await finalizeAdminMarking('sub_legacy');
+
+        const sub = JSON.parse(localStorage.getItem('submissions'))[0];
+        expect(sub.score).toBe(50);
+        expect(sub.scores).toBeUndefined();
+        expect(global.saveToServer).not.toHaveBeenCalled();
+        expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('does not have saved per-question marks'));
     });
 
     test('marking queue repairs linked pending vetting submissions back to completed', () => {

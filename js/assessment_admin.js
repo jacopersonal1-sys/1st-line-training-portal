@@ -734,9 +734,9 @@ async function openAdminMarking(subId, options = {}) {
     const container = document.getElementById('markingContainer');
     modal.classList.remove('hidden');
     
-    const isReadOnlyReview = options.readOnly === true || (options.claim === false && sub.status === 'completed');
-    const isLocked = isReadOnlyReview || (sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin');
     const missingSavedScores = sub.status === 'completed' && !hasSavedQuestionScores(sub);
+    const isReadOnlyReview = options.readOnly === true || (options.claim === false && sub.status === 'completed') || missingSavedScores;
+    const isLocked = isReadOnlyReview || (sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin');
 
     container.innerHTML = `
         <div class="marking-workbench-header">
@@ -797,7 +797,9 @@ async function openAdminMarking(subId, options = {}) {
         }
         
         const noteText = q.adminNotes || 'No note added';
-        const editBtn = `<button class="btn-secondary btn-sm" onclick="editMarkerNote('${sub.testId}', ${lookupIdx}, '${sub.id}')" style="margin-left:10px; padding:2px 6px; font-size:0.7rem;"><i class="fas fa-edit"></i> Edit Note</button>`;
+        const editBtn = isLocked
+            ? ''
+            : `<button class="btn-secondary btn-sm" onclick="editMarkerNote('${sub.testId}', ${lookupIdx}, '${sub.id}')" style="margin-left:10px; padding:2px 6px; font-size:0.7rem;"><i class="fas fa-edit"></i> Edit Note</button>`;
         let adminNoteHtml = `<div style="margin-bottom:10px; padding:8px; background:rgba(243, 112, 33, 0.1); border-left:3px solid var(--primary); font-size:0.85rem; color:var(--text-main);"><strong><i class="fas fa-info-circle"></i> Marker Note:</strong> <span id="marker-note-text-${lookupIdx}">${noteText}</span> ${editBtn}</div>`;
         const reviewSubject = String(q.reviewSubject || '').trim();
         const safeReviewSubject = reviewSubject
@@ -1018,6 +1020,11 @@ async function finalizeAdminMarking(subId) {
     const sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Submission data not found.");
 
+    if (sub.status === 'completed' && !hasSavedQuestionScores(sub)) {
+        alert("This completed submission does not have saved per-question marks, so the app will not overwrite its official score from reconstructed values. Use the record score editor for total-score corrections.");
+        return;
+    }
+
     const isFresh = await confirmSubmissionStillFreshForMarking(sub, 'finalizing your marking');
     if (!isFresh) return;
 
@@ -1196,9 +1203,13 @@ window.editMarkerNote = async function(testId, qIdx, subId = null) {
     if (subId) {
         const subs = assessmentAdminReadArray('submissions');
         const sub = subs.find(s => s.id === subId);
-        if (sub && sub.testSnapshot && sub.testSnapshot.questions[qIdx]) {
-            sub.testSnapshot.questions[qIdx].adminNotes = newNote;
-            sub.testSnapshot.questions[qIdx].adminNotesUpdated = Date.now();
+        if (sub && sub.testSnapshot && Array.isArray(sub.testSnapshot.questions)) {
+            const snapshotQuestion = sub.testSnapshot.questions.find(question => String(question?._originalIndex) === String(qIdx))
+                || sub.testSnapshot.questions[qIdx];
+            if (snapshotQuestion) {
+                snapshotQuestion.adminNotes = newNote;
+                snapshotQuestion.adminNotesUpdated = Date.now();
+            }
             localStorage.setItem('submissions', JSON.stringify(subs));
         }
     }
