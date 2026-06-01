@@ -414,7 +414,9 @@ function setMarkingInputsDisabled(isDisabled) {
     document.querySelectorAll('#markingContainer .q-mark, #markingContainer .q-comment').forEach(input => {
         input.disabled = isDisabled;
     });
-    const submitBtn = document.getElementById('markingSubmitBtn');
+    const submitBtn = (typeof document !== 'undefined' && typeof document.getElementById === 'function')
+        ? document.getElementById('markingSubmitBtn')
+        : null;
     if (submitBtn) submitBtn.disabled = isDisabled;
 }
 
@@ -822,7 +824,8 @@ async function openAdminMarking(subId, options = {}) {
     const missingSavedScores = sub.status === 'completed' && !scoreCoverage.hasAny;
     const incompleteSavedScores = sub.status === 'completed' && scoreCoverage.hasAny && !scoreCoverage.complete;
     const scoreMismatch = sub.status === 'completed' && scoreCoverage.complete && Math.abs(Number(sub.score || 0) - scoreCoverage.percent) > 0;
-    const isReadOnlyReview = options.readOnly === true || (options.claim === false && sub.status === 'completed') || missingSavedScores;
+    const allowCompletedScoreRepair = missingSavedScores && sub.status === 'completed' && shouldClaim && canEdit && options.readOnly !== true;
+    const isReadOnlyReview = options.readOnly === true || (options.claim === false && sub.status === 'completed') || (missingSavedScores && !allowCompletedScoreRepair);
     const isLocked = isReadOnlyReview || (sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin');
 
     container.innerHTML = `
@@ -860,7 +863,9 @@ async function openAdminMarking(subId, options = {}) {
         questionStack.innerHTML += `
             <div class="marking-lease-banner warning" style="display:block; margin-bottom:16px;">
                 <i class="fas fa-triangle-exclamation"></i>
-                This older completed submission does not contain saved per-question marks. Auto-marked questions are recalculated from the submitted answers and snapshot; manual question marks cannot be reconstructed unless they were saved previously.
+                ${allowCompletedScoreRepair
+                    ? 'This completed submission has no saved per-question marks. Review every question before saving; manual marks must be entered explicitly.'
+                    : 'This older completed submission does not contain saved per-question marks. Auto-marked questions are recalculated from the submitted answers and snapshot; manual question marks cannot be reconstructed unless they were saved previously.'}
             </div>`;
     }
     if (incompleteSavedScores) {
@@ -1044,13 +1049,16 @@ async function openAdminMarking(subId, options = {}) {
             </div>`;
     });
 
-    const submitBtn = document.getElementById('markingSubmitBtn');
+    const submitBtn = (typeof document !== 'undefined' && typeof document.getElementById === 'function')
+        ? document.getElementById('markingSubmitBtn')
+        : null;
     if(isLocked) {
         submitBtn.style.display = 'none';
     } else {
         submitBtn.style.display = 'inline-block';
         submitBtn.innerText = sub.status === 'completed' ? "Save Changes" : "Finalize Score & Push to Records";
         submitBtn.dataset.submissionId = subId;
+        submitBtn.dataset.allowScoreRepair = allowCompletedScoreRepair ? 'true' : 'false';
         submitBtn.onclick = () => finalizeAdminMarking(subId);
     }
     validateActiveMarkingModalLock();
@@ -1111,7 +1119,11 @@ async function finalizeAdminMarking(subId) {
     const sub = subs.find(s => s.id === subId);
     if (!sub) return alert("Submission data not found.");
 
-    if (sub.status === 'completed' && !hasSavedQuestionScores(sub)) {
+    const submitBtn = (typeof document !== 'undefined' && typeof document.getElementById === 'function')
+        ? document.getElementById('markingSubmitBtn')
+        : null;
+    const allowScoreRepair = submitBtn && submitBtn.dataset && submitBtn.dataset.allowScoreRepair === 'true';
+    if (sub.status === 'completed' && !hasSavedQuestionScores(sub) && !allowScoreRepair) {
         alert("This completed submission does not have saved per-question marks, so the app will not overwrite its official score from reconstructed values. Use the record score editor for total-score corrections.");
         return;
     }

@@ -371,6 +371,88 @@ describe('Test engine edge cases', () => {
         expect(typeof submitBtn.onclick).toBe('function');
     });
 
+    test('completed script edit can repair missing saved score maps after admin review', async () => {
+        const coreSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_core.js'), 'utf8');
+        const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(coreSrc);
+        eval(adminSrc);
+
+        global.CURRENT_USER = { role: 'admin', user: 'manager' };
+        window.supabaseClient = null;
+        global.confirm = jest.fn(() => true);
+        global.alert = jest.fn();
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        global.HTMLElement = function HTMLElement() {};
+        global.loadMarkingQueue = jest.fn();
+        global.loadAssessmentDashboard = jest.fn();
+        global.loadCompletedHistory = jest.fn();
+
+        const stack = { innerHTML: '' };
+        const modal = { classList: { remove: jest.fn(), add: jest.fn(), contains: jest.fn(() => false) } };
+        const submitBtn = { style: {}, dataset: {}, onclick: null, innerText: '' };
+        const markingContainer = {
+            innerHTML: '',
+            querySelectorAll: jest.fn((selector) => {
+                if (selector === '.q-mark') {
+                    return [
+                        { value: '1', getAttribute: (name) => name === 'data-idx' ? '0' : '0' },
+                        { value: '1.5', getAttribute: (name) => name === 'data-idx' ? '1' : '1' }
+                    ];
+                }
+                if (selector === '.q-comment') return [];
+                return [];
+            })
+        };
+
+        global.document = {
+            activeElement: null,
+            getElementById: jest.fn((id) => {
+                if (id === 'markingModal') return modal;
+                if (id === 'markingContainer') return markingContainer;
+                if (id === 'markingQuestionStack') return stack;
+                if (id === 'markingSubmitBtn') return submitBtn;
+                if (id === 'markingLeaseBanner') return { className: '', innerHTML: '', classList: { add: jest.fn(), remove: jest.fn(), toggle: jest.fn() } };
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([{
+            id: 'sub_repair_completed',
+            trainee: 'Alice',
+            testId: 'test_repair_completed',
+            testTitle: 'Course 7: Fibre Slow Speed Flow Chart Training',
+            status: 'completed',
+            score: 40,
+            date: '2026-05-31',
+            answers: { 0: 0, 1: 'Manual answer' },
+            testSnapshot: {
+                id: 'test_repair_completed',
+                title: 'Course 7: Fibre Slow Speed Flow Chart Training',
+                questions: [
+                    { text: 'Auto question', type: 'multiple_choice', points: 1, options: ['A'], correct: 0 },
+                    { text: 'Manual question', type: 'text', points: 2, modelAnswer: 'Manual answer' }
+                ]
+            }
+        }]));
+        localStorage.setItem('records', JSON.stringify([]));
+        localStorage.setItem('rosters', JSON.stringify({ group_a: ['Alice'] }));
+
+        await viewCompletedTest('sub_repair_completed', null, 'edit');
+        expect(submitBtn.dataset.allowScoreRepair).toBe('true');
+        expect(submitBtn.style.display).toBe('inline-block');
+
+        await finalizeAdminMarking('sub_repair_completed');
+
+        const sub = JSON.parse(localStorage.getItem('submissions'))[0];
+        expect(sub.scores).toEqual({ 0: 1, 1: 1.5 });
+        expect(sub.score).toBe(83);
+        expect(sub.markingAudit[0].action).toBe('Score updated');
+        expect(global.saveToServer).toHaveBeenCalledWith(['submissions', 'records'], true);
+    });
+
     test('completed legacy scripts without per-question scores cannot be overwritten from reconstructed marks', async () => {
         const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
         eval(adminSrc);
