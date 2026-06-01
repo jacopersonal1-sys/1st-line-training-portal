@@ -11,6 +11,7 @@ describe('Test engine edge cases', () => {
         global.getAvatarHTML = (name) => `<span>${name}</span>`;
         global.CURRENT_USER = { user: 'manager', role: 'admin' };
         window.CURRENT_USER = global.CURRENT_USER;
+        window.supabaseClient = null;
     });
 
     test('completed history keeps separate live attempts visible', () => {
@@ -358,6 +359,173 @@ describe('Test engine edge cases', () => {
         expect(sub.scores).toBeUndefined();
         expect(global.saveToServer).not.toHaveBeenCalled();
         expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('does not have saved per-question marks'));
+    });
+
+    test('completed partial manual scores are blank and cannot be saved as accidental zeroes', async () => {
+        const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(adminSrc);
+
+        global.confirm = jest.fn(() => true);
+        global.alert = jest.fn();
+        global.saveToServer = jest.fn();
+        window.saveToServer = global.saveToServer;
+        global.HTMLElement = function HTMLElement() {};
+
+        const stack = { innerHTML: '' };
+        const modal = { classList: { remove: jest.fn(), add: jest.fn(), contains: jest.fn(() => false) } };
+        const submitBtn = { style: {}, dataset: {}, onclick: null, innerText: '' };
+        const markingContainer = {
+            innerHTML: '',
+            querySelectorAll: jest.fn((selector) => {
+                if (selector === '.q-mark') {
+                    return [
+                        { value: '1', getAttribute: (name) => name === 'data-idx' ? '0' : '0' },
+                        { value: '', getAttribute: (name) => name === 'data-idx' ? '1' : '1' }
+                    ];
+                }
+                if (selector === '.q-comment') return [];
+                return [];
+            })
+        };
+
+        global.document = {
+            activeElement: null,
+            getElementById: jest.fn((id) => {
+                if (id === 'markingModal') return modal;
+                if (id === 'markingContainer') return markingContainer;
+                if (id === 'markingQuestionStack') return stack;
+                if (id === 'markingSubmitBtn') return submitBtn;
+                if (id === 'markingLeaseBanner') return { className: '', innerHTML: '', classList: { add: jest.fn(), remove: jest.fn(), toggle: jest.fn() } };
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([{
+            id: 'sub_partial',
+            trainee: 'Alice',
+            testId: 'test_partial',
+            testTitle: 'Partial Assessment',
+            status: 'completed',
+            score: 50,
+            answers: { 0: 0, 1: 'Manual answer' },
+            scores: { 0: 1 },
+            testSnapshot: {
+                id: 'test_partial',
+                title: 'Partial Assessment',
+                questions: [
+                    { text: 'Auto question', type: 'multiple_choice', points: 1, options: ['A'], correct: 0 },
+                    { text: 'Manual question', type: 'text', points: 1, modelAnswer: 'Manual answer' }
+                ]
+            }
+        }]));
+
+        await openAdminMarking('sub_partial');
+
+        expect(stack.innerHTML).toContain('incomplete saved per-question marks');
+        expect(stack.innerHTML).toContain('data-score-key="1"');
+        expect(stack.innerHTML).toContain('value=""');
+
+        await finalizeAdminMarking('sub_partial');
+
+        const sub = JSON.parse(localStorage.getItem('submissions'))[0];
+        expect(sub.score).toBe(50);
+        expect(sub.scores).toEqual({ 0: 1 });
+        expect(global.saveToServer).not.toHaveBeenCalled();
+        expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('Please enter a mark for every question'));
+    });
+
+    test('final marking save only reads score inputs from the active marking container', async () => {
+        const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(adminSrc);
+
+        global.confirm = jest.fn(() => true);
+        global.alert = jest.fn();
+        global.saveToServer = jest.fn(async () => true);
+        window.saveToServer = global.saveToServer;
+        global.HTMLElement = function HTMLElement() {};
+        global.loadMarkingQueue = jest.fn();
+        global.loadAssessmentDashboard = jest.fn();
+
+        const modal = { classList: { add: jest.fn() } };
+        const markingContainer = {
+            querySelectorAll: jest.fn((selector) => {
+                if (selector === '.q-mark') return [
+                    { value: '1', getAttribute: (name) => name === 'data-idx' ? '0' : '0' }
+                ];
+                if (selector === '.q-comment') return [];
+                return [];
+            })
+        };
+        global.document = {
+            activeElement: null,
+            getElementById: jest.fn((id) => {
+                if (id === 'markingContainer') return markingContainer;
+                if (id === 'markingModal') return modal;
+                return null;
+            }),
+            querySelectorAll: jest.fn((selector) => {
+                if (selector === '.q-mark') return [
+                    { value: '1', getAttribute: (name) => name === 'data-idx' ? '0' : '0' },
+                    { value: '99', getAttribute: (name) => name === 'data-idx' ? '99' : '99' }
+                ];
+                return [];
+            })
+        };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([{
+            id: 'sub_scoped',
+            trainee: 'Alice',
+            testId: 'test_scoped',
+            testTitle: 'Scoped Assessment',
+            status: 'pending',
+            score: 0,
+            answers: { 0: 0 },
+            testSnapshot: {
+                id: 'test_scoped',
+                title: 'Scoped Assessment',
+                questions: [{ text: 'Question', type: 'multiple_choice', points: 1, options: ['A'], correct: 0 }]
+            }
+        }]));
+
+        await finalizeAdminMarking('sub_scoped');
+
+        const sub = JSON.parse(localStorage.getItem('submissions'))[0];
+        expect(sub.score).toBe(100);
+        expect(sub.scores).toEqual({ 0: 1 });
+        expect(sub.scores['99']).toBeUndefined();
+    });
+
+    test('quick approve is blocked for manual-review submissions', async () => {
+        const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(adminSrc);
+
+        global.alert = jest.fn();
+        global.saveToServer = jest.fn();
+        window.saveToServer = global.saveToServer;
+
+        localStorage.setItem('submissions', JSON.stringify([{
+            id: 'sub_manual_pending',
+            trainee: 'Alice',
+            testId: 'test_manual',
+            testTitle: 'Manual Assessment',
+            status: 'pending',
+            score: 0,
+            testSnapshot: {
+                id: 'test_manual',
+                title: 'Manual Assessment',
+                questions: [{ text: 'Explain', type: 'text', points: 2 }]
+            }
+        }]));
+
+        await approveSubmission('sub_manual_pending');
+
+        const sub = JSON.parse(localStorage.getItem('submissions'))[0];
+        expect(sub.status).toBe('pending');
+        expect(global.saveToServer).not.toHaveBeenCalled();
+        expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('manual-review questions'));
     });
 
     test('marking queue repairs linked pending vetting submissions back to completed', () => {

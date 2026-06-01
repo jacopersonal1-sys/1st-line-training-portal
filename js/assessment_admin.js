@@ -189,6 +189,8 @@ function loadMarkingQueue() {
             } else if (tType === 'quiz') {
                 typeBadge = `<span style="font-size:0.75rem; background:rgba(52, 152, 219, 0.1); padding:2px 6px; border-radius:4px; color:#3498db; border:1px solid #3498db; margin-left:10px;"><i class="fas fa-circle-question"></i> Quiz</span>`;
             }
+            const requiresDetailed = submissionRequiresDetailedMarking(s);
+            const approveTitle = requiresDetailed ? 'Manual-review questions must be opened and finalized in Grade.' : 'Quick Approve (Accept Score)';
 
             return `
             <div class="marking-queue-row ${isLockedByOther ? 'locked' : ''}">
@@ -197,7 +199,7 @@ function loadMarkingQueue() {
                     <div style="font-size:0.8rem; color:var(--text-muted);"><i class="fas fa-calendar-alt"></i> Submitted: ${s.date} | Current Score: <span style="color:var(--text-main); font-weight:bold;">${s.score || 0}%</span></div>
                 </div>
                 <div style="display:flex; gap:8px;">
-                    <button class="btn-primary btn-sm" onclick="approveSubmission('${s.id}')" title="Quick Approve (Accept Score)" ${isLockedByOther ? 'disabled' : ''}><i class="fas fa-check"></i> Approve</button>
+                    <button class="btn-primary btn-sm" onclick="approveSubmission('${s.id}')" title="${approveTitle}" ${(isLockedByOther || requiresDetailed) ? 'disabled' : ''}><i class="fas fa-check"></i> Approve</button>
                     <button class="btn-secondary btn-sm" onclick="openAdminMarking('${s.id}')" title="Detailed Grade" ${isLockedByOther ? 'disabled' : ''}><i class="fas fa-highlighter"></i> Grade</button>
                 </div>
             </div>`;
@@ -231,6 +233,88 @@ function getSubmissionEditTime(submission) {
 
 function buildRecordIdForSubmission(submission) {
     return submission?.id ? `record_${submission.id}` : `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function getSubmissionQuestionScoreKey(question, questionIndex) {
+    const lookupIdx = question && question._originalIndex !== undefined ? question._originalIndex : questionIndex;
+    return String(lookupIdx);
+}
+
+function getAssessmentQuestionPoints(question) {
+    if (typeof toSafePoints === 'function') return toSafePoints(question?.points);
+    const parsed = parseFloat(question?.points);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function getSubmissionTestDefinition(submission) {
+    if (submission?.testSnapshot && Array.isArray(submission.testSnapshot.questions)) {
+        return submission.testSnapshot;
+    }
+    const tests = assessmentAdminReadArray('tests');
+    return tests.find(t => t.id == submission?.testId) || null;
+}
+
+function isManualMarkingQuestion(question) {
+    const type = String(question?.type || '').toLowerCase();
+    if (typeof isManualAssessmentQuestion === 'function') return isManualAssessmentQuestion(type);
+    return type === 'text' || type === 'live_practical';
+}
+
+function getSubmissionScoreCoverage(submission, test) {
+    const questions = Array.isArray(test?.questions) ? test.questions : [];
+    const missing = [];
+    const missingManual = [];
+    const missingAuto = [];
+    let earnedPoints = 0;
+    let maxPoints = 0;
+    let invalid = false;
+
+    questions.forEach((question, idx) => {
+        const scoreKey = getSubmissionQuestionScoreKey(question, idx);
+        const savedScore = getSubmissionQuestionScore(submission, idx, scoreKey);
+        const pointsMax = getAssessmentQuestionPoints(question);
+        maxPoints += pointsMax;
+
+        const missingSavedScore = savedScore === undefined || savedScore === null || String(savedScore).trim() === '';
+        if (missingSavedScore) {
+            const item = { idx, scoreKey, question };
+            missing.push(item);
+            if (isManualMarkingQuestion(question)) missingManual.push(item);
+            else missingAuto.push(item);
+            return;
+        }
+
+        const numericScore = Number(savedScore);
+        if (!Number.isFinite(numericScore)) {
+            invalid = true;
+            missing.push({ idx, scoreKey, question });
+            return;
+        }
+        earnedPoints += Math.max(0, Math.min(pointsMax, numericScore));
+    });
+
+    const percent = maxPoints > 0
+        ? (typeof clampAssessmentPercent === 'function'
+            ? clampAssessmentPercent((earnedPoints / maxPoints) * 100)
+            : Math.max(0, Math.min(100, Math.round((earnedPoints / maxPoints) * 100))))
+        : 0;
+
+    return {
+        complete: questions.length > 0 && missing.length === 0 && !invalid,
+        hasAny: hasSavedQuestionScores(submission),
+        missing,
+        missingManual,
+        missingAuto,
+        invalid,
+        earnedPoints,
+        maxPoints,
+        percent
+    };
+}
+
+function submissionRequiresDetailedMarking(submission) {
+    const test = getSubmissionTestDefinition(submission);
+    return Array.isArray(test?.questions) && test.questions.some(isManualMarkingQuestion);
 }
 
 function getSubmissionQuestionScore(submission, questionIndex, fallbackKey = questionIndex) {
@@ -577,6 +661,11 @@ async function approveSubmission(subId) {
         window._isApproving = null;
         return;
     }
+    if (submissionRequiresDetailedMarking(sub)) {
+        window._isApproving = null;
+        alert("This submission has manual-review questions. Open Grade and finalize the per-question marks instead of using Quick Approve.");
+        return;
+    }
 
     const claimed = await claimMarkingLease(subId, 'quick_approve');
     if (!claimed) {
@@ -721,12 +810,7 @@ async function openAdminMarking(subId, options = {}) {
     }
 
     // SNAPSHOT LOGIC: STRICTLY use saved test definition if available (Historical accuracy)
-    let test = sub.testSnapshot;
-    
-    if (!test || !test.questions) {
-        const tests = assessmentAdminReadArray('tests');
-        test = tests.find(t => t.id == sub.testId); 
-    }
+    let test = getSubmissionTestDefinition(sub);
 
     if(!test) return alert("Original Assessment definition seems to be deleted.");
 
@@ -734,7 +818,10 @@ async function openAdminMarking(subId, options = {}) {
     const container = document.getElementById('markingContainer');
     modal.classList.remove('hidden');
     
-    const missingSavedScores = sub.status === 'completed' && !hasSavedQuestionScores(sub);
+    const scoreCoverage = getSubmissionScoreCoverage(sub, test);
+    const missingSavedScores = sub.status === 'completed' && !scoreCoverage.hasAny;
+    const incompleteSavedScores = sub.status === 'completed' && scoreCoverage.hasAny && !scoreCoverage.complete;
+    const scoreMismatch = sub.status === 'completed' && scoreCoverage.complete && Math.abs(Number(sub.score || 0) - scoreCoverage.percent) > 0;
     const isReadOnlyReview = options.readOnly === true || (options.claim === false && sub.status === 'completed') || missingSavedScores;
     const isLocked = isReadOnlyReview || (sub.status === 'completed' && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin');
 
@@ -776,11 +863,25 @@ async function openAdminMarking(subId, options = {}) {
                 This older completed submission does not contain saved per-question marks. Auto-marked questions are recalculated from the submitted answers and snapshot; manual question marks cannot be reconstructed unless they were saved previously.
             </div>`;
     }
+    if (incompleteSavedScores) {
+        questionStack.innerHTML += `
+            <div class="marking-lease-banner warning" style="display:block; margin-bottom:16px;">
+                <i class="fas fa-triangle-exclamation"></i>
+                This completed submission has incomplete saved per-question marks. Missing manual marks are left blank and must be filled before saving, so the official score is not accidentally overwritten with zeroes.
+            </div>`;
+    }
+    if (scoreMismatch) {
+        questionStack.innerHTML += `
+            <div class="marking-lease-banner warning" style="display:block; margin-bottom:16px;">
+                <i class="fas fa-scale-balanced"></i>
+                The saved per-question marks add up to ${scoreCoverage.percent}%, while the official record shows ${sub.score || 0}%. Review the marks before saving changes.
+            </div>`;
+    }
 
     test.questions.forEach((q, idx) => {
         // FIX: Use original index if available (handles shuffled snapshots), else loop index
         const lookupIdx = (q._originalIndex !== undefined) ? q._originalIndex : idx;
-        const scoreKey = String(lookupIdx);
+        const scoreKey = getSubmissionQuestionScoreKey(q, idx);
         
         // Robust retrieval: try lookupIdx as number and string
         let userAns = undefined;
@@ -789,7 +890,7 @@ async function openAdminMarking(subId, options = {}) {
             if (userAns === undefined) userAns = sub.answers[String(lookupIdx)];
         }
         
-        const pointsMax = parseFloat(q.points || 1);
+        const pointsMax = getAssessmentQuestionPoints(q);
         let markHtml = '';
         let autoScore = 0;
         if (typeof calculateQuestionAutoScore === 'function') {
@@ -833,12 +934,10 @@ async function openAdminMarking(subId, options = {}) {
                     <div style="white-space:pre-wrap; margin-bottom:15px; font-weight:500;">${userAns || '<i>(No response)</i>'}</div>
                     
                     ${(() => {
-                        let val = 0;
                         const savedScore = getSubmissionQuestionScore(sub, idx, scoreKey);
+                        let val = sub.status === 'completed' ? '' : 0;
                         if (savedScore !== undefined) {
                             val = savedScore;
-                        } else {
-                            val = 0; 
                         }
                         return `
                     <div style="display:flex; align-items:center; gap:10px; border-top:1px dashed var(--border-color); padding-top:10px;">
@@ -914,11 +1013,8 @@ async function openAdminMarking(subId, options = {}) {
                 answerDisplay = JSON.stringify(userAns);
             }
 
-            let currentVal = autoScore;
             const savedScore = getSubmissionQuestionScore(sub, idx, scoreKey);
-            if (savedScore !== undefined) {
-                currentVal = savedScore;
-            }
+            let currentVal = savedScore === undefined ? autoScore : savedScore;
 
             markHtml = `
                 <div style="background:var(--bg-input); padding:10px; border-radius:6px; margin-top:5px; text-align:left;">
@@ -1031,30 +1127,51 @@ async function finalizeAdminMarking(subId) {
     const markerName = getCurrentMarkerName();
     const editTime = new Date().toISOString();
 
-    const tests = assessmentAdminReadArray('tests');
-    const test = (sub.testSnapshot && Array.isArray(sub.testSnapshot.questions))
-        ? sub.testSnapshot
-        : tests.find(t => t.id == sub.testId);
+    const test = getSubmissionTestDefinition(sub);
     let maxScore = 0;
-    if(test) test.questions.forEach(q => maxScore += parseFloat(q.points || 1));
-    else maxScore = document.querySelectorAll('.q-mark').length;
+    if(test) test.questions.forEach(q => maxScore += getAssessmentQuestionPoints(q));
 
-    const markInputs = document.querySelectorAll('.q-mark');
-    const commentInputs = document.querySelectorAll('.q-comment');
+    const markingContainer = (typeof document !== 'undefined' && typeof document.getElementById === 'function')
+        ? document.getElementById('markingContainer')
+        : null;
+    const queryRoot = markingContainer && typeof markingContainer.querySelectorAll === 'function' ? markingContainer : document;
+    const markInputs = typeof queryRoot.querySelectorAll === 'function' ? queryRoot.querySelectorAll('.q-mark') : [];
+    const commentInputs = typeof queryRoot.querySelectorAll === 'function' ? queryRoot.querySelectorAll('.q-comment') : [];
+    if (!test) maxScore = markInputs.length;
+    if (test && Array.isArray(test.questions) && markInputs.length < test.questions.length) {
+        alert("The marking form did not load all question score fields. Please reopen the script before saving.");
+        return;
+    }
+
     let earnedPoints = 0;
     const specificScores = {}; 
     const specificComments = sub.comments || {};
+    const missingMarks = [];
 
     markInputs.forEach(input => {
         const questionIdx = input.getAttribute('data-idx');
         const scoreKey = input.getAttribute('data-score-key') || questionIdx;
         const question = test && Array.isArray(test.questions) && questionIdx !== null ? test.questions[Number(questionIdx)] : null;
-        const pointsMax = question ? parseFloat(question.points || 1) : maxScore;
-        const rawVal = parseFloat(input.value) || 0;
+        const pointsMax = question ? getAssessmentQuestionPoints(question) : maxScore;
+        const rawText = String(input.value ?? '').trim();
+        if (rawText === '') {
+            missingMarks.push(questionIdx !== null ? Number(questionIdx) + 1 : '?');
+            return;
+        }
+        const rawVal = parseFloat(rawText);
+        if (!Number.isFinite(rawVal)) {
+            missingMarks.push(questionIdx !== null ? Number(questionIdx) + 1 : '?');
+            return;
+        }
         const val = Math.max(0, Math.min(Number.isFinite(pointsMax) ? pointsMax : rawVal, rawVal));
         earnedPoints += val;
         if (scoreKey !== null) specificScores[scoreKey] = val;
     });
+
+    if (missingMarks.length > 0) {
+        alert(`Please enter a mark for every question before saving. Missing: Q${missingMarks.join(', Q')}`);
+        return;
+    }
     
     commentInputs.forEach(input => {
         const idx = input.getAttribute('data-score-key') || input.getAttribute('data-idx');
