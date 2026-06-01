@@ -583,9 +583,9 @@ async function attemptLogin() {
                 : `Update Required. Could not verify app version. Minimum Version: ${minVersion}`;
              // Force check for updates if outdated
              if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.send === 'function') {
-                 try { window.electronAPI.ipcRenderer.send('manual-update-check', { channel: 'main' }); } catch(e){}
+                 try { window.electronAPI.ipcRenderer.send('manual-update-check'); } catch(e){}
              } else if (typeof require !== 'undefined') {
-                 try { require('electron').ipcRenderer.send('manual-update-check', { channel: 'main' }); } catch(e){}
+                 try { require('electron').ipcRenderer.send('manual-update-check'); } catch(e){}
              }
              return;
           }

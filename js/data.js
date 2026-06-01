@@ -4626,7 +4626,7 @@ function executePendingSessionAction(rawAction) {
     if (action === 'force_update') {
         if (typeof require !== 'undefined') {
             sessionStorage.setItem('force_update_active', 'true');
-            require('electron').ipcRenderer.send('manual-update-check', { channel: 'main' });
+            require('electron').ipcRenderer.send('manual-update-check');
             if(typeof showToast === 'function') showToast("System Update Check Initiated by Admin", "info");
         }
         return true;

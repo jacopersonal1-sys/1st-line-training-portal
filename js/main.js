@@ -1162,46 +1162,25 @@ window.onload = async function() {
         // NEW: Check if update is ALREADY waiting (Handle Reloads/Logouts)
         if (!isPassiveAppTabWindow) versionApi.invoke('get-update-status').then(status => {
             const isReady = (status && typeof status === 'object') ? !!status.ready : !!status;
-            const readyChannel = (status && typeof status === 'object')
-                ? normalizeClientUpdateChannel(status.channel)
-                : normalizeClientUpdateChannel(sessionStorage.getItem('update_ready_channel'));
-
-            window.UPDATE_READY_CHANNEL = readyChannel;
-            sessionStorage.setItem('update_ready_channel', readyChannel);
 
             if (isReady) {
                 window.UPDATE_DOWNLOADED = true;
                 sessionStorage.setItem('update_ready', 'true');
                 if (typeof updateNotifications === 'function') updateNotifications();
 
-                if (readyChannel === 'main') {
-                    // Transform Login Button immediately if visible (Main updates only)
-                    const loginBtn = document.querySelector('#login-screen button[type="submit"]');
-                    if(loginBtn) {
-                        loginBtn.innerText = "Restart & Install Update";
-                        loginBtn.onclick = (e) => { e.preventDefault(); performUpdateRestart(); };
-                        loginBtn.classList.remove('btn-primary');
-                        loginBtn.classList.add('btn-success');
-                        loginBtn.classList.add('pulse-anim');
-                    }
-                    const err = document.getElementById('loginError');
-                    if(err) { err.innerText = "Update Ready. Please restart."; err.style.color = "#2ecc71"; }
-                } else {
-                    const err = document.getElementById('loginError');
-                    if(err) { err.innerText = "Optional beta update is ready in Notifications."; err.style.color = "#f1c40f"; }
+                // Transform Login Button immediately if visible
+                const loginBtn = document.querySelector('#login-screen button[type="submit"]');
+                if(loginBtn) {
+                    loginBtn.innerText = "Restart & Install Update";
+                    loginBtn.onclick = (e) => { e.preventDefault(); performUpdateRestart(); };
+                    loginBtn.classList.remove('btn-primary');
+                    loginBtn.classList.add('btn-success');
+                    loginBtn.classList.add('pulse-anim');
                 }
+                const err = document.getElementById('loginError');
+                if(err) { err.innerText = "Update Ready. Please restart."; err.style.color = "#2ecc71"; }
             }
         });
-    }
-
-    // --- UPDATE CHANNEL CONFIGURATION ---
-    // Main is default. Beta remains opt-in via profile selector, except staging which is always beta.
-    if (!isPassiveAppTabWindow && typeof require !== 'undefined') {
-        const { ipcRenderer } = require('electron');
-        const target = localStorage.getItem('active_server_target');
-        const preferred = normalizeClientUpdateChannel(localStorage.getItem('profile_update_channel'));
-        const desiredChannel = target === 'staging' ? 'beta' : preferred;
-        ipcRenderer.send('set-update-channel', desiredChannel);
     }
 
     // --- IMPERSONATION CHECK ---
@@ -1557,10 +1536,7 @@ window.onload = async function() {
     if (!isPassiveAppTabWindow && typeof require !== 'undefined' && !window.__APP_UPDATE_CHECK_INTERVAL) {
         window.__APP_UPDATE_CHECK_INTERVAL = setInterval(() => {
             const { ipcRenderer } = require('electron');
-            const target = localStorage.getItem('active_server_target');
-            const preferred = normalizeClientUpdateChannel(localStorage.getItem('profile_update_channel'));
-            const channel = target === 'staging' ? 'beta' : preferred;
-            ipcRenderer.send('manual-update-check', { channel });
+            ipcRenderer.send('manual-update-check');
         }, 1800000); // 30 mins
     }
 
@@ -5148,17 +5124,15 @@ function updateNotifications() {
 
     // 1. SYSTEM UPDATE NOTIFICATION (Global for all roles)
     if (sessionStorage.getItem('update_ready') === 'true') {
-        const readyChannel = normalizeClientUpdateChannel(sessionStorage.getItem('update_ready_channel'));
-        const isBetaReady = readyChannel === 'beta';
-        const isOptionalReady = isBetaReady || isCurrentUserUpdateOptional();
+        const isOptionalReady = isCurrentUserUpdateOptional();
         count++;
         notifList.innerHTML += `
         <div class="notif-item" onclick="restartAndInstall()" style="background:rgba(46, 204, 113, 0.1); border-left:3px solid #2ecc71; cursor:pointer;">
             <div style="display:flex; align-items:center; gap:10px;">
                 <i class="fas fa-arrow-circle-up" style="color:#2ecc71; font-size:1.2rem;"></i>
                 <div>
-                    <strong>${isBetaReady ? 'Beta Update Ready' : 'Update Ready'}</strong>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">${isOptionalReady ? 'Optional: click to Restart & Install' : 'Click to Restart & Install'}</div>
+                    <strong>Update Ready</strong>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">${isOptionalReady ? 'Install when your work is at a safe stopping point' : 'Click to restart and install'}</div>
                 </div>
             </div>
         </div>`;
@@ -5363,12 +5337,6 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
-function normalizeClientUpdateChannel(value) {
-    const raw = String(value || '').trim().toLowerCase();
-    if (raw === 'beta' || raw === 'staging' || raw === 'prerelease' || raw === 'pre-release') return 'beta';
-    return 'main';
-}
-
 function isCurrentUserUpdateOptional() {
     const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
     return role === 'admin' || role === 'super_admin';
@@ -5385,31 +5353,16 @@ if (typeof require !== 'undefined') {
         }
     });
 
-    ipcRenderer.on('update-channel-changed', (event, payload) => {
-        const activeChannel = normalizeClientUpdateChannel(payload && payload.channel);
-        window.UPDATE_READY_CHANNEL = activeChannel;
-    });
-
-    ipcRenderer.on('update-downloaded', (event, payload) => {
-        const readyChannel = normalizeClientUpdateChannel(payload && payload.channel);
+    ipcRenderer.on('update-downloaded', () => {
         window.UPDATE_DOWNLOADED = true;
-        window.UPDATE_READY_CHANNEL = readyChannel;
         
         // NEW: Set flag for notification bell
         sessionStorage.setItem('update_ready', 'true');
-        sessionStorage.setItem('update_ready_channel', readyChannel);
         if(typeof updateNotifications === 'function') updateNotifications();
-
-        // Beta remains optional. Do not block login or force restart.
-        if (readyChannel === 'beta') {
-            sessionStorage.removeItem('force_update_active');
-            if (typeof showToast === 'function') showToast("Optional beta update downloaded. Install when ready from Notifications.", "info");
-            return;
-        }
 
         if (CURRENT_USER && isCurrentUserUpdateOptional()) {
             sessionStorage.removeItem('force_update_active');
-            if (typeof showToast === 'function') showToast("Main update downloaded. Admin install is optional from Notifications.", "info");
+            if (typeof showToast === 'function') showToast("Update downloaded. Install from Notifications when you reach a safe stopping point.", "info");
             return;
         }
 
@@ -6011,9 +5964,9 @@ function getChangelog(version) {
             </ul>`,
         "2.6.25": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> Beta updater flow is now strict opt-in so only users who select beta receive beta-channel checks.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Update notifications now clearly label Beta updates as optional installs.</li>
-                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Forced and minimum-version update checks are now pinned to Main channel to prevent accidental beta enforcement.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> System update checks were hardened so required updates follow the approved production path.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Update notifications now separate optional install timing from required restart prompts.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Minimum-version enforcement was pinned to production updates for safer fleet rollout.</li>
             </ul>`,
         "2.6.24": `
             <ul style="padding-left: 20px; margin: 0;">
@@ -6023,9 +5976,9 @@ function getChangelog(version) {
             </ul>`,
         "2.6.23": `
             <ul style="padding-left: 20px; margin: 0;">
-                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> System Updates now supports separate Main (inline) and Beta (pre-release) checks.</li>
-                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Update logs now show the selected channel so rollout intent is clear.</li>
-                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Added channel-safe updater routing so optional beta checks do not require code edits.</li>
+                <li style="margin-bottom: 8px;"><strong>Feature Added:</strong> System Updates gained clearer delivery controls for approved app releases.</li>
+                <li style="margin-bottom: 8px;"><strong>Improvement:</strong> Update logs now show check and download progress more clearly.</li>
+                <li style="margin-bottom: 8px;"><strong>Bug Fix:</strong> Added safer updater routing so manual checks do not require code edits.</li>
             </ul>`,
         "2.6.22": `
             <ul style="padding-left: 20px; margin: 0;">

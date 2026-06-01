@@ -501,6 +501,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.7.9 (Enterprise Update Delivery Cleanup, 2026-06-01):** Removed the old in-app beta/pre-release update channel from active Electron updater code, admin update UI, remote update commands, login minimum-version checks, and build scripts. The supported in-app updater path is now stable main-channel only (`npm run dist` / `npm run dist:main`). Admin Tools > System Updates uses the Enterprise Update Center layout with quiet background download messaging and safe-restart install wording. Trainee-facing release notes remain suppressed.
 - **v2.7.7 (Confidential Evidence Rule Patch, 2026-05-28):** Internal-only release prep for monitored trainee workflows. Trainee-facing release notes remain suppressed. Violation evidence screenshots are retained for normal idle/away and Teams-over-8-minute violations, while screenshot capture is skipped only for lock-idle/screen-locked violations. Violation review tombstones are authoritative across pull, realtime, and render paths so deleted reports cannot reappear from stale blobs.
 - **v2.7.4 (Confidential Monitoring Hardening + Release Readiness, 2026-05-27):** Internal release hardening for monitored trainee workflows. Public release notes must stay generic and must not describe Agent Activity Monitor implementation details. Internally, this release aligns training activity categorization with controlled study/work-tool/portal/assessment/communication/idle/violation buckets, keeps Teams communication at an 8-minute grace window, stores admin-only violation evidence in the private `violation_evidence` bucket/table, and replaces the old modal monitor surface with the simplified full-page timeline workspace plus bulk violation cleanup.
 - **v2.7.3 (Insight + Vetting Grading Release, 2026-05-26):** Shipped the post-vetting reliability cleanup and Insight workflow improvements. Vetting Arena submissions now enter admin review intentionally, while historical completed Vetting attempts are no longer reopened just because they predate marking audit metadata; linked pending rows with permanent records are repaired back to completed. Insight Knowledge Gaps now separates individual missed-question detail from group aggregation: individual mode shows full question text, trainee answer, and awarded/max points for below-full-mark questions, and group mode aggregates failed questions by assessment with filtering. HR Evidence Capture now supports multiple evaluation triggers per incident, edit/delete actions, and trigger filtering while preserving old single-trigger rows. Insight Compare/Build graph polish replaces numeric-only assessment axes with readable assessment names, and the broader release includes the accumulated performance, stability, navigation, trainee login, Vetting Arena, Schedule Studio, and embedded module cleanup work. This ships as stable main-channel version `2.7.3`.
@@ -548,7 +549,7 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 - **v2.6.57 (cPanel/Webmail Compatibility, 2026-05-06):** Study Browser now detects Herotel cPanel/Webmail targets (`cp1.herotel.com`, `cp2.herotel.com`, cPanel/Webmail paths, and standard cPanel ports) and opens them in the system browser instead of the embedded Electron webview because the embedded path can trigger a server-side `500 Internal Server Error` from `cpsrvd`. Activity Monitor also recognises cPanel/Webmail titles as permitted work activity while those program links run externally. Verification included focused `js/study_monitor.js` syntax check, full JavaScript syntax sweep, and Jest suite.
 - **v2.6.56 (Training Rules + Release Readiness, 2026-05-05):** Finalized Training Rules as a configurable Admin Tools > System Config workflow with rich text, first-login display, optional every-login redisplay, and all/user/group targeting. Trainees can open rules from the isolated Trainee Portal and legacy dashboard fallback, and first-time setup now uses the admin-configured Office dropdown. Hardened delete-agent cleanup and attendance parsing against literal `"undefined"` localStorage values, kept partial cloud row-delete failures non-fatal, restored compatibility wrappers for legacy marking/review/live-date buttons, routed dashboard Insight actions to Insight Studio, and configured Windows packaging to use `ico.ico`. Release verification included JS syntax sweep, literal route scan, inline handler scan, Jest suite, and Electron Builder unpacked package check.
 - **v2.6.55 (Agent Progress Catalog + Activity Grace Rules, 2026-05-05):** Agent Progress Builder now builds its add-list from active Test Engine definitions only and flags configured progress rows that are no longer present in the active test list. Added assessment rename propagation from Test Engine/History into linked submissions, records, Insight trigger presets, and Agent Progress mappings. Activity Monitor now treats MS Teams as permitted communication for the first 8 continuous minutes and only captures a violation after that grace window; OS idle also becomes a violation only after more than 8 minutes during monitored hours.
-- **v2.6.54 (Arcade Logo Click + Main Dist Script Release Prep, 2026-05-05):** Hardened the hidden Arcade Vault logo trigger so `#arcade-logo-trigger` is explicitly outside the Electron draggable header region and stops click propagation before the window can maximize/restore. Kept the `dist` script as a main-channel alias for token-based publishing (`npm run dist` -> `npm run dist:main`) alongside explicit `dist:main` and `dist:beta` commands.
+- **v2.6.54 (Arcade Logo Click + Main Dist Script Release Prep, 2026-05-05):** Hardened the hidden Arcade Vault logo trigger so `#arcade-logo-trigger` is explicitly outside the Electron draggable header region and stops click propagation before the window can maximize/restore. Kept the `dist` script as a main-channel alias for token-based publishing (`npm run dist` -> `npm run dist:main`) alongside the explicit `dist:main` command.
 - **v2.6.53 (Arcade Vault Game Pack, 2026-05-04):** Expanded the hidden Arcade Vault with Pong, Memory Match, Simon Says, Typing Speed Challenge, and Tic-Tac-Toe while keeping the existing Tetris, Snake, Space Impact, and Hangman games under the same five-click logo unlock.
 - **v2.6.52 (Arcade Logo Trigger Hotfix, 2026-05-04):** Restored the hidden Arcade Vault unlock by making the top-header logo click target explicit (`#arcade-logo-trigger`) and routing five rapid logo clicks through `handleEasterArcadeLogoClick(...)`. The arcade module still opens local-only games for any user once unlocked.
 - **v2.6.51 (Insight Replacement + Realtime Fallback Controls, 2026-05-04):** Retired the old Training Insight Dashboard route and navigation entry so the new Insight workspace is the single admin insight surface. Added Super Admin Console controls for realtime-tunnel failure fallback polling by server target and role, replacing the previous hardcoded 1-second admin failover with configurable conservative defaults. Hardened Insight data matching across alternate field names (`trainee`, `user`, `username`, `agent`, `email`), included `violation_reports` in activity/violation totals, surfaced explicit `No data` states for missing activity metrics, and added a Knowledge Gaps sub-view that groups below-full-mark questions by assessment, individual, and all groups.
@@ -1124,14 +1125,12 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 - `force-final-sync` / `final-sync-complete`: Handshake for the Intercepted Safe Quit flow.
 - `os-resume`: Triggers instant WebSocket reconnection when PC wakes from sleep.
 - `get-app-version`: Returns `package.json` version.
-- `get-update-status`: Returns updater readiness object `{ ready: boolean, channel: 'main' | 'beta' }`.
-- `manual-update-check`: Triggers auto-updater (supports channel-aware checks via `main`/`beta` payload).
-- `get-update-channel`: Returns the currently active updater channel (`main` or `beta`).
+- `get-update-status`: Returns updater readiness object `{ ready: boolean }`.
+- `manual-update-check`: Triggers the main-channel auto-updater check.
 - `set-kiosk-mode`: Toggles Kiosk mode.
 - `get-process-list`: Returns running processes (for Vetting).
 - `get-screen-count`: Returns the number of connected displays.
 - `get-active-window`: Returns title of foreground window (for Study Monitor).
-- `set-update-channel`: Switches update checks between `main` (inline release) and `beta` (pre-release).
 - `perform-network-test`: Pings a target IP/Host and returns latency in ms.
 - `get-system-stats`: Returns CPU load, RAM usage, Disk usage (C:), and Connection Type (Ethernet/Wireless).
 - `open-devtools`: Opens the Chromium Developer Tools.
@@ -1142,7 +1141,7 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 
 ## 7. Release & Update Protocol (AI Instructions)
 
-> **AI INSTRUCTION:** When the user asks to push an update, first confirm release type intent as either `main` (inline) or `beta` (pre-release), then follow this protocol.
+> **AI INSTRUCTION:** When the user asks to push an update, assume the supported app delivery path is the stable main release channel unless the user explicitly asks for a separate experimental branch outside the in-app updater.
 
 1.  **Silent vs Full Electron Update Decision Rules:**
     *   Before planning release work, explicitly tell the user whether the requested change can be delivered silently through Supabase/app config or requires a full Electron update.
@@ -1159,12 +1158,10 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
     *   Track/update health by client where possible: current version, channel, last check, downloaded/ready state, last error, and whether the client is behind the approved version.
 
 3.  **Release Type Rules:**
-    *   `main` update: publish with stable release channel.
-    *   `beta` update: publish as pre-release channel (strict opt-in adoption flow only).
-    *   Admin/Super Admin can manually check both channels from **Admin Tools > System Updates**.
+    *   In-app updater delivery uses the stable main release channel only.
+    *   Admin/Super Admin can manually check for approved main-channel updates from **Admin Tools > System Updates**.
     *   Trainee/Team Leader continue receiving normal app update prompts from the standard in-app updater flow.
-    *   Beta must never become mandatory for general users: no forced restart/login block and no global forced commands tied to beta payloads.
-    *   Remote/mandatory update nudges (`force_update`, min-version enforcement) must always target `main` channel checks only.
+    *   Remote/mandatory update nudges (`force_update`, min-version enforcement) must trigger main-channel checks only.
 
 4.  **Version + Changelog Rules:**
     *   Increment `version` in `package.json`.
@@ -1172,7 +1169,7 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
     *   Keep changelog wording concise: use only high-level labels such as `Bug Fix`, `Improvement`, `Feature Added` (no deep technical breakdown).
 
 5.  **Build Command Rules (Token-Based):**
-    *   Ensure scripts are ready so user only needs to provide token. `npm run dist` must remain a main-channel alias for `npm run dist:main`:
+    *   Ensure scripts are ready so user only needs to provide token. `npm run dist` must remain the stable release alias:
         ```bash
         $env:GH_TOKEN="<token>"
         npm run dist
@@ -1182,11 +1179,7 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
         $env:GH_TOKEN="<token>"
         npm run dist:main
         ```
-        or
-        ```bash
-        $env:GH_TOKEN="<token>"
-        npm run dist:beta
-        ```
+    *   Do not reintroduce beta/pre-release updater paths unless the user explicitly asks for a new release-channel architecture.
 
 6.  **Documentation Rules:**
     *   Update `AI_CONTEXT.md` whenever release workflow behavior changes.

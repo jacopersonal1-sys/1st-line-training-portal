@@ -1590,37 +1590,46 @@
         </div>
 
         <div id="admin-view-updates" class="admin-view">
-            <div class="card" style="text-align:center; max-width:600px; margin:40px auto;">
-                <img src="icon.svg" style="height:80px; margin-bottom:20px;">
-                <h3>System Updates</h3>
-                
-                <div id="updateStatusContainer" style="margin:20px 0;">
-                    <div style="font-size:0.9rem; color:var(--text-muted); margin-bottom:5px;">Current Version</div>
-                    <div id="currentVersionDisplay" style="font-size:1.5rem; font-weight:bold; color:var(--primary); margin-bottom:20px;">Loading...</div>
-
-                    <div id="updateChannelDisplay" style="font-size:0.9rem; margin-bottom:10px; color:var(--primary);">Active Channel: Main (Inline)</div>
-                    <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
-                        <button id="btnCheckMainUpdates" class="btn-primary btn-lg" onclick="triggerManualUpdate('main')"><i class="fas fa-rocket"></i> Check Main Update</button>
-                        <button id="btnCheckBetaUpdates" class="btn-secondary btn-lg" onclick="triggerManualUpdate('beta')"><i class="fas fa-flask"></i> Check Beta Update</button>
+            <div class="update-center-shell">
+                <div class="update-center-hero">
+                    <div class="update-center-icon"><i class="fas fa-cloud-arrow-down"></i></div>
+                    <div>
+                        <div class="workspace-eyebrow">Enterprise Delivery</div>
+                        <h3>System Updates</h3>
+                        <p>Approved updates download quietly in the background and install only when the app can safely restart.</p>
                     </div>
-                    <button id="btnInstallUpdate" class="btn-success btn-lg hidden" onclick="restartAndInstall()"><i class="fas fa-arrow-circle-up"></i> Restart & Install</button>
                 </div>
 
-                <div id="updateProgressContainer" class="hidden" style="background:var(--bg-input); padding:20px; border-radius:12px; border:1px solid var(--border-color); text-align:left;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-weight:bold;">
-                        <span id="updateStatusText" style="color:var(--primary);">Downloading...</span>
-                        <span id="updateProgressText">0%</span>
+                <div class="update-center-grid">
+                    <section class="update-center-panel">
+                        <div class="update-center-label">Installed Version</div>
+                        <div id="currentVersionDisplay" class="update-version-value">Loading...</div>
+                        <div class="update-channel-pill"><i class="fas fa-shield-check"></i> Main release channel</div>
+                    </section>
+
+                    <section class="update-center-panel update-center-actions">
+                        <div class="update-center-label">Delivery Control</div>
+                        <button id="btnCheckUpdates" class="btn-primary btn-lg" onclick="triggerManualUpdate()"><i class="fas fa-rotate"></i> Check for Updates</button>
+                        <button id="btnInstallUpdate" class="btn-success btn-lg hidden" onclick="restartAndInstall()"><i class="fas fa-power-off"></i> Install at Safe Restart</button>
+                        <p>Use install after active grading, live assessment, or trainee test work is complete.</p>
+                    </section>
+                </div>
+
+                <div id="updateProgressContainer" class="update-progress-panel hidden">
+                    <div class="update-progress-head">
+                        <span id="updateStatusText">Downloading quietly...</span>
+                        <strong id="updateProgressText">0%</strong>
                     </div>
-                    <div class="progress-track" style="height:12px; margin:0;">
+                    <div class="progress-track">
                         <div id="updateProgressBar" class="progress-fill" style="width:0%;"></div>
                     </div>
-                    <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px; text-align:center;">Please do not close the application.</p>
+                    <p>The app can keep running while the update downloads.</p>
                 </div>
 
-                <div style="margin-top:20px; text-align:left;">
-                    <h4 style="font-size:0.9rem; color:var(--text-muted); border-bottom:1px solid var(--border-color); padding-bottom:5px;">Update Log</h4>
-                    <div id="updateLog" style="height:100px; overflow-y:auto; font-family:monospace; font-size:0.8rem; color:var(--text-muted); padding:10px; background:rgba(0,0,0,0.2); border-radius:6px;"></div>
-                </div>
+                <section class="update-center-log-panel">
+                    <div class="update-center-label">Delivery Log</div>
+                    <div id="updateLog" class="update-log"></div>
+                </section>
             </div>
         </div>
 

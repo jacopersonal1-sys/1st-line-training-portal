@@ -1,36 +1,9 @@
 /* ================= ADMIN: SYSTEM UPDATES ================= */
 
 let ADMIN_UPDATE_LISTENERS_BOUND = false;
-let ADMIN_UPDATE_CHANNEL = 'main';
 
 function getAdminUpdateIpc() {
     return window.electronAPI && window.electronAPI.ipcRenderer ? window.electronAPI.ipcRenderer : null;
-}
-
-function normalizeUpdateChannel(value) {
-    const raw = String(value || '').trim().toLowerCase();
-    return (raw === 'beta' || raw === 'staging' || raw === 'prerelease' || raw === 'pre-release') ? 'beta' : 'main';
-}
-
-function renderUpdateChannelState() {
-    const badge = document.getElementById('updateChannelDisplay');
-    if (!badge) return;
-
-    const isBeta = ADMIN_UPDATE_CHANNEL === 'beta';
-    badge.innerText = isBeta ? 'Active Channel: Beta (Pre-release)' : 'Active Channel: Main (Inline)';
-    badge.style.color = isBeta ? '#f1c40f' : 'var(--primary)';
-}
-
-async function syncUpdateChannelState() {
-    const ipcRenderer = getAdminUpdateIpc();
-    if (!ipcRenderer) return;
-    try {
-        const channel = await ipcRenderer.invoke('get-update-channel');
-        ADMIN_UPDATE_CHANNEL = normalizeUpdateChannel(channel);
-    } catch (e) {
-        ADMIN_UPDATE_CHANNEL = 'main';
-    }
-    renderUpdateChannelState();
 }
 
 function bindAdminUpdateListeners() {
@@ -66,23 +39,16 @@ function bindAdminUpdateListeners() {
         }
     });
 
-    ipcRenderer.on('update-channel-changed', (event, payload) => {
-        ADMIN_UPDATE_CHANNEL = normalizeUpdateChannel(payload && payload.channel);
-        renderUpdateChannelState();
-    });
-
     ipcRenderer.on('update-downloaded', () => {
-        appendUpdateLog("Update downloaded successfully.", 'success');
+        appendUpdateLog("Update downloaded successfully. Install when the app is at a safe stopping point.", 'success');
 
         const statusText = document.getElementById('updateStatusText');
         const installBtn = document.getElementById('btnInstallUpdate');
-        const checkMainBtn = document.getElementById('btnCheckMainUpdates');
-        const checkBetaBtn = document.getElementById('btnCheckBetaUpdates');
+        const checkBtn = document.getElementById('btnCheckUpdates');
 
-        if (statusText) statusText.innerText = "Download Complete";
+        if (statusText) statusText.innerText = "Ready to Install";
         if (installBtn) installBtn.classList.remove('hidden');
-        if (checkMainBtn) checkMainBtn.classList.add('hidden');
-        if (checkBetaBtn) checkBetaBtn.classList.add('hidden');
+        if (checkBtn) checkBtn.classList.add('hidden');
     });
 }
 
@@ -97,32 +63,29 @@ function loadAdminUpdates() {
             if(el) el.innerText = ver;
         });
     }
-    syncUpdateChannelState();
 
     // 2. Reset UI
     const log = document.getElementById('updateLog');
     if(log && log.innerHTML === '') {
-        appendUpdateLog("Update Center initialized.", 'info');
-        appendUpdateLog("Use Main for normal rollout and Beta for optional pre-release checks.", 'info');
+        appendUpdateLog("Enterprise Update Center initialized.", 'info');
+        appendUpdateLog("Updates download in the background and install at a safe restart point.", 'info');
     }
 }
 
-function triggerManualUpdate(channel = 'main') {
+function triggerManualUpdate() {
     const ipcRenderer = getAdminUpdateIpc();
     if (!ipcRenderer) {
         appendUpdateLog("Electron update bridge is unavailable.", 'error');
         return;
     }
 
-    ADMIN_UPDATE_CHANNEL = normalizeUpdateChannel(channel);
-    renderUpdateChannelState();
-    appendUpdateLog(`Checking ${ADMIN_UPDATE_CHANNEL} updates...`, 'info');
+    appendUpdateLog("Checking approved main-channel updates...", 'info');
     
     // Reset Progress
     document.getElementById('updateProgressContainer')?.classList.add('hidden');
     document.getElementById('btnInstallUpdate')?.classList.add('hidden');
     
-    ipcRenderer.send('manual-update-check', { channel: ADMIN_UPDATE_CHANNEL });
+    ipcRenderer.send('manual-update-check');
 }
 
 function appendUpdateLog(msg, type='info') {

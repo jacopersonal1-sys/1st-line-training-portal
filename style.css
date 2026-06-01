@@ -2781,6 +2781,122 @@ section.report-card-workspace.active {
     animation: shimmer 2s infinite linear;
 }
 
+/* ================= ENTERPRISE UPDATE CENTER ================= */
+.update-center-shell {
+    max-width: 920px;
+    margin: 32px auto;
+    display: grid;
+    gap: 16px;
+}
+.update-center-hero,
+.update-center-panel,
+.update-progress-panel,
+.update-center-log-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-card);
+}
+.update-center-hero {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 22px;
+}
+.update-center-hero h3 {
+    margin: 2px 0 6px;
+    font-size: 1.45rem;
+}
+.update-center-hero p,
+.update-center-actions p,
+.update-progress-panel p {
+    margin: 0;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+.update-center-icon {
+    width: 58px;
+    height: 58px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--primary) 16%, var(--bg-input));
+    color: var(--primary);
+    font-size: 1.6rem;
+    flex: 0 0 auto;
+}
+.workspace-eyebrow,
+.update-center-label {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.update-center-grid {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(320px, 1.2fr);
+    gap: 16px;
+}
+.update-center-panel {
+    padding: 18px;
+}
+.update-version-value {
+    margin: 8px 0 12px;
+    color: var(--primary);
+    font-size: 2rem;
+    font-weight: 900;
+}
+.update-channel-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 9px;
+    border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border-color));
+    border-radius: 999px;
+    color: var(--text-main);
+    background: color-mix(in srgb, var(--primary) 9%, var(--bg-input));
+    font-size: 0.82rem;
+}
+.update-center-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+}
+.update-progress-panel,
+.update-center-log-panel {
+    padding: 18px;
+}
+.update-progress-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 10px;
+    color: var(--primary);
+}
+.update-log {
+    height: 132px;
+    overflow-y: auto;
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-muted);
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.82rem;
+}
+@media (max-width: 760px) {
+    .update-center-hero {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .update-center-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .checklist-container {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
