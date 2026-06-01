@@ -1066,7 +1066,7 @@ function submitMarking() {
     return finalizeAdminMarking(subId);
 }
 
-function viewCompletedTest(submissionId, arg2, arg3) {
+async function viewCompletedTest(submissionId, arg2, arg3) {
     if (CURRENT_USER?.role === 'trainee') {
         alert("Access denied. Trainees cannot view marked scripts after review.");
         return;
@@ -1090,12 +1090,7 @@ function viewCompletedTest(submissionId, arg2, arg3) {
         return;
     }
     
-    openAdminMarking(sub.id, { claim: mode !== 'view', readOnly: mode === 'view' });
-    
-    setTimeout(() => {
-        const btn = document.getElementById('markingSubmitBtn');
-        if(btn) btn.style.display = 'none';
-    }, 50);
+    await openAdminMarking(sub.id, { claim: mode !== 'view', readOnly: mode === 'view' });
     
     if (mode === 'view') {
         setTimeout(() => {

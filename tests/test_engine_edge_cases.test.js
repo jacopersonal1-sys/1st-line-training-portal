@@ -320,6 +320,57 @@ describe('Test engine edge cases', () => {
         expect(stack.innerHTML).not.toContain('Edit Note');
     });
 
+    test('completed script edit keeps save changes available for score adjustments', async () => {
+        const coreSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_core.js'), 'utf8');
+        const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
+        eval(coreSrc);
+        eval(adminSrc);
+
+        global.CURRENT_USER = { role: 'admin', user: 'manager' };
+        window.supabaseClient = null;
+
+        const stack = { innerHTML: '' };
+        const modal = { classList: { remove: jest.fn(), add: jest.fn(), contains: jest.fn(() => false) } };
+        const submitBtn = { style: {}, dataset: {}, onclick: null, innerText: '' };
+        const container = { innerHTML: '' };
+
+        global.document = {
+            getElementById: jest.fn((id) => {
+                if (id === 'markingModal') return modal;
+                if (id === 'markingContainer') return container;
+                if (id === 'markingQuestionStack') return stack;
+                if (id === 'markingSubmitBtn') return submitBtn;
+                if (id === 'markingLeaseBanner') return { className: '', innerHTML: '', classList: { add: jest.fn(), remove: jest.fn(), toggle: jest.fn() } };
+                return null;
+            }),
+            querySelectorAll: jest.fn(() => [])
+        };
+        window.document = global.document;
+
+        localStorage.setItem('submissions', JSON.stringify([{
+            id: 'sub_edit_completed',
+            trainee: 'Alice',
+            testId: 'test_edit_completed',
+            testTitle: 'Editable Completed Assessment',
+            status: 'completed',
+            score: 100,
+            answers: { 0: 'Original answer' },
+            scores: { 0: 1 },
+            testSnapshot: {
+                id: 'test_edit_completed',
+                title: 'Editable Completed Assessment',
+                questions: [{ text: 'Manual question', type: 'text', points: 1, modelAnswer: 'Expected answer' }]
+            }
+        }]));
+
+        await viewCompletedTest('sub_edit_completed', null, 'edit');
+
+        expect(submitBtn.style.display).toBe('inline-block');
+        expect(submitBtn.innerText).toBe('Save Changes');
+        expect(submitBtn.dataset.submissionId).toBe('sub_edit_completed');
+        expect(typeof submitBtn.onclick).toBe('function');
+    });
+
     test('completed legacy scripts without per-question scores cannot be overwritten from reconstructed marks', async () => {
         const adminSrc = fs.readFileSync(path.resolve(__dirname, '../js/assessment_admin.js'), 'utf8');
         eval(adminSrc);
