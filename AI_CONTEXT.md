@@ -50,6 +50,7 @@
 | `course_progress_request_config` | Object | Blob (`app_documents`) | Synced recipient list, SMTP server credentials, trainee request message/button text, email body template, and trainee-facing acknowledgement text for per-timeline course move-on requests. |
 | `admin_notifications` | Array | Blob (`app_documents`) | Admin notification-bell event stream; course move-on requests write here after email send/fallback succeeds. |
 | `test_integrity_overrides` | Object | Blob (`app_documents`) | Admin overrides for Test Engine Integrity Review, keyed by whole assessment/live/vetting entry. Stores validity and attempt 1/2 classifications. |
+| `update_policy_config` | Object | Blob (`app_documents`) | Planned/approved enterprise update policy document for controlling silent config rollout vs full Electron release behavior. Should store approved versions, minimum required version, rollout mode, target roles/groups/users, quiet hours, deadline, and non-intrusive install rules. |
 | `adminDecisions` | Object | Blob (`app_documents`) | Legacy Onboard Report manual review decisions keyed by trainee name; kept for report compatibility. |
 | `liveSessions` | Array | Row (`live_sessions`) | Active state of Live Assessments. |
 | `tests` | Array | Blob | Assessment definitions (Questions, Settings). |
@@ -1143,7 +1144,21 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
 
 > **AI INSTRUCTION:** When the user asks to push an update, first confirm release type intent as either `main` (inline) or `beta` (pre-release), then follow this protocol.
 
-1.  **Release Type Rules:**
+1.  **Silent vs Full Electron Update Decision Rules:**
+    *   Before planning release work, explicitly tell the user whether the requested change can be delivered silently through Supabase/app config or requires a full Electron update.
+    *   **Silent Supabase/config update:** Use when the change only modifies synced data/config/content and existing client code already knows how to consume it. Examples: rule text, training/booking messages, assessment feedback tooltip/message text, feature flags already implemented in code, rosters, schedules, update policy, target groups/users, admin notification wording, checklist/progress configuration, and other `app_documents`/row data edits.
+    *   **Full Electron update required:** Use when the change modifies application code, HTML, CSS, Electron main/preload behavior, scoring/grading logic, sync behavior, security/auth rules, updater behavior, database schema expectations, tests, packaged assets, or any feature that current installed clients do not already support.
+    *   **Hybrid release:** Use when a full Electron update adds support for a new configurable behavior, then future adjustments can be silent config updates. Example: build `update_policy_config` support once via Electron release; later policy changes can be Supabase-only.
+    *   Never imply a JavaScript/HTML/CSS bug fix can be silently delivered to already-installed clients unless that exact behavior is already driven by synced config.
+
+2.  **Enterprise Update Delivery UX Goals:**
+    *   Keep normal updates non-intrusive: prefer notification-bell items, small banners, and Admin Update Center progress over full-screen modals.
+    *   Separate download from install. Updates may download in the background, but install should wait for safe moments such as login screen, logout, app close, after assessment/vetting/live sessions, or an admin maintenance window.
+    *   Reserve blocking login/restart prompts for enforced minimum-version or critical security/integrity releases.
+    *   Never interrupt active tests, Vetting Arena, or trainee Live Assessment sessions. Queue update install until the session ends.
+    *   Track/update health by client where possible: current version, channel, last check, downloaded/ready state, last error, and whether the client is behind the approved version.
+
+3.  **Release Type Rules:**
     *   `main` update: publish with stable release channel.
     *   `beta` update: publish as pre-release channel (strict opt-in adoption flow only).
     *   Admin/Super Admin can manually check both channels from **Admin Tools > System Updates**.
@@ -1151,12 +1166,12 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
     *   Beta must never become mandatory for general users: no forced restart/login block and no global forced commands tied to beta payloads.
     *   Remote/mandatory update nudges (`force_update`, min-version enforcement) must always target `main` channel checks only.
 
-2.  **Version + Changelog Rules:**
+4.  **Version + Changelog Rules:**
     *   Increment `version` in `package.json`.
     *   Do not add trainee-facing release notes unless explicitly requested.
     *   Keep changelog wording concise: use only high-level labels such as `Bug Fix`, `Improvement`, `Feature Added` (no deep technical breakdown).
 
-3.  **Build Command Rules (Token-Based):**
+5.  **Build Command Rules (Token-Based):**
     *   Ensure scripts are ready so user only needs to provide token. `npm run dist` must remain a main-channel alias for `npm run dist:main`:
         ```bash
         $env:GH_TOKEN="<token>"
@@ -1173,12 +1188,12 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
         npm run dist:beta
         ```
 
-4.  **Documentation Rules:**
+6.  **Documentation Rules:**
     *   Update `AI_CONTEXT.md` whenever release workflow behavior changes.
     *   Add an internal release note block only when contracts or architecture change.
     *   Do not add trainee-facing changelog entries unless explicitly requested.
 
-5.  **Scoped Git Commands:**
+7.  **Scoped Git Commands:**
     *   Prefer scoped commits:
         ```bash
         git add <only-relevant-files>
