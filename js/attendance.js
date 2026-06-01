@@ -784,12 +784,12 @@ function manageAgentAttendance(username) {
             <div class="attendance-summary-card"><div class="attendance-summary-label">Missing Weekdays</div><div class="attendance-summary-value">${absentRows.length}</div></div>
             <div class="attendance-summary-card"><div class="attendance-summary-label">Open Clock-Outs</div><div class="attendance-summary-value">${openRows.length}</div></div>
         </div>
-        <div class="attendance-register-card" style="border-top: 4px solid var(--primary);">
+        <div class="attendance-register-card attendance-history-card" style="border-top: 4px solid var(--primary);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0; padding:14px; border-bottom:1px solid var(--border-color);">
                 <h3 style="margin:0;"><i class="fas fa-history"></i> Attendance History: <span style="color:var(--primary);">${escapeAttendanceHtml(username)}</span></h3>
                 <button class="btn-secondary btn-sm" onclick="renderAttendanceRegister({ force: true })">&larr; Back to Register</button>
             </div>
-            <div class="table-responsive">
+            <div class="table-responsive attendance-history-table">
             <table class="admin-table">
                 <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody>

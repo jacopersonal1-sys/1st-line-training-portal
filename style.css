@@ -223,7 +223,9 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
 .attendance-admin-content {
     flex: 1;
     min-height: 0;
+    max-height: 100%;
     overflow: auto;
+    overscroll-behavior: contain;
     padding-right: 4px;
 }
 
@@ -231,6 +233,7 @@ h2 { font-size: 1.5rem; margin-bottom: 20px; padding-bottom: 10px; border-bottom
     flex: 1;
     min-height: 0;
     align-items: stretch;
+    overflow: hidden;
 }
 
 .attendance-review-workspace .admin-data-sidebar {
@@ -446,6 +449,18 @@ body.density-spacious th {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     overflow: hidden;
+}
+
+.attendance-history-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.attendance-history-table {
+    overflow: auto;
+    max-height: calc((var(--app-vh) * 100) - 305px);
+    min-height: 260px;
 }
 
 .attendance-agent-cell {
