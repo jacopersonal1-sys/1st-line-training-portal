@@ -1166,7 +1166,10 @@ If you want me to run the prepared `ops/unbind_tshepo.sql` against your DB, prov
     *   Remote/mandatory update nudges (`force_update`, min-version enforcement) must trigger main-channel checks only.
 
 4.  **Version + Changelog Rules:**
-    *   Increment `version` in `package.json`.
+    *   Every full Electron main release must use a fresh, never-published version. Do not tell the user to run `npm run dist` until this is verified.
+    *   Before giving build commands, check the local version in `package.json`/`package-lock.json`, inspect local commits, and verify whether that version was already built or published. Treat electron-builder output such as `overwrite published file` or an existing GitHub release asset for the same version as proof the version has already been used.
+    *   If the current version has already been published or the release contents changed after a build attempt, bump to the next patch version before the next main Electron build. Example: if `2.7.10` was built/published and more code fixes are added, release `2.7.11`.
+    *   Increment `version` in both `package.json` and `package-lock.json` for every full Electron release.
     *   Do not add trainee-facing release notes unless explicitly requested.
     *   Keep changelog wording concise: use only high-level labels such as `Bug Fix`, `Improvement`, `Feature Added` (no deep technical breakdown).
 
