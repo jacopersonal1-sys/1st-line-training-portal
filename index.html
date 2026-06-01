@@ -69,6 +69,10 @@
               <label for="rememberMe" style="margin: 0; cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">Remember Me</label>
           </div>
           <button type="submit" class="btn-primary btn-lg">Sign In</button>
+          <div class="sso-login-divider"><span>or</span></div>
+          <button type="button" id="btnSsoLogin" class="btn-secondary btn-lg sso-login-btn" onclick="attemptSsoLogin()">
+              <i class="fab fa-microsoft"></i> Sign in with Microsoft
+          </button>
       </form>
     </div>
     

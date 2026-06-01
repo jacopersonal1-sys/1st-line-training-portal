@@ -48,8 +48,17 @@ const UPDATE_FEED_CONFIG = {
     owner: 'jacopersonal1-sys',
     repo: '1st-line-training-portal'
 };
+const SSO_PROTOCOL = 'first-line-training';
 
 Menu.setApplicationMenu(null);
+
+if (!app.isDefaultProtocolClient(SSO_PROTOCOL)) {
+    if (process.defaultApp && process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient(SSO_PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+    } else {
+        app.setAsDefaultProtocolClient(SSO_PROTOCOL);
+    }
+}
 
 autoUpdater.allowPrerelease = false;
 
@@ -109,6 +118,18 @@ async function runUpdateCheck(options = {}) {
             setTimeout(() => { runUpdateCheck(); }, 350);
         }
     }
+}
+
+function deliverSsoCallbackUrl(rawUrl) {
+    const url = String(rawUrl || '').trim();
+    if (!url || !url.toLowerCase().startsWith(`${SSO_PROTOCOL}://auth/callback`)) return false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+        mainWindow.webContents.send('sso-auth-callback', url);
+        return true;
+    }
+    return false;
 }
 
 function isTrustedStudyUrl(rawUrl = '') {
@@ -967,12 +988,21 @@ if (!gotTheLock) {
         } catch(e) { console.error("Clone cleanup error:", e); }
     }
 
-    app.on('second-instance', () => {
+    app.on('second-instance', (event, commandLine) => {
         // Someone tried to run a second instance, we should focus our window.
+        const callbackUrl = (Array.isArray(commandLine) ? commandLine : []).find(arg =>
+            String(arg || '').toLowerCase().startsWith(`${SSO_PROTOCOL}://auth/callback`)
+        );
+        if (callbackUrl && deliverSsoCallbackUrl(callbackUrl)) return;
         if (mainWindow) {
             if (mainWindow.isMinimized()) mainWindow.restore();
             mainWindow.focus();
         }
+    });
+
+    app.on('open-url', (event, url) => {
+        event.preventDefault();
+        deliverSsoCallbackUrl(url);
     });
 
     app.whenReady().then(() => {
@@ -1029,6 +1059,10 @@ ipcMain.handle('get-update-status', () => {
     return {
         ready: updateReady
     };
+});
+
+ipcMain.handle('get-sso-redirect-url', async () => {
+    return `${SSO_PROTOCOL}://auth/callback`;
 });
 
 // IPC Listener for Manual Update Check

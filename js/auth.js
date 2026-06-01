@@ -179,7 +179,7 @@ async function refreshAuthCriticalDataFromServer() {
         const docsQuery = window.supabaseClient
             .from('app_documents')
             .select('key, content, updated_at')
-            .in('key', ['revokedUsers', 'system_config', 'rosters', 'accessControl']);
+            .in('key', ['revokedUsers', 'system_config', 'rosters', 'accessControl', 'sso_login_config']);
 
         const [usersResult, docsResult] = await withAuthTimeout(Promise.all([usersQuery, docsQuery]));
 
@@ -365,6 +365,251 @@ function toggleLoginMode(mode) {
     }
   }
 }
+
+function getSsoLoginConfig() {
+  const storedConfig = authReadObject('sso_login_config', {});
+  const systemConfig = authReadObject('system_config', {});
+  const systemSso = systemConfig.sso_login || systemConfig.sso || {};
+  return {
+      enabled: storedConfig.enabled === true || systemSso.enabled === true,
+      provider: String(storedConfig.provider || systemSso.provider || 'azure').trim().toLowerCase() || 'azure',
+      allowedDomains: Array.isArray(storedConfig.allowedDomains)
+          ? storedConfig.allowedDomains
+          : (Array.isArray(systemSso.allowedDomains) ? systemSso.allowedDomains : [])
+  };
+}
+
+function getSsoLoginIpc() {
+  if (window.electronAPI && window.electronAPI.sso) return window.electronAPI.sso;
+  return null;
+}
+
+function getSsoEmailCandidates(authUser) {
+  const identities = Array.isArray(authUser?.identities) ? authUser.identities : [];
+  const meta = authUser?.user_metadata || {};
+  const candidates = [
+      authUser?.email,
+      meta.email,
+      meta.preferred_username,
+      meta.upn,
+      meta.userPrincipalName
+  ];
+  identities.forEach(identity => {
+      const data = identity?.identity_data || {};
+      candidates.push(data.email, data.preferred_username, data.upn, data.userPrincipalName);
+  });
+  return Array.from(new Set(candidates.map(value => String(value || '').trim().toLowerCase()).filter(Boolean)));
+}
+
+function findAppUserForSso(authUser) {
+  const emailCandidates = getSsoEmailCandidates(authUser);
+  const nameCandidates = emailCandidates.map(email => email.split('@')[0]).filter(Boolean);
+  const users = authReadArray('users');
+  return users.find(user => {
+      const profileEmail = String(user?.email || user?.traineeData?.email || user?.contactEmail || '').trim().toLowerCase();
+      const username = String(user?.user || user?.username || '').trim().toLowerCase();
+      const normalizedUsername = normalizeLoginIdentity(username);
+      return (profileEmail && emailCandidates.includes(profileEmail)) ||
+          emailCandidates.includes(username) ||
+          nameCandidates.includes(username) ||
+          nameCandidates.some(name => normalizeLoginIdentity(name) === normalizedUsername);
+  }) || null;
+}
+
+async function validateSsoResolvedUser(appUser, authUser) {
+  const loginError = document.getElementById('loginError');
+  const config = authReadObject('system_config');
+  const ssoConfig = getSsoLoginConfig();
+  const emailCandidates = getSsoEmailCandidates(authUser);
+  const allowedDomains = (Array.isArray(ssoConfig.allowedDomains) ? ssoConfig.allowedDomains : [])
+      .map(domain => String(domain || '').trim().toLowerCase().replace(/^@/, ''))
+      .filter(Boolean);
+
+  if (allowedDomains.length > 0) {
+      const domainAllowed = emailCandidates.some(email => allowedDomains.includes(String(email).split('@')[1] || ''));
+      if (!domainAllowed) {
+          loginError.innerText = "SSO account domain is not allowed for this app.";
+          return false;
+      }
+  }
+
+  if (isUserRevokedLocally(appUser.user || appUser.username)) {
+      loginError.innerText = "Account access revoked.";
+      return false;
+  }
+
+  const isBlocked = appUser.blocked === true || String(appUser.status || '').toLowerCase().trim() === 'blocked';
+  if (isBlocked) {
+      loginError.innerText = "Account is blocked. Please contact an administrator.";
+      return false;
+  }
+
+  if (config.security) {
+      if (config.security.maintenance_mode && appUser.role !== 'admin' && appUser.role !== 'super_admin') {
+          loginError.innerText = "System is in Maintenance Mode. Admin access only.";
+          return false;
+      }
+      if (config.security.lockdown_mode && appUser.role !== 'super_admin') {
+          loginError.innerText = "SYSTEM LOCKDOWN ACTIVE. Access Denied.";
+          return false;
+      }
+  }
+
+  const userRole = appUser.role ? appUser.role.toLowerCase().trim() : '';
+  const activeBootMode = String(window.APP_BOOT_MODE || '').toLowerCase().trim();
+  if (activeBootMode === 'trainee' && userRole !== 'trainee') {
+      loginError.innerText = "This startup is locked to Trainee runtime. Restart and choose Admin / Teamleader.";
+      return false;
+  }
+  if (activeBootMode === 'admin' && userRole === 'trainee') {
+      loginError.innerText = "This startup is locked to Admin / Teamleader runtime. Restart and choose Trainee.";
+      return false;
+  }
+  if (window.LOGIN_MODE === 'admin' && userRole === 'trainee') {
+      loginError.innerText = "Trainees must use Trainee tab.";
+      return false;
+  }
+
+  const currentClientId = localStorage.getItem('client_id') || '';
+  const isRoamingUser = appUser.role === 'admin' || appUser.role === 'super_admin';
+  if (!isRoamingUser) {
+      const rawBound = typeof appUser.boundClientId === 'undefined' ? '' : String(appUser.boundClientId || '').trim();
+      const isBound = rawBound !== '' && rawBound.toLowerCase() !== 'undefined' && rawBound.toLowerCase() !== 'null';
+      if (isBound && rawBound !== String(currentClientId || '').trim()) {
+          console.error("Security Violation: SSO Client ID Mismatch");
+          nukeApplication();
+          return false;
+      }
+      if (!isBound) {
+          const users = authReadArray('users');
+          const idx = users.findIndex(user => normalizeLoginIdentity(user?.user || user?.username) === normalizeLoginIdentity(appUser.user || appUser.username));
+          appUser.boundClientId = String(currentClientId || '').trim();
+          if (idx > -1) {
+              users[idx] = { ...users[idx], boundClientId: appUser.boundClientId };
+              localStorage.setItem('users', JSON.stringify(users));
+              secureAuthSave();
+          }
+      }
+  }
+
+  return true;
+}
+
+async function completeSsoLogin(authUser) {
+  await refreshAuthCriticalDataFromServer();
+  const appUser = findAppUserForSso(authUser);
+  const loginError = document.getElementById('loginError');
+  if (!appUser) {
+      const email = getSsoEmailCandidates(authUser)[0] || 'unknown email';
+      loginError.innerText = `SSO succeeded for ${email}, but no matching app user exists yet.`;
+      return;
+  }
+
+  const allowed = await validateSsoResolvedUser(appUser, authUser);
+  if (!allowed) return;
+
+  appUser.ssoLastLoginAt = new Date().toISOString();
+  appUser.ssoEmail = getSsoEmailCandidates(authUser)[0] || appUser.ssoEmail || '';
+  applySuccessfulLoginSession(appUser, { remember: false, clearRemember: true });
+}
+
+async function handleSsoCallbackUrl(callbackUrl) {
+  const loginError = document.getElementById('loginError');
+  try {
+      const client = window.supabaseClient || (typeof window.initSupabaseClient === 'function' ? window.initSupabaseClient() : null);
+      if (!client || !client.auth) throw new Error('Supabase auth client is not available.');
+
+      loginError.innerText = "Completing SSO sign in...";
+      const parsed = new URL(String(callbackUrl || ''));
+      const params = new URLSearchParams(parsed.search || '');
+      const hashParams = new URLSearchParams(String(parsed.hash || '').replace(/^#/, ''));
+
+      const authError = params.get('error_description') || hashParams.get('error_description') || params.get('error') || hashParams.get('error');
+      if (authError) throw new Error(authError);
+
+      if (params.get('code')) {
+          const { data, error } = await client.auth.exchangeCodeForSession(params.get('code'));
+          if (error) throw error;
+          await completeSsoLogin(data?.user);
+          return;
+      }
+
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+      if (accessToken) {
+          const { data, error } = await client.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken || ''
+          });
+          if (error) throw error;
+          await completeSsoLogin(data?.user);
+          return;
+      }
+
+      const { data, error } = await client.auth.getUser();
+      if (error) throw error;
+      await completeSsoLogin(data?.user);
+  } catch (error) {
+      console.error('SSO callback failed:', error);
+      loginError.innerText = `SSO sign in failed: ${error.message || error}`;
+  }
+}
+
+async function attemptSsoLogin() {
+  const loginError = document.getElementById('loginError');
+  const btn = document.getElementById('btnSsoLogin');
+  const ipc = getSsoLoginIpc();
+  const config = getSsoLoginConfig();
+
+  if (!config.enabled) {
+      loginError.innerText = "SSO is prepared but not enabled yet. Complete Supabase SSO setup first.";
+      return;
+  }
+  if (!ipc || typeof ipc.getRedirectUrl !== 'function') {
+      loginError.innerText = "SSO is only available in the desktop app.";
+      return;
+  }
+
+  try {
+      if (btn) btn.disabled = true;
+      loginError.innerText = "Opening Microsoft sign in...";
+      await refreshAuthCriticalDataFromServer();
+
+      const client = window.supabaseClient || (typeof window.initSupabaseClient === 'function' ? window.initSupabaseClient() : null);
+      if (!client || !client.auth) throw new Error('Supabase auth client is not available.');
+
+      const redirectTo = await ipc.getRedirectUrl();
+      const { data, error } = await client.auth.signInWithOAuth({
+          provider: config.provider || 'azure',
+          options: {
+              redirectTo,
+              skipBrowserRedirect: true,
+              scopes: 'openid email profile'
+          }
+      });
+      if (error) throw error;
+      if (!data?.url) throw new Error('Supabase did not return a provider sign-in URL.');
+
+      await window.electronAPI.shell.openExternal(data.url);
+      loginError.innerText = "Complete Microsoft sign in in your browser, then return to the app.";
+  } catch (error) {
+      console.error('SSO start failed:', error);
+      loginError.innerText = `SSO sign in failed: ${error.message || error}`;
+  } finally {
+      if (btn) btn.disabled = false;
+  }
+}
+
+function setupSsoCallbackListener() {
+  const ipc = getSsoLoginIpc();
+  if (!ipc || typeof ipc.onCallback !== 'function' || window.__SSO_CALLBACK_BOUND) return;
+  window.__SSO_CALLBACK_BOUND = true;
+  ipc.onCallback((url) => {
+      handleSsoCallbackUrl(url);
+  });
+}
+
+setupSsoCallbackListener();
 
 async function attemptLogin() {
   let u = (window.LOGIN_MODE === 'admin') ? document.getElementById('adminUsername').value : document.getElementById('traineeUsername').value;

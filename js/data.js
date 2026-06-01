@@ -21,6 +21,7 @@ const DB_SCHEMA = {
     course_progress_request_config: { recipients: [], requestMessage: '', emailBodyTemplate: '', acknowledgementMessage: '', smtp: { host: '', port: 587, secure: false, user: '', pass: '', from: '' }, updatedAt: null, updatedBy: null },
     admin_notifications: [],
     test_integrity_overrides: { entries: {}, updatedAt: null, updatedBy: null },
+    sso_login_config: { enabled: false, provider: 'azure', allowedDomains: [], updatedAt: null, updatedBy: null },
     qa_data: { questions: [], submissions: [], updatedAt: null, updatedBy: null },
     system_tombstones: [],
     adminDecisions: {}, // Legacy report-card review overrides

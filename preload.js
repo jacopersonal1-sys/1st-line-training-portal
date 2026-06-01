@@ -13,6 +13,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
         },
         removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
     },
+    sso: {
+        getRedirectUrl: () => ipcRenderer.invoke('get-sso-redirect-url'),
+        onCallback: (listener) => {
+            const safeListener = (event, url) => listener(url);
+            ipcRenderer.on('sso-auth-callback', safeListener);
+            return safeListener;
+        },
+        clearCallbacks: () => ipcRenderer.removeAllListeners('sso-auth-callback')
+    },
     shell: {
         openExternal: (url) => ipcRenderer.invoke('open-external-url', url)
     },

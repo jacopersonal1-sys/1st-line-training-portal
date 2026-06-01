@@ -750,6 +750,31 @@ body.density-spacious th {
   padding: 15px 0; color: var(--text-main); font-size: 1.1rem; transition: var(--transition);
 }
 .plain-input:focus { border-color: var(--primary); }
+.sso-login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: -8px 0;
+}
+.sso-login-divider::before,
+.sso-login-divider::after {
+    content: '';
+    height: 1px;
+    flex: 1;
+    background: var(--border-color);
+}
+.sso-login-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+}
 .login-error { color: #ff5252; margin-top: 20px; min-height: 20px; font-size: 0.9rem; text-align: center; }
 
 /* ================= APP LAYOUT ================= */
