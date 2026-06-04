@@ -260,8 +260,9 @@ function mergeArchiveRows(existingRows, incomingRows) {
 
 const RETRAIN_ARCHIVE_MAX_STRING_LENGTH = 12000;
 const RETRAIN_ARCHIVE_MAX_DEPTH = 5;
+const RETRAIN_ARCHIVE_TARGET_BYTES = 900000;
 const RETRAIN_ARCHIVE_OMIT_FIELD = '[omitted from retrain archive to keep migration safe]';
-const RETRAIN_ARCHIVE_OMIT_KEY_RE = /(base64|blob|binary|dataurl|data_url|screenshot|screenshots|image|images|attachment|attachments|reporthtml|renderedhtml|contenthtml|html)$/i;
+const RETRAIN_ARCHIVE_OMIT_KEY_RE = /(base64|blob|binary|dataurl|data_url|screenshot|screenshots|image|images|attachment|attachments|reporthtml|renderedhtml|contenthtml|html|testsnapshot|assessmentsnapshot|questions)$/i;
 
 function compactArchivePrimitive(value, keyName) {
     if (typeof value !== 'string') return value;
@@ -319,18 +320,21 @@ function summarizeArchiveNotes(notes) {
     return list.map(note => compactArchiveValue(note, 'note', 0));
 }
 
-function compactRetrainArchiveEntry(entry) {
+function compactRetrainArchiveEntry(entry, level) {
     if (!entry || typeof entry !== 'object') return entry;
+    const compactLevel = Number(level || 1);
     const next = { ...entry };
-    next.records = compactArchiveRows(next.records, 'full');
-    next.submissions = compactArchiveRows(next.submissions, 'full');
-    next.attendance = compactArchiveRows(next.attendance, 'full');
-    next.reports = compactArchiveRows(next.reports, 'full');
-    next.reviews = compactArchiveRows(next.reviews, 'full');
-    next.exemptions = compactArchiveRows(next.exemptions, 'full');
-    next.liveBookings = compactArchiveRows(next.liveBookings, 'full');
-    next.liveSessions = compactArchiveRows(next.liveSessions, 'full');
-    next.linkRequests = compactArchiveRows(next.linkRequests, 'full');
+    const rowMode = compactLevel >= 3 ? 'identity' : 'full';
+    const reportMode = compactLevel >= 2 ? 'identity' : 'full';
+    next.records = compactArchiveRows(next.records, rowMode);
+    next.submissions = compactArchiveRows(next.submissions, rowMode);
+    next.attendance = compactArchiveRows(next.attendance, compactLevel >= 3 ? 'identity' : 'full');
+    next.reports = compactArchiveRows(next.reports, reportMode);
+    next.reviews = compactArchiveRows(next.reviews, reportMode);
+    next.exemptions = compactArchiveRows(next.exemptions, reportMode);
+    next.liveBookings = compactArchiveRows(next.liveBookings, compactLevel >= 3 ? 'identity' : 'full');
+    next.liveSessions = compactArchiveRows(next.liveSessions, compactLevel >= 3 ? 'identity' : 'full');
+    next.linkRequests = compactArchiveRows(next.linkRequests, reportMode);
     next.monitorHistory = compactArchiveRows(next.monitorHistory, 'identity');
     next.tlTaskSubmissions = compactArchiveRows(next.tlTaskSubmissions, 'identity');
     next.notes = summarizeArchiveNotes(next.notes);
@@ -339,14 +343,37 @@ function compactRetrainArchiveEntry(entry) {
     next.archiveCompaction = {
         compactedAt: new Date().toISOString(),
         heavyFieldsOmitted: true,
+        compactionLevel: compactLevel,
         monitorHistoryRows: Array.isArray(entry.monitorHistory) ? entry.monitorHistory.length : 0,
         tlTaskSubmissionRows: Array.isArray(entry.tlTaskSubmissions) ? entry.tlTaskSubmissions.length : 0
     };
     return next;
 }
 
-function compactRetrainArchivesForStorage(archives) {
-    return (Array.isArray(archives) ? archives : []).map(compactRetrainArchiveEntry);
+function compactRetrainArchivesForStorage(archives, level) {
+    return (Array.isArray(archives) ? archives : []).map(entry => compactRetrainArchiveEntry(entry, level));
+}
+
+function getRetrainArchivePayloadBytes(archives) {
+    try {
+        return new Blob([JSON.stringify(archives || [])]).size;
+    } catch (error) {
+        try {
+            return JSON.stringify(archives || []).length;
+        } catch (stringifyError) {
+            return Number.MAX_SAFE_INTEGER;
+        }
+    }
+}
+
+function prepareRetrainArchivesForServerSave(archives) {
+    let level = 1;
+    let prepared = compactRetrainArchivesForStorage(archives, level);
+    while (getRetrainArchivePayloadBytes(prepared) > RETRAIN_ARCHIVE_TARGET_BYTES && level < 3) {
+        level += 1;
+        prepared = compactRetrainArchivesForStorage(prepared, level);
+    }
+    return prepared;
 }
 
 function removeUserFromScheduleExceptions(schedules, userToken) {
@@ -1607,7 +1634,7 @@ async function confirmMoveUser() {
         } else {
             archives.push(archiveData);
         }
-        archives = compactRetrainArchivesForStorage(archives);
+        archives = prepareRetrainArchivesForServerSave(archives);
         archiveData = archives.find(entry => entry && entry.id === archiveData.id) || archiveData;
         localStorage.setItem('retrain_archives', JSON.stringify(archives));
 
@@ -1632,7 +1659,7 @@ async function confirmMoveUser() {
         const archiveIndex = archives.findIndex(entry => entry && entry.id === archiveData.id);
         if (archiveIndex > -1) {
             archives[archiveIndex] = compactRetrainArchiveEntry(archiveData);
-            archives = compactRetrainArchivesForStorage(archives);
+            archives = prepareRetrainArchivesForServerSave(archives);
             archiveData = archives.find(entry => entry && entry.id === archiveData.id) || archiveData;
             localStorage.setItem('retrain_archives', JSON.stringify(archives));
         }

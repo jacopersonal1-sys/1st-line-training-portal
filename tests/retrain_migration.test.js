@@ -33,7 +33,7 @@ describe('Retrain migration clean slate', () => {
         const progressCatalog = fs.readFileSync(path.resolve(__dirname, '../js/progress_catalog.js'), 'utf8');
         eval(progressCatalog);
         const adminUsers = fs.readFileSync(path.resolve(__dirname, '../js/admin_users.js'), 'utf8');
-        eval(`${adminUsers}\nwindow.__confirmMoveUser = confirmMoveUser;\nwindow.__setUserToMove = (value) => { userToMove = value; };\nwindow.__repairRetrainRosterDuplicates = repairRetrainRosterDuplicates;`);
+        eval(`${adminUsers}\nwindow.__confirmMoveUser = confirmMoveUser;\nwindow.__setUserToMove = (value) => { userToMove = value; };\nwindow.__repairRetrainRosterDuplicates = repairRetrainRosterDuplicates;\nwindow.__prepareRetrainArchivesForServerSave = prepareRetrainArchivesForServerSave;\nwindow.__getRetrainArchivePayloadBytes = getRetrainArchivePayloadBytes;`);
     });
 
     test('moving a trainee archives attempt 1 from Progress Builder and clears live rows including active live sessions', async () => {
@@ -240,5 +240,40 @@ describe('Retrain migration clean slate', () => {
             june: ['Alice'],
             july: ['Dana']
         });
+    });
+
+    test('large retrain archives are compacted before server save', () => {
+        const hugeText = 'x'.repeat(700000);
+        const prepared = window.__prepareRetrainArchivesForServerSave([
+            {
+                id: 'old_archive',
+                user: 'Hloni Masenkane',
+                targetGroup: 'June 2026',
+                records: [{ id: 'rec_hloni', trainee: 'Hloni Masenkane', assessment: 'Fiber', score: 90, questions: hugeText }],
+                submissions: [{ id: 'sub_hloni', trainee: 'Hloni Masenkane', testTitle: 'Fiber', score: 90, testSnapshot: { questions: [hugeText] } }],
+                reports: [{ id: 'rep_hloni', trainee: 'Hloni Masenkane', title: 'Onboard Report', html: hugeText }],
+                monitorHistory: [{ id: 'mon_hloni', user_id: 'Hloni Masenkane', screenshot: hugeText }],
+                officialProgress: { items: [{ name: 'Fiber', completed: true, score: 90 }] }
+            },
+            {
+                id: 'new_archive',
+                user: 'Courage Mahlaule',
+                targetGroup: 'June 2026',
+                records: [{ id: 'rec_courage', trainee: 'Courage Mahlaule', assessment: 'Fiber', score: 88, questions: hugeText }],
+                submissions: [{ id: 'sub_courage', trainee: 'Courage Mahlaule', testTitle: 'Fiber', score: 88, testSnapshot: { questions: [hugeText] } }],
+                reports: [{ id: 'rep_courage', trainee: 'Courage Mahlaule', title: 'Onboard Report', html: hugeText }],
+                officialProgress: { items: [{ name: 'Fiber', completed: true, score: 88 }] }
+            }
+        ]);
+
+        expect(window.__getRetrainArchivePayloadBytes(prepared)).toBeLessThan(900000);
+        expect(prepared[0].records[0].id).toBe('rec_hloni');
+        expect(prepared[0].submissions[0].id).toBe('sub_hloni');
+        expect(prepared[0].reports[0].id).toBe('rep_hloni');
+        expect(prepared[0].officialProgress.items[0].completed).toBe(true);
+        expect(prepared[0].archiveCompaction.compactionLevel).toBeGreaterThanOrEqual(1);
+        expect(prepared[0].records[0].questions).toBe('[omitted from retrain archive to keep migration safe]');
+        expect(prepared[0].submissions[0].testSnapshot).toBe('[omitted from retrain archive to keep migration safe]');
+        expect(prepared[0].reports[0].html).toBe('[omitted from retrain archive to keep migration safe]');
     });
 });
