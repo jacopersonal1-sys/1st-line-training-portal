@@ -88,6 +88,22 @@ describe('Retrain migration clean slate', () => {
         localStorage.setItem('insightReviews', JSON.stringify([
             { id: 'review_1', user_id: 'Alice', status: 'done' }
         ]));
+        localStorage.setItem('monitor_history', JSON.stringify([
+            {
+                id: 'mon_1',
+                user_id: 'Alice',
+                summary: 'Focused study activity',
+                details: { screenshot: 'data:image/png;base64,' + 'a'.repeat(20000), windows: ['Teams'] }
+            }
+        ]));
+        localStorage.setItem('tl_task_submissions', JSON.stringify([
+            {
+                id: 'tl_1',
+                user_id: 'Alice',
+                title: 'QA Check',
+                payload: { evidenceImage: 'data:image/png;base64,' + 'b'.repeat(20000) }
+            }
+        ]));
 
         window.__setUserToMove('Alice');
         await window.__confirmMoveUser();
@@ -103,6 +119,8 @@ describe('Retrain migration clean slate', () => {
         expect(JSON.parse(localStorage.getItem('liveSessions'))).toEqual([]);
         expect(JSON.parse(localStorage.getItem('savedReports'))).toEqual([]);
         expect(JSON.parse(localStorage.getItem('insightReviews'))).toEqual([]);
+        expect(JSON.parse(localStorage.getItem('monitor_history'))).toEqual([]);
+        expect(JSON.parse(localStorage.getItem('tl_task_submissions'))).toEqual([]);
 
         const archives = JSON.parse(localStorage.getItem('retrain_archives'));
         expect(archives).toHaveLength(1);
@@ -117,6 +135,15 @@ describe('Retrain migration clean slate', () => {
         expect(archives[0].progressConfigSnapshot.requiredItems[0].name).toBe('Fiber Basics');
         expect(archives[0].officialProgress.items.some(item => item.name === 'Fiber Basics' && item.completed)).toBe(true);
         expect(archives[0].liveSessions).toHaveLength(1);
+        expect(archives[0].monitorHistory).toEqual([
+            expect.objectContaining({ id: 'mon_1', user_id: 'Alice', summary: 'Focused study activity' })
+        ]);
+        expect(archives[0].monitorHistory[0].details).toBeUndefined();
+        expect(archives[0].tlTaskSubmissions).toEqual([
+            expect.objectContaining({ id: 'tl_1', user_id: 'Alice', title: 'QA Check' })
+        ]);
+        expect(archives[0].tlTaskSubmissions[0].payload).toBeUndefined();
+        expect(archives[0].archiveCompaction.heavyFieldsOmitted).toBe(true);
 
         expect(deleteCalls).toEqual(expect.arrayContaining([
             { table: 'records', column: 'id', ids: ['rec_1'] },
@@ -125,10 +152,47 @@ describe('Retrain migration clean slate', () => {
             { table: 'live_bookings', column: 'id', ids: ['book_1'] },
             { table: 'live_sessions', column: 'id', ids: ['live_1'] },
             { table: 'saved_reports', column: 'id', ids: ['rep_1'] },
-            { table: 'insight_reviews', column: 'id', ids: ['review_1'] }
+            { table: 'insight_reviews', column: 'id', ids: ['review_1'] },
+            { table: 'monitor_history', column: 'id', ids: ['mon_1'] },
+            { table: 'tl_task_submissions', column: 'id', ids: ['tl_1'] }
         ]));
 
         expect(global.saveToServer).toHaveBeenCalledWith(['retrain_archives'], true, true);
         expect(global.saveToServer).toHaveBeenCalledWith(expect.arrayContaining(['rosters', 'retrain_archives', 'liveSessions', 'system_tombstones']), true);
+    });
+
+    test('archive save failure stops before clearing or moving live data', async () => {
+        global.saveToServer = jest.fn(async (keys) => {
+            if (Array.isArray(keys) && keys.length === 1 && keys[0] === 'retrain_archives') return false;
+            return true;
+        });
+
+        localStorage.setItem('users', JSON.stringify([{ user: 'Nomphelo Jack', role: 'trainee' }]));
+        localStorage.setItem('rosters', JSON.stringify({
+            'group-a': ['Nomphelo Jack'],
+            'group-b': []
+        }));
+        localStorage.setItem('records', JSON.stringify([
+            { id: 'rec_keep', trainee: 'Nomphelo Jack', groupID: 'group-a', assessment: 'Fiber Slow Speed' }
+        ]));
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_keep', trainee: 'Nomphelo Jack', groupID: 'group-a', testTitle: 'Fiber Slow Speed' }
+        ]));
+        localStorage.setItem('liveSessions', JSON.stringify([
+            { sessionId: 'live_keep', trainee: 'Nomphelo Jack', active: true }
+        ]));
+
+        window.__setUserToMove('Nomphelo Jack');
+        await window.__confirmMoveUser();
+
+        expect(JSON.parse(localStorage.getItem('records'))).toHaveLength(1);
+        expect(JSON.parse(localStorage.getItem('submissions'))).toHaveLength(1);
+        expect(JSON.parse(localStorage.getItem('liveSessions'))).toHaveLength(1);
+        expect(JSON.parse(localStorage.getItem('rosters'))).toEqual({
+            'group-a': ['Nomphelo Jack'],
+            'group-b': []
+        });
+        expect(JSON.parse(localStorage.getItem('retrain_archives'))).toHaveLength(1);
+        expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('No live data was cleared'));
     });
 });

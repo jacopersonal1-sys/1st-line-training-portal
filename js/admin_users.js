@@ -214,6 +214,97 @@ function mergeArchiveRows(existingRows, incomingRows) {
     return out;
 }
 
+const RETRAIN_ARCHIVE_MAX_STRING_LENGTH = 12000;
+const RETRAIN_ARCHIVE_MAX_DEPTH = 5;
+const RETRAIN_ARCHIVE_OMIT_FIELD = '[omitted from retrain archive to keep migration safe]';
+const RETRAIN_ARCHIVE_OMIT_KEY_RE = /(base64|blob|binary|dataurl|data_url|screenshot|screenshots|image|images|attachment|attachments|reporthtml|renderedhtml|contenthtml|html)$/i;
+
+function compactArchivePrimitive(value, keyName) {
+    if (typeof value !== 'string') return value;
+    const normalizedKey = String(keyName || '').replace(/[^a-z0-9_]/gi, '').toLowerCase();
+    if (RETRAIN_ARCHIVE_OMIT_KEY_RE.test(normalizedKey)) return RETRAIN_ARCHIVE_OMIT_FIELD;
+    if (value.length <= RETRAIN_ARCHIVE_MAX_STRING_LENGTH) return value;
+    return `${value.slice(0, RETRAIN_ARCHIVE_MAX_STRING_LENGTH)}\n[truncated ${value.length - RETRAIN_ARCHIVE_MAX_STRING_LENGTH} chars for retrain archive]`;
+}
+
+function compactArchiveValue(value, keyName, depth) {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'object') return compactArchivePrimitive(value, keyName);
+    if (depth >= RETRAIN_ARCHIVE_MAX_DEPTH) return '[nested object omitted from retrain archive]';
+
+    if (Array.isArray(value)) {
+        return value.map(item => compactArchiveValue(item, keyName, depth + 1));
+    }
+
+    const out = {};
+    Object.entries(value).forEach(([key, child]) => {
+        const normalizedKey = String(key || '').replace(/[^a-z0-9_]/gi, '').toLowerCase();
+        if (RETRAIN_ARCHIVE_OMIT_KEY_RE.test(normalizedKey)) {
+            out[key] = RETRAIN_ARCHIVE_OMIT_FIELD;
+            return;
+        }
+        out[key] = compactArchiveValue(child, key, depth + 1);
+    });
+    return out;
+}
+
+function compactArchiveRow(row, mode) {
+    if (!row || typeof row !== 'object') return row;
+    if (mode === 'identity') {
+        const out = {};
+        [
+            'id', 'sessionId', 'user', 'username', 'user_id', 'trainee', 'group', 'groupID',
+            'date', 'createdAt', 'created_at', 'updatedAt', 'updated_at', 'status',
+            'type', 'source', 'summary', 'title', 'assessment', 'testTitle'
+        ].forEach(key => {
+            if (typeof row[key] !== 'undefined') out[key] = compactArchiveValue(row[key], key, 0);
+        });
+        return out;
+    }
+    return compactArchiveValue(row, '', 0);
+}
+
+function compactArchiveRows(rows, mode) {
+    if (!Array.isArray(rows)) return [];
+    return rows.map(row => compactArchiveRow(row, mode));
+}
+
+function summarizeArchiveNotes(notes) {
+    if (!notes) return null;
+    const list = Array.isArray(notes) ? notes : [notes];
+    return list.map(note => compactArchiveValue(note, 'note', 0));
+}
+
+function compactRetrainArchiveEntry(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    const next = { ...entry };
+    next.records = compactArchiveRows(next.records, 'full');
+    next.submissions = compactArchiveRows(next.submissions, 'full');
+    next.attendance = compactArchiveRows(next.attendance, 'full');
+    next.reports = compactArchiveRows(next.reports, 'full');
+    next.reviews = compactArchiveRows(next.reviews, 'full');
+    next.exemptions = compactArchiveRows(next.exemptions, 'full');
+    next.liveBookings = compactArchiveRows(next.liveBookings, 'full');
+    next.liveSessions = compactArchiveRows(next.liveSessions, 'full');
+    next.linkRequests = compactArchiveRows(next.linkRequests, 'full');
+    next.monitorHistory = compactArchiveRows(next.monitorHistory, 'identity');
+    next.tlTaskSubmissions = compactArchiveRows(next.tlTaskSubmissions, 'identity');
+    next.notes = summarizeArchiveNotes(next.notes);
+    next.officialProgress = compactArchiveValue(next.officialProgress, 'officialProgress', 0);
+    next.progressConfigSnapshot = compactArchiveValue(next.progressConfigSnapshot, 'progressConfigSnapshot', 0);
+    next.archiveCompaction = {
+        compactedAt: new Date().toISOString(),
+        heavyFieldsOmitted: true,
+        monitorHistoryRows: Array.isArray(entry.monitorHistory) ? entry.monitorHistory.length : 0,
+        tlTaskSubmissionRows: Array.isArray(entry.tlTaskSubmissions) ? entry.tlTaskSubmissions.length : 0
+    };
+    return next;
+}
+
+function compactRetrainArchivesForStorage(archives) {
+    return (Array.isArray(archives) ? archives : []).map(compactRetrainArchiveEntry);
+}
+
 function findResumableRetrainArchiveIndex(archives, userToken, targetGroup) {
     const target = String(targetGroup || '').trim();
     const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
@@ -410,7 +501,7 @@ function queueRetrainArchiveServerDeletes(archiveData) {
     deleteTargets.forEach(target => {
         const rows = Array.isArray(target.rows) ? target.rows : [];
         rows.forEach(row => {
-            const id = row && row.id;
+            const id = row && (row.id || row.sessionId);
             if (!id) {
                 skipped += 1;
                 return;
@@ -1381,7 +1472,7 @@ async function confirmMoveUser() {
                 return key ? allNotes[key] : null;
             })()
         };
-        const archiveData = resumeIndex > -1
+        let archiveData = resumeIndex > -1
             ? {
                 ...archives[resumeIndex],
                 user: archives[resumeIndex].user || userToMove,
@@ -1435,11 +1526,14 @@ async function confirmMoveUser() {
             });
         }
 
+        archiveData = compactRetrainArchiveEntry(archiveData);
         if (resumeIndex > -1) {
             archives[resumeIndex] = archiveData;
         } else {
             archives.push(archiveData);
         }
+        archives = compactRetrainArchivesForStorage(archives);
+        archiveData = archives.find(entry => entry && entry.id === archiveData.id) || archiveData;
         localStorage.setItem('retrain_archives', JSON.stringify(archives));
 
         // Persist the archive snapshot before clearing live rows. This avoids a half-migration
@@ -1447,7 +1541,7 @@ async function confirmMoveUser() {
         if(typeof saveToServer === 'function') {
             const archiveSaved = await saveToServer(['retrain_archives'], true, true);
             if (!archiveSaved) {
-                throw new Error('Retrain archive could not be saved to the server. Live data was not cleared.');
+                throw new Error('Retrain archive could not be saved to the server. No live data was cleared. The archive was kept locally and this move can be retried after refresh.');
             }
         }
 
@@ -1462,7 +1556,9 @@ async function confirmMoveUser() {
         archives = readRetrainArchives();
         const archiveIndex = archives.findIndex(entry => entry && entry.id === archiveData.id);
         if (archiveIndex > -1) {
-            archives[archiveIndex] = archiveData;
+            archives[archiveIndex] = compactRetrainArchiveEntry(archiveData);
+            archives = compactRetrainArchivesForStorage(archives);
+            archiveData = archives.find(entry => entry && entry.id === archiveData.id) || archiveData;
             localStorage.setItem('retrain_archives', JSON.stringify(archives));
         }
 
