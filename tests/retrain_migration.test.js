@@ -33,7 +33,7 @@ describe('Retrain migration clean slate', () => {
         const progressCatalog = fs.readFileSync(path.resolve(__dirname, '../js/progress_catalog.js'), 'utf8');
         eval(progressCatalog);
         const adminUsers = fs.readFileSync(path.resolve(__dirname, '../js/admin_users.js'), 'utf8');
-        eval(`${adminUsers}\nwindow.__confirmMoveUser = confirmMoveUser;\nwindow.__setUserToMove = (value) => { userToMove = value; };`);
+        eval(`${adminUsers}\nwindow.__confirmMoveUser = confirmMoveUser;\nwindow.__setUserToMove = (value) => { userToMove = value; };\nwindow.__repairRetrainRosterDuplicates = repairRetrainRosterDuplicates;`);
     });
 
     test('moving a trainee archives attempt 1 from Progress Builder and clears live rows including active live sessions', async () => {
@@ -222,5 +222,23 @@ describe('Retrain migration clean slate', () => {
         });
         expect(JSON.parse(localStorage.getItem('retrain_archives'))).toHaveLength(1);
         expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('No live data was cleared'));
+    });
+
+    test('retrain roster repair removes duplicate old group only when target group is present', () => {
+        const result = window.__repairRetrainRosterDuplicates({
+            april: ['Alice', 'Bob', 'Cara'],
+            june: ['Alice'],
+            july: ['Dana']
+        }, [
+            { user: 'Alice', movedDate: '2026-06-01T10:00:00.000Z', targetGroup: 'june' },
+            { user: 'Dana', movedDate: '2026-06-01T10:00:00.000Z', targetGroup: 'june' }
+        ]);
+
+        expect(result.changed).toBe(true);
+        expect(result.rosters).toEqual({
+            april: ['Bob', 'Cara'],
+            june: ['Alice'],
+            july: ['Dana']
+        });
     });
 });

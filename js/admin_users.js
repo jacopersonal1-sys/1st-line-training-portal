@@ -159,6 +159,50 @@ function sanitizeUsersAndRosters() {
     return { users, rosters, usersChanged, rostersChanged };
 }
 
+function getRetrainArchiveTimestamp(entry) {
+    return new Date(
+        (entry && (entry.resumedAt || entry.movedDate || entry.archivedAt || entry.createdAt)) || 0
+    ).getTime() || 0;
+}
+
+function repairRetrainRosterDuplicates(rostersInput, archivesInput) {
+    const rosters = (rostersInput && typeof rostersInput === 'object') ? { ...rostersInput } : {};
+    const archives = Array.isArray(archivesInput) ? archivesInput : [];
+    const latestByUser = new Map();
+
+    archives.forEach(entry => {
+        if (!entry || typeof entry !== 'object') return;
+        const userToken = getUserIdentityToken(entry.user || entry.trainee || entry.username);
+        const targetGroup = String(entry.targetGroup || '').trim();
+        if (!userToken || !targetGroup || !Array.isArray(rosters[targetGroup])) return;
+        const current = latestByUser.get(userToken);
+        const ts = getRetrainArchiveTimestamp(entry);
+        if (!current || ts >= current.ts) latestByUser.set(userToken, { entry, ts, targetGroup });
+    });
+
+    let changed = false;
+    let repaired = 0;
+    latestByUser.forEach(({ targetGroup }, userToken) => {
+        const groups = Object.entries(rosters)
+            .filter(([, members]) => Array.isArray(members) && members.some(member => getUserIdentityToken(member) === userToken))
+            .map(([gid]) => gid);
+
+        if (groups.length <= 1 || !groups.includes(targetGroup)) return;
+
+        Object.keys(rosters).forEach(gid => {
+            if (gid === targetGroup || !Array.isArray(rosters[gid])) return;
+            const before = rosters[gid].length;
+            rosters[gid] = rosters[gid].filter(member => getUserIdentityToken(member) !== userToken);
+            if (rosters[gid].length !== before) {
+                changed = true;
+                repaired += before - rosters[gid].length;
+            }
+        });
+    });
+
+    return { rosters, changed, repaired };
+}
+
 function isRetrainArchiveEntry(entry) {
     const reason = String((entry && entry.reason) || '').toLowerCase().trim();
     return reason.startsWith('moved to ');
@@ -1319,7 +1363,12 @@ function loadAdminUsers(forceRender = false) {
     const sanitized = sanitizeUsersAndRosters();
     const users = sanitized.users;
     const savedReports = readAdminUsersArray('savedReports');
-    const rosters = sanitized.rosters;
+    const rosterRepair = repairRetrainRosterDuplicates(sanitized.rosters, readRetrainArchives());
+    const rosters = rosterRepair.rosters;
+    if (rosterRepair.changed) {
+        localStorage.setItem('rosters', JSON.stringify(rosters));
+        sanitized.rostersChanged = true;
+    }
 
     if (sanitized.usersChanged || sanitized.rostersChanged) {
         if (typeof saveToServer === 'function') {
