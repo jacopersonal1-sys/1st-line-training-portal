@@ -305,6 +305,32 @@ function compactRetrainArchivesForStorage(archives) {
     return (Array.isArray(archives) ? archives : []).map(compactRetrainArchiveEntry);
 }
 
+function removeUserFromScheduleExceptions(schedules, userToken) {
+    if (!schedules || typeof schedules !== 'object' || !userToken) return { schedules, changed: false, removed: 0 };
+    let changed = false;
+    let removed = 0;
+    const nextSchedules = { ...schedules };
+
+    Object.keys(nextSchedules).forEach(scheduleId => {
+        const schedule = nextSchedules[scheduleId];
+        if (!schedule || typeof schedule !== 'object') return;
+        const nextSchedule = { ...schedule };
+        const items = Array.isArray(nextSchedule.items) ? nextSchedule.items : [];
+        nextSchedule.items = items.map(item => {
+            if (!item || typeof item !== 'object' || !Array.isArray(item.availabilityExceptionUsers)) return item;
+            const before = item.availabilityExceptionUsers.length;
+            const filtered = item.availabilityExceptionUsers.filter(user => getUserIdentityToken(user) !== userToken);
+            if (filtered.length === before) return item;
+            changed = true;
+            removed += before - filtered.length;
+            return { ...item, availabilityExceptionUsers: filtered };
+        });
+        if (nextSchedule !== schedule) nextSchedules[scheduleId] = nextSchedule;
+    });
+
+    return { schedules: nextSchedules, changed, removed };
+}
+
 function findResumableRetrainArchiveIndex(archives, userToken, targetGroup) {
     const target = String(targetGroup || '').trim();
     const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
@@ -1603,10 +1629,17 @@ async function confirmMoveUser() {
         if(!rosters[targetGid].some(member => getUserIdentityToken(member) === normalizedUserToMove)) rosters[targetGid].push(userToMove);
         localStorage.setItem('rosters', JSON.stringify(rosters));
 
+        // Schedule item exceptions are trainee-specific and can keep old timelines visible
+        // after the roster move. A retrain move starts a clean schedule slate.
+        const scheduleCleanup = removeUserFromScheduleExceptions(readAdminUsersObject('schedules'), normalizedUserToMove);
+        if (scheduleCleanup.changed) {
+            localStorage.setItem('schedules', JSON.stringify(scheduleCleanup.schedules));
+        }
+
         // 4. SYNC EVERYTHING
         if(typeof saveToServer === 'function') {
             const movedSaved = await saveToServer([
-                'rosters', 'retrain_archives', 'records', 'submissions', 'attendance_records',
+                'rosters', 'schedules', 'retrain_archives', 'records', 'submissions', 'attendance_records',
                 'savedReports', 'insightReviews', 'agentNotes', 'exemptions', 'liveBookings',
                 'liveSessions', 'linkRequests', 'monitor_history', 'tl_task_submissions', 'system_tombstones'
             ], true);

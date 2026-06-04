@@ -104,6 +104,20 @@ describe('Retrain migration clean slate', () => {
                 payload: { evidenceImage: 'data:image/png;base64,' + 'b'.repeat(20000) }
             }
         ]));
+        localStorage.setItem('schedules', JSON.stringify({
+            oldTimeline: {
+                assigned: 'group-a',
+                items: [
+                    { courseName: 'Old course', availabilityExceptionUsers: ['Alice', 'Bob'] }
+                ]
+            },
+            newTimeline: {
+                assigned: 'group-b',
+                items: [
+                    { courseName: 'New course', availabilityExceptionUsers: ['Charlie'] }
+                ]
+            }
+        }));
 
         window.__setUserToMove('Alice');
         await window.__confirmMoveUser();
@@ -121,6 +135,20 @@ describe('Retrain migration clean slate', () => {
         expect(JSON.parse(localStorage.getItem('insightReviews'))).toEqual([]);
         expect(JSON.parse(localStorage.getItem('monitor_history'))).toEqual([]);
         expect(JSON.parse(localStorage.getItem('tl_task_submissions'))).toEqual([]);
+        expect(JSON.parse(localStorage.getItem('schedules'))).toEqual({
+            oldTimeline: {
+                assigned: 'group-a',
+                items: [
+                    { courseName: 'Old course', availabilityExceptionUsers: ['Bob'] }
+                ]
+            },
+            newTimeline: {
+                assigned: 'group-b',
+                items: [
+                    { courseName: 'New course', availabilityExceptionUsers: ['Charlie'] }
+                ]
+            }
+        });
 
         const archives = JSON.parse(localStorage.getItem('retrain_archives'));
         expect(archives).toHaveLength(1);
@@ -158,7 +186,7 @@ describe('Retrain migration clean slate', () => {
         ]));
 
         expect(global.saveToServer).toHaveBeenCalledWith(['retrain_archives'], true, true);
-        expect(global.saveToServer).toHaveBeenCalledWith(expect.arrayContaining(['rosters', 'retrain_archives', 'liveSessions', 'system_tombstones']), true);
+        expect(global.saveToServer).toHaveBeenCalledWith(expect.arrayContaining(['rosters', 'schedules', 'retrain_archives', 'liveSessions', 'system_tombstones']), true);
     });
 
     test('archive save failure stops before clearing or moving live data', async () => {
