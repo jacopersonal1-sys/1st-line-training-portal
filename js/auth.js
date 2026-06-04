@@ -375,7 +375,8 @@ function getSsoLoginConfig() {
       provider: String(storedConfig.provider || systemSso.provider || 'azure').trim().toLowerCase() || 'azure',
       allowedDomains: Array.isArray(storedConfig.allowedDomains)
           ? storedConfig.allowedDomains
-          : (Array.isArray(systemSso.allowedDomains) ? systemSso.allowedDomains : [])
+          : (Array.isArray(systemSso.allowedDomains) ? systemSso.allowedDomains : []),
+      allowEmailFallback: storedConfig.allowEmailFallback === false || systemSso.allowEmailFallback === false ? false : true
   };
 }
 
@@ -401,18 +402,68 @@ function getSsoEmailCandidates(authUser) {
   return Array.from(new Set(candidates.map(value => String(value || '').trim().toLowerCase()).filter(Boolean)));
 }
 
+function getSsoProviderIdCandidates(authUser) {
+  const identities = Array.isArray(authUser?.identities) ? authUser.identities : [];
+  const meta = authUser?.user_metadata || {};
+  const candidates = [
+      authUser?.id,
+      authUser?.sub,
+      meta.oid,
+      meta.objectId,
+      meta.sub
+  ];
+  identities.forEach(identity => {
+      const data = identity?.identity_data || {};
+      candidates.push(
+          identity?.id,
+          identity?.identity_id,
+          identity?.provider_id,
+          data.oid,
+          data.objectId,
+          data.sub
+      );
+  });
+  return Array.from(new Set(candidates.map(value => String(value || '').trim().toLowerCase()).filter(Boolean)));
+}
+
 function findAppUserForSso(authUser) {
+  const ssoConfig = getSsoLoginConfig();
   const emailCandidates = getSsoEmailCandidates(authUser);
-  const nameCandidates = emailCandidates.map(email => email.split('@')[0]).filter(Boolean);
+  const providerIdCandidates = getSsoProviderIdCandidates(authUser);
   const users = authReadArray('users');
+  const explicitIdMatch = users.find(user => {
+      const explicitIds = [
+          user?.ssoProviderId,
+          user?.ssoObjectId,
+          user?.ssoLoginId,
+          user?.traineeData?.ssoProviderId,
+          user?.traineeData?.ssoObjectId
+      ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+      return explicitIds.some(value => providerIdCandidates.includes(value));
+  });
+  if (explicitIdMatch) return explicitIdMatch;
+
+  const explicitEmailMatch = users.find(user => {
+      const explicitEmails = [
+          user?.ssoEmail,
+          user?.ssoLoginEmail,
+          user?.traineeData?.ssoEmail
+      ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+      return explicitEmails.some(value => emailCandidates.includes(value));
+  });
+  if (explicitEmailMatch) return explicitEmailMatch;
+
+  if (ssoConfig.allowEmailFallback === false) return null;
+
   return users.find(user => {
-      const profileEmail = String(user?.email || user?.traineeData?.email || user?.contactEmail || '').trim().toLowerCase();
-      const username = String(user?.user || user?.username || '').trim().toLowerCase();
-      const normalizedUsername = normalizeLoginIdentity(username);
-      return (profileEmail && emailCandidates.includes(profileEmail)) ||
-          emailCandidates.includes(username) ||
-          nameCandidates.includes(username) ||
-          nameCandidates.some(name => normalizeLoginIdentity(name) === normalizedUsername);
+      const profileEmails = [
+          user?.email,
+          user?.traineeData?.email,
+          user?.contactEmail,
+          user?.user,
+          user?.username
+      ].map(value => String(value || '').trim().toLowerCase()).filter(value => value.includes('@'));
+      return profileEmails.some(value => emailCandidates.includes(value));
   }) || null;
 }
 
@@ -510,6 +561,18 @@ async function completeSsoLogin(authUser) {
 
   appUser.ssoLastLoginAt = new Date().toISOString();
   appUser.ssoEmail = getSsoEmailCandidates(authUser)[0] || appUser.ssoEmail || '';
+  appUser.ssoProviderId = getSsoProviderIdCandidates(authUser)[0] || appUser.ssoProviderId || '';
+  try {
+      const users = authReadArray('users');
+      const idx = users.findIndex(user => normalizeLoginIdentity(user?.user || user?.username) === normalizeLoginIdentity(appUser.user || appUser.username));
+      if (idx > -1) {
+          users[idx] = { ...users[idx], ...appUser };
+          localStorage.setItem('users', JSON.stringify(users));
+          await secureAuthSave();
+      }
+  } catch (error) {
+      console.warn('Failed to persist SSO identity mapping:', error);
+  }
   applySuccessfulLoginSession(appUser, { remember: false, clearRemember: true });
 }
 
@@ -565,7 +628,7 @@ async function attemptSsoLogin() {
       loginError.innerText = "SSO is prepared but not enabled yet. Complete Supabase SSO setup first.";
       return;
   }
-  if (!ipc || typeof ipc.getRedirectUrl !== 'function') {
+  if (!ipc || typeof ipc.getRedirectUrl !== 'function' || typeof ipc.openAuthWindow !== 'function') {
       loginError.innerText = "SSO is only available in the desktop app.";
       return;
   }
@@ -590,8 +653,8 @@ async function attemptSsoLogin() {
       if (error) throw error;
       if (!data?.url) throw new Error('Supabase did not return a provider sign-in URL.');
 
-      await window.electronAPI.shell.openExternal(data.url);
-      loginError.innerText = "Complete Microsoft sign in in your browser, then return to the app.";
+      const callbackUrl = await ipc.openAuthWindow(data.url);
+      await handleSsoCallbackUrl(callbackUrl);
   } catch (error) {
       console.error('SSO start failed:', error);
       loginError.innerText = `SSO sign in failed: ${error.message || error}`;
@@ -599,17 +662,6 @@ async function attemptSsoLogin() {
       if (btn) btn.disabled = false;
   }
 }
-
-function setupSsoCallbackListener() {
-  const ipc = getSsoLoginIpc();
-  if (!ipc || typeof ipc.onCallback !== 'function' || window.__SSO_CALLBACK_BOUND) return;
-  window.__SSO_CALLBACK_BOUND = true;
-  ipc.onCallback((url) => {
-      handleSsoCallbackUrl(url);
-  });
-}
-
-setupSsoCallbackListener();
 
 async function attemptLogin() {
   let u = (window.LOGIN_MODE === 'admin') ? document.getElementById('adminUsername').value : document.getElementById('traineeUsername').value;

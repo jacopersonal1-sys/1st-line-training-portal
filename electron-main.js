@@ -48,17 +48,9 @@ const UPDATE_FEED_CONFIG = {
     owner: 'jacopersonal1-sys',
     repo: '1st-line-training-portal'
 };
-const SSO_PROTOCOL = 'first-line-training';
+const SSO_CALLBACK_URL = 'first-line-training://auth/callback';
 
 Menu.setApplicationMenu(null);
-
-if (!app.isDefaultProtocolClient(SSO_PROTOCOL)) {
-    if (process.defaultApp && process.argv.length >= 2) {
-        app.setAsDefaultProtocolClient(SSO_PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
-    } else {
-        app.setAsDefaultProtocolClient(SSO_PROTOCOL);
-    }
-}
 
 autoUpdater.allowPrerelease = false;
 
@@ -120,16 +112,9 @@ async function runUpdateCheck(options = {}) {
     }
 }
 
-function deliverSsoCallbackUrl(rawUrl) {
+function isSsoCallbackUrl(rawUrl) {
     const url = String(rawUrl || '').trim();
-    if (!url || !url.toLowerCase().startsWith(`${SSO_PROTOCOL}://auth/callback`)) return false;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.focus();
-        mainWindow.webContents.send('sso-auth-callback', url);
-        return true;
-    }
-    return false;
+    return !!url && url.toLowerCase().startsWith(SSO_CALLBACK_URL);
 }
 
 function isTrustedStudyUrl(rawUrl = '') {
@@ -707,6 +692,82 @@ function openStudyPopoutWindow(payload = {}) {
     return true;
 }
 
+function openSsoAuthWindow(rawUrl = '') {
+    const startUrl = String(rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(startUrl)) {
+        return Promise.reject(new Error('Invalid Microsoft sign-in URL.'));
+    }
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const authWindow = new BrowserWindow({
+            width: 560,
+            height: 720,
+            minWidth: 460,
+            minHeight: 560,
+            title: 'Microsoft Sign In',
+            icon: path.join(__dirname, 'ico.ico'),
+            parent: mainWindow || undefined,
+            modal: false,
+            show: true,
+            backgroundColor: '#111827',
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                partition: STUDY_SESSION_PARTITION,
+                backgroundThrottling: false,
+                devTools: !app.isPackaged
+            }
+        });
+
+        const finish = (callbackUrl) => {
+            if (settled) return;
+            settled = true;
+            resolve(callbackUrl);
+            if (!authWindow.isDestroyed()) authWindow.close();
+        };
+
+        const fail = (error) => {
+            if (settled) return;
+            settled = true;
+            reject(error instanceof Error ? error : new Error(String(error || 'Microsoft sign-in failed.')));
+            if (!authWindow.isDestroyed()) authWindow.close();
+        };
+
+        const inspectNavigation = (event, url) => {
+            if (!url) return;
+            if (isSsoCallbackUrl(url)) {
+                if (event && typeof event.preventDefault === 'function') event.preventDefault();
+                finish(url);
+                return;
+            }
+            if (!/^https?:\/\//i.test(url)) {
+                if (event && typeof event.preventDefault === 'function') event.preventDefault();
+            }
+        };
+
+        authWindow.setMenuBarVisibility(false);
+        authWindow.webContents.setUserAgent(STUDY_BROWSER_USER_AGENT);
+        authWindow.webContents.on('will-navigate', inspectNavigation);
+        authWindow.webContents.on('will-redirect', inspectNavigation);
+        authWindow.webContents.on('did-start-navigation', inspectNavigation);
+        authWindow.webContents.setWindowOpenHandler(({ url }) => {
+            if (isSsoCallbackUrl(url)) {
+                finish(url);
+                return { action: 'deny' };
+            }
+            if (/^https?:\/\//i.test(String(url || ''))) {
+                authWindow.loadURL(url).catch(fail);
+            }
+            return { action: 'deny' };
+        });
+        authWindow.on('closed', () => {
+            if (!settled) fail(new Error('Microsoft sign-in window was closed before login completed.'));
+        });
+        authWindow.loadURL(startUrl).catch(fail);
+    });
+}
+
 function createAppWindowLaunchToken(payload = {}) {
     const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     appWindowLaunchPayloads.set(token, {
@@ -990,19 +1051,10 @@ if (!gotTheLock) {
 
     app.on('second-instance', (event, commandLine) => {
         // Someone tried to run a second instance, we should focus our window.
-        const callbackUrl = (Array.isArray(commandLine) ? commandLine : []).find(arg =>
-            String(arg || '').toLowerCase().startsWith(`${SSO_PROTOCOL}://auth/callback`)
-        );
-        if (callbackUrl && deliverSsoCallbackUrl(callbackUrl)) return;
         if (mainWindow) {
             if (mainWindow.isMinimized()) mainWindow.restore();
             mainWindow.focus();
         }
-    });
-
-    app.on('open-url', (event, url) => {
-        event.preventDefault();
-        deliverSsoCallbackUrl(url);
     });
 
     app.whenReady().then(() => {
@@ -1062,7 +1114,11 @@ ipcMain.handle('get-update-status', () => {
 });
 
 ipcMain.handle('get-sso-redirect-url', async () => {
-    return `${SSO_PROTOCOL}://auth/callback`;
+    return SSO_CALLBACK_URL;
+});
+
+ipcMain.handle('open-sso-auth-window', async (event, url) => {
+    return await openSsoAuthWindow(url);
 });
 
 // IPC Listener for Manual Update Check

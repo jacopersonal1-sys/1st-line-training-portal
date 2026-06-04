@@ -15,12 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     sso: {
         getRedirectUrl: () => ipcRenderer.invoke('get-sso-redirect-url'),
-        onCallback: (listener) => {
-            const safeListener = (event, url) => listener(url);
-            ipcRenderer.on('sso-auth-callback', safeListener);
-            return safeListener;
-        },
-        clearCallbacks: () => ipcRenderer.removeAllListeners('sso-auth-callback')
+        openAuthWindow: (url) => ipcRenderer.invoke('open-sso-auth-window', url)
     },
     shell: {
         openExternal: (url) => ipcRenderer.invoke('open-external-url', url)

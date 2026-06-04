@@ -387,6 +387,7 @@ function queueRetrainArchiveServerDeletes(archiveData) {
         { rows: archiveData.reviews, table: 'insight_reviews' },
         { rows: archiveData.exemptions, table: 'exemptions' },
         { rows: archiveData.liveBookings, table: 'live_bookings' },
+        { rows: archiveData.liveSessions, table: 'live_sessions' },
         { rows: archiveData.linkRequests, table: 'link_requests' },
         { rows: archiveData.monitorHistory, table: 'monitor_history' },
         { rows: archiveData.tlTaskSubmissions, table: 'tl_task_submissions' }
@@ -444,6 +445,7 @@ function getRetrainArchiveDeleteTargets(archiveData) {
         { rows: archiveData.reviews, table: 'insight_reviews' },
         { rows: archiveData.exemptions, table: 'exemptions' },
         { rows: archiveData.liveBookings, table: 'live_bookings' },
+        { rows: archiveData.liveSessions, table: 'live_sessions' },
         { rows: archiveData.linkRequests, table: 'link_requests' },
         { rows: archiveData.monitorHistory, table: 'monitor_history' },
         { rows: archiveData.tlTaskSubmissions, table: 'tl_task_submissions' }
@@ -460,7 +462,7 @@ async function executeRetrainArchiveServerDeletes(archiveData) {
 
     for (const target of getRetrainArchiveDeleteTargets(archiveData)) {
         const ids = [...new Set((Array.isArray(target.rows) ? target.rows : [])
-            .map(row => row && row.id)
+            .map(row => row && (row.id || row.sessionId))
             .filter(id => id !== undefined && id !== null && id !== '')
             .map(String))];
         const rowCount = Array.isArray(target.rows) ? target.rows.length : 0;
@@ -503,12 +505,13 @@ async function executeRetrainArchiveServerDeletes(archiveData) {
 async function verifyRetrainArchiveServerCleanup(userName) {
     const client = window.supabaseClient;
     const userToken = getUserIdentityToken(userName);
-    const summary = { records: 0, submissions: 0 };
+    const summary = { records: 0, submissions: 0, liveSessions: 0 };
     if (!client || !userToken) return summary;
 
     const checks = [
         { key: 'records', table: 'records' },
-        { key: 'submissions', table: 'submissions' }
+        { key: 'submissions', table: 'submissions' },
+        { key: 'liveSessions', table: 'live_sessions' }
     ];
 
     for (const check of checks) {
@@ -1361,16 +1364,17 @@ async function confirmMoveUser() {
             ? window.ProgressCatalog.getOfficialItemsFromConfig(progressConfigSnapshot, { includeAuto: true })
             : null;
         const liveSnapshot = {
-            records: rowsForMoveArchive('records', 'trainee', targetToken),
-            submissions: rowsForMoveArchive('submissions', 'trainee', targetToken),
-            attendance: rowsForMoveArchive('attendance_records', 'user', targetToken),
-            reports: rowsForMoveArchive('savedReports', ['trainee', 'user'], targetToken),
-            reviews: rowsForMoveArchive('insightReviews', ['trainee', 'user'], targetToken),
-            exemptions: rowsForMoveArchive('exemptions', ['trainee', 'user'], targetToken),
-            liveBookings: rowsForMoveArchive('liveBookings', ['trainee', 'user'], targetToken),
-            linkRequests: rowsForMoveArchive('linkRequests', ['trainee', 'user'], targetToken),
+            records: rowsForMoveArchive('records', ['trainee', 'user', 'user_id'], targetToken),
+            submissions: rowsForMoveArchive('submissions', ['trainee', 'user', 'user_id'], targetToken),
+            attendance: rowsForMoveArchive('attendance_records', ['user', 'user_id', 'trainee'], targetToken),
+            reports: rowsForMoveArchive('savedReports', ['trainee', 'user', 'user_id'], targetToken),
+            reviews: rowsForMoveArchive('insightReviews', ['trainee', 'user', 'user_id'], targetToken),
+            exemptions: rowsForMoveArchive('exemptions', ['trainee', 'user', 'user_id'], targetToken),
+            liveBookings: rowsForMoveArchive('liveBookings', ['trainee', 'user', 'user_id'], targetToken),
+            liveSessions: rowsForMoveArchive('liveSessions', ['trainee', 'user', 'user_id'], targetToken),
+            linkRequests: rowsForMoveArchive('linkRequests', ['trainee', 'user', 'user_id'], targetToken),
             monitorHistory: rowsForMoveArchive('monitor_history', ['user', 'user_id'], targetToken),
-            tlTaskSubmissions: rowsForMoveArchive('tl_task_submissions', ['user', 'trainee'], targetToken),
+            tlTaskSubmissions: rowsForMoveArchive('tl_task_submissions', ['user', 'user_id', 'trainee'], targetToken),
             notes: (() => {
                 const allNotes = readAdminUsersObject('agentNotes');
                 const key = Object.keys(allNotes).find(k => getUserIdentityToken(k) === targetToken);
@@ -1394,6 +1398,7 @@ async function confirmMoveUser() {
                 reviews: mergeArchiveRows(archives[resumeIndex].reviews, liveSnapshot.reviews),
                 exemptions: mergeArchiveRows(archives[resumeIndex].exemptions, liveSnapshot.exemptions),
                 liveBookings: mergeArchiveRows(archives[resumeIndex].liveBookings, liveSnapshot.liveBookings),
+                liveSessions: mergeArchiveRows(archives[resumeIndex].liveSessions, liveSnapshot.liveSessions),
                 linkRequests: mergeArchiveRows(archives[resumeIndex].linkRequests, liveSnapshot.linkRequests),
                 monitorHistory: mergeArchiveRows(archives[resumeIndex].monitorHistory, liveSnapshot.monitorHistory),
                 tlTaskSubmissions: mergeArchiveRows(archives[resumeIndex].tlTaskSubmissions, liveSnapshot.tlTaskSubmissions),
@@ -1472,16 +1477,17 @@ async function confirmMoveUser() {
             if (data.length !== newData.length) localStorage.setItem(key, JSON.stringify(newData));
         };
         
-        wipe('records', 'trainee');
-        wipe('submissions', 'trainee');
-        wipe('attendance_records', 'user');
-        wipe('savedReports', ['trainee', 'user']);
-        wipe('insightReviews', ['trainee', 'user']);
-        wipe('exemptions', ['trainee', 'user']);
-        wipe('liveBookings', ['trainee', 'user']);
-        wipe('linkRequests', ['trainee', 'user']);
+        wipe('records', ['trainee', 'user', 'user_id']);
+        wipe('submissions', ['trainee', 'user', 'user_id']);
+        wipe('attendance_records', ['user', 'user_id', 'trainee']);
+        wipe('savedReports', ['trainee', 'user', 'user_id']);
+        wipe('insightReviews', ['trainee', 'user', 'user_id']);
+        wipe('exemptions', ['trainee', 'user', 'user_id']);
+        wipe('liveBookings', ['trainee', 'user', 'user_id']);
+        wipe('liveSessions', ['trainee', 'user', 'user_id']);
+        wipe('linkRequests', ['trainee', 'user', 'user_id']);
         wipe('monitor_history', ['user', 'user_id']);
-        wipe('tl_task_submissions', ['user', 'trainee']);
+        wipe('tl_task_submissions', ['user', 'user_id', 'trainee']);
         
         let notes = readAdminUsersObject('agentNotes');
         const noteKey = Object.keys(notes).find(k => getUserIdentityToken(k) === normalizedUserToMove);
@@ -1506,7 +1512,7 @@ async function confirmMoveUser() {
             const movedSaved = await saveToServer([
                 'rosters', 'retrain_archives', 'records', 'submissions', 'attendance_records',
                 'savedReports', 'insightReviews', 'agentNotes', 'exemptions', 'liveBookings',
-                'linkRequests', 'monitor_history', 'tl_task_submissions', 'system_tombstones'
+                'liveSessions', 'linkRequests', 'monitor_history', 'tl_task_submissions', 'system_tombstones'
             ], true);
             if (!movedSaved) {
                 throw new Error('Move changes could not be fully saved to the server. Please refresh before retrying.');
@@ -1514,13 +1520,14 @@ async function confirmMoveUser() {
         }
 
         const cleanupCheck = await verifyRetrainArchiveServerCleanup(userToMove);
-        const leftoverRows = Number(cleanupCheck.records || 0) + Number(cleanupCheck.submissions || 0);
+        const leftoverRows = Number(cleanupCheck.records || 0) + Number(cleanupCheck.submissions || 0) + Number(cleanupCheck.liveSessions || 0);
         if (leftoverRows > 0) {
             alert([
                 `${userToMove} was moved to ${targetGid}, but server cleanup still sees old live rows.`,
                 '',
                 `Remaining records: ${cleanupCheck.records || 0}`,
                 `Remaining submissions: ${cleanupCheck.submissions || 0}`,
+                `Remaining live sessions: ${cleanupCheck.liveSessions || 0}`,
                 '',
                 'The archive snapshot was saved. Please refresh Data Studio and run Archive + Reset again for this user before they retake assessments.'
             ].join('\n'));
@@ -1833,6 +1840,8 @@ function openUserEdit(username) {
     const safeAttr = (value) => String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     const email = (u.traineeData && u.traineeData.email) ? u.traineeData.email : '';
     const phone = (u.traineeData && u.traineeData.phone) ? u.traineeData.phone : '';
+    const ssoEmail = u.ssoEmail || u.ssoLoginEmail || (u.traineeData && u.traineeData.ssoEmail) || '';
+    const ssoProviderId = u.ssoProviderId || u.ssoObjectId || u.ssoLoginId || (u.traineeData && (u.traineeData.ssoProviderId || u.traineeData.ssoObjectId)) || '';
     const status = isUserBlockedAccount(u) ? 'blocked' : 'active';
     const groups = getUserGroupLabels(u.user, readAdminUsersObject('rosters'));
     const groupDisplay = groups.length > 0 ? groups.join(', ') : 'No Group';
@@ -1879,6 +1888,14 @@ function openUserEdit(username) {
             <div>
                 <label>Primary Group(s)</label>
                 <input type="text" value="${safeAttr(groupDisplay)}" disabled>
+            </div>
+            <div>
+                <label>Microsoft SSO Email</label>
+                <input type="text" id="editUserSsoEmail" value="${safeAttr(ssoEmail)}" placeholder="exact.microsoft.account@example.com">
+            </div>
+            <div>
+                <label>Microsoft SSO ID</label>
+                <input type="text" id="editUserSsoProviderId" value="${safeAttr(ssoProviderId)}" placeholder="optional provider/object id">
             </div>
         </div>
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
@@ -2060,10 +2077,16 @@ async function saveUserEdit() {
     
     const newEmail = document.getElementById('editUserEmail').value.trim();
     const newPhone = document.getElementById('editUserPhone').value.trim();
+    const newSsoEmail = String(document.getElementById('editUserSsoEmail')?.value || '').trim().toLowerCase();
+    const newSsoProviderId = String(document.getElementById('editUserSsoProviderId')?.value || '').trim();
     
     users[liveIndex].traineeData.email = newEmail;
     users[liveIndex].traineeData.phone = newPhone;
     users[liveIndex].traineeData.contact = `${newEmail} | ${newPhone}`; // Legacy support
+    users[liveIndex].ssoEmail = newSsoEmail;
+    users[liveIndex].ssoProviderId = newSsoProviderId;
+    users[liveIndex].traineeData.ssoEmail = newSsoEmail;
+    users[liveIndex].traineeData.ssoProviderId = newSsoProviderId;
     users[liveIndex].lastModified = new Date().toISOString();
     users[liveIndex].modifiedBy = CURRENT_USER.user;
 

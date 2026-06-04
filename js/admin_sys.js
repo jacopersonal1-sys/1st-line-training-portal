@@ -1171,6 +1171,10 @@ function openSuperAdminConfig() {
     const ai = config.ai || { enabled: true, apiKey: "" }; // FIX: Default to Enabled
     const lockdown = sec.lockdown_mode || false;
     const srv = config.server_settings || { active: 'cloud', local_url: '', local_key: '' };
+    const safeSaAttr = (value) => String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const ssoConfig = adminSysReadObject('sso_login_config');
+    const ssoProvider = safeSaAttr(ssoConfig.provider || 'azure');
+    const ssoAllowedDomains = safeSaAttr(Array.isArray(ssoConfig.allowedDomains) ? ssoConfig.allowedDomains.join(', ') : '');
 
     // --- STAGING UI LOGIC ---
     const currentLocalTarget = localStorage.getItem('active_server_target') || 'cloud';
@@ -1403,6 +1407,26 @@ function openSuperAdminConfig() {
                                 <label><input type="checkbox" id="sa_feat_tips" ${feat.daily_tips !== false ? 'checked' : ''}> Daily Tips</label>
                                 <label><input type="checkbox" id="sa_feat_anim" ${feat.disable_animations ? 'checked' : ''}> Disable Animations</label>
                             </div>
+                        </div>
+                        <div class="card" style="margin-top:15px; border-left:4px solid #2563eb;">
+                            <h4><i class="fab fa-microsoft"></i> Microsoft SSO Login</h4>
+                            <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+                                <input type="checkbox" id="sa_sso_enabled" ${ssoConfig.enabled === true ? 'checked' : ''} style="width:auto;"> Enable Microsoft SSO login
+                            </label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                                <div>
+                                    <label>Provider</label>
+                                    <input type="text" id="sa_sso_provider" value="${ssoProvider}" placeholder="azure">
+                                </div>
+                                <div>
+                                    <label>Allowed Email Domains</label>
+                                    <input type="text" id="sa_sso_domains" value="${ssoAllowedDomains}" placeholder="herotel.com, example.com">
+                                </div>
+                            </div>
+                            <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+                                <input type="checkbox" id="sa_sso_email_fallback" ${ssoConfig.allowEmailFallback === false ? '' : 'checked'} style="width:auto;"> Allow exact stored email fallback
+                            </label>
+                            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;">For safest rollout, set each user's Microsoft SSO Email or SSO ID in Manage Users > Advanced Edit.</div>
                         </div>
                         <div class="card" style="margin-top:15px;">
                             <h4><i class="fas fa-scroll"></i> Global Banner</h4>
@@ -2179,6 +2203,19 @@ async function saveSuperAdminConfig() {
     };
 
     config.features = { ...config.features, vetting_arena: getCheck('sa_feat_vet'), live_assessments: getCheck('sa_feat_live'), nps_surveys: getCheck('sa_feat_nps'), daily_tips: getCheck('sa_feat_tips'), disable_animations: getCheck('sa_feat_anim') };
+    const previousSsoConfig = adminSysReadObject('sso_login_config');
+    const ssoLoginConfig = {
+        ...previousSsoConfig,
+        enabled: getCheck('sa_sso_enabled'),
+        provider: String(getVal('sa_sso_provider', 'azure') || 'azure').trim().toLowerCase() || 'azure',
+        allowedDomains: getVal('sa_sso_domains', '')
+            .split(',')
+            .map(domain => domain.trim().toLowerCase().replace(/^@/, ''))
+            .filter(Boolean),
+        allowEmailFallback: getCheck('sa_sso_email_fallback'),
+        updatedAt: new Date().toISOString(),
+        updatedBy: (CURRENT_USER && CURRENT_USER.user) || 'super_admin'
+    };
     
     config.announcement = { active: getCheck('sa_ann_active'), message: getVal('sa_ann_msg', ''), type: getVal('sa_ann_type', 'info') };
 
@@ -2213,9 +2250,10 @@ async function saveSuperAdminConfig() {
     }
 
     localStorage.setItem('system_config', JSON.stringify(config));
+    localStorage.setItem('sso_login_config', JSON.stringify(ssoLoginConfig));
     
     // STANDARD SAVE (To currently connected server)
-    if (typeof saveToServer === 'function') await saveToServer(['system_config'], true);
+    if (typeof saveToServer === 'function') await saveToServer(['system_config', 'sso_login_config'], true);
     
     // Save Revoked Users Blacklist
     const revokedInput = document.getElementById('sa_sec_revoked');
@@ -2235,6 +2273,11 @@ async function saveSuperAdminConfig() {
                 key: 'system_config', 
                 content: config, 
                 updated_at: new Date().toISOString() 
+            });
+            await cloudClient.from('app_documents').upsert({
+                key: 'sso_login_config',
+                content: ssoLoginConfig,
+                updated_at: new Date().toISOString()
             });
             console.log("System Config dual-written to Cloud Master.");
         } catch(e) { console.warn("Could not dual-write config to Cloud:", e); }
