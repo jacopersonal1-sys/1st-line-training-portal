@@ -681,6 +681,7 @@ window.onload = async function() {
     if (typeof installResponsiveTableCards === 'function') installResponsiveTableCards();
     if (typeof updateViewSyncIndicators === 'function') updateViewSyncIndicators();
     ensureReportProblemUI();
+    if (typeof refreshSsoLoginVisibility === 'function') refreshSsoLoginVisibility();
 
     // --- INJECT GLOBAL VISUAL STYLES ---
     if (!document.getElementById('global-visuals')) {
@@ -2292,6 +2293,7 @@ function updateViewSyncIndicators() {
         'capture',
         'superadmin-studio',
         'opl-hub',
+        'assessment-studio',
         'content-studio'
     ]);
 
@@ -2774,6 +2776,14 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
     {
         label: 'Training Content',
         items: [
+            { id: 'assessment-studio', title: 'Assessment Studio', text: 'Assessment Studio', icon: 'fas fa-vial-circle-check', classes: 'admin-only', subItems: [
+                { label: 'Question Bucket', type: 'assessment-studio', view: 'bucket' },
+                { label: 'Test Generator Details', type: 'assessment-studio', view: 'generator' },
+                { label: 'Completed Tests', type: 'assessment-studio', view: 'completed' },
+                { label: 'Grading Queue', type: 'assessment-studio', view: 'grading' },
+                { label: 'Feedback Sessions', type: 'assessment-studio', view: 'feedback' },
+                { label: 'Universal Search', type: 'assessment-studio', view: 'search' }
+            ] },
             { id: 'content-studio', title: 'Content Creator', text: 'Content Creator', icon: 'fas fa-photo-film', subItems: [
                 { label: 'View Content', type: 'content-studio', view: 'view' },
                 { label: 'Builder', type: 'content-studio', view: 'builder' },
@@ -2999,6 +3009,12 @@ function getNavigationSubItemIcon(sub) {
         'report:saved': 'fas fa-folder-open',
         'opl:opl_search': 'fas fa-magnifying-glass',
         'opl:backend_data': 'fas fa-table-list',
+        'assessment-studio:bucket': 'fas fa-box-archive',
+        'assessment-studio:generator': 'fas fa-wand-magic-sparkles',
+        'assessment-studio:completed': 'fas fa-clipboard-check',
+        'assessment-studio:grading': 'fas fa-pen-to-square',
+        'assessment-studio:feedback': 'fas fa-comments',
+        'assessment-studio:search': 'fas fa-magnifying-glass',
         'content-studio:view': 'fas fa-eye',
         'content-studio:builder': 'fas fa-hammer',
         'content-studio:engagement': 'fas fa-chart-pie',
@@ -3186,6 +3202,8 @@ window.navigateAdvancedSubMenu = function navigateAdvancedSubMenu(tabId, type, v
             navigateEmbeddedInsightView(subView);
         } else if (kind === 'opl') {
             navigateOplHubView(subView);
+        } else if (kind === 'assessment-studio') {
+            navigateGenericWebviewApp('assessment-studio-webview', subView);
         } else if (kind === 'content-studio') {
             navigateGenericWebviewApp('content-studio-webview', subView);
         } else if (kind === 'teamleader-hub') {
@@ -3936,6 +3954,7 @@ const HIGH_PRIORITY_SYNC_VIEWS = new Set([
 const HEAVY_EMBEDDED_VIEWS = new Set([
     'insight-studio',
     'opl-hub',
+    'assessment-studio',
     'content-studio',
     'tl-hub',
     'assessment-schedule',
@@ -4102,6 +4121,7 @@ const TRAINEE_ALLOWED_TABS = new Set([
     'study-notes',
     'my-tests',
     'test-take-view',
+    'assessment-studio-trainee',
     'assessment-schedule',
     'live-assessment',
     'live-execution',
@@ -4326,6 +4346,14 @@ function renderViewById(id, options = {}) {
             window.QAHub.renderUI();
             return;
         }
+        if (id === 'assessment-studio' && typeof AssessmentStudioLoader !== 'undefined' && typeof AssessmentStudioLoader.renderUI === 'function') {
+            AssessmentStudioLoader.renderUI();
+            return;
+        }
+        if (id === 'assessment-studio-trainee' && typeof renderAssessmentStudioTraineeRuntime === 'function') {
+            renderAssessmentStudioTraineeRuntime();
+            return;
+        }
         if (id === 'test-manage') {
             if (typeof loadManageTests === 'function') loadManageTests();
             if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
@@ -4361,6 +4389,8 @@ function renderViewById(id, options = {}) {
         if (id === 'live-assessment' && typeof renderLiveTable === 'function') renderLiveTable();
         if (id === 'insight-studio' && typeof InsightStudioLoader !== 'undefined' && typeof InsightStudioLoader.refresh === 'function') InsightStudioLoader.refresh({ force: true });
         if (id === 'qa-hub' && window.QAHub && typeof window.QAHub.renderUI === 'function') window.QAHub.renderUI();
+        if (id === 'assessment-studio' && typeof AssessmentStudioLoader !== 'undefined' && typeof AssessmentStudioLoader.renderUI === 'function') AssessmentStudioLoader.renderUI();
+        if (id === 'assessment-studio-trainee' && typeof renderAssessmentStudioTraineeRuntime === 'function') renderAssessmentStudioTraineeRuntime();
         if (id === 'report-card' && typeof loadReportTab === 'function') loadReportTab();
         if (id === 'agent-search' && typeof loadAgentSearch === 'function') loadAgentSearch();
         if (id === 'admin-panel' && typeof loadAdminUsers === 'function') loadAdminUsers();
@@ -4455,6 +4485,15 @@ function renderViewById(id, options = {}) {
         return;
     }
 
+    if (id === 'assessment-studio') {
+        if (typeof AssessmentStudioLoader !== 'undefined' && typeof AssessmentStudioLoader.renderUI === 'function') {
+            AssessmentStudioLoader.renderUI();
+        } else {
+            console.error('AssessmentStudioLoader module not loaded. Check js/assessment_studio_loader.js');
+        }
+        return;
+    }
+
     if (id === 'content-studio') {
         if (typeof ContentStudioLoader !== 'undefined' && typeof ContentStudioLoader.renderUI === 'function') {
             ContentStudioLoader.renderUI();
@@ -4525,6 +4564,11 @@ function renderViewById(id, options = {}) {
 
     if (id === 'my-tests' && typeof loadTraineeTests === 'function') {
         loadTraineeTests();
+        return;
+    }
+
+    if (id === 'assessment-studio-trainee' && typeof renderAssessmentStudioTraineeRuntime === 'function') {
+        renderAssessmentStudioTraineeRuntime();
         return;
     }
 
@@ -4657,7 +4701,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'qa-hub', 'manage', 'capture', 'superadmin-studio', 'opl-hub', 'content-studio'];
+      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'qa-hub', 'manage', 'capture', 'superadmin-studio', 'opl-hub', 'assessment-studio', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -4702,6 +4746,13 @@ function showTab(id, btn) {
   if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'content-studio') {
       if (typeof showToast === 'function') {
           showToast("Access denied: Content Creator is restricted to Admin and Super Admin.", "error");
+      }
+      return;
+  }
+
+  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'assessment-studio') {
+      if (typeof showToast === 'function') {
+          showToast("Access denied: Assessment Studio is restricted to Admin and Super Admin.", "error");
       }
       return;
   }
@@ -5512,6 +5563,14 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.17": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Adds the new generated assessment workflow with Question Bucket, generator recipes, sealed trainee snapshots, full-page trainee runtime, Grading Queue, Completed Tests, Feedback Sessions, and Universal Search.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Flow:</strong> Timeline-linked Assessment Studio tests now generate per trainee, save drafts, submit for admin review, show completed scores in My Assessments, and support feedback requests.</li>
+                <li style="margin-bottom: 8px;"><strong>Admin Flow:</strong> Admins can grade generated submissions, adjust auto-scored answers, re-edit scores, manage feedback states, delete Assessment Studio submissions, and preserve legacy Test Engine history separately.</li>
+                <li style="margin-bottom: 8px;"><strong>Reliability:</strong> Assessment Studio sync now merges bucket questions, generators, submissions, grades, and feedback states by ID to reduce overwrite risk during production testing.</li>
+                <li style="margin-bottom: 8px;"><strong>One UI:</strong> Assessment Studio admin and trainee views now inherit the app theme for a more consistent release-ready experience.</li>
+            </ul>`,
         "2.7.4": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Reliability:</strong> Internal release hardening improves monitored training workflows, session state reporting, and review cleanup paths.</li>

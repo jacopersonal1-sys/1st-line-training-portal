@@ -18,6 +18,43 @@ describe('Data Sync Module', () => {
         expect(userA.role).toBe('trainee');
     });
 
+    test('performSmartMerge merges Assessment Studio bucket, generators, submissions and feedback independently', () => {
+        const server = {
+            assessment_studio_data: {
+                questionBucket: [{ id: 'q1', text: 'Server question', updatedAt: '2026-06-01T00:00:00.000Z' }],
+                generators: [{ id: 'g1', assessment: 'Server Gen', updatedAt: '2026-06-01T00:00:00.000Z' }],
+                submissions: [{ id: 's1', trainee: 'Alice', status: 'pending_review', updatedAt: '2026-06-01T00:00:00.000Z' }],
+                groupings: [{ id: 'grp1', name: 'Server Group', updatedAt: '2026-06-01T00:00:00.000Z' }],
+                tags: []
+            }
+        };
+        const local = {
+            assessment_studio_data: {
+                questionBucket: [
+                    { id: 'q1', text: 'Local question', updatedAt: '2026-06-02T00:00:00.000Z' },
+                    { id: 'q2', text: 'New local question', updatedAt: '2026-06-02T00:00:00.000Z' }
+                ],
+                generators: [{ id: 'g2', assessment: 'Local Gen', updatedAt: '2026-06-02T00:00:00.000Z' }],
+                submissions: [
+                    { id: 's1', trainee: 'Alice', status: 'completed', feedbackStatus: 'received', updatedAt: '2026-06-03T00:00:00.000Z' },
+                    { id: 's2', trainee: 'Bob', status: 'pending_review', updatedAt: '2026-06-02T00:00:00.000Z' }
+                ],
+                groupings: [],
+                tags: [{ id: 'tag1', name: 'Tag One', updatedAt: '2026-06-02T00:00:00.000Z' }]
+            }
+        };
+
+        const merged = DataModule.performSmartMerge(server, local).assessment_studio_data;
+
+        expect(merged.questionBucket.map(item => item.id).sort()).toEqual(['q1', 'q2']);
+        expect(merged.questionBucket.find(item => item.id === 'q1').text).toBe('Local question');
+        expect(merged.generators.map(item => item.id).sort()).toEqual(['g1', 'g2']);
+        expect(merged.submissions.map(item => item.id).sort()).toEqual(['s1', 's2']);
+        expect(merged.submissions.find(item => item.id === 's1').feedbackStatus).toBe('received');
+        expect(merged.groupings.map(item => item.id)).toEqual(['grp1']);
+        expect(merged.tags.map(item => item.id)).toEqual(['tag1']);
+    });
+
     test('loadFromServer fetches stale blob keys and ignores row-synced blob keys', async () => {
         // Mock Supabase response
         const mockMeta = [

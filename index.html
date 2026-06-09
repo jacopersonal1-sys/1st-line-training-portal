@@ -69,8 +69,8 @@
               <label for="rememberMe" style="margin: 0; cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">Remember Me</label>
           </div>
           <button type="submit" class="btn-primary btn-lg">Sign In</button>
-          <div class="sso-login-divider"><span>or</span></div>
-          <button type="button" id="btnSsoLogin" class="btn-secondary btn-lg sso-login-btn" onclick="attemptSsoLogin()">
+          <div class="sso-login-divider hidden" aria-hidden="true"><span>or</span></div>
+          <button type="button" id="btnSsoLogin" class="btn-secondary btn-lg sso-login-btn hidden" aria-hidden="true" tabindex="-1" onclick="attemptSsoLogin()">
               <i class="fab fa-microsoft"></i> Sign in with Microsoft
           </button>
       </form>
@@ -401,6 +401,7 @@
         <div class="saved-report-modal-header no-print">
             <h3>Saved Report View</h3>
             <div class="saved-report-actions">
+                <button class="btn-primary hidden" id="savedReportSaveBtn" onclick="saveEditedSavedReport()"><i class="fas fa-save"></i> Save Changes</button>
                 <button class="btn-primary" onclick="printSavedReport()"><i class="fas fa-print"></i> Print</button>
                 <button class="btn-secondary" onclick="closeSavedReportModal()">Close</button>
             </div>
@@ -482,6 +483,10 @@
 
         <button class="nav-item admin-only" onclick="showTab('qa-hub')" title="Q&A Hub">
             <i class="fas fa-circle-question"></i><span class="nav-text">Q&A Hub</span>
+        </button>
+
+        <button class="nav-item admin-only" onclick="showTab('assessment-studio')" title="Assessment Studio">
+            <i class="fas fa-vial-circle-check"></i><span class="nav-text">Assessment Studio</span>
         </button>
 
         <button class="nav-item" onclick="showTab('content-studio')" title="Content Creator">
@@ -577,6 +582,10 @@
 
         <section id="qa-hub" class="admin-only-section">
             <div id="qa-hub-content"></div>
+        </section>
+
+        <section id="assessment-studio" class="admin-only-section">
+            <div id="assessment-studio-content"></div>
         </section>
 
         <section id="manage" class="admin-only-section">
@@ -934,6 +943,10 @@
             <div id="takingQuestions" style="width: 100%; margin: 0;"></div>
             </section>
 
+        <section id="assessment-studio-trainee">
+            <div id="assessmentStudioTraineeRuntime"></div>
+        </section>
+
         <section id="report-card" class="report-card-workspace">
         <div class="page-titlebar no-print">
             <div>
@@ -950,16 +963,24 @@
         <div id="report-view-create">
             <div class="report-builder-shell no-print">
                 <div>
-                    <label for="reportTraineeSelect">Trainee</label>
-                    <select id="reportTraineeSelect" class="report-trainee-select" onchange="generateReport()" aria-label="Select Trainee for Report"><option value="">-- Select Trainee --</option></select>
+                    <label for="reportTraineeSearch">Trainee</label>
+                    <input id="reportTraineeSearch" class="report-trainee-select" type="search" list="reportTraineeOptions" placeholder="Search trainee name..." oninput="handleReportTraineeSearchInput()" aria-label="Search Trainee for Report">
+                    <datalist id="reportTraineeOptions"></datalist>
+                    <input id="reportTraineeSelect" type="hidden" value="">
                 </div>
                 <div class="report-toolbar-actions">
+                    <button class="btn-primary" onclick="createSelectedReport()"><i class="fas fa-file-circle-plus"></i> Create</button>
                     <button class="btn-primary" onclick="saveGeneratedReport()"><i class="fas fa-save"></i> Save</button>
                     <button class="btn-secondary" onclick="printGeneratedReport()"><i class="fas fa-print"></i> Print / PDF</button>
                 </div>
-                <div class="report-helper-text">Editable fields expand as you type and are normalized before save or print.</div>
+                <div id="reportGeneratorStatus" class="report-helper-text">Search a trainee, then click Create to build the report.</div>
             </div>
-            <div class="a4-page" id="reportContainer">
+            <div class="report-generator-empty no-print" id="reportGeneratorEmpty">
+                <i class="fas fa-file-lines"></i>
+                <h3>Report generator ready</h3>
+                <p>Select a live trainee who does not already have a report for the current training attempt.</p>
+            </div>
+            <div class="a4-page hidden" id="reportContainer">
                 <div class="report-header"><div class="report-logo">1st Line Training</div><div class="report-title">Trainee Review Report</div></div>
                 <div class="report-row dynamic-section"><div class="report-field half"><label><span class="rep-num"></span>Onboard Name</label><div id="repName" class="report-input-display report-editable-line" contenteditable="true" placeholder="Select a trainee"></div></div><div class="report-field half"><label>Training Period</label><div id="repPeriod" class="report-input-display report-editable-line" contenteditable="true" placeholder="Training period"></div></div></div>
                 <div class="report-row dynamic-section"><div class="report-field half"><label><span class="rep-num"></span>Contact Information</label><div id="repContact" class="report-input-display report-editable-line report-field-tall" contenteditable="true" placeholder="Contact information"></div></div><div class="report-field half"><label><span class="rep-num"></span>Knowledge Present Before Training</label><div id="repKnowledge" class="report-input-display report-editable-line report-field-tall" contenteditable="true" placeholder="Knowledge before training"></div></div></div>
@@ -986,7 +1007,7 @@
                     </div>
                 </div>
                 <input type="text" id="savedReportSearch" placeholder="Search by Trainee Name..." onkeyup="renderSavedReportsList()" aria-label="Search Saved Reports">
-                <table class="responsive-row-card-table report-saved-table"><thead><tr><th>Date Saved</th><th>Trainee</th><th>Saved By</th><th>Action</th></tr></thead><tbody id="savedReportsList"></tbody></table>
+                <table class="responsive-row-card-table report-saved-table"><thead><tr><th>Date Saved</th><th>Trainee</th><th>Attempt</th><th>Saved By</th><th>Action</th></tr></thead><tbody id="savedReportsList"></tbody></table>
             </div>
         </div>
         </section>
@@ -1879,10 +1900,12 @@
 <script src="js/assessment_quiz_flow.js"></script>
 <script src="js/assessment_admin.js"></script>
 <script src="js/assessment_trainee.js"></script>
+<script src="js/assessment_studio_trainee.js"></script>
 <script src="js/live_execution.js"></script>
 <script src="js/agent_search.js"></script>
 <script src="js/tl_tasks.js"></script>
 <script src="js/opl_hub_loader.js"></script>
+<script src="js/assessment_studio_loader.js"></script>
 <script src="js/content_studio_loader.js"></script>
 <script src="js/insight_studio_loader.js"></script>
 <script src="js/admin_history.js"></script>

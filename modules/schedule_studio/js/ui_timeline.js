@@ -107,6 +107,7 @@ const TimelineUI = {
             item.isVetting ? 'Vetting' : '',
             item.isLive ? 'Live' : '',
             item.linkedTestId ? 'Linked Test' : '',
+            item.linkedAssessmentStudioGeneratorId ? 'Assessment Studio Test' : '',
             item.assessmentLink ? 'External Assessment' : '',
             contentState.linked ? 'Linked Content' : '',
             item.courseRequestEnabled ? 'Move-On Request' : '',
@@ -143,7 +144,7 @@ const TimelineUI = {
                 </div>
 
                 ${item.materialLink ? `<div class="studio-status">Material: ${this.escape(materialState.label)}</div>` : ''}
-                ${(item.linkedTestId || item.assessmentLink) ? `<div class="studio-status">Assessment: ${this.escape(assessmentState.label)}</div>` : ''}
+                ${(item.linkedTestId || item.linkedAssessmentStudioGeneratorId || item.assessmentLink) ? `<div class="studio-status">Assessment: ${this.escape(assessmentState.label)}</div>` : ''}
                 ${contentState.linked ? `<div class="studio-status">Content Module: ${this.escape(contentState.label)}</div>` : ''}
 
                 <div class="studio-item-actions">
@@ -152,7 +153,7 @@ const TimelineUI = {
                             <i class="fas fa-book-open"></i> ${materialState.enabled ? 'Study Material' : 'Material Locked'}
                         </button>
                     ` : ''}
-                    ${(item.linkedTestId || item.assessmentLink) ? `
+                    ${(item.linkedTestId || item.linkedAssessmentStudioGeneratorId || item.assessmentLink) ? `
                         <button class="studio-btn ${assessmentState.enabled ? 'primary' : 'secondary'}" onclick="App.openAssessment(${index})" ${assessmentState.enabled ? '' : 'disabled'}>
                             <i class="fas fa-file-signature"></i> ${assessmentState.buttonLabel}
                         </button>

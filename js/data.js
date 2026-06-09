@@ -23,6 +23,7 @@ const DB_SCHEMA = {
     test_integrity_overrides: { entries: {}, updatedAt: null, updatedBy: null },
     sso_login_config: { enabled: false, provider: 'azure', allowedDomains: [], allowEmailFallback: true, updatedAt: null, updatedBy: null },
     qa_data: { questions: [], submissions: [], updatedAt: null, updatedBy: null },
+    assessment_studio_data: { questionBucket: [], generators: [], submissions: [], groupings: [], tags: [], updatedAt: null, updatedBy: null },
     system_tombstones: [],
     adminDecisions: {}, // Legacy report-card review overrides
     dailyTips: [], // Admin controlled daily tips
@@ -1103,7 +1104,7 @@ async function loadFromServer(silent = false) {
         const config = safeLocalParse('system_config', {});
         if (config.security && config.security.lockdown_mode && CURRENT_USER && CURRENT_USER.role !== 'super_admin') {
             alert("⚠️ EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
-            if(typeof logout === 'function') logout();
+            if(typeof logout === 'function') logout('lockdown_mode', { source: 'server_pull' });
         }
 
         if(silent && typeof refreshAllDropdowns === 'function') {
@@ -1308,7 +1309,7 @@ function applyLockdownConfig(config) {
     if (!isLocked || !isNonSuperAdmin) return false;
 
     alert("EMERGENCY LOCKDOWN INITIATED.\n\nYou are being logged out.");
-    if (typeof logout === 'function') logout();
+    if (typeof logout === 'function') logout('lockdown_mode', { source: 'system_config' });
     return true;
 }
 
@@ -2863,6 +2864,38 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
             const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
             base.questions = mergeById(sVal.questions, lVal.questions, ['updatedAt', 'createdAt']).sort(questionSort);
             base.submissions = mergeById(sVal.submissions, lVal.submissions, ['reviewedAt', 'createdAt']).sort(submissionSort);
+            merged[key] = base;
+        }
+        // Case 2e: Assessment Studio (merge bucket, recipes, trainee snapshots and feedback/grading independently)
+        else if (key === 'assessment_studio_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
+            const pickLatest = (existing, incoming, dateFields) => {
+                if (!existing) return incoming;
+                const existingDate = dateFields.map(field => existing[field]).find(Boolean) || '';
+                const incomingDate = dateFields.map(field => incoming[field]).find(Boolean) || '';
+                return String(incomingDate) >= String(existingDate) ? incoming : existing;
+            };
+            const mergeById = (serverItems, localItems, dateFields) => {
+                const map = new Map();
+                (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (id) map.set(id, item);
+                });
+                (Array.isArray(localItems) ? localItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (id) map.set(id, pickLatest(map.get(id), item, dateFields));
+                });
+                return Array.from(map.values());
+            };
+            const byUpdated = (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
+            const bySubmitted = (a, b) => String(b.submittedAt || b.generatedAt || b.updatedAt || '').localeCompare(String(a.submittedAt || a.generatedAt || a.updatedAt || ''));
+            const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
+            base.questionBucket = mergeById(sVal.questionBucket, lVal.questionBucket, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.generators = mergeById(sVal.generators, lVal.generators, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.submissions = mergeById(sVal.submissions, lVal.submissions, ['updatedAt', 'gradedAt', 'submittedAt', 'generatedAt']).sort(bySubmitted);
+            base.groupings = mergeById(sVal.groupings, lVal.groupings, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.tags = mergeById(sVal.tags, lVal.tags, ['updatedAt', 'createdAt']).sort(byUpdated);
             merged[key] = base;
         }
         // Case 2: Objects (Rosters, Schedules)
@@ -4616,7 +4649,7 @@ function executePendingSessionAction(rawAction) {
     if (!action) return false;
 
     if (action === 'logout') {
-        if (typeof logout === 'function') logout();
+        if (typeof logout === 'function') logout('remote_admin_command', { source: 'sessions.pending_action' });
         return true;
     }
     if (action === 'restart') {

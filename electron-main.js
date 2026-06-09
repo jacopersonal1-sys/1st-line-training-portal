@@ -84,17 +84,13 @@ async function runUpdateCheck(options = {}) {
     applyMainUpdateFeed();
 
     if (!app.isPackaged) {
-        if (mainWindow) {
-            mainWindow.webContents.send('update-message', { text: '[DEV] Main update check triggered', type: 'info' });
-        }
+        sendToMainWindow('update-message', { text: '[DEV] Main update check triggered', type: 'info' });
         return;
     }
 
     if (updateCheckInProgress) {
         queuedUpdateCheck = true;
-        if (mainWindow) {
-            mainWindow.webContents.send('update-message', { text: 'An update check is already running. Queued another check...', type: 'info' });
-        }
+        sendToMainWindow('update-message', { text: 'An update check is already running. Queued another check...', type: 'info' });
         return;
     }
 
@@ -334,7 +330,9 @@ function createWindow() {
             for (const suggestion of params.dictionarySuggestions) {
                 menu.append(new MenuItem({
                     label: suggestion,
-                    click: () => mainWindow.webContents.replaceMisspelling(suggestion)
+                    click: () => {
+                        if (isMainWindowUsable()) mainWindow.webContents.replaceMisspelling(suggestion);
+                    }
                 }));
             }
             menu.append(new MenuItem({ type: 'separator' }));
@@ -345,7 +343,9 @@ function createWindow() {
         if (params.misspelledWord) {
             menu.append(new MenuItem({
                 label: `Add "${params.misspelledWord}" to Dictionary`,
-                click: () => mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+                click: () => {
+                    if (isMainWindowUsable()) mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
+                }
             }));
             menu.append(new MenuItem({ type: 'separator' }));
             hasItems = true;
@@ -371,7 +371,9 @@ function createWindow() {
             if (hasItems) menu.append(new MenuItem({ type: 'separator' }));
             menu.append(new MenuItem({
                 label: 'Inspect Element',
-                click: () => mainWindow.webContents.inspectElement(params.x, params.y)
+                click: () => {
+                    if (isMainWindowUsable()) mainWindow.webContents.inspectElement(params.x, params.y);
+                }
             }));
             hasItems = true;
         }
@@ -389,7 +391,7 @@ function createWindow() {
         }
         if (!isSafeToQuit) {
             e.preventDefault();
-            if (mainWindow) mainWindow.webContents.send('force-final-sync');
+            sendToMainWindow('force-final-sync');
             // Failsafe: force close after 3 seconds if network is hung
             setTimeout(() => {
                 isSafeToQuit = true;
@@ -889,9 +891,7 @@ app.on('web-contents-created', (event, contents) => {
                 if (url) shell.openExternal(url);
                 return { action: 'deny' };
             }
-            if (mainWindow) {
-                mainWindow.webContents.send('webview-new-window', url);
-            }
+            sendToMainWindow('webview-new-window', url);
             return { action: 'deny' }; // Prevent the external Electron window from opening
         });
         contents.on('did-create-window', (childWindow, details) => {
@@ -1051,10 +1051,7 @@ if (!gotTheLock) {
 
     app.on('second-instance', (event, commandLine) => {
         // Someone tried to run a second instance, we should focus our window.
-        if (mainWindow) {
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.focus();
-        }
+        focusMainWindow();
     });
 
     app.whenReady().then(() => {
@@ -1063,21 +1060,19 @@ if (!gotTheLock) {
 
         // SHIELD: Hardware Wake/Resume Triggers (The "Sleep Mode" Fix)
         powerMonitor.on('resume', () => {
-            if (mainWindow) mainWindow.webContents.send('os-resume');
+            sendToMainWindow('os-resume');
         });
         powerMonitor.on('lock-screen', () => {
             isScreenLocked = true;
-            if (mainWindow) {
-                mainWindow.webContents.send('activity-update', {
-                    osIdleSeconds: powerMonitor.getSystemIdleTime(),
-                    activeWindow: 'Lock Idle',
-                    isScreenLocked: true
-                });
-            }
+            sendToMainWindow('activity-update', {
+                osIdleSeconds: powerMonitor.getSystemIdleTime(),
+                activeWindow: 'Lock Idle',
+                isScreenLocked: true
+            });
         });
         powerMonitor.on('unlock-screen', () => {
             isScreenLocked = false;
-            if (mainWindow) mainWindow.webContents.send('os-resume');
+            sendToMainWindow('os-resume');
         });
 
         app.on('activate', () => {
@@ -1141,7 +1136,7 @@ ipcMain.on('force-restart', () => {
 // IPC Listener for DevTools (Super Admin Only)
 ipcMain.on('open-devtools', () => {
     if (app.isPackaged) return;
-    if (mainWindow) mainWindow.webContents.openDevTools();
+    if (isMainWindowUsable()) mainWindow.webContents.openDevTools();
 });
 
 // IPC Listener for System Idle Time (Activity Monitor)
@@ -1181,21 +1176,21 @@ ipcMain.handle('invoke-gemini-api', async (event, { endpoint, apiKey, promptText
 // Send status updates to the renderer to show in Toasts
 
 autoUpdater.on('checking-for-update', () => {
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Checking for updates...', type: 'info' });
+    sendToMainWindow('update-message', { text: 'Checking for updates...', type: 'info' });
 });
 
 autoUpdater.on('update-available', (info) => {
     resetLatestYmlRetryState();
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'Update available. Downloading in the background...', type: 'info' });
+    sendToMainWindow('update-message', { text: 'Update available. Downloading in the background...', type: 'info' });
 });
 
 autoUpdater.on('update-not-available', (info) => {
     resetLatestYmlRetryState();
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: 'No update found. You are on the latest version.', type: 'success' });
+    sendToMainWindow('update-message', { text: 'No update found. You are on the latest version.', type: 'success' });
 });
 
 autoUpdater.on('error', (err) => {
-    if (!mainWindow) return;
+    if (!isMainWindowUsable()) return;
 
     if (suppressNextLatestYmlErrorToast && isLatestYmlMissingError(err)) {
         suppressNextLatestYmlErrorToast = false;
@@ -1204,7 +1199,7 @@ autoUpdater.on('error', (err) => {
 
     if (isLatestYmlMissingError(err) && latestYmlRetryAttempts < UPDATE_MAX_RETRY_ATTEMPTS) {
         latestYmlRetryAttempts += 1;
-        mainWindow.webContents.send('update-message', {
+        sendToMainWindow('update-message', {
             text: `Update metadata is still publishing. Retrying in ${Math.round(UPDATE_RETRY_DELAY_MS / 1000)}s (${latestYmlRetryAttempts}/${UPDATE_MAX_RETRY_ATTEMPTS})...`,
             type: 'info'
         });
@@ -1223,26 +1218,26 @@ autoUpdater.on('error', (err) => {
     }
 
     if (isLatestYmlMissingError(err)) {
-        mainWindow.webContents.send('update-message', {
+        sendToMainWindow('update-message', {
             text: 'Update metadata is not available on GitHub yet. Please retry in 1-2 minutes.',
             type: 'error'
         });
         return;
     }
 
-    mainWindow.webContents.send('update-message', { text: 'Update error: ' + (err.message || err), type: 'error' });
+    sendToMainWindow('update-message', { text: 'Update error: ' + (err.message || err), type: 'error' });
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
     const log_message = `Downloading update: ${Math.round(progressObj.percent)}%`;
     // Send progress periodically (optional: throttle this if too frequent)
-    if(mainWindow) mainWindow.webContents.send('update-message', { text: log_message, type: 'info' });
+    sendToMainWindow('update-message', { text: log_message, type: 'info' });
 });
 
 autoUpdater.on('update-downloaded', (info) => {
     resetLatestYmlRetryState();
     updateReady = true;
-    if(mainWindow) mainWindow.webContents.send('update-downloaded', {});
+    sendToMainWindow('update-downloaded', {});
 });
 
 // --- VETTING ARENA SECURITY IPC ---
@@ -1254,7 +1249,7 @@ ipcMain.handle('get-screen-count', () => {
 
 ipcMain.handle('set-kiosk-mode', (event, enable) => {
     vettingLockdown = enable; // Set lock state
-    if (mainWindow) {
+    if (isMainWindowAlive()) {
         mainWindow.setKiosk(enable);
         mainWindow.setAlwaysOnTop(enable, 'screen-saver'); // Force top
         mainWindow.setClosable(!enable); // Disable close button if enabled
@@ -1263,7 +1258,7 @@ ipcMain.handle('set-kiosk-mode', (event, enable) => {
 });
 
 ipcMain.handle('set-content-protection', (event, enable) => {
-    if (mainWindow) {
+    if (isMainWindowAlive()) {
         // Prevents screenshots/recording on Windows/macOS
         mainWindow.setContentProtection(enable);
     }
@@ -1408,18 +1403,49 @@ ipcMain.handle('get-system-stats', async () => {
 // --- HIGH-PERFORMANCE BACKGROUND POLLER ---
 let activityMonitorInterval = null;
 
+function isMainWindowUsable() {
+    return !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed());
+}
+
+function isMainWindowAlive() {
+    return !!(mainWindow && !mainWindow.isDestroyed());
+}
+
+function sendToMainWindow(channel, payload) {
+    if (!isMainWindowUsable()) return false;
+    try {
+        mainWindow.webContents.send(channel, payload);
+        return true;
+    } catch (error) {
+        console.warn(`Skipped renderer send on destroyed window: ${channel}`, error && error.message ? error.message : error);
+        return false;
+    }
+}
+
+function focusMainWindow() {
+    if (!isMainWindowAlive()) return false;
+    try {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+        return true;
+    } catch (error) {
+        console.warn('Skipped focus on destroyed main window:', error && error.message ? error.message : error);
+        return false;
+    }
+}
+
 ipcMain.on('start-activity-monitor', (event) => {
     if (activityMonitorInterval) clearInterval(activityMonitorInterval);
     
     activityMonitorInterval = setInterval(() => {
-        if (!mainWindow) return;
+        if (!isMainWindowUsable()) return;
         const osIdleSeconds = powerMonitor.getSystemIdleTime();
         if (isScreenLocked) {
-            mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow: 'Lock Idle', isScreenLocked: true });
+            sendToMainWindow('activity-update', { osIdleSeconds, activeWindow: 'Lock Idle', isScreenLocked: true });
             return;
         }
-        if (mainWindow.isFocused()) {
-            mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow: '1st Line Training Portal [electron]' });
+        if (isMainWindowUsable() && mainWindow.isFocused()) {
+            sendToMainWindow('activity-update', { osIdleSeconds, activeWindow: '1st Line Training Portal [electron]' });
             return;
         }
         
@@ -1427,11 +1453,12 @@ ipcMain.on('start-activity-monitor', (event) => {
             const cmd = `powershell -NoProfile -Command "try { $code = '[DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\\\"user32.dll\\\")] public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);'; $type = Add-Type -MemberDefinition $code -Name Win32 -Namespace Win32 -PassThru; $hwnd = $type::GetForegroundWindow(); $pidOut = 0; $type::GetWindowThreadProcessId($hwnd, [ref]$pidOut) | Out-Null; $p = Get-Process -Id $pidOut; if ($p.MainWindowTitle) { $p.MainWindowTitle + ' [' + $p.ProcessName + ']' } else { $p.ProcessName } } catch { 'Unknown External App' }"`;
             
             exec(cmd, (err, stdout) => {
+                if (!isMainWindowUsable()) return;
                 const activeWindow = err ? "External Activity (Unknown)" : (stdout.trim() || "External Activity");
-                mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow });
+                sendToMainWindow('activity-update', { osIdleSeconds, activeWindow });
             });
         } else {
-            mainWindow.webContents.send('activity-update', { osIdleSeconds, activeWindow: "External Activity (OS Not Supported)" });
+            sendToMainWindow('activity-update', { osIdleSeconds, activeWindow: "External Activity (OS Not Supported)" });
         }
     }, 5000);
 });
@@ -1481,10 +1508,7 @@ ipcMain.on('show-notification', (event, { title, body }) => {
             icon: path.join(__dirname, 'ico.ico')
         });
         notif.on('click', () => {
-            if (mainWindow) {
-                if (mainWindow.isMinimized()) mainWindow.restore();
-                mainWindow.focus();
-            }
+            focusMainWindow();
         });
         notif.show();
     }
@@ -1571,7 +1595,7 @@ ipcMain.handle('clear-study-browser-cache', async () => {
 // --- ACTIVE WINDOW TRACKING (Activity Monitor) ---
 ipcMain.handle('get-active-window', async () => {
     return new Promise((resolve) => {
-        if (mainWindow && mainWindow.isFocused()) {
+        if (isMainWindowAlive() && mainWindow.isFocused()) {
             resolve('1st Line Training Portal [electron]');
             return;
         }

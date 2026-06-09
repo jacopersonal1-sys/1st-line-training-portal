@@ -53,6 +53,7 @@ const CalendarUI = {
     getColor(item) {
         if (item.isVetting) return 'var(--studio-danger)';
         if (item.isLive) return 'var(--studio-success)';
+        if (item.linkedAssessmentStudioGeneratorId) return 'var(--studio-test)';
         if (item.linkedTestId) return 'var(--studio-test)';
         return 'var(--primary)';
     },

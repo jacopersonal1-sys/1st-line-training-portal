@@ -48,7 +48,7 @@ const App = {
 
         this._boundHostDataListener = (event) => {
             const changedKey = event?.detail?.key;
-            if (!['schedules', 'rosters', 'tests', 'content_studio_data', 'content_studio_data_local'].includes(changedKey)) return;
+            if (!['schedules', 'rosters', 'tests', 'content_studio_data', 'content_studio_data_local', 'assessment_studio_data', 'assessment_studio_data_local'].includes(changedKey)) return;
 
             clearTimeout(this.refreshTimer);
             this.refreshTimer = setTimeout(() => this.refresh(), 120);
@@ -463,6 +463,7 @@ const App = {
         const range = ScheduleData.parseRange(item);
         const inferredDuration = ScheduleData.normalizeDurationDays(item.durationDays) || ScheduleData.inferDurationDays(item);
         const tests = ScheduleData.getTests();
+        const assessmentStudioGenerators = ScheduleData.getAssessmentStudioGenerators();
         const contentModules = ScheduleData.getContentModules();
 
         document.getElementById('edit-step-index').value = index;
@@ -486,6 +487,21 @@ const App = {
             testSelect.add(new Option(test.title, test.id));
         });
         testSelect.value = item.linkedTestId || '';
+
+        const assessmentStudioSelect = document.getElementById('edit-linked-assessment-studio');
+        if (assessmentStudioSelect) {
+            assessmentStudioSelect.innerHTML = '<option value="">-- None --</option>';
+            assessmentStudioGenerators.forEach(generator => {
+                const parts = [
+                    generator.assessment,
+                    generator.phase && generator.phase !== 'Assessment' ? generator.phase : '',
+                    generator.totalPoints ? `${generator.totalPoints} pts` : '',
+                    generator.totalPoints ? '+/- 7 pts' : ''
+                ].filter(Boolean);
+                assessmentStudioSelect.add(new Option(parts.join(' | '), generator.id));
+            });
+            assessmentStudioSelect.value = item.linkedAssessmentStudioGeneratorId || '';
+        }
 
         const contentSelect = document.getElementById('edit-content-module');
         if (contentSelect) {
@@ -552,6 +568,16 @@ const App = {
         const linkedTestId = document.getElementById('edit-linked-test').value;
         if (linkedTestId) item.linkedTestId = linkedTestId;
         else delete item.linkedTestId;
+
+        const linkedAssessmentStudioGeneratorId = String(document.getElementById('edit-linked-assessment-studio')?.value || '').trim();
+        if (linkedAssessmentStudioGeneratorId) {
+            const generator = ScheduleData.getAssessmentStudioGeneratorById(linkedAssessmentStudioGeneratorId);
+            item.linkedAssessmentStudioGeneratorId = linkedAssessmentStudioGeneratorId;
+            item.linkedAssessmentStudioLabel = generator ? generator.assessment : '';
+        } else {
+            delete item.linkedAssessmentStudioGeneratorId;
+            delete item.linkedAssessmentStudioLabel;
+        }
 
         const contentModuleKey = String(document.getElementById('edit-content-module')?.value || '').trim();
         if (contentModuleKey) {
@@ -1053,11 +1079,24 @@ const App = {
     getAssessmentState(item) {
         const range = ScheduleData.parseRange(item);
         const releaseDate = range.end || range.start;
-        const hasLinkedAssessment = Boolean(item.linkedTestId || item.assessmentLink);
+        const hasLinkedAssessment = Boolean(item.linkedTestId || item.linkedAssessmentStudioGeneratorId || item.assessmentLink);
         const hasException = this.isCurrentUserAvailabilityException(item);
 
         if (!hasLinkedAssessment) {
             return { enabled: false, label: 'No linked assessment', buttonLabel: 'No Assessment' };
+        }
+
+        const studioGenerator = item.linkedAssessmentStudioGeneratorId
+            ? ScheduleData.getAssessmentStudioGeneratorById(item.linkedAssessmentStudioGeneratorId)
+            : null;
+        const assessmentLabel = studioGenerator
+            ? `Assessment Studio: ${studioGenerator.assessment}`
+            : item.linkedAssessmentStudioGeneratorId
+                ? 'Assessment Studio generator not found'
+                : '';
+
+        if (item.linkedAssessmentStudioGeneratorId && !studioGenerator) {
+            return { enabled: false, label: assessmentLabel, buttonLabel: 'Missing' };
         }
 
         const today = this.todayString();
@@ -1070,7 +1109,7 @@ const App = {
         }
 
         if (item.ignoreTime) {
-            return { enabled: true, label: 'Available today', buttonLabel: 'Open Assessment' };
+            return { enabled: true, label: assessmentLabel || 'Available today', buttonLabel: 'Open Assessment' };
         }
 
         const nowMinutes = this.currentMinutes();
@@ -1085,7 +1124,7 @@ const App = {
             return { enabled: false, label: `Closed after ${item.closeTime}`, buttonLabel: 'Closed' };
         }
 
-        return { enabled: true, label: 'Available now', buttonLabel: 'Open Assessment' };
+        return { enabled: true, label: assessmentLabel || 'Available now', buttonLabel: 'Open Assessment' };
     },
 
     getExpandedContentKey(index) {
@@ -1422,6 +1461,21 @@ const App = {
         if (!item) return;
         const state = this.getAssessmentState(item);
         if (!state.enabled) return;
+
+        if (item.linkedAssessmentStudioGeneratorId && AppContext.host && typeof AppContext.host.openAssessmentStudioFromSchedule === 'function') {
+            AppContext.host.openAssessmentStudioFromSchedule(item.linkedAssessmentStudioGeneratorId, {
+                courseName: item.courseName || '',
+                dateRange: item.dateRange || '',
+                dueDate: item.dueDate || '',
+                scheduleId: this.state.activeScheduleId
+            });
+            return;
+        }
+
+        if (item.linkedAssessmentStudioGeneratorId && AppContext.host && typeof AppContext.host.showTab === 'function') {
+            AppContext.host.showTab('assessment-studio');
+            return;
+        }
 
         if (item.linkedTestId && AppContext.host && typeof AppContext.host.showTab === 'function') {
             AppContext.host.showTab('my-tests');

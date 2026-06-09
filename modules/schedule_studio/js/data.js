@@ -18,6 +18,8 @@ const SCHEDULE_TEMPLATE_STORAGE_KEY = 'scheduleTemplates';
 const SCHEDULE_HOLIDAY_STORAGE_KEY = 'scheduleHolidays';
 const CONTENT_STUDIO_LOCAL_CACHE_KEY = 'content_studio_data_local';
 const CONTENT_STUDIO_DATA_KEY = 'content_studio_data';
+const ASSESSMENT_STUDIO_LOCAL_CACHE_KEY = 'assessment_studio_data_local';
+const ASSESSMENT_STUDIO_DATA_KEY = 'assessment_studio_data';
 const CONTENT_CREATOR_DEFAULT_KEY = 'content_creator_default';
 const CONTENT_CREATOR_DEFAULT_LABEL = 'Content Creator';
 
@@ -74,6 +76,58 @@ const ScheduleData = {
 
     getTests() {
         return JSON.parse(this.getStorage().getItem('tests') || '[]');
+    },
+
+    getAssessmentStudioStore() {
+        let local = null;
+        let canonical = null;
+        try {
+            local = JSON.parse(this.getStorage().getItem(ASSESSMENT_STUDIO_LOCAL_CACHE_KEY) || 'null');
+        } catch (error) {
+            local = null;
+        }
+        try {
+            canonical = JSON.parse(this.getStorage().getItem(ASSESSMENT_STUDIO_DATA_KEY) || 'null');
+        } catch (error) {
+            canonical = null;
+        }
+
+        const countItems = (store) => {
+            if (!store || typeof store !== 'object') return 0;
+            return (Array.isArray(store.questionBucket) ? store.questionBucket.length : 0)
+                + (Array.isArray(store.generators) ? store.generators.length : 0)
+                + (Array.isArray(store.submissions) ? store.submissions.length : 0);
+        };
+
+        const parsed = countItems(canonical) > countItems(local) ? canonical : local;
+        if (!parsed || typeof parsed !== 'object') return { questionBucket: [], generators: [], submissions: [] };
+        if (!Array.isArray(parsed.questionBucket)) parsed.questionBucket = [];
+        if (!Array.isArray(parsed.generators)) parsed.generators = [];
+        if (!Array.isArray(parsed.submissions)) parsed.submissions = [];
+        return parsed;
+    },
+
+    getAssessmentStudioGenerators() {
+        const store = this.getAssessmentStudioStore();
+        return (store.generators || [])
+            .filter(generator => generator && String(generator.status || 'active') !== 'archived')
+            .map(generator => ({
+                id: String(generator.id || '').trim(),
+                assessment: String(generator.assessment || '').trim(),
+                phase: String(generator.phase || 'Assessment').trim(),
+                totalPoints: Number(generator.totalPoints || generator.totalScore || 0),
+                pointLeeway: 7,
+                allowedTypes: Array.isArray(generator.allowedTypes) ? generator.allowedTypes : [],
+                groupLimits: generator.groupLimits && typeof generator.groupLimits === 'object' && !Array.isArray(generator.groupLimits) ? generator.groupLimits : {}
+            }))
+            .filter(generator => generator.id && generator.assessment)
+            .sort((a, b) => String(a.assessment || '').localeCompare(String(b.assessment || ''), undefined, { sensitivity: 'base', numeric: true }));
+    },
+
+    getAssessmentStudioGeneratorById(generatorId) {
+        const id = String(generatorId || '').trim();
+        if (!id) return null;
+        return this.getAssessmentStudioGenerators().find(generator => String(generator.id) === id) || null;
     },
 
     getContentStudioStore() {

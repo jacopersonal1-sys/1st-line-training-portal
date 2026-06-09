@@ -580,12 +580,16 @@ function loadTraineeTests() {
         });
     }
 
-    if (visibleTests.length === 0) {
+    const assessmentStudioHtml = typeof renderAssessmentStudioAssignmentsHtml === 'function'
+        ? renderAssessmentStudioAssignmentsHtml()
+        : '';
+
+    if (visibleTests.length === 0 && !assessmentStudioHtml) {
         container.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No assessments available.</div>';
         return;
     }
 
-    container.innerHTML = visibleTests.map(t => {
+    const legacyTestsHtml = visibleTests.map(t => {
         const liveBooking = t._liveBooking || null;
         const completedLiveSub = t._completedSubmission || null;
         const sub = completedLiveSub || submissions.find(s =>
@@ -677,6 +681,8 @@ function loadTraineeTests() {
             ${feedbackHtml}
         </div>`;
     }).join('');
+
+    container.innerHTML = `${assessmentStudioHtml}${legacyTestsHtml}`;
 }
 
 /**

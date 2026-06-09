@@ -26,6 +26,22 @@ function authReadObject(key, fallback = {}) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
 }
 
+function recordLogoutReason(reason = 'user', detail = null) {
+    try {
+        const payload = {
+            reason: String(reason || 'user'),
+            detail: detail || null,
+            user: (window.CURRENT_USER && window.CURRENT_USER.user) || null,
+            role: (window.CURRENT_USER && window.CURRENT_USER.role) || null,
+            at: new Date().toISOString()
+        };
+        localStorage.setItem('last_logout_reason', JSON.stringify(payload));
+        sessionStorage.setItem('last_logout_reason', JSON.stringify(payload));
+    } catch (error) {
+        console.warn('Could not record logout reason:', error);
+    }
+}
+
 function persistAppSession(user) {
     if (window.APP_CHILD_WINDOW_MODE) return;
     if (!user) return;
@@ -225,6 +241,7 @@ async function refreshAuthCriticalDataFromServer() {
 
         if (typeof applySystemConfig === 'function') applySystemConfig();
         if (typeof populateTraineeDropdown === 'function') populateTraineeDropdown();
+        if (typeof refreshSsoLoginVisibility === 'function') refreshSsoLoginVisibility();
         return true;
     } catch (e) {
         console.warn('Auth refresh fallback to local cache:', e && e.message ? e.message : e);
@@ -364,6 +381,8 @@ function toggleLoginMode(mode) {
         populateTraineeDropdown();
     }
   }
+
+  if (typeof refreshSsoLoginVisibility === 'function') refreshSsoLoginVisibility();
 }
 
 function getSsoLoginConfig() {
@@ -383,6 +402,24 @@ function getSsoLoginConfig() {
 function getSsoLoginIpc() {
   if (window.electronAPI && window.electronAPI.sso) return window.electronAPI.sso;
   return null;
+}
+
+function refreshSsoLoginVisibility() {
+  const config = getSsoLoginConfig();
+  const shouldShow = config.enabled === true;
+  const btn = document.getElementById('btnSsoLogin');
+  const divider = document.querySelector('.sso-login-divider');
+
+  [btn, divider].forEach(el => {
+      if (!el) return;
+      el.classList.toggle('hidden', !shouldShow);
+      el.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+  });
+
+  if (btn) {
+      btn.disabled = !shouldShow;
+      btn.tabIndex = shouldShow ? 0 : -1;
+  }
 }
 
 function getSsoEmailCandidates(authUser) {
@@ -1126,7 +1163,7 @@ async function autoLogin() {
       const day = new Date().getDay();
       if ((day === 0 || day === 6) && CURRENT_USER.role !== 'admin' && CURRENT_USER.role !== 'super_admin') {
           alert("Weekend login is currently disabled by System Administrator.");
-          if(typeof logout === 'function') logout();
+          if(typeof logout === 'function') logout('weekend_login_disabled', { source: 'attendance_config' });
           return;
       }
   }
@@ -1477,7 +1514,8 @@ function applyRolePermissions() {
   }
 }
 
-async function logout() { 
+async function logout(reason = 'user', detail = null) { 
+  recordLogoutReason(reason, detail);
   if (window.APP_CHILD_WINDOW_MODE && window.electronAPI?.windowControls?.close) {
       window.electronAPI.windowControls.close();
       return;

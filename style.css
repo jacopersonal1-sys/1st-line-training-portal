@@ -2115,6 +2115,44 @@ section.report-card-workspace.active {
     line-height: 1.4;
 }
 
+.report-helper-text.ok {
+    color: #2e7d32;
+}
+
+.report-helper-text.warn {
+    color: #b45309;
+}
+
+.report-generator-empty {
+    display: grid;
+    place-items: center;
+    gap: 8px;
+    min-height: 260px;
+    max-width: 820px;
+    margin: 0 auto 24px;
+    padding: 34px;
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.report-generator-empty i {
+    color: var(--primary);
+    font-size: 2rem;
+}
+
+.report-generator-empty h3 {
+    margin: 0;
+    color: var(--text-main);
+}
+
+.report-generator-empty p {
+    margin: 0;
+    max-width: 520px;
+}
+
 .a4-page { background: white; color: black; width: 210mm; min-height: 297mm; margin: 0 auto 24px; padding: 15mm; box-shadow: 0 18px 55px rgba(0,0,0,0.35); font-family: 'Arial', sans-serif; position: relative; counter-reset: rep-counter; overflow: visible; }
 .dynamic-section { counter-increment: rep-counter; }
 .rep-num::after { content: counter(rep-counter) ". "; }
@@ -8024,5 +8062,361 @@ body.theme-one-ui .app-loading-spinner {
 
     .qa-submission-actions {
         margin-top: 10px;
+    }
+}
+
+/* Assessment Studio trainee runtime */
+.assessment-studio-assignment-block {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.assessment-studio-assignment-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border-color));
+    background: color-mix(in srgb, var(--primary) 9%, var(--bg-card));
+    border-radius: 8px;
+}
+
+.assessment-studio-assignment-head h3 {
+    margin: 0 0 4px;
+    font-size: 1rem;
+}
+
+.assessment-studio-assignment-head p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+
+.assessment-studio-assignment-row {
+    border-left: 3px solid var(--primary);
+}
+
+#assessment-studio-trainee {
+    padding: 0;
+}
+
+.ast-trainee-shell {
+    min-height: calc(100vh - 126px);
+    background: var(--bg-app);
+    color: var(--text-main);
+}
+
+.ast-trainee-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-card);
+}
+
+.ast-trainee-title span {
+    display: block;
+    color: var(--primary);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.ast-trainee-title h2 {
+    margin: 2px 0 0;
+    font-size: 1.28rem;
+    line-height: 1.2;
+}
+
+.ast-trainee-score {
+    min-width: 92px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    text-align: center;
+    background: color-mix(in srgb, var(--bg-input) 88%, var(--primary) 12%);
+}
+
+.ast-trainee-score strong,
+.ast-trainee-score span {
+    display: block;
+}
+
+.ast-trainee-score span {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.ast-trainee-workspace {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
+    min-height: calc(100vh - 190px);
+}
+
+.ast-trainee-sidebar {
+    position: sticky;
+    top: 66px;
+    height: calc(100vh - 190px);
+    overflow: auto;
+    padding: 18px;
+    border-right: 1px solid var(--border-color);
+    background: var(--bg-card);
+}
+
+.ast-trainee-meta,
+.ast-trainee-progress-list,
+.ast-option-list,
+.ast-match-list,
+.ast-rank-list,
+.ast-matrix-grid {
+    display: grid;
+    gap: 10px;
+}
+
+.ast-trainee-meta {
+    margin-bottom: 18px;
+}
+
+.ast-trainee-meta span,
+.ast-trainee-progress-list a,
+.ast-option-list label,
+.ast-match-list label,
+.ast-rank-row,
+.ast-matrix-row {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-input);
+}
+
+.ast-trainee-meta span {
+    padding: 8px 10px;
+    color: var(--text-muted);
+}
+
+.ast-trainee-progress-list a {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+    color: var(--text-main);
+    text-decoration: none;
+}
+
+.ast-trainee-progress-list a.done {
+    border-color: color-mix(in srgb, var(--primary) 45%, var(--border-color));
+    background: var(--primary-soft);
+}
+
+.ast-trainee-progress-list span {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-align: right;
+}
+
+.ast-trainee-paper {
+    width: min(100%, 980px);
+    margin: 0 auto;
+    padding: 24px;
+}
+
+.ast-trainee-question {
+    margin-bottom: 18px;
+    padding: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-card);
+    box-shadow: var(--shadow-card);
+}
+
+.ast-trainee-question-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.ast-trainee-question-head span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.ast-trainee-question-head h3 {
+    margin: 4px 0 0;
+    font-size: 1rem;
+    line-height: 1.35;
+}
+
+.ast-trainee-question-meta {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.ast-option-list label,
+.ast-match-list label,
+.ast-rank-row,
+.ast-matrix-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+}
+
+.ast-match-list label {
+    justify-content: space-between;
+}
+
+.ast-match-list span {
+    font-weight: 700;
+}
+
+.ast-rank-row span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-weight: 800;
+}
+
+.ast-match-list select,
+.ast-rank-row select {
+    min-width: min(360px, 55vw);
+}
+
+.ast-match-list select,
+.ast-rank-row select,
+.ast-trainee-question textarea {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text-main);
+    padding: 10px 12px;
+}
+
+.ast-option-list input,
+.ast-matrix-row input {
+    accent-color: var(--primary);
+}
+
+.ast-matrix-row {
+    flex-wrap: wrap;
+}
+
+.ast-matrix-row strong {
+    min-width: 150px;
+}
+
+.ast-trainee-question textarea {
+    width: 100%;
+    min-height: 140px;
+    resize: vertical;
+}
+
+.ast-trainee-locked {
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 8px;
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.ast-trainee-submitbar {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 0 4px;
+    background: linear-gradient(to top, var(--bg-app) 72%, rgba(0, 0, 0, 0));
+}
+
+body.theme-one-ui .assessment-studio-assignment-head,
+body.theme-one-ui .ast-trainee-topbar,
+body.theme-one-ui .ast-trainee-sidebar,
+body.theme-one-ui .ast-trainee-question,
+body.theme-one-ui .ast-trainee-empty {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--oneui-layer-2, var(--bg-card)) 96%, var(--primary) 4%), var(--oneui-layer-2, var(--bg-card)));
+    border-color: color-mix(in srgb, var(--primary) 18%, var(--border-color));
+    box-shadow: var(--oneui-shadow-soft, var(--shadow-card));
+}
+
+body.theme-one-ui .ast-trainee-meta span,
+body.theme-one-ui .ast-trainee-progress-list a,
+body.theme-one-ui .ast-option-list label,
+body.theme-one-ui .ast-match-list label,
+body.theme-one-ui .ast-rank-row,
+body.theme-one-ui .ast-matrix-row,
+body.theme-one-ui .ast-match-list select,
+body.theme-one-ui .ast-rank-row select,
+body.theme-one-ui .ast-trainee-question textarea {
+    background: color-mix(in srgb, var(--bg-input) 86%, var(--oneui-layer-2, var(--bg-card)));
+    border-color: color-mix(in srgb, var(--border-color) 82%, var(--primary));
+}
+
+.ast-trainee-empty {
+    max-width: 640px;
+    margin: 60px auto;
+    padding: 24px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    text-align: center;
+    background: var(--bg-card);
+}
+
+@media (max-width: 860px) {
+    .ast-trainee-topbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .ast-trainee-workspace {
+        grid-template-columns: 1fr;
+    }
+
+    .ast-trainee-sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .ast-trainee-progress-list {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    }
+
+    .ast-trainee-paper {
+        padding: 16px;
+    }
+
+    .ast-trainee-question-head,
+    .ast-match-list label,
+    .ast-rank-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ast-match-list select,
+    .ast-rank-row select {
+        min-width: 100%;
     }
 }

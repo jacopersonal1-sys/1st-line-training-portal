@@ -399,21 +399,92 @@ function renderMonthly() {
 }
 
 function loadReportTab() {
-  let users = readReportingArray('users');
-  let reports = readReportingArray('savedReports');
-  const existingTrainees = new Set(reports.map(r => r.trainee.toLowerCase()));
-
-  const select = document.getElementById('reportTraineeSelect');
-  if(select) {
-      select.innerHTML = '<option value="">-- Select Trainee --</option>';
-      users.filter(u => u.role === 'trainee' && !existingTrainees.has(u.user.toLowerCase()))
-           .sort((a,b) => a.user.localeCompare(b.user))
-           .forEach(u => { select.add(new Option(u.user, u.user)); });
-  }
+  populateReportTraineePicker();
   const dateEl = document.getElementById('printDate');
   if(dateEl) dateEl.innerText = new Date().toLocaleDateString();
+  setReportGeneratedVisible(false);
   installReportAutoGrow();
   prepareReportForOutput(document.getElementById('reportContainer'));
+}
+
+function populateReportTraineePicker() {
+    const search = document.getElementById('reportTraineeSearch');
+    const hidden = document.getElementById('reportTraineeSelect');
+    const list = document.getElementById('reportTraineeOptions');
+    if (!search || !hidden || !list) return;
+
+    const eligible = getReportEligibleTrainees();
+    list.innerHTML = '';
+    eligible.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.name;
+        option.label = `${item.name} - ${item.attemptLabel}`;
+        list.appendChild(option);
+    });
+    search.dataset.reportOptions = JSON.stringify(eligible.map(item => ({
+        name: item.name,
+        attemptNumber: item.attemptNumber,
+        attemptLabel: item.attemptLabel,
+        groupID: item.groupID
+    })));
+    search.value = '';
+    hidden.value = '';
+    setReportGeneratorStatus(eligible.length
+        ? `${eligible.length} trainee${eligible.length === 1 ? '' : 's'} ready for report generation.`
+        : 'No live trainees are currently eligible for a new report.');
+}
+
+function handleReportTraineeSearchInput() {
+    const search = document.getElementById('reportTraineeSearch');
+    const hidden = document.getElementById('reportTraineeSelect');
+    if (!search || !hidden) return;
+    const typed = String(search.value || '').trim();
+    const eligible = JSON.parse(search.dataset.reportOptions || '[]');
+    const match = eligible.find(item => getReportIdentity(item.name) === getReportIdentity(typed));
+    hidden.value = match ? match.name : '';
+    setReportGeneratedVisible(false);
+
+    if (!typed) {
+        setReportGeneratorStatus('Search a trainee, then click Create to build the report.');
+        return;
+    }
+
+    if (match) {
+        setReportGeneratorStatus(`${match.name} selected for ${match.attemptLabel}. Click Create to build the report.`, 'ok');
+        return;
+    }
+
+    const users = readReportingArray('users');
+    const user = users.find(item => getReportIdentity(item && (item.user || item.username)) === getReportIdentity(typed));
+    if (user) {
+        const attempt = getReportAttemptMeta(user.user || user.username);
+        const existing = findSavedReportForAttempt(user.user || user.username, attempt.attemptNumber);
+        if (existing) {
+            setReportGeneratorStatus(`Report already exists for ${user.user || user.username} (${attempt.attemptLabel}). Open it under Saved Reports.`, 'warn');
+            return;
+        }
+    }
+    setReportGeneratorStatus('Choose a trainee from the search suggestions.');
+}
+
+function createSelectedReport() {
+    const hidden = document.getElementById('reportTraineeSelect');
+    const name = String(hidden?.value || '').trim();
+    if (!name) {
+        handleReportTraineeSearchInput();
+        return alert('Select a trainee from the search suggestions first.');
+    }
+    const attempt = getReportAttemptMeta(name);
+    const existing = findSavedReportForAttempt(name, attempt.attemptNumber);
+    if (existing) {
+        setReportGeneratorStatus(`Report already exists for ${name} (${attempt.attemptLabel}). Open it under Saved Reports.`, 'warn');
+        showReportSub('saved', document.getElementById('btn-rep-saved'));
+        return;
+    }
+    if (hidden) hidden.value = name;
+    setReportGeneratedVisible(true);
+    setReportGeneratorStatus(`Building ${attempt.attemptLabel} report for ${name}.`, 'ok');
+    generateReport();
 }
 
 function showReportSub(type, btn) {
@@ -431,6 +502,16 @@ function toggleReportDetails(section, isYes) {
         if (isYes) el.classList.remove('hidden-print-field'); else el.classList.add('hidden-print-field');
     }
     prepareReportForOutput(document.getElementById('reportContainer'));
+}
+
+function toggleReportDetailsInScope(scope, section, isYes) {
+    const root = scope || document;
+    const el = root.querySelector ? root.querySelector(`#${section}Details`) : null;
+    if (el) {
+        if (isYes) el.classList.remove('hidden-print-field');
+        else el.classList.add('hidden-print-field');
+    }
+    prepareReportForOutput(root);
 }
 
 function getReportEditableFields(scope) {
@@ -468,6 +549,12 @@ function installReportAutoGrow() {
                 growReportEditableField(event.target);
             }
         });
+        root.addEventListener('change', event => {
+            const target = event.target;
+            if (!target || !target.matches('input[name="repBehavior"], input[name="repObserve"]')) return;
+            const section = target.name === 'repBehavior' ? 'behavior' : 'observe';
+            toggleReportDetailsInScope(root, section, target.value === 'Yes' && target.checked);
+        });
         root.addEventListener('paste', event => {
             if (!event.target || !event.target.matches('.report-text-area[contenteditable="true"], .report-input-display[contenteditable="true"]')) return;
             event.preventDefault();
@@ -490,6 +577,99 @@ function escapeReportHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function getReportIdentity(value) {
+    return normalizeReportingIdentity(value).replace(/\s+/g, '');
+}
+
+function getReportCurrentGroupId(traineeName) {
+    const target = getReportIdentity(traineeName);
+    if (!target) return '';
+    const rosters = readReportingObject('rosters');
+    const groupIds = Object.keys(rosters || {}).sort().reverse();
+    for (const gid of groupIds) {
+        const members = Array.isArray(rosters[gid]) ? rosters[gid] : [];
+        if (members.some(member => getReportIdentity(member) === target)) return gid;
+    }
+    return '';
+}
+
+function getReportAttemptMeta(traineeName) {
+    const target = getReportIdentity(traineeName);
+    const archives = [
+        ...readReportingArray('retrain_archives'),
+        ...readReportingArray('graduated_agents').filter(entry =>
+            String((entry && entry.reason) || '').trim().toLowerCase().startsWith('moved to ')
+        )
+    ].filter(entry => getReportIdentity(entry && (entry.user || entry.username || entry.trainee)) === target);
+
+    const archiveAttempts = archives
+        .map(entry => Number(entry && entry.attemptNumber))
+        .filter(value => Number.isFinite(value) && value > 0);
+    const archiveCount = archiveAttempts.length ? Math.max(...archiveAttempts) : archives.length;
+    const attemptNumber = Math.max(1, archiveCount + 1);
+    return {
+        attemptNumber,
+        attemptLabel: `Training Attempt ${attemptNumber}`,
+        groupID: getReportCurrentGroupId(traineeName)
+    };
+}
+
+function getSavedReportAttemptNumber(report) {
+    const explicit = Number(report && (report.attemptNumber || report.trainingAttempt || report.reportAttemptNumber));
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    const label = String(report && (report.attemptLabel || report.trainingAttemptLabel || '') || '');
+    const match = label.match(/attempt\s*(\d+)/i);
+    if (match) return Number(match[1]);
+    return 1;
+}
+
+function findSavedReportForAttempt(traineeName, attemptNumber) {
+    const target = getReportIdentity(traineeName);
+    const attempt = Number(attemptNumber) || 1;
+    return readReportingArray('savedReports').find(report =>
+        getReportIdentity(report && report.trainee) === target &&
+        getSavedReportAttemptNumber(report) === attempt
+    ) || null;
+}
+
+function getReportEligibleTrainees() {
+    const users = readReportingArray('users');
+    const rosters = readReportingObject('rosters');
+    const liveTokens = new Set();
+    Object.values(rosters || {}).forEach(members => {
+        if (!Array.isArray(members)) return;
+        members.forEach(member => {
+            const token = getReportIdentity(member);
+            if (token) liveTokens.add(token);
+        });
+    });
+
+    return users
+        .filter(user => String(user && user.role || '').toLowerCase() === 'trainee')
+        .map(user => {
+            const name = String(user.user || user.username || '').trim();
+            const attempt = getReportAttemptMeta(name);
+            return { name, ...attempt, existingReport: findSavedReportForAttempt(name, attempt.attemptNumber) };
+        })
+        .filter(item => item.name && liveTokens.has(getReportIdentity(item.name)) && !item.existingReport)
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function setReportGeneratedVisible(isVisible) {
+    const report = document.getElementById('reportContainer');
+    const empty = document.getElementById('reportGeneratorEmpty');
+    if (report) report.classList.toggle('hidden', !isVisible);
+    if (empty) empty.classList.toggle('hidden', isVisible);
+}
+
+function setReportGeneratorStatus(message, type = '') {
+    const el = document.getElementById('reportGeneratorStatus');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.remove('warn', 'ok');
+    if (type) el.classList.add(type);
 }
 
 function getConfiguredOnboardReportItems(sectionKey) {
@@ -558,6 +738,10 @@ function findReportScore(itemName, records, submissions, options = {}) {
 
 function createReportSnapshotHtml() {
     const container = document.getElementById('reportContainer');
+    return createReportSnapshotHtmlFrom(container);
+}
+
+function createReportSnapshotHtmlFrom(container) {
     if (!container) return '';
     prepareReportForOutput(container);
     const clone = container.cloneNode(true);
@@ -569,6 +753,9 @@ function createReportSnapshotHtml() {
 }
 
 function printGeneratedReport() {
+    if (document.getElementById('reportContainer')?.classList.contains('hidden')) {
+        return alert('Create a report before printing.');
+    }
     prepareReportForOutput(document.getElementById('reportContainer'));
     document.body.classList.add('printing-generated-report');
     window.print();
@@ -582,6 +769,10 @@ function printSavedReport() {
 
 function closeSavedReportModal() {
     document.getElementById('savedReportModal')?.classList.add('hidden');
+    const saveBtn = document.getElementById('savedReportSaveBtn');
+    if (saveBtn) saveBtn.classList.add('hidden');
+    const container = document.getElementById('savedReportContent');
+    if (container) delete container.dataset.reportId;
     document.body.classList.remove('printing-saved-report');
 }
 
@@ -601,6 +792,7 @@ window.addEventListener('afterprint', () => {
 function generateReport() {
   const name = document.getElementById('reportTraineeSelect').value;
   if(!name) return;
+  const attemptMeta = getReportAttemptMeta(name);
   
   // --- 1. RESET FORM FIELDS (Fixes persistence issue) ---
   document.querySelectorAll('input[name="repBehavior"]').forEach(el => el.checked = false);
@@ -648,15 +840,21 @@ function generateReport() {
               break;
           }
       }
-      document.getElementById('repPeriod').innerText = group;
+      document.getElementById('repPeriod').innerText = `${group} | ${attemptMeta.attemptLabel}`;
       
       // DATA AGGREGATION: Manual Records + Approved Digital Submissions
       const allRecs = readReportingArray('records');
       const submissions = readReportingArray('submissions');
+      const liveRecs = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
+          ? filterRowsToCurrentTraineeLifecycle(allRecs)
+          : allRecs;
+      const liveSubs = (typeof filterRowsToCurrentTraineeLifecycle === 'function')
+          ? filterRowsToCurrentTraineeLifecycle(submissions)
+          : submissions;
       
       // Filter for this trainee (Safe check for nulls)
-      const myRecs = allRecs.filter(r => r.trainee && r.trainee.toLowerCase() === name.toLowerCase());
-      const mySubs = submissions.filter(s => s.trainee && s.trainee.toLowerCase() === name.toLowerCase() && s.status === 'completed');
+      const myRecs = liveRecs.filter(r => r.trainee && r.trainee.toLowerCase() === name.toLowerCase());
+      const mySubs = liveSubs.filter(s => s.trainee && s.trainee.toLowerCase() === name.toLowerCase() && s.status === 'completed');
 
       // 1. STANDARD ASSESSMENTS (Configured from Agent Progress Builder Insight)
       const assessList = readReportingArray('assessments');
@@ -748,11 +946,21 @@ async function saveGeneratedReport() {
     const selectedName = document.getElementById('reportTraineeSelect')?.value || '';
     const name = document.getElementById('repName').innerText.trim();
     if(!selectedName || !name || name.toLowerCase().includes('generating')) return alert("Generate a report first.");
+    const attemptMeta = getReportAttemptMeta(name);
+    const existing = findSavedReportForAttempt(name, attemptMeta.attemptNumber);
+    if (existing) {
+        alert(`Report already exists for ${name} (${attemptMeta.attemptLabel}). Open Saved Reports to edit it.`);
+        showReportSub('saved', document.getElementById('btn-rep-saved'));
+        return;
+    }
     prepareReportForOutput(document.getElementById('reportContainer'));
     const reportData = {
         id: Date.now(),
         date: new Date().toLocaleDateString(),
         trainee: name,
+        attemptNumber: attemptMeta.attemptNumber,
+        attemptLabel: attemptMeta.attemptLabel,
+        groupID: attemptMeta.groupID,
         savedBy: CURRENT_USER.user,
         html: createReportSnapshotHtml(),
         behaviorYes: document.querySelector('input[name="repBehavior"][value="Yes"]').checked,
@@ -835,17 +1043,19 @@ function renderSavedReportsList() {
     });
 
     if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No reports found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No reports found.</td></tr>';
         return;
     }
 
     filtered.reverse().forEach(r => {
+        const attemptLabel = r.attemptLabel || `Training Attempt ${getSavedReportAttemptNumber(r)}`;
         tbody.innerHTML += `<tr>
             <td data-label="Date Saved">${r.date}</td>
             <td data-label="Trainee">${r.trainee}</td>
+            <td data-label="Attempt">${attemptLabel}</td>
             <td data-label="Saved By">${r.savedBy}</td>
             <td data-label="Action">
-                <button class="btn-primary" onclick="viewSavedReport(${r.id})" aria-label="View Saved Report for ${r.trainee}">View</button>
+                <button class="btn-primary" onclick="viewSavedReport(${r.id})" aria-label="View Saved Report for ${r.trainee}">View / Edit</button>
                 <button class="btn-danger" onclick="deleteSavedReport(${r.id})" style="margin-left:5px;" title="Delete Report"><i class="fas fa-trash"></i></button>
             </td>
         </tr>`;
@@ -903,29 +1113,100 @@ function viewSavedReport(id) {
 
     if(!report) return;
     const container = document.getElementById('savedReportContent');
+    container.dataset.reportId = String(report.id || id);
     container.innerHTML = report.html;
     if(report.behaviorYes) {
-        container.querySelector('input[name="repBehavior"][value="Yes"]').checked = true;
-        container.querySelector('#behaviorDetails').classList.remove('hidden-print-field');
-        container.querySelector('#repProbText').innerHTML = report.probText;
-        container.querySelector('#repProbLink').innerHTML = report.probLink;
+        const behaviorYes = container.querySelector('input[name="repBehavior"][value="Yes"]');
+        if (behaviorYes) behaviorYes.checked = true;
+        container.querySelector('#behaviorDetails')?.classList.remove('hidden-print-field');
+        const probText = container.querySelector('#repProbText');
+        const probLink = container.querySelector('#repProbLink');
+        if (probText) probText.innerHTML = report.probText || '';
+        if (probLink) probLink.innerHTML = report.probLink || '';
     }
     if(report.observeYes) {
-        container.querySelector('input[name="repObserve"][value="Yes"]').checked = true;
-        container.querySelector('#observeDetails').classList.remove('hidden-print-field');
-        container.querySelector('#repObsText').innerHTML = report.obsText;
-        container.querySelector('#repObsLink').innerHTML = report.obsLink;
+        const observeYes = container.querySelector('input[name="repObserve"][value="Yes"]');
+        if (observeYes) observeYes.checked = true;
+        container.querySelector('#observeDetails')?.classList.remove('hidden-print-field');
+        const obsText = container.querySelector('#repObsText');
+        const obsLink = container.querySelector('#repObsLink');
+        if (obsText) obsText.innerHTML = report.obsText || '';
+        if (obsLink) obsLink.innerHTML = report.obsLink || '';
     }
-    container.querySelector('#repFeedback').innerHTML = report.feedback;
-    container.querySelector('#repDeploy').innerHTML = report.deploy;
+    const feedback = container.querySelector('#repFeedback');
+    const deploy = container.querySelector('#repDeploy');
+    if (feedback) feedback.innerHTML = report.feedback || '';
+    if (deploy) deploy.innerHTML = report.deploy || '';
     if(report.checks) {
-        if(report.checks[0]) container.querySelector('#repPass1').checked = true;
-        if(report.checks[1]) container.querySelector('#repPass2').checked = true;
-        if(report.checks[2]) container.querySelector('#repPass3').checked = true;
+        const pass1 = container.querySelector('#repPass1');
+        const pass2 = container.querySelector('#repPass2');
+        const pass3 = container.querySelector('#repPass3');
+        if(report.checks[0] && pass1) pass1.checked = true;
+        if(report.checks[1] && pass2) pass2.checked = true;
+        if(report.checks[2] && pass3) pass3.checked = true;
     }
     document.getElementById('savedReportModal').classList.remove('hidden');
+    document.getElementById('savedReportSaveBtn')?.classList.remove('hidden');
     installReportAutoGrow();
     prepareReportForOutput(container);
+}
+
+function getReportFieldStateFromContainer(container) {
+    const pick = selector => container.querySelector(selector);
+    const isChecked = selector => !!(pick(selector) && pick(selector).checked);
+    const html = selector => pick(selector) ? pick(selector).innerHTML : '';
+    return {
+        behaviorYes: isChecked('input[name="repBehavior"][value="Yes"]'),
+        observeYes: isChecked('input[name="repObserve"][value="Yes"]'),
+        probText: html('#repProbText'),
+        probLink: html('#repProbLink'),
+        obsText: html('#repObsText'),
+        obsLink: html('#repObsLink'),
+        feedback: html('#repFeedback'),
+        deploy: html('#repDeploy'),
+        checks: [
+            isChecked('#repPass1'),
+            isChecked('#repPass2'),
+            isChecked('#repPass3')
+        ]
+    };
+}
+
+async function saveEditedSavedReport() {
+    const container = document.getElementById('savedReportContent');
+    const id = container?.dataset.reportId;
+    if (!container || !id) return alert('Open a saved report first.');
+
+    const saved = readReportingArray('savedReports');
+    const index = saved.findIndex(report => String(report.id || '') === String(id));
+    if (index < 0) return alert('This report is archived or could not be edited from the saved list.');
+
+    prepareReportForOutput(container);
+    saved[index] = {
+        ...saved[index],
+        ...getReportFieldStateFromContainer(container),
+        html: createReportSnapshotHtmlFrom(container),
+        lastEditedAt: new Date().toISOString(),
+        lastEditedBy: CURRENT_USER.user
+    };
+    if (!saved[index].attemptNumber) saved[index].attemptNumber = getSavedReportAttemptNumber(saved[index]);
+    if (!saved[index].attemptLabel) saved[index].attemptLabel = `Training Attempt ${saved[index].attemptNumber}`;
+    localStorage.setItem('savedReports', JSON.stringify(saved));
+
+    const btn = document.getElementById('savedReportSaveBtn');
+    const originalText = btn ? btn.innerText : '';
+    if (btn) {
+        btn.innerText = 'Saving...';
+        btn.disabled = true;
+    }
+    await secureReportSave();
+    if (btn) {
+        btn.innerText = originalText;
+        btn.disabled = false;
+    }
+    if (typeof showToast === 'function') showToast('Report changes saved.', 'success');
+    else alert('Report changes saved.');
+    renderSavedReportsList();
 }
 
 // --- LINK MANAGEMENT (TL & ADMIN) ---
