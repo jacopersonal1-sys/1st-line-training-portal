@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.7.20 - 2026-06-09
+
+- Fix: Timeline-linked Assessment Studio submissions now stay closed after submission and show Submitted or Graded instead of reopening the test.
+- Fix: Trainee runtime no longer displays submitted question answers after an Assessment Studio test is handed in.
+- Fix: Completed Assessment Studio grades now win during sync/merge so trainee My Assessments updates from Pending Review to Completed.
+- Improvement: Assessment Studio grading now reserves the selected script for the active admin and shows when another admin is grading it.
+- Improvement: Assessment Studio grading now opens as a full-width marking workspace with the active trainee/test details kept sticky at the top.
+- Improvement: Legacy Test Engine grading now uses a larger full-app style marking view with a sticky test detail header.
+- Release: Version bump to `2.7.20` for stable main-channel rollout.
+
+> Release target: stable main channel.
+
 ## 2.7.1 - 2026-05-21
 
 - Hotfix: Live Assessment Arena is now hidden unless its own tab is active, preventing the arena layout/background from bleeding into unrelated application views.

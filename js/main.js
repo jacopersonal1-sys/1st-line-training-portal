@@ -5582,6 +5582,15 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.20": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Timeline-linked tests now stay closed after submission and show Submitted or Graded instead of reopening the paper.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee View:</strong> Submitted Assessment Studio question answers are no longer shown in the trainee runtime after hand-in.</li>
+                <li style="margin-bottom: 8px;"><strong>Grading:</strong> Admin marking now reserves the selected Studio submission and shows when another admin is already grading it.</li>
+                <li style="margin-bottom: 8px;"><strong>Grading Workspace:</strong> Assessment Studio grading now opens as a full-width marking workspace with current trainee and test details kept visible at the top.</li>
+                <li style="margin-bottom: 8px;"><strong>Reliability:</strong> Completed Studio grades now win during sync so trainee My Assessments updates from Pending Review to Completed.</li>
+                <li style="margin-bottom: 8px;"><strong>Test Engine:</strong> Legacy grading now uses a larger full-app style marking view with a sticky test detail header.</li>
+            </ul>`,
         "2.7.17": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Adds the new generated assessment workflow with Question Bucket, generator recipes, sealed trainee snapshots, full-page trainee runtime, Grading Queue, Completed Tests, Feedback Sessions, and Universal Search.</li>

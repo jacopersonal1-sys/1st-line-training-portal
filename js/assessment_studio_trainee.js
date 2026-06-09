@@ -166,18 +166,87 @@ function astTraineeMergeById(remoteItems, localItems, timeField = 'updatedAt') {
     return Array.from(map.values());
 }
 
+function astTraineeSubmissionStatusRank(status) {
+    const value = String(status || '').trim().toLowerCase();
+    if (value === 'completed') return 4;
+    if (value === 'pending_review') return 3;
+    if (value === 'in_progress') return 2;
+    if (value === 'assigned') return 1;
+    return 0;
+}
+
+function astTraineePickSubmission(existing, incoming) {
+    if (!existing) return incoming;
+    const existingRank = astTraineeSubmissionStatusRank(existing.status);
+    const incomingRank = astTraineeSubmissionStatusRank(incoming.status);
+    if (incomingRank !== existingRank) return incomingRank > existingRank ? incoming : existing;
+    const existingDate = existing.updatedAt || existing.gradedAt || existing.submittedAt || existing.generatedAt || '';
+    const incomingDate = incoming.updatedAt || incoming.gradedAt || incoming.submittedAt || incoming.generatedAt || '';
+    return String(incomingDate) >= String(existingDate) ? incoming : existing;
+}
+
+function astTraineeMergeSubmissions(remoteItems, localItems) {
+    const map = new Map();
+    (Array.isArray(remoteItems) ? remoteItems : []).forEach(item => {
+        if (!item || typeof item !== 'object') return;
+        const id = String(item.id || '');
+        if (id) map.set(id, item);
+    });
+    (Array.isArray(localItems) ? localItems : []).forEach(item => {
+        if (!item || typeof item !== 'object') return;
+        const id = String(item.id || '');
+        if (id) map.set(id, astTraineePickSubmission(map.get(id), item));
+    });
+    return Array.from(map.values());
+}
+
 function astTraineeGetStore() {
     const local = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_LOCAL_KEY), null));
     const canonical = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_DATA_KEY), null));
     return astTraineeNormalizeStore({
         questionBucket: astTraineeMergeById(canonical.questionBucket, local.questionBucket),
         generators: astTraineeMergeById(canonical.generators, local.generators),
-        submissions: astTraineeMergeById(canonical.submissions, local.submissions),
+        submissions: astTraineeMergeSubmissions(canonical.submissions, local.submissions),
         groupings: astTraineeMergeById(canonical.groupings, local.groupings),
         tags: astTraineeMergeById(canonical.tags, local.tags),
         updatedAt: local.updatedAt || canonical.updatedAt,
         updatedBy: local.updatedBy || canonical.updatedBy
     });
+}
+
+async function refreshAssessmentStudioTraineeStoreFromServer() {
+    if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') return false;
+    if (window.__AST_TRAINEE_REFRESHING) return false;
+    window.__AST_TRAINEE_REFRESHING = true;
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('app_documents')
+            .select('content, updated_at')
+            .eq('key', AST_TRAINEE_DATA_KEY)
+            .maybeSingle();
+        if (error) throw error;
+        if (data && data.content && typeof data.content === 'object') {
+            const remote = astTraineeNormalizeStore(data.content);
+            const local = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_LOCAL_KEY), null));
+            const merged = astTraineeNormalizeStore({
+                questionBucket: astTraineeMergeById(remote.questionBucket, local.questionBucket),
+                generators: astTraineeMergeById(remote.generators, local.generators),
+                submissions: astTraineeMergeSubmissions(remote.submissions, local.submissions),
+                groupings: astTraineeMergeById(remote.groupings, local.groupings),
+                tags: astTraineeMergeById(remote.tags, local.tags),
+                updatedAt: remote.updatedAt || data.updated_at || new Date().toISOString(),
+                updatedBy: remote.updatedBy || 'System'
+            });
+            localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(remote));
+            localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(merged));
+            return true;
+        }
+    } catch (error) {
+        console.warn('[Assessment Studio Trainee] refresh failed:', error);
+    } finally {
+        window.__AST_TRAINEE_REFRESHING = false;
+    }
+    return false;
 }
 
 async function astTraineeSaveStore(store, forceSync = false) {
@@ -423,6 +492,10 @@ async function openAssessmentStudioFromSchedule(generatorId, scheduleItem = {}) 
             if (typeof showToast === 'function') showToast('Assessment Studio assignment could not be opened.', 'error');
             return false;
         }
+        if (!['assigned', 'in_progress'].includes(String(sub.status || ''))) {
+            if (typeof showToast === 'function') showToast('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
+            return false;
+        }
         openAssessmentStudioTraineeRuntime(sub.id);
         return true;
     } catch (error) {
@@ -437,6 +510,13 @@ function openAssessmentStudioTraineeRuntime(submissionId) {
     AST_ACTIVE_SUBMISSION_ID = String(submissionId || '').trim();
     const store = astTraineeGetStore();
     const sub = store.submissions.find(item => String(item.id) === AST_ACTIVE_SUBMISSION_ID);
+    if (sub && !['assigned', 'in_progress'].includes(String(sub.status || ''))) {
+        AST_ACTIVE_SUBMISSION_ID = '';
+        if (typeof showToast === 'function') showToast('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
+        if (typeof showTab === 'function') showTab('my-tests');
+        if (typeof loadTraineeTests === 'function') loadTraineeTests();
+        return;
+    }
     if (sub && sub.status === 'assigned') {
         sub.status = 'in_progress';
         sub.updatedAt = new Date().toISOString();
@@ -487,6 +567,31 @@ function renderAssessmentStudioTraineeRuntime() {
     const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
     const completeness = astTraineeAnswerCompleteness(sub);
     const locked = !['assigned', 'in_progress'].includes(String(sub.status || ''));
+    if (locked) {
+        const status = String(sub.status || '').trim();
+        const isCompleted = status === 'completed';
+        root.innerHTML = `
+            <div class="ast-trainee-shell">
+                <header class="ast-trainee-topbar">
+                    <button class="btn-secondary btn-sm" onclick="showTab('my-tests')"><i class="fas fa-arrow-left"></i> My Assessments</button>
+                    <div class="ast-trainee-title">
+                        <span>Assessment Studio</span>
+                        <h2>${astTraineeEsc(sub.assessment || 'Generated Assessment')}</h2>
+                    </div>
+                    <div class="ast-trainee-score">
+                        <strong>${isCompleted ? `${Math.round(Number(sub.percent || 0))}%` : 'Submitted'}</strong>
+                        <span>${isCompleted ? 'graded' : 'for review'}</span>
+                    </div>
+                </header>
+                <div class="ast-trainee-empty">
+                    <h2>${isCompleted ? 'Assessment Graded' : 'Assessment Submitted'}</h2>
+                    <p>${isCompleted ? 'Your result is available in My Assessments.' : 'Your test has been submitted for admin review and cannot be reopened.'}</p>
+                    <button class="btn-primary" onclick="showTab('my-tests')"><i class="fas fa-list-check"></i> Back to My Assessments</button>
+                </div>
+            </div>
+        `;
+        return;
+    }
     root.innerHTML = `
         <div class="ast-trainee-shell">
             <header class="ast-trainee-topbar">
@@ -516,7 +621,6 @@ function renderAssessmentStudioTraineeRuntime() {
                     </div>
                 </aside>
                 <main class="ast-trainee-paper">
-                    ${locked ? `<div class="ast-trainee-locked"><i class="fas fa-lock"></i> This submission is already saved for review and can no longer be changed from the trainee view.</div>` : ''}
                     ${questions.map((q, idx) => renderAssessmentStudioTraineeQuestion(sub, q, idx, locked)).join('')}
                     <div class="ast-trainee-submitbar">
                         <button class="btn-secondary" onclick="saveAssessmentStudioDraft()" ${locked ? 'disabled' : ''}><i class="fas fa-save"></i> Save Draft</button>
@@ -721,3 +825,4 @@ window.openAssessmentStudioTraineeRuntime = openAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioTraineeRuntime = renderAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioAssignmentsHtml = renderAssessmentStudioAssignmentsHtml;
 window.requestAssessmentStudioFeedback = requestAssessmentStudioFeedback;
+window.refreshAssessmentStudioTraineeStoreFromServer = refreshAssessmentStudioTraineeStoreFromServer;

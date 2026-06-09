@@ -2868,8 +2868,21 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
         // Case 2e: Assessment Studio (merge bucket, recipes, trainee snapshots and feedback/grading independently)
         else if (key === 'assessment_studio_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
+            const statusRank = (status) => {
+                const value = String(status || '').trim().toLowerCase();
+                if (value === 'completed') return 4;
+                if (value === 'pending_review') return 3;
+                if (value === 'in_progress') return 2;
+                if (value === 'assigned') return 1;
+                return 0;
+            };
             const pickLatest = (existing, incoming, dateFields) => {
                 if (!existing) return incoming;
+                if (dateFields.includes('__status_rank__')) {
+                    const existingRank = statusRank(existing.status);
+                    const incomingRank = statusRank(incoming.status);
+                    if (incomingRank !== existingRank) return incomingRank > existingRank ? incoming : existing;
+                }
                 const existingDate = dateFields.map(field => existing[field]).find(Boolean) || '';
                 const incomingDate = dateFields.map(field => incoming[field]).find(Boolean) || '';
                 return String(incomingDate) >= String(existingDate) ? incoming : existing;
@@ -2893,7 +2906,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
             const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
             base.questionBucket = mergeById(sVal.questionBucket, lVal.questionBucket, ['updatedAt', 'createdAt']).sort(byUpdated);
             base.generators = mergeById(sVal.generators, lVal.generators, ['updatedAt', 'createdAt']).sort(byUpdated);
-            base.submissions = mergeById(sVal.submissions, lVal.submissions, ['updatedAt', 'gradedAt', 'submittedAt', 'generatedAt']).sort(bySubmitted);
+            base.submissions = mergeById(sVal.submissions, lVal.submissions, ['__status_rank__', 'updatedAt', 'gradedAt', 'submittedAt', 'generatedAt']).sort(bySubmitted);
             base.groupings = mergeById(sVal.groupings, lVal.groupings, ['updatedAt', 'createdAt']).sort(byUpdated);
             base.tags = mergeById(sVal.tags, lVal.tags, ['updatedAt', 'createdAt']).sort(byUpdated);
             merged[key] = base;

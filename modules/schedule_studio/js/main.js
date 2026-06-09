@@ -1059,6 +1059,44 @@ const App = {
         return item.availabilityExceptionUsers.some(entry => ScheduleData.identitiesMatch(entry, username));
     },
 
+    getCurrentUserAssessmentStudioSubmission(generatorId) {
+        const cleanGeneratorId = String(generatorId || '').trim();
+        const currentUser = ScheduleData.getCurrentUser();
+        const username = String(currentUser?.user || currentUser?.username || '').trim();
+        if (!cleanGeneratorId || !username) return null;
+        try {
+            const storage = ScheduleData.getStorage();
+            const canonical = JSON.parse(storage.getItem('assessment_studio_data') || 'null');
+            const local = JSON.parse(storage.getItem('assessment_studio_data_local') || 'null');
+            const submissions = [
+                ...((canonical && Array.isArray(canonical.submissions)) ? canonical.submissions : []),
+                ...((local && Array.isArray(local.submissions)) ? local.submissions : [])
+            ];
+            const rankStatus = (status) => {
+                const value = String(status || '').trim().toLowerCase();
+                if (value === 'completed') return 4;
+                if (value === 'pending_review') return 3;
+                if (value === 'in_progress') return 2;
+                if (value === 'assigned') return 1;
+                return 0;
+            };
+            return submissions
+                .filter(sub =>
+                    sub &&
+                    String(sub.generatorId || '') === cleanGeneratorId &&
+                    ScheduleData.identitiesMatch(sub.trainee, username) &&
+                    String(sub.status || '') !== 'archived'
+                )
+                .sort((a, b) => {
+                    const rankDiff = rankStatus(b.status) - rankStatus(a.status);
+                    if (rankDiff) return rankDiff;
+                    return String(b.updatedAt || b.gradedAt || b.submittedAt || b.generatedAt || '').localeCompare(String(a.updatedAt || a.gradedAt || a.submittedAt || a.generatedAt || ''));
+                })[0] || null;
+        } catch (error) {
+            return null;
+        }
+    },
+
     getMaterialState(item) {
         const range = ScheduleData.parseRange(item);
         if (this.isCurrentUserAvailabilityException(item)) {
@@ -1097,6 +1135,17 @@ const App = {
 
         if (item.linkedAssessmentStudioGeneratorId && !studioGenerator) {
             return { enabled: false, label: assessmentLabel, buttonLabel: 'Missing' };
+        }
+
+        if (item.linkedAssessmentStudioGeneratorId) {
+            const existingStudioSubmission = this.getCurrentUserAssessmentStudioSubmission(item.linkedAssessmentStudioGeneratorId);
+            const existingStatus = String(existingStudioSubmission?.status || '').trim().toLowerCase();
+            if (existingStatus && !['assigned', 'in_progress'].includes(existingStatus)) {
+                const completedLabel = existingStatus === 'completed'
+                    ? `Graded (${Math.round(Number(existingStudioSubmission.percent || 0))}%)`
+                    : 'Submitted for admin review';
+                return { enabled: false, label: completedLabel, buttonLabel: existingStatus === 'completed' ? 'Graded' : 'Submitted' };
+            }
         }
 
         const today = this.todayString();

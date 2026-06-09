@@ -7341,6 +7341,31 @@ body.theme-one-ui .app-loading-spinner {
 }
 
 /* ================= TEST ENGINE WORKBENCH ================= */
+.modal-box.marking-app-modal {
+    width: min(1500px, 98vw);
+    max-width: 98vw;
+    height: min(96vh, 980px);
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+}
+.modal-box.marking-app-modal > h3 {
+    margin: 0 0 10px;
+}
+#markingContainer {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin-bottom: 14px;
+    padding-right: 4px;
+}
+.marking-app-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 12px;
+}
 .marking-queue-row {
     display: flex;
     justify-content: space-between;
@@ -7383,13 +7408,18 @@ body.theme-one-ui .app-loading-spinner {
     border-color: rgba(241, 196, 15, 0.35);
 }
 .marking-workbench-header {
+    position: sticky;
+    top: 0;
+    z-index: 4;
     display: flex;
     justify-content: space-between;
     gap: 20px;
     align-items: flex-start;
     margin-bottom: 16px;
-    padding-bottom: 16px;
+    padding: 10px 0 16px;
     border-bottom: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--bg-card) 94%, transparent);
+    backdrop-filter: blur(10px);
 }
 .marking-eyebrow,
 .marking-side-label {
@@ -7408,19 +7438,17 @@ body.theme-one-ui .app-loading-spinner {
     font-size: 0.82rem;
 }
 .marking-workbench-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 280px;
-    gap: 18px;
-    align-items: start;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 14px;
 }
 .marking-question-stack {
     min-width: 0;
 }
 .marking-side-panel {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
-    position: sticky;
-    top: 0;
 }
 .marking-side-card {
     background: var(--bg-input);
@@ -7476,11 +7504,8 @@ body.theme-one-ui .app-loading-spinner {
     font-weight: 800;
 }
 @media (max-width: 980px) {
-    .marking-workbench-grid {
-        grid-template-columns: 1fr;
-    }
     .marking-side-panel {
-        position: static;
+        grid-template-columns: 1fr;
     }
     .marking-workbench-header,
     .marking-queue-row {

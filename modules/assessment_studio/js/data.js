@@ -126,6 +126,7 @@ const AssessmentStudioData = {
             percent: Number.isFinite(Number(s.percent)) ? Number(s.percent) : 0,
             graderNotes: String(s.graderNotes || '').trim(),
             gradingAudit: Array.isArray(s.gradingAudit) ? s.gradingAudit : [],
+            gradingLock: s.gradingLock && typeof s.gradingLock === 'object' ? s.gradingLock : null,
             generatedAt: s.generatedAt || s.createdAt || new Date().toISOString(),
             submittedAt: s.submittedAt || null,
             gradedAt: s.gradedAt || null,
@@ -177,13 +178,47 @@ const AssessmentStudioData = {
         return Array.from(map.values());
     },
 
+    submissionStatusRank(status) {
+        const value = String(status || '').trim().toLowerCase();
+        if (value === 'completed') return 4;
+        if (value === 'pending_review') return 3;
+        if (value === 'in_progress') return 2;
+        if (value === 'assigned') return 1;
+        return 0;
+    },
+
+    pickSubmission(existing, incoming) {
+        if (!existing) return incoming;
+        const existingRank = this.submissionStatusRank(existing.status);
+        const incomingRank = this.submissionStatusRank(incoming.status);
+        if (incomingRank !== existingRank) return incomingRank > existingRank ? incoming : existing;
+        const existingDate = existing.updatedAt || existing.gradedAt || existing.submittedAt || existing.generatedAt || '';
+        const incomingDate = incoming.updatedAt || incoming.gradedAt || incoming.submittedAt || incoming.generatedAt || '';
+        return String(incomingDate) >= String(existingDate) ? incoming : existing;
+    },
+
+    mergeSubmissions(remoteItems, localItems) {
+        const map = new Map();
+        (Array.isArray(remoteItems) ? remoteItems : []).forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const id = String(item.id || '');
+            if (id) map.set(id, item);
+        });
+        (Array.isArray(localItems) ? localItems : []).forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const id = String(item.id || '');
+            if (id) map.set(id, this.pickSubmission(map.get(id), item));
+        });
+        return Array.from(map.values());
+    },
+
     mergeStudio(remote, local) {
         const a = this.normalizeStudio(remote);
         const b = this.normalizeStudio(local);
         return this.normalizeStudio({
             questionBucket: this.mergeById(a.questionBucket, b.questionBucket),
             generators: this.mergeById(a.generators, b.generators),
-            submissions: this.mergeById(a.submissions, b.submissions),
+            submissions: this.mergeSubmissions(a.submissions, b.submissions),
             groupings: this.mergeById(a.groupings, b.groupings),
             tags: this.mergeById(a.tags, b.tags),
             updatedAt: b.updatedAt || a.updatedAt,

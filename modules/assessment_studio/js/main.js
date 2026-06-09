@@ -8,9 +8,12 @@ const QUESTION_TYPES = [
     { key: 'matrix', label: 'Matrix / Grid' }
 ];
 
+const AST_GRADING_LEASE_MS = 30 * 60 * 1000;
+
 const App = {
     view: 'bucket',
     selectedSubmissionId: null,
+    markerSessionId: `ast_marker_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
 
     async init() {
         const root = document.getElementById('assessment-studio-app');
@@ -54,13 +57,20 @@ const App = {
         this.toast(error && error.message ? error.message : fallback, 'error');
     },
 
-    setView(view) {
+    async setView(view) {
+        if (this.view === 'grading' && this.selectedSubmissionId) {
+            await this.releaseSubmissionLock(this.selectedSubmissionId);
+        }
         this.view = view;
         this.selectedSubmissionId = null;
         this.render();
     },
 
     async refresh() {
+        if (this.view === 'grading' && this.selectedSubmissionId) {
+            await this.releaseSubmissionLock(this.selectedSubmissionId);
+            this.selectedSubmissionId = null;
+        }
         await AssessmentStudioData.load();
         this.render();
     },
@@ -1260,17 +1270,21 @@ const App = {
     renderGradingQueue() {
         const rows = this.getCombinedSubmissions().filter(s => s.source === 'studio' && ['pending_review', 'completed'].includes(String(s.status || '')));
         const selected = this.selectedSubmissionId ? this.state().studio.submissions.find(s => s.id === this.selectedSubmissionId) : null;
+        if (selected) {
+            return `
+                <main class="ast-grading-full">
+                    ${this.renderGrader(selected)}
+                </main>
+            `;
+        }
         return `
-            <main class="ast-grading-layout">
+            <main class="ast-single-layout">
                 <section class="ast-card">
                     <div class="ast-card-head"><div><h2>Grading Queue</h2><p>Dedicated review workspace for generated Assessment Studio submissions.</p></div></div>
                     ${this.renderCompletedFilters({ includeSource: false })}
                     <div class="ast-table-wrap ast-grade-queue-table">
                         <table class="ast-table"><thead><tr><th>Date</th><th>Group</th><th>Trainee</th><th>Assessment</th><th>Status</th><th>Score</th><th>Action</th></tr></thead><tbody id="completedRows">${rows.length ? rows.map(s => this.renderCompletedRow(s, { gradingAction: true })).join('') : '<tr><td colspan="7" class="ast-empty">No Assessment Studio submissions found.</td></tr>'}</tbody></table>
                     </div>
-                </section>
-                <section class="ast-card ast-grader">
-                    ${selected ? this.renderGrader(selected) : '<div class="ast-empty-panel"><i class="fas fa-pen-to-square"></i><h3>Select a generated submission to grade</h3><p>This view is dedicated to scoring, review notes, and grade edits.</p></div>'}
                 </section>
             </main>
         `;
@@ -1312,20 +1326,89 @@ const App = {
         return [...studioRows, ...legacyRows].sort((a, b) => String(b.submittedAt || b.generatedAt || '').localeCompare(String(a.submittedAt || a.generatedAt || '')));
     },
 
+    markerName() {
+        return AssessmentStudioData.editor();
+    },
+
+    markerSessionKey() {
+        return `${this.markerName()}::${this.markerSessionId}`;
+    },
+
+    getActiveGradingLock(submission) {
+        const lock = submission && submission.gradingLock;
+        if (!lock || !lock.expiresAt) return null;
+        return new Date(lock.expiresAt).getTime() > Date.now() ? lock : null;
+    },
+
+    isOwnGradingLock(lock) {
+        return lock && lock.markerSession === this.markerSessionKey();
+    },
+
+    gradingLockBadge(submission) {
+        const lock = this.getActiveGradingLock(submission);
+        if (!lock) return '<span class="ast-lock-badge available"><i class="fas fa-unlock"></i> Available</span>';
+        if (this.isOwnGradingLock(lock)) return '<span class="ast-lock-badge mine"><i class="fas fa-pen"></i> You are grading</span>';
+        return `<span class="ast-lock-badge locked"><i class="fas fa-lock"></i> ${this.esc(lock.marker || 'Another admin')} is grading</span>`;
+    },
+
+    async claimSubmissionLock(id) {
+        const sub = this.state().studio.submissions.find(s => s.id === id);
+        if (!sub) return false;
+        const activeLock = this.getActiveGradingLock(sub);
+        if (activeLock && !this.isOwnGradingLock(activeLock)) {
+            this.toast(`${activeLock.marker || 'Another admin'} is already grading this test.`, 'warn');
+            return false;
+        }
+        const now = new Date();
+        sub.gradingLock = {
+            marker: this.markerName(),
+            markerSession: this.markerSessionKey(),
+            claimedAt: activeLock?.claimedAt || now.toISOString(),
+            heartbeatAt: now.toISOString(),
+            expiresAt: new Date(now.getTime() + AST_GRADING_LEASE_MS).toISOString()
+        };
+        sub.updatedAt = now.toISOString();
+        sub.updatedBy = this.markerName();
+        await AssessmentStudioData.saveStudio();
+        return true;
+    },
+
+    async releaseSubmissionLock(id) {
+        const sub = this.state().studio.submissions.find(s => s.id === id);
+        if (!sub) return;
+        const activeLock = this.getActiveGradingLock(sub);
+        if (!activeLock || !this.isOwnGradingLock(activeLock)) return;
+        sub.gradingLock = null;
+        sub.updatedAt = new Date().toISOString();
+        sub.updatedBy = this.markerName();
+        await AssessmentStudioData.saveStudio();
+    },
+
+    async closeGrader() {
+        const id = this.selectedSubmissionId;
+        if (id) await this.releaseSubmissionLock(id);
+        this.selectedSubmissionId = null;
+        this.view = 'grading';
+        this.render();
+    },
+
     renderCompletedRow(s, options = {}) {
         const date = s.submittedAt || s.generatedAt || '';
         const score = s.status === 'completed' ? `${Math.round(Number(s.percent || 0))}%` : '-';
+        const activeLock = s.source === 'studio' ? this.getActiveGradingLock(s) : null;
+        const lockedByOther = activeLock && !this.isOwnGradingLock(activeLock);
+        const lockBadge = s.source === 'studio' ? this.gradingLockBadge(s) : '';
         const deleteAction = s.source === 'studio'
-            ? ` <button class="ast-btn small danger" onclick="App.deleteSubmission('${this.esc(s.id)}')"><i class="fas fa-trash"></i></button>`
+            ? ` <button class="ast-btn small danger" onclick="App.deleteSubmission('${this.esc(s.id)}')" ${lockedByOther ? 'disabled' : ''}><i class="fas fa-trash"></i></button>`
             : '';
         const action = s.source === 'studio'
             ? (options.gradingAction
-                ? `<button class="ast-btn small primary" onclick="App.selectSubmission('${this.esc(s.id)}')"><i class="fas fa-pen"></i> Grade</button>${s.status === 'assigned' ? ` <button class="ast-btn small" onclick="App.mockSubmit('${this.esc(s.id)}')">Demo Submit</button>` : ''}${deleteAction}`
+                ? `<button class="ast-btn small primary" onclick="App.selectSubmission('${this.esc(s.id)}')" ${lockedByOther ? 'disabled' : ''}><i class="fas fa-pen"></i> Grade</button>${s.status === 'assigned' ? ` <button class="ast-btn small" onclick="App.mockSubmit('${this.esc(s.id)}')">Demo Submit</button>` : ''}${deleteAction}`
                 : `<button class="ast-btn small" onclick="App.selectSubmission('${this.esc(s.id)}')"><i class="fas fa-pen-to-square"></i> Open Grading</button>${deleteAction}`)
             : '<span class="ast-muted">Legacy</span>';
         return `
             <tr data-completed-row data-search="${this.esc(`${s.trainee} ${s.assessment} ${s.groupID} ${s.status} ${s.source}`.toLowerCase())}" data-assessment="${this.esc(s.assessment)}" data-group="${this.esc(s.groupID || '')}" data-status="${this.esc(s.source === 'legacy' ? 'legacy' : s.status)}" data-source="${this.esc(s.source || 'studio')}" data-date="${this.esc(String(date).slice(0, 10))}">
-                <td>${this.esc(String(date).slice(0, 10) || '-')}</td><td>${this.esc(s.groupID || '-')}</td><td>${this.esc(s.trainee)}</td><td>${this.esc(s.assessment)}</td><td><span class="ast-status ${this.esc(s.status)}">${this.esc(s.source === 'legacy' ? 'legacy' : s.status)}</span></td><td>${score}</td><td>${action}</td>
+                <td>${this.esc(String(date).slice(0, 10) || '-')}</td><td>${this.esc(s.groupID || '-')}</td><td>${this.esc(s.trainee)}</td><td>${this.esc(s.assessment)}${lockBadge ? `<div class="ast-row-lock">${lockBadge}</div>` : ''}</td><td><span class="ast-status ${this.esc(s.status)}">${this.esc(s.source === 'legacy' ? 'legacy' : s.status)}</span></td><td>${score}</td><td>${action}</td>
             </tr>
         `;
     },
@@ -1351,7 +1434,12 @@ const App = {
         });
     },
 
-    selectSubmission(id) {
+    async selectSubmission(id) {
+        const claimed = await this.claimSubmissionLock(id);
+        if (!claimed) {
+            this.render();
+            return;
+        }
         this.selectedSubmissionId = id;
         this.view = 'grading';
         this.render();
@@ -1408,8 +1496,20 @@ const App = {
         }, 0);
         const max = questions.reduce((sum, q) => sum + Number(q.points || 1), 0);
         return `
+            <section class="ast-card ast-grader">
             <div class="ast-grader-head">
-                <div><h2>${this.esc(sub.trainee)}</h2><p>${this.esc(sub.assessment)} | ${this.esc(sub.status)} | ${Math.round(total * 10) / 10}/${max} points</p></div>
+                <button class="ast-btn" onclick="App.closeGrader()"><i class="fas fa-arrow-left"></i> Queue</button>
+                <div class="ast-grader-title">
+                    <span>Current Test</span>
+                    <h2>${this.esc(sub.trainee)}</h2>
+                    <p>${this.esc(sub.assessment)}</p>
+                    <div class="ast-grader-meta">
+                        <span><i class="fas fa-layer-group"></i> ${this.esc(sub.groupID || '-')}</span>
+                        <span><i class="fas fa-clipboard-check"></i> ${this.esc(sub.status)}</span>
+                        <span><i class="fas fa-star"></i> ${Math.round(total * 10) / 10}/${max} points</span>
+                        ${this.gradingLockBadge(sub)}
+                    </div>
+                </div>
                 <div class="ast-actions">
                     <button class="ast-btn primary" onclick="App.saveGrade('${this.esc(sub.id)}')"><i class="fas fa-save"></i> Save Grade</button>
                     <button class="ast-btn danger" onclick="App.deleteSubmission('${this.esc(sub.id)}')"><i class="fas fa-trash"></i> Delete</button>
@@ -1420,6 +1520,7 @@ const App = {
             </div>
             <label>Grader Notes</label>
             <textarea id="graderNotes" rows="4">${this.esc(sub.graderNotes || '')}</textarea>
+            </section>
         `;
     },
 
@@ -1489,9 +1590,12 @@ const App = {
         sub.gradedBy = AssessmentStudioData.editor();
         sub.updatedAt = new Date().toISOString();
         sub.updatedBy = AssessmentStudioData.editor();
+        sub.gradingLock = null;
+        if (!Array.isArray(sub.gradingAudit)) sub.gradingAudit = [];
         sub.gradingAudit.push({ at: sub.gradedAt, by: sub.gradedBy, earned: sub.earnedPoints, max: sub.maxPoints, percent: sub.percent });
         await AssessmentStudioData.saveStudio();
         this.toast('Grade saved. Scores remain editable from this queue.', 'ok');
+        this.selectedSubmissionId = null;
         this.render();
     },
 
