@@ -996,27 +996,33 @@ const App = {
     },
 
     async saveGenerator() {
-        const generator = {
-            ...this.buildGeneratorFromForm(),
-            updatedAt: new Date().toISOString(),
-            updatedBy: AssessmentStudioData.editor()
-        };
-        if (!generator.assessment || !generator.allowedTypes.length) return this.toast('Assessment and at least one question type are required.', 'warn');
-        const studio = this.state().studio;
-        const idx = studio.generators.findIndex(g => g.id === id);
-        if (idx >= 0) studio.generators[idx] = AssessmentStudioData.normalizeGenerator({ ...studio.generators[idx], ...generator });
-        else studio.generators.unshift(AssessmentStudioData.normalizeGenerator({ ...generator, createdAt: new Date().toISOString() }));
-        await AssessmentStudioData.saveStudio();
-        this.toast('Generator saved.', 'ok');
-        this.render();
+        try {
+            const generator = {
+                ...this.buildGeneratorFromForm(),
+                updatedAt: new Date().toISOString(),
+                updatedBy: AssessmentStudioData.editor()
+            };
+            if (!generator.assessment || !generator.allowedTypes.length) return this.toast('Assessment and at least one question type are required.', 'warn');
+            const studio = this.state().studio;
+            const idx = studio.generators.findIndex(g => g.id === generator.id);
+            if (idx >= 0) studio.generators[idx] = AssessmentStudioData.normalizeGenerator({ ...studio.generators[idx], ...generator });
+            else studio.generators.unshift(AssessmentStudioData.normalizeGenerator({ ...generator, createdAt: new Date().toISOString() }));
+            await AssessmentStudioData.saveStudio();
+            this.toast('Generator saved.', 'ok');
+            this.render();
+        } catch (error) {
+            this.handleError(error, 'Generator could not be saved.');
+        }
     },
 
     buildGeneratorFromForm() {
+        const rawTotal = Number(document.getElementById('generatorTotal').value || 100);
+        const rawLeeway = Number(document.getElementById('generatorLeeway')?.value || 0);
         return {
             id: document.getElementById('generatorId').value || AssessmentStudioData.makeId('gen'),
             assessment: document.getElementById('generatorAssessment').value.trim(),
-            totalPoints: Number(document.getElementById('generatorTotal').value || 100),
-            pointLeeway: Math.max(0, Number(document.getElementById('generatorLeeway')?.value || 0)),
+            totalPoints: Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 100,
+            pointLeeway: Number.isFinite(rawLeeway) && rawLeeway >= 0 ? rawLeeway : 7,
             allowedTypes: Array.from(document.querySelectorAll('input[name="generatorTypes"]:checked')).map(el => el.value),
             groupLimits: this.collectGeneratorGroupLimits()
         };

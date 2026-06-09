@@ -1316,7 +1316,7 @@ function applyRolePermissions() {
       adminPanelBtn.style.overflow = '';
 
       // Visibility Logic: Only for Admins
-      if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'teamleader' || CURRENT_USER.role === 'special_viewer') {
+      if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'special_viewer') {
           adminPanelBtn.classList.remove('hidden');
       } else {
           adminPanelBtn.classList.add('hidden');
@@ -1472,9 +1472,9 @@ function applyRolePermissions() {
         if(document.getElementById('filterTraineeDiv')) document.getElementById('filterTraineeDiv').classList.remove('hidden');
         if(document.getElementById('filterMonthDiv')) document.getElementById('filterMonthDiv').classList.remove('hidden');
         
-        // ALLOWED SECTIONS FOR TL: Report Card, Admin Panel (Settings), Test Records, Insights, Agent Search, Capture (No), Manage (No)
+        // ALLOWED SECTIONS FOR TL: reports, schedule/records, Insight, and Agent Search only.
         // Note: Monthly, Schedule are public sections so they are visible by default.
-        const allowedSections = ['report-card', 'admin-panel', 'test-records', 'agent-search', 'activity-monitor-view'];
+        const allowedSections = ['report-card', 'insight-studio', 'agent-search', 'activity-monitor-view'];
         
         sections.forEach(s => {
             if(!allowedSections.includes(s.id)) s.classList.add('hidden'); 

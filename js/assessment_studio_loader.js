@@ -27,7 +27,7 @@ const AssessmentStudioLoader = {
 
         const runCloudSave = () => {
             if (typeof saveToServer !== 'function') return false;
-            Promise.resolve(saveToServer(['assessment_studio_data'], false, true))
+            Promise.resolve(saveToServer(['assessment_studio_data'], true, true))
                 .then((ok) => {
                     if (!ok && typeof showToast === 'function') {
                         showToast('Assessment Studio saved locally, but cloud sync did not confirm.', 'warning');
@@ -42,7 +42,8 @@ const AssessmentStudioLoader = {
 
         if (typeof saveToServer === 'function') {
             clearTimeout(this._saveTimer);
-            this._saveTimer = setTimeout(runCloudSave, 900);
+            this._saveTimer = null;
+            runCloudSave();
         } else if (window.supabaseClient && typeof window.supabaseClient.from === 'function') {
             window.supabaseClient.from('app_documents').upsert({
                 key: 'assessment_studio_data',

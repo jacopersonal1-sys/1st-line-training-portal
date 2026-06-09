@@ -151,12 +151,12 @@ const App = {
     },
 
     canViewAll() {
-        const role = ScheduleData.getCurrentUser()?.role;
-        return ['admin', 'super_admin', 'special_viewer'].includes(role);
+        const role = String(ScheduleData.getCurrentUser()?.role || '').toLowerCase();
+        return ['admin', 'super_admin', 'special_viewer', 'teamleader'].includes(role);
     },
 
     canEdit() {
-        const role = ScheduleData.getCurrentUser()?.role;
+        const role = String(ScheduleData.getCurrentUser()?.role || '').toLowerCase();
         return ['admin', 'super_admin'].includes(role);
     },
 

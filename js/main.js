@@ -2864,6 +2864,24 @@ function canUseAdminNavigationView() {
     return !!(CURRENT_USER && ['admin', 'super_admin', 'teamleader'].includes(CURRENT_USER.role));
 }
 
+function isAdvancedNavigationItemVisibleForRole(item, roleValue = '') {
+    const role = String(roleValue || (CURRENT_USER && CURRENT_USER.role) || '').toLowerCase();
+    const id = String(item && item.id || '');
+    if (!id) return false;
+    if (role === 'teamleader') {
+        return [
+            'dashboard-view',
+            'network-test',
+            'insight-studio',
+            'report-card',
+            'assessment-schedule',
+            'monthly',
+            'agent-search'
+        ].includes(id);
+    }
+    return true;
+}
+
 function initSidebarHoverController() {
     const sidebar = document.querySelector('.sidebar');
     if (!sidebar || sidebar.dataset.hoverControllerReady === '1') return;
@@ -3368,7 +3386,8 @@ function setActiveNavigationTarget(id) {
 }
 
 function renderAdvancedAdminNavigation(menu) {
-    const items = getOrderedAdminNavigationItems();
+    const role = CURRENT_USER && CURRENT_USER.role;
+    const items = getOrderedAdminNavigationItems().filter(item => isAdvancedNavigationItemVisibleForRole(item, role));
     const featured = [];
     const compact = [];
     items.forEach((item, index) => {
@@ -3732,7 +3751,7 @@ function updateSidebarVisibility() {
             return;
         }
 
-        if (targetTab === 'insight-studio' && !['admin', 'super_admin'].includes(role)) {
+        if (targetTab === 'insight-studio' && !['admin', 'super_admin', 'teamleader'].includes(role)) {
             btn.classList.add('hidden');
             return;
         }
@@ -3758,7 +3777,7 @@ function updateSidebarVisibility() {
         if (role === 'teamleader') {
             // Team Leaders hide Admin, Test Builder, My Tests, Live Assessment
             // NOTE: 'tl-hub' hidden temporarily while in development
-            const hiddenForTL = ['test-manage', 'my-tests', 'study-notes', 'live-assessment', 'live-execution', 'insight-studio', 'manage', 'capture', 'tl-hub', 'superadmin-studio', 'content-studio', 'trainee-portal'];
+            const hiddenForTL = ['admin-panel', 'test-manage', 'my-tests', 'study-notes', 'live-assessment', 'live-execution', 'manage', 'capture', 'tl-hub', 'superadmin-studio', 'content-studio', 'trainee-portal', 'assessment-studio', 'vetting-arena', 'qa-hub', 'opl-hub'];
             if (hiddenForTL.includes(targetTab)) btn.classList.add('hidden');
         }
         else if (role === 'admin') {
@@ -4701,7 +4720,7 @@ function showTab(id, btn) {
   // --- TEAM LEADER RESTRICTIONS (Double Check) ---
   if(CURRENT_USER && CURRENT_USER.role === 'teamleader') {
       // Block specific tabs even if clicked somehow
-      const forbidden = ['test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'insight-studio', 'qa-hub', 'manage', 'capture', 'superadmin-studio', 'opl-hub', 'assessment-studio', 'content-studio'];
+      const forbidden = ['admin-panel', 'test-manage', 'my-tests', 'study-notes', 'trainee-portal', 'live-assessment', 'vetting-arena', 'qa-hub', 'manage', 'capture', 'superadmin-studio', 'opl-hub', 'assessment-studio', 'content-studio'];
       if(forbidden.includes(id)) {
           return; // Simply do nothing
       }
@@ -4757,9 +4776,9 @@ function showTab(id, btn) {
       return;
   }
 
-  if (CURRENT_USER && !['admin', 'super_admin'].includes(CURRENT_USER.role) && id === 'insight-studio') {
+  if (CURRENT_USER && !['admin', 'super_admin', 'teamleader'].includes(CURRENT_USER.role) && id === 'insight-studio') {
       if (typeof showToast === 'function') {
-          showToast("Access denied: Insight is restricted to Admin and Super Admin.", "error");
+          showToast("Access denied: Insight is restricted to Admin, Super Admin, and Teamleader.", "error");
       }
       return;
   }
