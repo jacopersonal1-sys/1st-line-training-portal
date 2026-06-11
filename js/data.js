@@ -420,6 +420,88 @@ function safeParse(raw, fallback = null) {
     }
 }
 
+const SERVER_AUTHORITY_GUARDED_BLOB_KEYS = new Set([
+    'schedules',
+    'qa_data',
+    'assessment_studio_data',
+    'content_studio_data'
+]);
+
+const SERVER_AUTHORITY_LOCAL_MIRRORS = {
+    qa_data: 'qa_data_local',
+    assessment_studio_data: 'assessment_studio_data_local',
+    content_studio_data: 'content_studio_data_local'
+};
+
+function validateServerAuthorityBlob(key, content) {
+    if (!SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) return { ok: true };
+    if (!content || typeof content !== 'object' || Array.isArray(content)) {
+        return { ok: false, message: `${key} must be a JSON object.` };
+    }
+
+    if (key === 'schedules') {
+        const entries = Object.entries(content);
+        if (!entries.length) return { ok: false, message: 'schedules must contain at least one schedule group.' };
+        const badGroup = entries.find(([, group]) => !group || typeof group !== 'object' || !Array.isArray(group.items));
+        if (badGroup) return { ok: false, message: `schedules.${badGroup[0]} must contain an items array.` };
+    }
+
+    if (key === 'qa_data') {
+        if (!Array.isArray(content.questions)) return { ok: false, message: 'qa_data.questions must be an array.' };
+        if (!Array.isArray(content.submissions)) return { ok: false, message: 'qa_data.submissions must be an array.' };
+    }
+
+    if (key === 'assessment_studio_data') {
+        for (const field of ['questionBucket', 'generators', 'submissions', 'groupings', 'tags']) {
+            if (!Array.isArray(content[field])) return { ok: false, message: `assessment_studio_data.${field} must be an array.` };
+        }
+    }
+
+    if (key === 'content_studio_data') {
+        if (!Array.isArray(content.entries)) return { ok: false, message: 'content_studio_data.entries must be an array.' };
+        if (!Array.isArray(content.analytics)) return { ok: false, message: 'content_studio_data.analytics must be an array.' };
+        if (!Array.isArray(content.annotations)) return { ok: false, message: 'content_studio_data.annotations must be an array.' };
+    }
+
+    return { ok: true };
+}
+
+function backupServerAuthorityLocalBlob(key, source, incomingContent) {
+    if (!SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) return;
+    try {
+        const currentRaw = localStorage.getItem(key);
+        if (!currentRaw || currentRaw === 'undefined' || currentRaw === 'null') return;
+        const incomingRaw = JSON.stringify(incomingContent);
+        if (currentRaw === incomingRaw) return;
+        const backup = {
+            key,
+            source,
+            createdAt: new Date().toISOString(),
+            incomingUpdatedAt: incomingContent && incomingContent.updatedAt ? incomingContent.updatedAt : null,
+            previous: safeParse(currentRaw, null)
+        };
+        localStorage.setItem(`server_authority_backup_${key}`, JSON.stringify(backup));
+    } catch (error) {
+        console.warn(`[Sync Guard] Failed to write backup for ${key}:`, error);
+    }
+}
+
+function mirrorServerAuthorityLocalCache(key, content) {
+    const mirrorKey = SERVER_AUTHORITY_LOCAL_MIRRORS[key];
+    if (!mirrorKey) return;
+    localStorage.setItem(mirrorKey, JSON.stringify(content));
+}
+
+function writeServerAuthorityBlobToLocal(key, content, source = 'unknown') {
+    const validation = validateServerAuthorityBlob(key, content);
+    if (!validation.ok) {
+        throw new Error(`[Sync Guard] Refusing invalid ${key} from ${source}: ${validation.message}`);
+    }
+    backupServerAuthorityLocalBlob(key, source, content);
+    localStorage.setItem(key, JSON.stringify(content));
+    mirrorServerAuthorityLocalCache(key, content);
+}
+
 // --- HARD DELETE PROTOCOL (Ghost Data Fix) ---
 const PENDING_DEL_KEY = 'system_pending_deletes';
 const TOMBSTONE_KEY = 'system_tombstones'; // New: Persistent Blacklist for Deleted IDs
@@ -766,15 +848,23 @@ async function loadFromServer(silent = false) {
                     const mergedContent = localKey === 'violation_reports'
                         ? sanitizeViolationReportsForSync(merged[localKey])
                         : merged[localKey];
-                    localStorage.setItem(localKey, JSON.stringify(mergedContent));
+                    if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(localKey)) {
+                        writeServerAuthorityBlobToLocal(localKey, mergedContent, 'load_from_server');
+                    } else {
+                        localStorage.setItem(localKey, JSON.stringify(mergedContent));
+                    }
                 } else {
                     // Fallback for primitives OR no-merge keys (Direct Overwrite)
                     // Ensure we never store the string "undefined" (causes JSON.parse failures)
                     const docContent = localKey === 'violation_reports'
                         ? sanitizeViolationReportsForSync(doc.content)
                         : doc.content;
-                    const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
-                    localStorage.setItem(localKey, serialized);
+                    if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(localKey)) {
+                        writeServerAuthorityBlobToLocal(localKey, docContent, 'load_from_server');
+                    } else {
+                        const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
+                        localStorage.setItem(localKey, serialized);
+                    }
                 }
                 localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
                 emitDataChange(localKey, 'load_from_server');
@@ -2705,6 +2795,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                     pruneLocalViolationReportsByTombstones();
                 }
 
+                const validation = validateServerAuthorityBlob(key, finalContent);
+                if (!validation.ok) {
+                    const guardError = new Error(validation.message);
+                    guardError.nonRetryableSyncGuard = true;
+                    guardError.syncKey = key;
+                    throw guardError;
+                }
+
                 const { data: savedData, error: saveErr } = await window.supabaseClient
                     .from('app_documents')
                     .upsert({ 
@@ -2719,7 +2817,11 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 const localStoreContent = key === 'violation_reports' && isTraineeRuntime()
                     ? sanitizeViolationReportsForTrainee(finalContent)
                     : finalContent;
-                localStorage.setItem(key, JSON.stringify(localStoreContent));
+                if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) {
+                    writeServerAuthorityBlobToLocal(key, localStoreContent, 'save_to_server');
+                } else {
+                    localStorage.setItem(key, JSON.stringify(localStoreContent));
+                }
                 if(savedData && savedData[0]) localStorage.setItem('sync_ts_' + key, savedData[0].updated_at);
                 emitDataChange(key, 'save_to_server');
             }
@@ -2782,10 +2884,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
         return true;
 
     } catch (err) {
-        keysToSave.slice(currentKeyIndex).forEach(k => SAVE_QUEUE.add(k));
+        const isNonRetryableGuard = err && err.nonRetryableSyncGuard;
+        if (isNonRetryableGuard && err.syncKey) EXPLICIT_SAVE_KEYS.delete(err.syncKey);
+        keysToSave
+            .slice(isNonRetryableGuard ? currentKeyIndex + 1 : currentKeyIndex)
+            .forEach(k => SAVE_QUEUE.add(k));
 
         // RETRY LOGIC: Try once more if it failed (Network blip)
-        if (retryCount < 1) {
+        if (!isNonRetryableGuard && retryCount < 1) {
             console.warn("Sync failed, retrying...", err);
                 return await _processSaveQueue(force, silent, retryCount + 1);
         }
@@ -4554,13 +4660,21 @@ function processIncomingDataQueue() {
                         const mergedContent = key === 'violation_reports'
                             ? sanitizeViolationReportsForSync(merged[key])
                             : merged[key];
-                        localStorage.setItem(key, JSON.stringify(mergedContent));
+                        if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) {
+                            writeServerAuthorityBlobToLocal(key, mergedContent, 'realtime');
+                        } else {
+                            localStorage.setItem(key, JSON.stringify(mergedContent));
+                        }
                     } else {
                         const docContent = key === 'violation_reports'
                             ? sanitizeViolationReportsForSync(content)
                             : content;
-                        const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
-                        localStorage.setItem(key, serialized);
+                        if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) {
+                            writeServerAuthorityBlobToLocal(key, docContent, 'realtime');
+                        } else {
+                            const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
+                            localStorage.setItem(key, serialized);
+                        }
                     }
                     if (key === 'system_tombstones' || key === 'violation_reports') {
                         pruneLocalViolationReportsByTombstones();
@@ -5503,7 +5617,9 @@ if (typeof module !== 'undefined' && module.exports) {
         forceFullSync,
         sanitizeViolationReportsForSync,
         sanitizeViolationReportsForTrainee,
-        getMonitorHistoryRepairRows
+        getMonitorHistoryRepairRows,
+        validateServerAuthorityBlob,
+        writeServerAuthorityBlobToLocal
     };
 }
 

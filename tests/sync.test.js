@@ -185,6 +185,46 @@ describe('Data Sync Module', () => {
         expect(merged.analytics.map(item => item.username).sort()).toEqual(['Alice', 'Bob']);
     });
 
+    test('server-authority blob guard rejects malformed shared documents', () => {
+        expect(DataModule.validateServerAuthorityBlob('schedules', { A: { assigned: 'G1' } })).toMatchObject({ ok: false });
+        expect(DataModule.validateServerAuthorityBlob('qa_data', { questions: [] })).toMatchObject({ ok: false });
+        expect(DataModule.validateServerAuthorityBlob('assessment_studio_data', {
+            questionBucket: [],
+            generators: [],
+            submissions: [],
+            groupings: []
+        })).toMatchObject({ ok: false });
+        expect(DataModule.validateServerAuthorityBlob('content_studio_data', {
+            entries: [],
+            analytics: [],
+            annotations: []
+        })).toMatchObject({ ok: true });
+    });
+
+    test('server-authority local writes keep backup and mirror embedded caches', () => {
+        localStorage.setItem('content_studio_data', JSON.stringify({
+            updatedAt: '2026-06-11T08:00:00.000Z',
+            entries: [{ id: 'old', scheduleKey: 'old', scheduleLabel: 'Old' }],
+            analytics: [],
+            annotations: []
+        }));
+
+        const incoming = {
+            updatedAt: '2026-06-11T09:00:00.000Z',
+            entries: [{ id: 'new', scheduleKey: 'new', scheduleLabel: 'New' }],
+            analytics: [],
+            annotations: []
+        };
+
+        DataModule.writeServerAuthorityBlobToLocal('content_studio_data', incoming, 'test');
+
+        expect(JSON.parse(localStorage.getItem('content_studio_data'))).toEqual(incoming);
+        expect(JSON.parse(localStorage.getItem('content_studio_data_local'))).toEqual(incoming);
+        const backup = JSON.parse(localStorage.getItem('server_authority_backup_content_studio_data'));
+        expect(backup.source).toBe('test');
+        expect(backup.previous.entries[0].scheduleKey).toBe('old');
+    });
+
     test('loadFromServer fetches stale blob keys and ignores row-synced blob keys', async () => {
         // Mock Supabase response
         const mockMeta = [
@@ -422,6 +462,30 @@ describe('Data Sync Module', () => {
 
         expect(result).toBe(false);
         expect(blobUpsertMock).toHaveBeenCalled();
+    });
+
+    test('saveToServer refuses invalid server-authority blob payloads before upload', async () => {
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        localStorage.setItem('schedules', JSON.stringify({ A: { assigned: 'Group A' } }));
+
+        const blobUpsertMock = jest.fn(() => ({
+            select: jest.fn().mockResolvedValue({ data: [{ updated_at: '2026-06-11T09:00:00.000Z' }], error: null })
+        }));
+
+        global.window.supabaseClient.from = jest.fn(() => ({
+            select: jest.fn(() => ({
+                eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }) }))
+            })),
+            upsert: blobUpsertMock,
+            delete: jest.fn(() => ({ neq: jest.fn().mockResolvedValue({ error: null }) }))
+        }));
+
+        const result = await DataModule.saveToServer(['schedules'], true, true);
+
+        expect(result).toBe(false);
+        expect(blobUpsertMock).not.toHaveBeenCalledWith(expect.objectContaining({ key: 'schedules' }));
     });
 
     test('violation report sync strips inline screenshot payloads', () => {

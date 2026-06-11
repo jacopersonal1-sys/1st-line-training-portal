@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.7.31 - 2026-06-11
+
+- **Fail-Safe:** Added shape validation for server-authoritative Schedule Studio, Q&A Hub, Assessment Studio, and Content Creator documents before pull, realtime, or upload can write them.
+- **Safety:** Server-authoritative overwrites now keep a last-good local backup under `server_authority_backup_<key>` before replacing local cache.
+- **Guardrail:** Q&A Hub, Assessment Studio, and Content Creator server pulls now mirror the confirmed server document into their `_local` embedded-module caches so stale local copies cannot keep winning after refresh.
+- **Guardrail:** Invalid shared documents fail closed and are not retried as poisoned sync queue items.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.30 - 2026-06-11
 
 - **Server Authority:** Q&A Hub, Assessment Studio, Content Creator, and Schedule Studio documents are now treated as strict server-authoritative shared blobs, so background cache saves cannot silently republish stale admin structures.
