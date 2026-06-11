@@ -1529,6 +1529,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
     table-layout: fixed;
     margin-top: 0;
 }
+
+.live-booking-table-scroll {
+    max-height: calc((var(--app-vh, 1vh) * 100) - 245px);
+    overflow: auto;
+    overscroll-behavior: contain;
+    border-radius: 8px;
+}
+
 .booking-table th {
     background: #242a30;
     padding: 13px 10px;
@@ -1539,6 +1547,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
     z-index: 10;
     color: var(--text-main);
 }
+
+.booking-table th:first-child {
+    left: 0;
+    z-index: 14;
+}
+
 .booking-table td {
     padding: 10px;
     border-bottom: 1px solid var(--border-color);
@@ -1548,6 +1562,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
     background: #20262c;
     border-right: 1px solid var(--border-color);
     vertical-align: middle;
+    position: sticky;
+    left: 0;
+    z-index: 6;
 }
 
 /* Booking Slots Container */

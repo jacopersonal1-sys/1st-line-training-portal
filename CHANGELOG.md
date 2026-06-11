@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.27 - 2026-06-11
+
+- **Fix:** Live Assessment Booking now keeps the time-slot header sticky while scrolling through the booking grid, with the date column pinned for context.
+- **Improvement:** Insight Build's Assessment & Test Scores now uses the same official progress checklist source and status style as the agent progress checklist.
+- **Screenshot Safety:** Insight Build cards expand their stat tables/lists instead of forcing inner vertical scrollbars, making review screenshots easier to capture in one pass.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/live_booking_slots.test.js tests/insight_compare_viewer.test.js tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.26 - 2026-06-11
 
 - **Safety:** Added Assessment Studio guardrails across the full flow: admin bucket questions, generator setup, Schedule Studio links, trainee launch/submission, and admin grading.

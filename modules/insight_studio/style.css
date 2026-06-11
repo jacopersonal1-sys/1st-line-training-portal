@@ -295,6 +295,45 @@ body {
     overflow-y: auto;
 }
 
+.ins-progress-checklist,
+.ins-official-progress-list,
+.ins-build-grid .ins-list,
+.ins-build-grid .table-responsive,
+.ins-build-grid .ins-trend-summary,
+.ins-build-grid .ins-axis-key,
+.ins-build-grid .ins-gap-list,
+.ins-build-grid .ins-hr-trigger-grid,
+.ins-build-grid .ins-compare-picker,
+.ins-build-grid .ins-timeline {
+    max-height: none !important;
+    overflow-y: visible !important;
+}
+
+.ins-build-grid .table-responsive {
+    overflow-x: auto;
+}
+
+.ins-official-progress-score {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.ins-official-progress-score span {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.ins-official-progress-score strong {
+    color: var(--text-main);
+    font-size: 0.95rem;
+}
+
 .ins-item {
     border: 1px solid var(--border-color);
     background: var(--bg-input);

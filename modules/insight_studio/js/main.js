@@ -770,7 +770,7 @@ const InsightApp = {
                                 <div class="ins-progress-fill" style="width:${progress.progress}%;"></div>
                             </div>
                             <div class="ins-subtle" style="margin-top:7px;">Mark N/A where valid. Checklist items come from Admin Tools -> Insight Triggers -> Agent Progress Builder.</div>
-                            <div class="ins-list" style="margin-top:10px; max-height:420px;">
+                            <div class="ins-list ins-progress-checklist" style="margin-top:10px;">
                                 ${(progress.items || []).map((item) => {
                                     const itemStatus = String(item.status || 'missing');
                                     const statusClass = itemStatus === 'completed' ? 'pass' : (itemStatus === 'exempt' ? 'semi' : 'critical');
@@ -3028,7 +3028,7 @@ const InsightApp = {
         if (!primaryAgent || !primaryRow) return '<div class="ins-item">Select a trainee to build the probation review.</div>';
         const progress = InsightDataService.getAgentProgress(primaryAgent.name, primaryAgent.group || '');
         const activity = primaryRow.activitySummary || InsightDataService.getAgentActivityBreakdown(primaryAgent.name);
-        const scoreItems = this.getInsightScoreBreakdownItems(primaryRow);
+        const officialItems = Array.isArray(progress.items) ? progress.items : [];
         const stats = this.getProbationAttendanceStatsForRow(primaryRow, days);
         const reviewRows = [
             ['Assessment Average', primaryRow.assessmentScore === null ? 'No data' : `${primaryRow.assessmentScore}%`, primaryRow.assessmentScore !== null && primaryRow.assessmentScore < 70 ? 'Needs review' : 'On track'],
@@ -3044,7 +3044,7 @@ const InsightApp = {
         return `
             <div class="ins-card">
                 <h3>Probation Review Signals</h3>
-                <div class="table-responsive" style="max-height:320px; overflow-y:auto;">
+                <div class="table-responsive">
                     <table class="ins-table ins-table-compact">
                         <thead><tr><th>Area</th><th>Evidence</th><th>Signal</th></tr></thead>
                         <tbody>
@@ -3061,19 +3061,25 @@ const InsightApp = {
             </div>
             <div class="ins-card">
                 <h3>Assessment & Test Scores</h3>
-                <div class="table-responsive" style="max-height:320px; overflow-y:auto;">
-                    <table class="ins-table ins-table-compact">
-                        <thead><tr><th>Type</th><th>Name</th><th>Percentage</th></tr></thead>
-                        <tbody>
-                            ${scoreItems.length ? scoreItems.map(item => `
-                                <tr>
-                                    <td><span class="ins-badge">${esc(item.type)}</span></td>
-                                    <td>${esc(item.name)}</td>
-                                    <td class="ins-metric">${item.score}%</td>
-                                </tr>
-                            `).join('') : '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No assessment, vetting, live assessment, or test scores found for this trainee.</td></tr>'}
-                        </tbody>
-                    </table>
+                <div class="ins-list ins-official-progress-list">
+                    ${officialItems.length ? officialItems.map((item) => {
+                        const itemStatus = String(item.status || 'missing');
+                        const statusClass = itemStatus === 'completed' ? 'pass' : (itemStatus === 'exempt' ? 'semi' : 'critical');
+                        const scoreLabel = Number.isFinite(Number(item.score)) ? `${Math.round(Number(item.score))}%` : (itemStatus === 'exempt' ? 'N/A' : '-');
+                        return `
+                            <div class="ins-item">
+                                <div class="ins-item-top">
+                                    <strong>${esc(item.name)}</strong>
+                                    <span class="ins-status ${statusClass}">${esc(itemStatus === 'exempt' ? 'N/A' : itemStatus)}</span>
+                                </div>
+                                <div class="ins-subtle" style="margin-top:6px;">Type: ${esc(item.type || 'assessment')} | Source: ${esc(item.source || 'manual')}</div>
+                                <div class="ins-official-progress-score">
+                                    <span>Score</span>
+                                    <strong>${esc(scoreLabel)}</strong>
+                                </div>
+                            </div>
+                        `;
+                    }).join('') : '<div class="ins-item">No official progress items configured yet.</div>'}
                 </div>
             </div>
             ${this.renderPerformanceEvaluationEvidenceGrid(primaryAgent, primaryRow, days)}
@@ -3149,7 +3155,7 @@ const InsightApp = {
         const primaryFocusDays = primaryRow ? (focusCoverage[primaryRow.personKey || primaryRow.label] || 0) : 0;
 
         return `
-            <div class="ins-dept-grid">
+            <div class="ins-dept-grid ins-build-grid">
                 <div class="ins-card full ins-compare-hero">
                     <div class="ins-item-top" style="align-items:flex-start;">
                         <div>
