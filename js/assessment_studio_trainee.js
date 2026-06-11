@@ -153,6 +153,86 @@ function astTraineeNormalizeStore(raw) {
     };
 }
 
+function astTraineeQuestionSafetyErrors(question) {
+    const q = question && typeof question === 'object' ? question : {};
+    const errors = [];
+    const type = String(q.type || '').trim();
+    if (!String(q.assessment || '').trim()) errors.push('A generated question is missing its assessment.');
+    if (!String(q.text || '').trim()) errors.push('A generated question is missing its question text.');
+    if (!AST_TRAINEE_TYPES.some(item => item.key === type)) errors.push('A generated question has an unsupported type.');
+    if (!(Number(q.points) > 0)) errors.push('A generated question has invalid points.');
+    if (type === 'multiple_choice') {
+        if (!Array.isArray(q.options) || q.options.length < 2) errors.push('A multiple choice question is missing options.');
+        if (!Number.isInteger(Number(q.correct)) || Number(q.correct) < 0 || Number(q.correct) >= (q.options || []).length) errors.push('A multiple choice question is missing its correct answer.');
+    }
+    if (type === 'multi_select') {
+        if (!Array.isArray(q.options) || q.options.length < 2) errors.push('A multiple answer question is missing options.');
+        if (!Array.isArray(q.correct) || q.correct.length < 1) errors.push('A multiple answer question is missing correct answers.');
+    }
+    if (type === 'matching' && (!Array.isArray(q.pairs) || q.pairs.length < 1)) errors.push('A matching question is missing pairs.');
+    if (type === 'ranking' && (!Array.isArray(q.items) || q.items.length < 2)) errors.push('A ranking question is missing ordered items.');
+    if (type === 'matrix') {
+        const rowCount = Array.isArray(q.rows) ? q.rows.length : 0;
+        const colCount = Array.isArray(q.cols) ? q.cols.length : 0;
+        const correctCount = q.matrixCorrect && typeof q.matrixCorrect === 'object' ? Object.keys(q.matrixCorrect).length : 0;
+        if (!rowCount || !colCount) errors.push('A matrix question is missing rows or columns.');
+        if (rowCount && correctCount < rowCount) errors.push('A matrix question is missing correct answers.');
+    }
+    return errors;
+}
+
+function astTraineeValidateGenerator(store, generator) {
+    const errors = [];
+    const g = generator && typeof generator === 'object' ? generator : {};
+    if (!String(g.id || '').trim()) errors.push('The linked Assessment Studio generator is missing its ID.');
+    if (!String(g.assessment || '').trim()) errors.push('The linked Assessment Studio generator is missing its assessment name.');
+    if (!(Number(g.totalPoints) > 0)) errors.push('The linked Assessment Studio generator has invalid total points.');
+    if (!Array.isArray(g.allowedTypes) || !g.allowedTypes.length) errors.push('The linked Assessment Studio generator has no allowed question types.');
+    if (!(Number(g.pointLeeway) >= 0)) errors.push('The linked Assessment Studio generator has invalid point leeway.');
+    if (errors.length) return { errors, pool: [] };
+
+    const pool = (store.questionBucket || []).filter(q =>
+        q.status !== 'archived' &&
+        astTraineeNormalize(q.assessment) === astTraineeNormalize(g.assessment) &&
+        g.allowedTypes.includes(q.type)
+    );
+    if (!pool.length) errors.push('No active bucket questions match this linked Assessment Studio generator.');
+    const broken = pool.find(q => astTraineeQuestionSafetyErrors(q).length > 0);
+    if (broken) errors.push(`The bucket question "${broken.text || broken.id}" is incomplete.`);
+    return { errors, pool };
+}
+
+function astTraineeAnswerIsComplete(question, value) {
+    const q = question && typeof question === 'object' ? question : {};
+    if (q.type === 'multi_select' || q.type === 'ranking') return Array.isArray(value) && value.length > 0;
+    if (q.type === 'matching') {
+        const pairCount = Array.isArray(q.pairs) ? q.pairs.length : 0;
+        return value && typeof value === 'object' && Object.keys(value).length >= pairCount && Object.values(value).every(v => String(v || '').trim());
+    }
+    if (q.type === 'matrix') {
+        const rowCount = Array.isArray(q.rows) ? q.rows.length : 0;
+        return value && typeof value === 'object' && Object.keys(value).length >= rowCount;
+    }
+    return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function astTraineeSubmissionSafetyErrors(submission, options = {}) {
+    const sub = submission && typeof submission === 'object' ? submission : {};
+    const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
+    const errors = [];
+    if (!String(sub.trainee || '').trim()) errors.push('This Assessment Studio test is missing the trainee name.');
+    if (!String(sub.assessment || '').trim()) errors.push('This Assessment Studio test is missing the assessment name.');
+    if (!questions.length) errors.push('This Assessment Studio test has no generated questions.');
+    questions.forEach((q, idx) => {
+        const questionErrors = astTraineeQuestionSafetyErrors(q);
+        if (questionErrors.length) errors.push(`Question ${idx + 1} is incomplete: ${questionErrors[0]}`);
+        if (options.requireAnswers && !astTraineeAnswerIsComplete(q, sub.answers ? sub.answers[String(idx)] : undefined)) {
+            errors.push(`Question ${idx + 1} still needs an answer.`);
+        }
+    });
+    return errors;
+}
+
 function astTraineeMergeById(remoteItems, localItems, timeField = 'updatedAt') {
     const map = new Map();
     (Array.isArray(remoteItems) ? remoteItems : []).forEach(item => map.set(String(item.id), item));
@@ -267,9 +347,12 @@ async function astTraineeSaveStore(store, forceSync = false) {
     localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(next));
     localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(next));
 
+    let confirmed = false;
     if (typeof saveToServer === 'function') {
         try {
-            await saveToServer([AST_TRAINEE_DATA_KEY], Boolean(forceSync), true);
+            const ok = await saveToServer([AST_TRAINEE_DATA_KEY], Boolean(forceSync), true);
+            if (ok === false) throw new Error('Assessment Studio cloud save did not confirm.');
+            confirmed = true;
             return next;
         } catch (error) {
             console.warn('[Assessment Studio Trainee] saveToServer failed:', error);
@@ -278,14 +361,21 @@ async function astTraineeSaveStore(store, forceSync = false) {
 
     if (window.supabaseClient && typeof window.supabaseClient.from === 'function') {
         try {
-            await window.supabaseClient.from('app_documents').upsert({
+            const { data, error } = await window.supabaseClient.from('app_documents').upsert({
                 key: AST_TRAINEE_DATA_KEY,
                 content: next,
                 updated_at: new Date().toISOString()
-            });
+            }).select('updated_at');
+            if (error) throw error;
+            const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+            if (confirmedAt) localStorage.setItem(`sync_ts_${AST_TRAINEE_DATA_KEY}`, confirmedAt);
+            confirmed = true;
         } catch (error) {
             console.warn('[Assessment Studio Trainee] direct cloud save failed:', error);
         }
+    }
+    if (forceSync && !confirmed) {
+        throw new Error('Assessment Studio could not confirm the save to Supabase. Your local draft is still kept on this device.');
     }
     return next;
 }
@@ -341,12 +431,9 @@ function astTraineeShuffle(items, seedText) {
 }
 
 function astTraineeGenerateSnapshot(store, generator, trainee, scheduleItem = {}) {
-    const pool = store.questionBucket.filter(q =>
-        q.status !== 'archived' &&
-        astTraineeNormalize(q.assessment) === astTraineeNormalize(generator.assessment) &&
-        generator.allowedTypes.includes(q.type)
-    );
-    if (!pool.length) throw new Error('No Assessment Studio bucket questions match this linked generator.');
+    const safety = astTraineeValidateGenerator(store, generator);
+    if (safety.errors.length) throw new Error(safety.errors[0]);
+    const pool = safety.pool;
 
     const existingSignatures = new Set(store.submissions
         .filter(s => astTraineeNormalize(s.assessment) === astTraineeNormalize(generator.assessment))
@@ -387,6 +474,9 @@ function astTraineeGenerateSnapshot(store, generator, trainee, scheduleItem = {}
     picked = best && best.questions ? best.questions : [];
     signature = best && best.signature ? best.signature : '';
     if (!picked.length) throw new Error('Assessment Studio could not select any questions.');
+    if (!best.inRange) {
+        throw new Error(`Assessment Studio generated ${Math.round(best.points * 10) / 10} points, outside the allowed ${minPoints}-${maxPoints} point range. Ask an admin to adjust bucket questions or point leeway.`);
+    }
 
     return {
         id: astTraineeMakeId('snapshot'),
@@ -408,7 +498,8 @@ function astTraineeGenerateSnapshot(store, generator, trainee, scheduleItem = {}
 async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, scheduleItem = {}) {
     const cleanGeneratorId = String(generatorId || '').trim();
     const trainee = astTraineeCurrentUserName();
-    if (!cleanGeneratorId || !trainee) return null;
+    if (!cleanGeneratorId) throw new Error('This timeline item is missing its Assessment Studio generator link.');
+    if (!trainee) throw new Error('Assessment Studio could not identify the current trainee.');
 
     const store = astTraineeGetStore();
     const existing = store.submissions.find(s =>
@@ -416,10 +507,16 @@ async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, sched
         astTraineeIdentity(s.trainee) === astTraineeIdentity(trainee) &&
         String(s.status || '') !== 'archived'
     );
-    if (existing) return existing;
+    if (existing) {
+        const existingErrors = astTraineeSubmissionSafetyErrors(existing);
+        if (existingErrors.length) throw new Error(existingErrors[0]);
+        return existing;
+    }
 
     const generator = store.generators.find(g => String(g.id) === cleanGeneratorId && g.status !== 'archived');
     if (!generator) throw new Error('The linked Assessment Studio generator could not be found.');
+    const generatorSafety = astTraineeValidateGenerator(store, generator);
+    if (generatorSafety.errors.length) throw new Error(generatorSafety.errors[0]);
 
     const snapshot = astTraineeGenerateSnapshot(store, generator, trainee, scheduleItem);
     const submission = astTraineeNormalizeSubmission({
@@ -469,7 +566,7 @@ function renderAssessmentStudioAssignmentsHtml() {
                 <div class="test-card-main">
                     <strong>${astTraineeEsc(sub.assessment || 'Assessment Studio Test')}</strong>
                     <div class="test-card-meta">
-                        <span><i class="fas fa-vial-circle-check"></i> Assessment Studio</span>
+                        <span><i class="fas fa-clipboard-list"></i> Assessment Studio</span>
                         <span><i class="fas fa-list-ol"></i> ${questions} Questions</span>
                         <span><i class="fas fa-shield-halved"></i> Snapshot ${astTraineeEsc(sub.testSnapshot?.signature || sub.id).slice(0, 12)}</span>
                     </div>
@@ -521,6 +618,19 @@ function openAssessmentStudioTraineeRuntime(submissionId) {
     AST_ACTIVE_SUBMISSION_ID = String(submissionId || '').trim();
     const store = astTraineeGetStore();
     const sub = store.submissions.find(item => String(item.id) === AST_ACTIVE_SUBMISSION_ID);
+    if (!sub) {
+        AST_ACTIVE_SUBMISSION_ID = '';
+        if (typeof showToast === 'function') showToast('Assessment Studio test could not be found. Refresh My Assessments and try again.', 'error');
+        if (typeof showTab === 'function') showTab('my-tests');
+        return;
+    }
+    const safetyErrors = astTraineeSubmissionSafetyErrors(sub);
+    if (safetyErrors.length) {
+        AST_ACTIVE_SUBMISSION_ID = '';
+        if (typeof showToast === 'function') showToast(safetyErrors[0], 'error');
+        if (typeof showTab === 'function') showTab('my-tests');
+        return;
+    }
     if (sub && !['assigned', 'in_progress'].includes(String(sub.status || ''))) {
         AST_ACTIVE_SUBMISSION_ID = '';
         if (typeof showToast === 'function') showToast('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
@@ -551,9 +661,7 @@ function astTraineeAnswerCompleteness(sub) {
     const questions = Array.isArray(sub?.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
     const answered = questions.filter((q, idx) => {
         const value = astTraineeAnswerValue(sub, idx);
-        if (q.type === 'multi_select' || q.type === 'ranking') return Array.isArray(value) && value.length > 0;
-        if (q.type === 'matching' || q.type === 'matrix') return value && typeof value === 'object' && Object.keys(value).length > 0;
-        return value !== undefined && value !== null && String(value).trim() !== '';
+        return astTraineeAnswerIsComplete(q, value);
     }).length;
     return { answered, total: questions.length };
 }
@@ -747,8 +855,14 @@ async function saveAssessmentStudioDraft() {
     if (!sub) return;
     sub.status = 'in_progress';
     sub.updatedAt = new Date().toISOString();
-    await astTraineeSaveStore(store, true);
-    if (typeof showToast === 'function') showToast('Assessment Studio draft saved.', 'success');
+    try {
+        await astTraineeSaveStore(store, true);
+        if (typeof showToast === 'function') showToast('Assessment Studio draft saved.', 'success');
+    } catch (error) {
+        console.warn('[Assessment Studio Trainee] draft save failed:', error);
+        if (typeof showToast === 'function') showToast(error.message || 'Assessment Studio draft could not be confirmed.', 'error');
+        else alert(error.message || 'Assessment Studio draft could not be confirmed.');
+    }
 }
 
 function scoreAssessmentStudioQuestion(q, answer) {
@@ -783,7 +897,13 @@ async function submitAssessmentStudioTest() {
     const { store, sub } = astTraineeGetActiveSubmission();
     if (!sub || !['assigned', 'in_progress'].includes(sub.status)) return;
     const completeness = astTraineeAnswerCompleteness(sub);
-    if (completeness.answered < completeness.total && !confirm(`Only ${completeness.answered}/${completeness.total} questions have answers. Submit anyway?`)) return;
+    const safetyErrors = astTraineeSubmissionSafetyErrors(sub, { requireAnswers: true });
+    if (safetyErrors.length) {
+        if (typeof showToast === 'function') showToast(safetyErrors[0], 'warning');
+        else alert(safetyErrors[0]);
+        return;
+    }
+    if (completeness.answered < completeness.total) return;
 
     const scores = {};
     const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
@@ -801,7 +921,14 @@ async function submitAssessmentStudioTest() {
     sub.submittedAt = new Date().toISOString();
     sub.updatedAt = sub.submittedAt;
     sub.feedbackStatus = sub.feedbackStatus || 'none';
-    await astTraineeSaveStore(store, true);
+    try {
+        await astTraineeSaveStore(store, true);
+    } catch (error) {
+        console.warn('[Assessment Studio Trainee] submit failed:', error);
+        if (typeof showToast === 'function') showToast(error.message || 'Assessment submission could not be confirmed.', 'error');
+        else alert(error.message || 'Assessment submission could not be confirmed.');
+        return;
+    }
     if (typeof showToast === 'function') showToast('Assessment submitted to the grading queue.', 'success');
     if (typeof loadTraineeTests === 'function') loadTraineeTests();
     if (typeof showTab === 'function') showTab('my-tests');
@@ -817,10 +944,18 @@ async function requestAssessmentStudioFeedback(submissionId) {
     sub.feedbackRequestedAt = new Date().toISOString();
     sub.updatedAt = sub.feedbackRequestedAt;
     astTraineeCreateFeedbackNotification(sub);
-    await astTraineeSaveStore(store, true);
+    try {
+        await astTraineeSaveStore(store, true);
+    } catch (error) {
+        console.warn('[Assessment Studio Trainee] feedback request save failed:', error);
+        if (typeof showToast === 'function') showToast(error.message || 'Feedback request could not be confirmed.', 'error');
+        else alert(error.message || 'Feedback request could not be confirmed.');
+        return;
+    }
     if (typeof saveToServer === 'function') {
         try {
-            await saveToServer(['assessment_studio_data', 'admin_notifications'], true, true);
+            const ok = await saveToServer(['assessment_studio_data', 'admin_notifications'], true, true);
+            if (ok === false) throw new Error('Assessment Studio feedback sync did not confirm.');
         } catch (error) {
             console.warn('[Assessment Studio Trainee] feedback notification sync failed:', error);
         }

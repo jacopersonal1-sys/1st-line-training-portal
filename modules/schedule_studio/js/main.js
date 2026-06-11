@@ -572,6 +572,7 @@ const App = {
         const linkedAssessmentStudioGeneratorId = String(document.getElementById('edit-linked-assessment-studio')?.value || '').trim();
         if (linkedAssessmentStudioGeneratorId) {
             const generator = ScheduleData.getAssessmentStudioGeneratorById(linkedAssessmentStudioGeneratorId);
+            if (!generator) return alert('The selected Assessment Studio generator could not be found. Refresh Schedule Studio and choose the generator again.');
             item.linkedAssessmentStudioGeneratorId = linkedAssessmentStudioGeneratorId;
             item.linkedAssessmentStudioLabel = generator ? generator.assessment : '';
         } else {

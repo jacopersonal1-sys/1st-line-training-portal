@@ -174,7 +174,7 @@ const App = {
             <div class="ast-shell">
                 <header class="ast-header">
                     <div>
-                        <h1><i class="fas fa-vial-circle-check"></i> Assessment Studio</h1>
+                        <h1><i class="fas fa-clipboard-list"></i> Assessment Studio</h1>
                     </div>
                     <div class="ast-stats">
                         <span><strong>${stats.questions}</strong>Bucket</span>
@@ -218,6 +218,84 @@ const App = {
             pending: studio.submissions.filter(s => s.status === 'pending_review').length,
             completed: studio.submissions.filter(s => s.status === 'completed').length
         };
+    },
+
+    questionSafetyErrors(question) {
+        const q = question && typeof question === 'object' ? question : {};
+        const errors = [];
+        const type = String(q.type || '').trim();
+        if (!String(q.assessment || '').trim()) errors.push('Choose the Standard Assessment before saving the question.');
+        if (!String(q.text || '').trim()) errors.push('Enter the trainee-facing question text.');
+        if (!QUESTION_TYPES.some(item => item.key === type)) errors.push('Choose a supported question type.');
+        if (!(Number(q.points) > 0)) errors.push('Question points must be greater than zero.');
+
+        if (type === 'multiple_choice') {
+            if (!Array.isArray(q.options) || q.options.length < 2) errors.push('Multiple choice questions need at least two options.');
+            if (!Number.isInteger(Number(q.correct)) || Number(q.correct) < 0 || Number(q.correct) >= (q.options || []).length) errors.push('Mark one correct multiple choice answer.');
+        }
+        if (type === 'multi_select') {
+            if (!Array.isArray(q.options) || q.options.length < 2) errors.push('Multiple answer questions need at least two options.');
+            if (!Array.isArray(q.correct) || q.correct.length < 1) errors.push('Mark at least one correct multiple answer option.');
+        }
+        if (type === 'matching' && (!Array.isArray(q.pairs) || q.pairs.length < 1)) errors.push('Matching questions need at least one complete pair.');
+        if (type === 'ranking' && (!Array.isArray(q.items) || q.items.length < 2)) errors.push('Ranking questions need at least two ordered items.');
+        if (type === 'matrix') {
+            const rowCount = Array.isArray(q.rows) ? q.rows.length : 0;
+            const colCount = Array.isArray(q.cols) ? q.cols.length : 0;
+            const correctCount = q.matrixCorrect && typeof q.matrixCorrect === 'object' ? Object.keys(q.matrixCorrect).length : 0;
+            if (!rowCount || !colCount) errors.push('Matrix questions need rows and columns.');
+            if (rowCount && correctCount < rowCount) errors.push('Select a correct matrix answer for every row.');
+        }
+        return errors;
+    },
+
+    generatorSafetyCheck(generator) {
+        const g = generator && typeof generator === 'object' ? generator : {};
+        const errors = [];
+        if (!String(g.assessment || '').trim()) errors.push('Select the Standard Assessment for this generator.');
+        if (!(Number(g.totalPoints) > 0)) errors.push('Total Points / Score must be greater than zero.');
+        if (!(Number(g.pointLeeway) >= 0)) errors.push('Point Leeway must be zero or greater.');
+        if (!Array.isArray(g.allowedTypes) || !g.allowedTypes.length) errors.push('Choose at least one allowed question type.');
+        if (errors.length) return { errors, test: null };
+
+        const pool = this.state().studio.questionBucket.filter(q =>
+            q.status !== 'archived' &&
+            this.normalize(q.assessment) === this.normalize(g.assessment) &&
+            g.allowedTypes.includes(q.type)
+        );
+        if (!pool.length) return { errors: ['Add active bucket questions for this assessment and the selected question types before saving the generator.'], test: null };
+
+        const invalidQuestion = pool.find(q => this.questionSafetyErrors(q).length > 0);
+        if (invalidQuestion) {
+            return { errors: [`Fix the bucket question "${invalidQuestion.text || invalidQuestion.id}" before saving this generator.`], test: null };
+        }
+
+        try {
+            const test = this.evaluateGenerator(g, { ignoreExistingSignatures: true, seed: `${g.assessment}|safety|${g.totalPoints}`, attempts: 160 });
+            if (!test.best.inRange) {
+                return {
+                    errors: [`This generator cannot produce a test inside ${test.minPoints}-${test.maxPoints} points. Closest result is ${Math.round(test.best.points * 10) / 10} points.`],
+                    test
+                };
+            }
+            return { errors: [], test };
+        } catch (error) {
+            return { errors: [error && error.message ? error.message : 'Generator could not produce a valid trainee test.'], test: null };
+        }
+    },
+
+    submissionSafetyErrors(submission) {
+        const sub = submission && typeof submission === 'object' ? submission : {};
+        const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
+        const errors = [];
+        if (!String(sub.trainee || '').trim()) errors.push('Submission is missing the trainee name.');
+        if (!String(sub.assessment || '').trim()) errors.push('Submission is missing the assessment name.');
+        if (!questions.length) errors.push('Submission has no generated snapshot questions.');
+        questions.forEach((q, idx) => {
+            const questionErrors = this.questionSafetyErrors(q);
+            if (questionErrors.length) errors.push(`Question ${idx + 1} is incomplete: ${questionErrors[0]}`);
+        });
+        return errors;
     },
 
     renderBucket() {
@@ -810,8 +888,6 @@ const App = {
             updatedAt: new Date().toISOString(),
             updatedBy: AssessmentStudioData.editor()
         };
-        if (!question.assessment || !question.text) return this.toast('Assessment and question text are required.', 'warn');
-
         if (type === 'matching') {
             question.pairs = Array.from(document.querySelectorAll('[data-pair-row]')).map(row => ({
                 left: row.querySelector('.pair-left')?.value.trim() || '',
@@ -840,14 +916,8 @@ const App = {
             question.suggestedAnswer = String(document.getElementById('questionSuggestedAnswer')?.value || '').trim();
         }
 
-        if ((type === 'multiple_choice' || type === 'multi_select') && (!question.options.length || (type === 'multiple_choice' ? question.correct < 0 : !question.correct.length))) {
-            return this.toast('Add options and mark the correct answer inside the options.', 'warn');
-        }
-        if (type === 'matching' && !question.pairs.length) return this.toast('Add at least one matching pair.', 'warn');
-        if (type === 'ranking' && question.items.length < 2) return this.toast('Add at least two ranking items.', 'warn');
-        if (type === 'matrix' && (!question.rows.length || !question.cols.length || Object.keys(question.matrixCorrect).length < question.rows.length)) {
-            return this.toast('Add matrix rows, columns, and select a correct answer for each row.', 'warn');
-        }
+        const questionErrors = this.questionSafetyErrors(question);
+        if (questionErrors.length) return this.toast(questionErrors[0], 'warn');
 
         if (grouping) await this.saveGroupingName(grouping);
         if (tag) await this.saveTagName(tag);
@@ -1012,7 +1082,8 @@ const App = {
                 updatedAt: new Date().toISOString(),
                 updatedBy: AssessmentStudioData.editor()
             };
-            if (!generator.assessment || !generator.allowedTypes.length) return this.toast('Assessment and at least one question type are required.', 'warn');
+            const safety = this.generatorSafetyCheck(generator);
+            if (safety.errors.length) return this.toast(safety.errors[0], 'warn');
             const studio = this.state().studio;
             const idx = studio.generators.findIndex(g => g.id === generator.id);
             if (idx >= 0) studio.generators[idx] = AssessmentStudioData.normalizeGenerator({ ...studio.generators[idx], ...generator });
@@ -1181,6 +1252,12 @@ const App = {
             if (!generator.assessment || !generator.allowedTypes.length) {
                 result.className = 'ast-generator-test warn';
                 result.innerHTML = '<strong>Generator needs an assessment and at least one question type.</strong>';
+                return;
+            }
+            const safety = this.generatorSafetyCheck(generator);
+            if (safety.errors.length) {
+                result.className = 'ast-generator-test error';
+                result.innerHTML = `<strong>${this.esc(safety.errors[0])}</strong>`;
                 return;
             }
             const test = this.evaluateGenerator(generator, { ignoreExistingSignatures: true, seed: `${generator.assessment}|${generator.totalPoints}|${Date.now()}`, attempts: 120 });
@@ -1435,6 +1512,12 @@ const App = {
     },
 
     async selectSubmission(id) {
+        const sub = this.state().studio.submissions.find(s => s.id === id);
+        const safetyErrors = this.submissionSafetyErrors(sub);
+        if (safetyErrors.length) {
+            this.toast(safetyErrors[0], 'error');
+            return;
+        }
         const claimed = await this.claimSubmissionLock(id);
         if (!claimed) {
             this.render();
@@ -1574,12 +1657,28 @@ const App = {
     async saveGrade(id) {
         const sub = this.state().studio.submissions.find(s => s.id === id);
         if (!sub) return;
+        const safetyErrors = this.submissionSafetyErrors(sub);
+        if (safetyErrors.length) return this.toast(safetyErrors[0], 'error');
+        const activeLock = this.getActiveGradingLock(sub);
+        if (!activeLock || !this.isOwnGradingLock(activeLock)) {
+            const claimed = await this.claimSubmissionLock(id);
+            if (!claimed) return;
+        }
         const scores = {};
-        document.querySelectorAll('.grade-score').forEach(input => {
-            scores[input.dataset.qidx] = Math.max(0, Math.min(Number(input.max || 0), Number(input.value || 0)));
-        });
+        const scoreInputs = Array.from(document.querySelectorAll('.grade-score'));
+        const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
+        if (scoreInputs.length !== questions.length) return this.toast('Every generated question must have a score before completing grading.', 'warn');
+        for (const input of scoreInputs) {
+            const rawScore = Number(input.value);
+            const maxScore = Number(input.max || 0);
+            if (!Number.isFinite(rawScore) || rawScore < 0 || rawScore > maxScore) {
+                return this.toast('Every score must be between zero and the question max.', 'warn');
+            }
+            scores[input.dataset.qidx] = Math.round(rawScore * 10) / 10;
+        }
         const earned = Object.values(scores).reduce((sum, value) => sum + Number(value || 0), 0);
         const max = (sub.testSnapshot.questions || []).reduce((sum, q) => sum + Number(q.points || 1), 0);
+        if (!(max > 0)) return this.toast('Cannot complete grading because this test has no valid maximum score.', 'error');
         sub.questionScores = scores;
         sub.earnedPoints = Math.round(earned * 10) / 10;
         sub.maxPoints = Math.round(max * 10) / 10;

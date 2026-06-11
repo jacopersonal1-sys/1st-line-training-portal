@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.26 - 2026-06-11
+
+- **Safety:** Added Assessment Studio guardrails across the full flow: admin bucket questions, generator setup, Schedule Studio links, trainee launch/submission, and admin grading.
+- **Critical Fix:** Assessment Studio trainee forced saves now surface failed Supabase confirmation instead of showing submit/draft success when the cloud write is not confirmed.
+- **Fix:** Replaced the missing Assessment Studio icon references with the supported clipboard-list icon in the sidebar, embedded header, module header, and trainee assignment card.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.25 - 2026-06-11
 
 - **Recovery:** Extended the one-time first-run recovery check to include Content Creator (`content_studio_data`) and Q&A Hub (`qa_data`) along with Schedule Studio and Assessment Studio.

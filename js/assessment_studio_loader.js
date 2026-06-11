@@ -153,7 +153,7 @@ const AssessmentStudioLoader = {
             <div class="embedded-program-shell">
                 <div class="embedded-program-header">
                     <div>
-                        <div class="embedded-program-title"><i class="fas fa-vial-circle-check"></i> Assessment Studio</div>
+                        <div class="embedded-program-title"><i class="fas fa-clipboard-list"></i> Assessment Studio</div>
                         <div class="embedded-program-subtitle">Question bucket, generated test snapshots, grading queue, feedback, and universal search.</div>
                     </div>
                     <div class="embedded-program-actions">

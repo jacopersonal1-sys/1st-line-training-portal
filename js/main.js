@@ -2776,7 +2776,7 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
     {
         label: 'Training Content',
         items: [
-            { id: 'assessment-studio', title: 'Assessment Studio', text: 'Assessment Studio', icon: 'fas fa-vial-circle-check', classes: 'admin-only', subItems: [
+            { id: 'assessment-studio', title: 'Assessment Studio', text: 'Assessment Studio', icon: 'fas fa-clipboard-list', classes: 'admin-only', subItems: [
                 { label: 'Question Bucket', type: 'assessment-studio', view: 'bucket' },
                 { label: 'Test Generator Details', type: 'assessment-studio', view: 'generator' },
                 { label: 'Completed Tests', type: 'assessment-studio', view: 'completed' },
