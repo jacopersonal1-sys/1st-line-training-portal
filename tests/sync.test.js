@@ -125,6 +125,66 @@ describe('Data Sync Module', () => {
         expect(merged.submissions.map(item => item.id)).toEqual(['s_new']);
     });
 
+    test('performSmartMerge keeps Q&A admin library server-authoritative during pull', () => {
+        const server = {
+            qa_data: {
+                updatedAt: '2026-06-11T10:00:00.000Z',
+                questions: [{ id: 'qa_live', question: 'Server FAQ', answer: 'Yes', updatedAt: '2026-06-11T10:00:00.000Z' }],
+                submissions: [{ id: 'ask_1', question: 'Server ask', trainee: 'Alice', createdAt: '2026-06-11T09:00:00.000Z' }]
+            }
+        };
+        const local = {
+            qa_data: {
+                updatedAt: '2026-06-11T09:00:00.000Z',
+                questions: [
+                    { id: 'qa_live', question: 'Old local FAQ', answer: 'Old', updatedAt: '2026-06-11T09:00:00.000Z' },
+                    { id: 'qa_deleted', question: 'Deleted FAQ', answer: 'No', updatedAt: '2026-06-11T09:00:00.000Z' }
+                ],
+                submissions: [
+                    { id: 'ask_1', question: 'Old ask', trainee: 'Alice', createdAt: '2026-06-11T08:00:00.000Z' },
+                    { id: 'ask_new', question: 'Newer local ask', trainee: 'Bob', createdAt: '2026-06-11T10:01:00.000Z' }
+                ]
+            }
+        };
+
+        const merged = DataModule.performSmartMerge(server, local, 'server_wins').qa_data;
+
+        expect(merged.questions.map(item => item.id)).toEqual(['qa_live']);
+        expect(merged.questions[0].question).toBe('Server FAQ');
+        expect(merged.submissions.map(item => item.id).sort()).toEqual(['ask_1', 'ask_new']);
+    });
+
+    test('performSmartMerge keeps Content Creator modules server-authoritative during pull', () => {
+        const server = {
+            content_studio_data: {
+                updatedAt: '2026-06-11T10:00:00.000Z',
+                entries: [{ id: 'entry_live', scheduleKey: 'module-live', scheduleLabel: 'Server Module', updatedAt: '2026-06-11T10:00:00.000Z' }],
+                analytics: [{ id: 'entry_live:subject_1:Alice', entryId: 'entry_live', subjectId: 'subject_1', username: 'Alice', updatedAt: '2026-06-11T09:00:00.000Z' }],
+                annotations: []
+            }
+        };
+        const local = {
+            content_studio_data: {
+                updatedAt: '2026-06-11T09:00:00.000Z',
+                entries: [
+                    { id: 'entry_live', scheduleKey: 'module-live', scheduleLabel: 'Old Local Module', updatedAt: '2026-06-11T09:00:00.000Z' },
+                    { id: 'entry_deleted', scheduleKey: 'module-deleted', scheduleLabel: 'Deleted Module', updatedAt: '2026-06-11T09:00:00.000Z' }
+                ],
+                analytics: [
+                    { id: 'entry_live:subject_1:Alice', entryId: 'entry_live', subjectId: 'subject_1', username: 'Alice', updatedAt: '2026-06-11T09:30:00.000Z' },
+                    { id: 'entry_live:subject_1:Bob', entryId: 'entry_live', subjectId: 'subject_1', username: 'Bob', updatedAt: '2026-06-11T10:01:00.000Z' }
+                ],
+                annotations: []
+            }
+        };
+
+        const merged = DataModule.performSmartMerge(server, local, 'server_wins').content_studio_data;
+
+        expect(merged.entries.map(item => item.scheduleKey)).toEqual(['module-live']);
+        expect(merged.entries[0].scheduleLabel).toBe('Server Module');
+        expect(merged.analytics.map(item => item.username).sort()).toEqual(['Alice', 'Bob']);
+    });
+
     test('loadFromServer fetches stale blob keys and ignores row-synced blob keys', async () => {
         // Mock Supabase response
         const mockMeta = [

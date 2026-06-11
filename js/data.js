@@ -157,7 +157,10 @@ const STRICT_SERVER_BLOB_KEYS = new Set([
     'tests',
     'schedules',
     'liveSchedules',
-    'assessments'
+    'assessments',
+    'qa_data',
+    'assessment_studio_data',
+    'content_studio_data'
 ]);
 
 const STRICT_SERVER_ROW_KEYS = new Set([
@@ -3049,13 +3052,18 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
         // Case 2d: Q&A Hub (merge FAQ library and trainee asks independently)
         else if (key === 'qa_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
+            const serverDocTime = Date.parse(sVal.updatedAt || 0) || 0;
             const pickLatest = (existing, incoming, dateFields) => {
                 if (!existing) return incoming;
                 const existingDate = dateFields.map(field => existing[field]).find(Boolean) || '';
                 const incomingDate = dateFields.map(field => incoming[field]).find(Boolean) || '';
                 return String(incomingDate) >= String(existingDate) ? incoming : existing;
             };
-            const mergeById = (serverItems, localItems, dateFields) => {
+            const itemTime = (item, dateFields) => {
+                const value = dateFields.map(field => item && item[field]).find(Boolean);
+                return Date.parse(value || 0) || 0;
+            };
+            const mergeActivityById = (serverItems, localItems, dateFields) => {
                 const map = new Map();
                 (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
                     if (!item || typeof item !== 'object') return;
@@ -3065,18 +3073,68 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 (Array.isArray(localItems) ? localItems : []).forEach(item => {
                     if (!item || typeof item !== 'object') return;
                     const id = String(item.id || '');
-                    if (id) map.set(id, pickLatest(map.get(id), item, dateFields));
+                    if (!id) return;
+                    if (map.has(id)) {
+                        map.set(id, pickLatest(map.get(id), item, dateFields));
+                    } else if (strategy === 'local_wins' || itemTime(item, dateFields) > serverDocTime) {
+                        map.set(id, item);
+                    }
                 });
                 return Array.from(map.values());
             };
             const questionSort = (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
             const submissionSort = (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
             const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
-            base.questions = mergeById(sVal.questions, lVal.questions, ['updatedAt', 'createdAt']).sort(questionSort);
-            base.submissions = mergeById(sVal.submissions, lVal.submissions, ['reviewedAt', 'createdAt']).sort(submissionSort);
+            base.questions = (strategy === 'server_wins'
+                ? (Array.isArray(sVal.questions) ? sVal.questions : [])
+                : (Array.isArray(lVal.questions) ? lVal.questions : [])
+            ).sort(questionSort);
+            base.submissions = mergeActivityById(sVal.submissions, lVal.submissions, ['reviewedAt', 'createdAt']).sort(submissionSort);
             merged[key] = base;
         }
-        // Case 2e: Assessment Studio (merge bucket, recipes, trainee snapshots and feedback/grading independently)
+        // Case 2e: Content Creator (server owns modules; user activity can merge forward)
+        else if (key === 'content_studio_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
+            const serverDocTime = Date.parse(sVal.updatedAt || 0) || 0;
+            const pickLatest = (existing, incoming, dateFields) => {
+                if (!existing) return incoming;
+                const existingDate = dateFields.map(field => existing[field]).find(Boolean) || '';
+                const incomingDate = dateFields.map(field => incoming[field]).find(Boolean) || '';
+                return String(incomingDate) >= String(existingDate) ? incoming : existing;
+            };
+            const itemTime = (item, dateFields) => {
+                const value = dateFields.map(field => item && item[field]).find(Boolean);
+                return Date.parse(value || 0) || 0;
+            };
+            const mergeActivityById = (serverItems, localItems, dateFields) => {
+                const map = new Map();
+                (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (id) map.set(id, item);
+                });
+                (Array.isArray(localItems) ? localItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (!id) return;
+                    if (map.has(id)) {
+                        map.set(id, pickLatest(map.get(id), item, dateFields));
+                    } else if (strategy === 'local_wins' || itemTime(item, dateFields) > serverDocTime) {
+                        map.set(id, item);
+                    }
+                });
+                return Array.from(map.values());
+            };
+            const entrySort = (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
+            const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
+            base.entries = (strategy === 'server_wins'
+                ? (Array.isArray(sVal.entries) ? sVal.entries : [])
+                : (Array.isArray(lVal.entries) ? lVal.entries : [])
+            ).sort(entrySort);
+            base.analytics = mergeActivityById(sVal.analytics, lVal.analytics, ['updatedAt', 'lastPlayedAt', 'createdAt']);
+            base.annotations = mergeActivityById(sVal.annotations, lVal.annotations, ['updatedAt', 'createdAt']);
+            merged[key] = base;
+        }
+        // Case 2f: Assessment Studio (merge bucket, recipes, trainee snapshots and feedback/grading independently)
         else if (key === 'assessment_studio_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
             const currentUserToken = normalizeIdentityValue((typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) || '');
             const serverDocTime = Date.parse(sVal.updatedAt || 0) || 0;

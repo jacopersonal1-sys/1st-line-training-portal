@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.30 - 2026-06-11
+
+- **Server Authority:** Q&A Hub, Assessment Studio, Content Creator, and Schedule Studio documents are now treated as strict server-authoritative shared blobs, so background cache saves cannot silently republish stale admin structures.
+- **Fix:** Q&A Hub admin questions and Content Creator modules now stay server-owned during pull/realtime merges, preventing deleted FAQs or modules from being resurrected from older local cache.
+- **Safety:** User activity data still merges forward where appropriate: Q&A asks, Content Creator analytics/annotations, and Assessment Studio trainee submissions remain protected when genuinely newer than the server document.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.29 - 2026-06-11
 
 - **Fix:** Schedule Studio now uses delete-aware merging for Assessment Studio generators and Content Creator modules, so newer recreated generators appear while deleted modules are not resurrected from stale cache.

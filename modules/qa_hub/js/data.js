@@ -87,37 +87,49 @@ const QAData = {
         localStorage.setItem(QA_LOCAL_CACHE_KEY, JSON.stringify(this.normalize(store)));
     },
 
-    mergeStores(remote, local) {
+    itemTime(item, fields) {
+        const value = fields.map(field => item && item[field]).find(Boolean);
+        return Date.parse(value || 0) || 0;
+    },
+
+    mergeSubmissions(remoteItems, localItems, remoteDocTime = 0) {
+        const map = new Map();
+        (Array.isArray(remoteItems) ? remoteItems : []).forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const id = String(item.id || '');
+            if (id) map.set(id, item);
+        });
+        (Array.isArray(localItems) ? localItems : []).forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const id = String(item.id || '');
+            if (!id) return;
+            const current = map.get(id);
+            if (current) {
+                if (this.itemTime(item, ['reviewedAt', 'createdAt']) >= this.itemTime(current, ['reviewedAt', 'createdAt'])) {
+                    map.set(id, item);
+                }
+            } else if (this.itemTime(item, ['reviewedAt', 'createdAt']) > remoteDocTime) {
+                map.set(id, item);
+            }
+        });
+        return Array.from(map.values());
+    },
+
+    mergeStores(remote, local, mode = 'load') {
         const base = this.normalize(remote || {});
         const incoming = this.normalize(local || {});
         const byUpdated = (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
         const byCreated = (a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+        const remoteDocTime = Date.parse(base.updatedAt || 0) || 0;
 
-        const questions = new Map();
-        base.questions.forEach(item => questions.set(String(item.id), item));
-        incoming.questions.forEach(item => {
-            const id = String(item.id);
-            const current = questions.get(id);
-            if (!current || String(item.updatedAt || item.createdAt || '') >= String(current.updatedAt || current.createdAt || '')) {
-                questions.set(id, item);
-            }
-        });
-
-        const submissions = new Map();
-        base.submissions.forEach(item => submissions.set(String(item.id), item));
-        incoming.submissions.forEach(item => {
-            const id = String(item.id);
-            const current = submissions.get(id);
-            if (!current || String(item.reviewedAt || item.createdAt || '') >= String(current.reviewedAt || current.createdAt || '')) {
-                submissions.set(id, item);
-            }
-        });
+        const questions = mode === 'save' ? incoming.questions : base.questions;
+        const submissions = this.mergeSubmissions(base.submissions, incoming.submissions, remoteDocTime);
 
         return this.normalize({
-            questions: Array.from(questions.values()).sort(byUpdated),
-            submissions: Array.from(submissions.values()).sort(byCreated),
-            updatedAt: incoming.updatedAt || base.updatedAt,
-            updatedBy: incoming.updatedBy || base.updatedBy
+            questions: questions.slice().sort(byUpdated),
+            submissions: submissions.sort(byCreated),
+            updatedAt: (mode === 'save' ? incoming.updatedAt : base.updatedAt) || incoming.updatedAt,
+            updatedBy: (mode === 'save' ? incoming.updatedBy : base.updatedBy) || incoming.updatedBy
         });
     },
 
@@ -170,7 +182,7 @@ const QAData = {
                 .maybeSingle();
             if (loadError) throw loadError;
             if (remoteRow && remoteRow.content) {
-                normalized = this.mergeStores(remoteRow.content, normalized);
+                normalized = this.mergeStores(remoteRow.content, normalized, 'save');
                 normalized.updatedAt = new Date().toISOString();
                 normalized.updatedBy = this.getEditor();
             }
