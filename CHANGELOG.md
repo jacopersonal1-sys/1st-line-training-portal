@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.28 - 2026-06-11
+
+- **Fix:** Schedule Studio now merges Content Creator canonical and local module caches by stable module key, so newly saved modules appear in timeline linking even when an older one-module cache exists.
+- **Fix:** Assessment Studio and Content Creator embedded loaders now merge canonical/local cache data before injecting studio state, preventing stale host data from hiding newly saved generators or modules.
+- **Safety:** Timeline editor now shows empty/missing picker states for Assessment Studio generators and Content Creator modules, and blocks saving a Content Creator module link if the selected module cannot be found.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/schedule_studio_recalculate.test.js tests/sync.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.27 - 2026-06-11
 
 - **Fix:** Live Assessment Booking now keeps the time-slot header sticky while scrolling through the booking grid, with the date column pinned for context.

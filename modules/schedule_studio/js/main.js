@@ -491,25 +491,47 @@ const App = {
         const assessmentStudioSelect = document.getElementById('edit-linked-assessment-studio');
         if (assessmentStudioSelect) {
             assessmentStudioSelect.innerHTML = '<option value="">-- None --</option>';
-            assessmentStudioGenerators.forEach(generator => {
-                const parts = [
-                    generator.assessment,
-                    generator.phase && generator.phase !== 'Assessment' ? generator.phase : '',
-                    generator.totalPoints ? `${generator.totalPoints} pts` : '',
-                    generator.totalPoints ? `+/- ${generator.pointLeeway} pts` : ''
-                ].filter(Boolean);
-                assessmentStudioSelect.add(new Option(parts.join(' | '), generator.id));
-            });
+            if (assessmentStudioGenerators.length) {
+                assessmentStudioGenerators.forEach(generator => {
+                    const parts = [
+                        generator.assessment,
+                        generator.phase && generator.phase !== 'Assessment' ? generator.phase : '',
+                        generator.totalPoints ? `${generator.totalPoints} pts` : '',
+                        generator.totalPoints ? `+/- ${generator.pointLeeway} pts` : ''
+                    ].filter(Boolean);
+                    assessmentStudioSelect.add(new Option(parts.join(' | '), generator.id));
+                });
+            } else {
+                const option = new Option('No Assessment Studio generators found - save generator details first', '');
+                option.disabled = true;
+                assessmentStudioSelect.add(option);
+            }
+            if (item.linkedAssessmentStudioGeneratorId && !assessmentStudioGenerators.some(generator => String(generator.id) === String(item.linkedAssessmentStudioGeneratorId))) {
+                const missing = new Option(`Missing linked generator: ${item.linkedAssessmentStudioLabel || item.linkedAssessmentStudioGeneratorId}`, item.linkedAssessmentStudioGeneratorId);
+                missing.disabled = true;
+                assessmentStudioSelect.add(missing);
+            }
             assessmentStudioSelect.value = item.linkedAssessmentStudioGeneratorId || '';
         }
 
         const contentSelect = document.getElementById('edit-content-module');
         if (contentSelect) {
             contentSelect.innerHTML = '<option value="">-- None --</option>';
-            contentModules.forEach(module => {
-                const label = `${module.label}${module.subjects.length ? ` (${module.subjects.length} subjects)` : ''}`;
-                contentSelect.add(new Option(label, module.key));
-            });
+            if (contentModules.length) {
+                contentModules.forEach(module => {
+                    const label = `${module.label}${module.subjects.length ? ` (${module.subjects.length} subjects)` : ''}`;
+                    contentSelect.add(new Option(label, module.key));
+                });
+            } else {
+                const option = new Option('No Content Creator modules found - create/save a module first', '');
+                option.disabled = true;
+                contentSelect.add(option);
+            }
+            if (item.contentModuleKey && !contentModules.some(module => String(module.key) === String(item.contentModuleKey))) {
+                const missing = new Option(`Missing linked module: ${item.contentModuleLabel || item.contentModuleKey}`, item.contentModuleKey);
+                missing.disabled = true;
+                contentSelect.add(missing);
+            }
             contentSelect.value = item.contentModuleKey || '';
         }
 
@@ -583,6 +605,7 @@ const App = {
         const contentModuleKey = String(document.getElementById('edit-content-module')?.value || '').trim();
         if (contentModuleKey) {
             const module = ScheduleData.getContentModuleByKey(contentModuleKey);
+            if (!module) return alert('The selected Content Creator module could not be found. Refresh Schedule Studio and choose the module again.');
             item.contentModuleKey = contentModuleKey;
             item.contentModuleLabel = module ? module.label : '';
         } else {

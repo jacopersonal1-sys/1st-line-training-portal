@@ -69,4 +69,46 @@ describe('Schedule Studio recalculation', () => {
         expect(recalculated[0].dateRange).toBe('2026/05/11');
         expect(recalculated[0].dueDate).toBe('2026/05/11');
     });
+
+    test('merges Content Creator canonical and local modules for timeline linking', () => {
+        localStorage.setItem('content_studio_data_local', JSON.stringify({
+            updatedAt: '2026-06-11T08:00:00.000Z',
+            entries: [
+                {
+                    id: 'entry-old',
+                    scheduleKey: 'module-old',
+                    scheduleLabel: 'Existing Module',
+                    updatedAt: '2026-06-11T08:00:00.000Z',
+                    subjects: []
+                }
+            ]
+        }));
+        localStorage.setItem('content_studio_data', JSON.stringify({
+            updatedAt: '2026-06-11T09:00:00.000Z',
+            entries: [
+                {
+                    id: 'entry-old',
+                    scheduleKey: 'module-old',
+                    scheduleLabel: 'Existing Module',
+                    updatedAt: '2026-06-11T08:00:00.000Z',
+                    subjects: []
+                },
+                {
+                    id: 'entry-new',
+                    scheduleKey: 'module-new',
+                    scheduleLabel: 'New Timeline Module',
+                    updatedAt: '2026-06-11T09:00:00.000Z',
+                    subjects: [{ id: 'subject-1' }]
+                }
+            ]
+        }));
+
+        const modules = ScheduleData.getContentModules();
+
+        expect(modules.map(module => module.key)).toEqual(['module-old', 'module-new']);
+        expect(ScheduleData.getContentModuleByKey('module-new')).toMatchObject({
+            label: 'New Timeline Module',
+            subjects: [{ id: 'subject-1' }]
+        });
+    });
 });

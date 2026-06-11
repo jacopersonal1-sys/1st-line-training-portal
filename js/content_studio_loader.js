@@ -114,8 +114,33 @@ const ContentStudioLoader = {
         if (!webview || typeof webview.executeJavaScript !== 'function') return;
         let content = null;
         try {
-            content = JSON.parse(localStorage.getItem('content_studio_data') || 'null')
-                || JSON.parse(localStorage.getItem('content_studio_data_local') || 'null');
+            const canonical = JSON.parse(localStorage.getItem('content_studio_data') || 'null');
+            const local = JSON.parse(localStorage.getItem('content_studio_data_local') || 'null');
+            const itemTime = (item) => Date.parse(item && (item.updatedAt || item.lastModified || item.createdAt) || 0) || 0;
+            const mergeByKey = (leftItems, rightItems, keyFn) => {
+                const map = new Map();
+                [...(Array.isArray(leftItems) ? leftItems : []), ...(Array.isArray(rightItems) ? rightItems : [])].forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const key = String(keyFn(item) || '').trim();
+                    if (!key) return;
+                    const existing = map.get(key);
+                    if (!existing || itemTime(item) >= itemTime(existing)) map.set(key, item);
+                });
+                return Array.from(map.values());
+            };
+            if (canonical && local && typeof canonical === 'object' && typeof local === 'object') {
+                const canonicalTime = itemTime(canonical);
+                const localTime = itemTime(local);
+                content = {
+                    ...(canonicalTime >= localTime ? local : canonical),
+                    ...(canonicalTime >= localTime ? canonical : local),
+                    entries: mergeByKey(canonical.entries, local.entries, item => item.scheduleKey || item.id),
+                    analytics: mergeByKey(canonical.analytics, local.analytics, item => item.id),
+                    annotations: mergeByKey(canonical.annotations, local.annotations, item => item.id)
+                };
+            } else {
+                content = canonical || local;
+            }
         } catch (error) {
             content = null;
         }

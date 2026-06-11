@@ -99,8 +99,35 @@ const AssessmentStudioLoader = {
         if (!webview || typeof webview.executeJavaScript !== 'function') return;
         let content = null;
         try {
-            content = JSON.parse(localStorage.getItem('assessment_studio_data') || 'null')
-                || JSON.parse(localStorage.getItem('assessment_studio_data_local') || 'null');
+            const canonical = JSON.parse(localStorage.getItem('assessment_studio_data') || 'null');
+            const local = JSON.parse(localStorage.getItem('assessment_studio_data_local') || 'null');
+            const itemTime = (item) => Date.parse(item && (item.updatedAt || item.gradedAt || item.submittedAt || item.createdAt) || 0) || 0;
+            const mergeById = (leftItems, rightItems) => {
+                const map = new Map();
+                [...(Array.isArray(leftItems) ? leftItems : []), ...(Array.isArray(rightItems) ? rightItems : [])].forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '').trim();
+                    if (!id) return;
+                    const existing = map.get(id);
+                    if (!existing || itemTime(item) >= itemTime(existing)) map.set(id, item);
+                });
+                return Array.from(map.values());
+            };
+            if (canonical && local && typeof canonical === 'object' && typeof local === 'object') {
+                const canonicalTime = itemTime(canonical);
+                const localTime = itemTime(local);
+                content = {
+                    ...(canonicalTime >= localTime ? local : canonical),
+                    ...(canonicalTime >= localTime ? canonical : local),
+                    questionBucket: mergeById(canonical.questionBucket, local.questionBucket),
+                    generators: mergeById(canonical.generators, local.generators),
+                    submissions: mergeById(canonical.submissions, local.submissions),
+                    groupings: mergeById(canonical.groupings, local.groupings),
+                    tags: mergeById(canonical.tags, local.tags)
+                };
+            } else {
+                content = canonical || local;
+            }
         } catch (error) {
             content = null;
         }

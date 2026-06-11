@@ -48,6 +48,43 @@ const ScheduleData = {
         return window.localStorage;
     },
 
+    readStorageObject(key, fallback = null) {
+        try {
+            const raw = this.getStorage().getItem(key);
+            if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
+        } catch (error) {
+            return fallback;
+        }
+    },
+
+    itemUpdatedMs(item) {
+        const candidates = [
+            item && item.updatedAt,
+            item && item.lastModified,
+            item && item.createdAt
+        ];
+        for (const value of candidates) {
+            const ts = Date.parse(value || 0) || 0;
+            if (ts) return ts;
+        }
+        return 0;
+    },
+
+    mergeObjectsByStableKey(leftItems, rightItems, keySelector) {
+        const map = new Map();
+        [...(Array.isArray(leftItems) ? leftItems : []), ...(Array.isArray(rightItems) ? rightItems : [])]
+            .forEach(item => {
+                if (!item || typeof item !== 'object') return;
+                const key = String(keySelector(item) || '').trim();
+                if (!key) return;
+                const existing = map.get(key);
+                if (!existing || this.itemUpdatedMs(item) >= this.itemUpdatedMs(existing)) map.set(key, item);
+            });
+        return Array.from(map.values());
+    },
+
     async init() {
         if (AppContext.host && AppContext.host.APP_PASSIVE_TAB_WINDOW) return;
         if (AppContext.host && typeof AppContext.host.loadFromServer === 'function') {
@@ -158,29 +195,19 @@ const ScheduleData = {
     },
 
     getContentStudioStore() {
-        let parsed = null;
-        let localEntriesCount = 0;
-        try {
-            parsed = JSON.parse(this.getStorage().getItem(CONTENT_STUDIO_LOCAL_CACHE_KEY) || '{}');
-            localEntriesCount = (parsed && Array.isArray(parsed.entries)) ? parsed.entries.length : 0;
-        } catch (error) {
-            parsed = null;
-            localEntriesCount = 0;
-        }
-
-        // Fallback: host runtime persists the canonical document as `content_studio_data`.
-        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.entries) || localEntriesCount === 0) {
-            let canonical = null;
-            try {
-                canonical = JSON.parse(this.getStorage().getItem(CONTENT_STUDIO_DATA_KEY) || '{}');
-            } catch (error) {
-                canonical = null;
+        const local = this.readStorageObject(CONTENT_STUDIO_LOCAL_CACHE_KEY, null);
+        const canonical = this.readStorageObject(CONTENT_STUDIO_DATA_KEY, null);
+        const localTime = this.itemUpdatedMs(local);
+        const canonicalTime = this.itemUpdatedMs(canonical);
+        const parsed = canonical && local
+            ? {
+                ...(canonicalTime >= localTime ? local : canonical),
+                ...(canonicalTime >= localTime ? canonical : local),
+                entries: this.mergeObjectsByStableKey(canonical.entries, local.entries, entry => entry.scheduleKey || entry.id),
+                analytics: this.mergeObjectsByStableKey(canonical.analytics, local.analytics, row => row.id),
+                annotations: this.mergeObjectsByStableKey(canonical.annotations, local.annotations, row => row.id)
             }
-
-            if (canonical && typeof canonical === 'object' && Array.isArray(canonical.entries) && canonical.entries.length > 0) {
-                parsed = canonical;
-            }
-        }
+            : (localTime > canonicalTime ? local : (canonical || local));
 
         if (!parsed || typeof parsed !== 'object') return { entries: [], analytics: [], annotations: [] };
         if (!Array.isArray(parsed.entries)) parsed.entries = [];
