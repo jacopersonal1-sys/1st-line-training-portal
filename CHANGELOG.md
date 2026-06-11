@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.25 - 2026-06-11
+
+- **Recovery:** Extended the one-time first-run recovery check to include Content Creator (`content_studio_data`) and Q&A Hub (`qa_data`) along with Schedule Studio and Assessment Studio.
+- **Safety:** Bumped the recovery marker so clients that already ran the 2.7.24 recovery will re-check the expanded set once after this update.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.24 - 2026-06-11
 
 - **Critical Fix:** Restored confirmed cloud persistence for Assessment Studio and Content Creator by routing embedded saves through the host sync engine and surfacing failed Supabase writes instead of showing a false synced state.

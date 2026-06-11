@@ -514,7 +514,7 @@ window.addEventListener('offline', () => {
     updateSyncUI('error');
 });
 
-const STUDIO_RECOVERY_MARKER_KEY = 'studio_recent_recovery_2026_06_11_v1';
+const STUDIO_RECOVERY_MARKER_KEY = 'studio_recent_recovery_2026_06_11_v2';
 const STUDIO_RECOVERY_WINDOW_MS = 20 * 60 * 60 * 1000;
 
 function getMostRecentTimestampMs(value) {
@@ -553,7 +553,7 @@ async function runRecentStudioRecoveryOnce() {
     if (localStorage.getItem(STUDIO_RECOVERY_MARKER_KEY) === 'complete') return;
 
     sessionStorage.setItem(`${STUDIO_RECOVERY_MARKER_KEY}_running`, 'true');
-    const keysToCheck = ['schedules', 'assessment_studio_data'];
+    const keysToCheck = ['schedules', 'assessment_studio_data', 'content_studio_data', 'qa_data'];
     const keysToPush = [];
     const cutoff = Date.now() - STUDIO_RECOVERY_WINDOW_MS;
 
