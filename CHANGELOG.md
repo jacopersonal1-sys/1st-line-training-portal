@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.29 - 2026-06-11
+
+- **Fix:** Schedule Studio now uses delete-aware merging for Assessment Studio generators and Content Creator modules, so newer recreated generators appear while deleted modules are not resurrected from stale cache.
+- **Fix:** Assessment Studio now writes its merged loaded document back to both host cache keys, preventing Schedule Studio from reading an old canonical generator list after refresh.
+- **Safety:** Content Creator now stamps the full module document on save, giving Schedule Studio a reliable document timestamp to distinguish real deletes from missing stale cache data.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/schedule_studio_recalculate.test.js tests/sync.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.28 - 2026-06-11
 
 - **Fix:** Schedule Studio now merges Content Creator canonical and local module caches by stable module key, so newly saved modules appear in timeline linking even when an older one-module cache exists.

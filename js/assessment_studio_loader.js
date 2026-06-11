@@ -102,14 +102,29 @@ const AssessmentStudioLoader = {
             const canonical = JSON.parse(localStorage.getItem('assessment_studio_data') || 'null');
             const local = JSON.parse(localStorage.getItem('assessment_studio_data_local') || 'null');
             const itemTime = (item) => Date.parse(item && (item.updatedAt || item.gradedAt || item.submittedAt || item.createdAt) || 0) || 0;
-            const mergeById = (leftItems, rightItems) => {
+            const mergeById = (leftItems, rightItems, leftDocTime = 0, rightDocTime = 0) => {
                 const map = new Map();
-                [...(Array.isArray(leftItems) ? leftItems : []), ...(Array.isArray(rightItems) ? rightItems : [])].forEach(item => {
+                const leftMap = new Map();
+                const rightMap = new Map();
+                const indexItems = (items, target) => (Array.isArray(items) ? items : []).forEach(item => {
                     if (!item || typeof item !== 'object') return;
                     const id = String(item.id || '').trim();
                     if (!id) return;
-                    const existing = map.get(id);
-                    if (!existing || itemTime(item) >= itemTime(existing)) map.set(id, item);
+                    const existing = target.get(id);
+                    if (!existing || itemTime(item) >= itemTime(existing)) target.set(id, item);
+                });
+                indexItems(leftItems, leftMap);
+                indexItems(rightItems, rightMap);
+                new Set([...leftMap.keys(), ...rightMap.keys()]).forEach(id => {
+                    const left = leftMap.get(id);
+                    const right = rightMap.get(id);
+                    if (left && right) {
+                        map.set(id, itemTime(right) >= itemTime(left) ? right : left);
+                    } else if (left) {
+                        if (!rightDocTime || itemTime(left) >= rightDocTime) map.set(id, left);
+                    } else if (!leftDocTime || itemTime(right) >= leftDocTime) {
+                        map.set(id, right);
+                    }
                 });
                 return Array.from(map.values());
             };
@@ -119,11 +134,11 @@ const AssessmentStudioLoader = {
                 content = {
                     ...(canonicalTime >= localTime ? local : canonical),
                     ...(canonicalTime >= localTime ? canonical : local),
-                    questionBucket: mergeById(canonical.questionBucket, local.questionBucket),
-                    generators: mergeById(canonical.generators, local.generators),
-                    submissions: mergeById(canonical.submissions, local.submissions),
-                    groupings: mergeById(canonical.groupings, local.groupings),
-                    tags: mergeById(canonical.tags, local.tags)
+                    questionBucket: mergeById(canonical.questionBucket, local.questionBucket, canonicalTime, localTime),
+                    generators: mergeById(canonical.generators, local.generators, canonicalTime, localTime),
+                    submissions: mergeById(canonical.submissions, local.submissions, canonicalTime, localTime),
+                    groupings: mergeById(canonical.groupings, local.groupings, canonicalTime, localTime),
+                    tags: mergeById(canonical.tags, local.tags, canonicalTime, localTime)
                 };
             } else {
                 content = canonical || local;

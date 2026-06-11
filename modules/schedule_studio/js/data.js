@@ -72,16 +72,37 @@ const ScheduleData = {
         return 0;
     },
 
-    mergeObjectsByStableKey(leftItems, rightItems, keySelector) {
+    mergeObjectsByStableKey(leftItems, rightItems, keySelector, leftDocTime = 0, rightDocTime = 0) {
         const map = new Map();
-        [...(Array.isArray(leftItems) ? leftItems : []), ...(Array.isArray(rightItems) ? rightItems : [])]
-            .forEach(item => {
+        const leftMap = new Map();
+        const rightMap = new Map();
+        const indexItems = (items, target) => {
+            (Array.isArray(items) ? items : []).forEach(item => {
                 if (!item || typeof item !== 'object') return;
                 const key = String(keySelector(item) || '').trim();
                 if (!key) return;
-                const existing = map.get(key);
-                if (!existing || this.itemUpdatedMs(item) >= this.itemUpdatedMs(existing)) map.set(key, item);
+                const existing = target.get(key);
+                if (!existing || this.itemUpdatedMs(item) >= this.itemUpdatedMs(existing)) target.set(key, item);
             });
+        };
+        indexItems(leftItems, leftMap);
+        indexItems(rightItems, rightMap);
+
+        new Set([...leftMap.keys(), ...rightMap.keys()]).forEach(key => {
+            const left = leftMap.get(key);
+            const right = rightMap.get(key);
+            if (left && right) {
+                map.set(key, this.itemUpdatedMs(right) >= this.itemUpdatedMs(left) ? right : left);
+                return;
+            }
+
+            if (left) {
+                if (!rightDocTime || this.itemUpdatedMs(left) >= rightDocTime) map.set(key, left);
+                return;
+            }
+
+            if (!leftDocTime || this.itemUpdatedMs(right) >= leftDocTime) map.set(key, right);
+        });
         return Array.from(map.values());
     },
 
@@ -136,30 +157,17 @@ const ScheduleData = {
                 + (Array.isArray(store.submissions) ? store.submissions.length : 0);
         };
 
-        const mergeById = (leftItems, rightItems) => {
-            const map = new Map();
-            [...(Array.isArray(leftItems) ? leftItems : []), ...(Array.isArray(rightItems) ? rightItems : [])]
-                .forEach(item => {
-                    if (!item || typeof item !== 'object') return;
-                    const id = String(item.id || '').trim();
-                    if (!id) return;
-                    const existing = map.get(id);
-                    const existingTime = Date.parse(existing?.updatedAt || existing?.createdAt || 0) || 0;
-                    const itemTime = Date.parse(item.updatedAt || item.createdAt || 0) || 0;
-                    if (!existing || itemTime >= existingTime) map.set(id, item);
-                });
-            return Array.from(map.values());
-        };
-
         const canonicalTime = Date.parse(canonical?.updatedAt || 0) || 0;
         const localTime = Date.parse(local?.updatedAt || 0) || 0;
         const parsed = canonical && local
             ? {
                 ...(canonicalTime >= localTime ? local : canonical),
                 ...(canonicalTime >= localTime ? canonical : local),
-                questionBucket: mergeById(canonical.questionBucket, local.questionBucket),
-                generators: mergeById(canonical.generators, local.generators),
-                submissions: mergeById(canonical.submissions, local.submissions)
+                questionBucket: this.mergeObjectsByStableKey(canonical.questionBucket, local.questionBucket, item => item.id, canonicalTime, localTime),
+                generators: this.mergeObjectsByStableKey(canonical.generators, local.generators, item => item.id, canonicalTime, localTime),
+                submissions: this.mergeObjectsByStableKey(canonical.submissions, local.submissions, item => item.id, canonicalTime, localTime),
+                groupings: this.mergeObjectsByStableKey(canonical.groupings, local.groupings, item => item.id, canonicalTime, localTime),
+                tags: this.mergeObjectsByStableKey(canonical.tags, local.tags, item => item.id, canonicalTime, localTime)
             }
             : (canonicalTime || localTime
                 ? (localTime > canonicalTime ? local : canonical)
@@ -203,9 +211,9 @@ const ScheduleData = {
             ? {
                 ...(canonicalTime >= localTime ? local : canonical),
                 ...(canonicalTime >= localTime ? canonical : local),
-                entries: this.mergeObjectsByStableKey(canonical.entries, local.entries, entry => entry.scheduleKey || entry.id),
-                analytics: this.mergeObjectsByStableKey(canonical.analytics, local.analytics, row => row.id),
-                annotations: this.mergeObjectsByStableKey(canonical.annotations, local.annotations, row => row.id)
+                entries: this.mergeObjectsByStableKey(canonical.entries, local.entries, entry => entry.scheduleKey || entry.id, canonicalTime, localTime),
+                analytics: this.mergeObjectsByStableKey(canonical.analytics, local.analytics, row => row.id, canonicalTime, localTime),
+                annotations: this.mergeObjectsByStableKey(canonical.annotations, local.annotations, row => row.id, canonicalTime, localTime)
             }
             : (localTime > canonicalTime ? local : (canonical || local));
 

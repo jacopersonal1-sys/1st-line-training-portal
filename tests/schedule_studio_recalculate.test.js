@@ -111,4 +111,82 @@ describe('Schedule Studio recalculation', () => {
             subjects: [{ id: 'subject-1' }]
         });
     });
+
+    test('does not resurrect deleted Content Creator modules from older cache', () => {
+        localStorage.setItem('content_studio_data_local', JSON.stringify({
+            updatedAt: '2026-06-11T08:00:00.000Z',
+            entries: [
+                {
+                    id: 'entry-deleted',
+                    scheduleKey: 'module-deleted',
+                    scheduleLabel: 'Deleted Module',
+                    updatedAt: '2026-06-11T07:00:00.000Z',
+                    subjects: []
+                },
+                {
+                    id: 'entry-kept',
+                    scheduleKey: 'module-kept',
+                    scheduleLabel: 'Kept Module',
+                    updatedAt: '2026-06-11T08:00:00.000Z',
+                    subjects: []
+                }
+            ]
+        }));
+        localStorage.setItem('content_studio_data', JSON.stringify({
+            updatedAt: '2026-06-11T09:00:00.000Z',
+            entries: [
+                {
+                    id: 'entry-kept',
+                    scheduleKey: 'module-kept',
+                    scheduleLabel: 'Kept Module',
+                    updatedAt: '2026-06-11T08:30:00.000Z',
+                    subjects: []
+                }
+            ]
+        }));
+
+        expect(ScheduleData.getContentModules().map(module => module.key)).toEqual(['module-kept']);
+    });
+
+    test('keeps newly recreated Assessment Studio generators newer than server cache', () => {
+        localStorage.setItem('assessment_studio_data', JSON.stringify({
+            updatedAt: '2026-06-11T08:00:00.000Z',
+            questionBucket: [],
+            generators: [
+                {
+                    id: 'gen_terms',
+                    assessment: 'Terms',
+                    totalPoints: 100,
+                    updatedAt: '2026-06-11T08:00:00.000Z'
+                }
+            ],
+            submissions: []
+        }));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify({
+            updatedAt: '2026-06-11T09:00:00.000Z',
+            questionBucket: [],
+            generators: [
+                {
+                    id: 'gen_terms',
+                    assessment: 'Terms',
+                    totalPoints: 100,
+                    updatedAt: '2026-06-11T08:00:00.000Z'
+                },
+                {
+                    id: 'gen_new',
+                    assessment: 'New Assessment',
+                    totalPoints: 80,
+                    pointLeeway: 5,
+                    updatedAt: '2026-06-11T09:00:00.000Z'
+                }
+            ],
+            submissions: []
+        }));
+
+        expect(ScheduleData.getAssessmentStudioGenerators().map(generator => generator.id).sort()).toEqual(['gen_new', 'gen_terms']);
+        expect(ScheduleData.getAssessmentStudioGeneratorById('gen_new')).toMatchObject({
+            assessment: 'New Assessment',
+            pointLeeway: 5
+        });
+    });
 });

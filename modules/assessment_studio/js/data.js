@@ -178,15 +178,41 @@ const AssessmentStudioData = {
         return Array.from(map.values());
     },
 
-    pickAuthoritativeStudio(remote, local) {
-        const remoteStudio = this.normalizeStudio(remote);
-        const localStudio = this.normalizeStudio(local);
-        const remoteTime = Date.parse(remoteStudio.updatedAt || 0) || 0;
-        const localTime = Date.parse(localStudio.updatedAt || 0) || 0;
+    mergeStudioItems(remoteItems, localItems, remoteDocTime = 0, localDocTime = 0) {
+        const remoteMap = new Map();
+        const localMap = new Map();
+        const itemTime = (item) => Date.parse(item && (item.updatedAt || item.createdAt) || 0) || 0;
+        const indexItems = (items, target) => {
+            (Array.isArray(items) ? items : []).forEach(item => {
+                if (!item || typeof item !== 'object') return;
+                const id = String(item.id || '').trim();
+                if (!id) return;
+                const existing = target.get(id);
+                if (!existing || itemTime(item) >= itemTime(existing)) target.set(id, item);
+            });
+        };
 
-        if (!remote || !remoteTime) return localStudio;
-        if (!local || !localTime) return remoteStudio;
-        return localTime > remoteTime ? localStudio : remoteStudio;
+        indexItems(remoteItems, remoteMap);
+        indexItems(localItems, localMap);
+
+        const merged = new Map();
+        new Set([...remoteMap.keys(), ...localMap.keys()]).forEach(id => {
+            const remote = remoteMap.get(id);
+            const local = localMap.get(id);
+            if (remote && local) {
+                merged.set(id, itemTime(local) >= itemTime(remote) ? local : remote);
+                return;
+            }
+
+            if (remote) {
+                if (!localDocTime || itemTime(remote) >= localDocTime) merged.set(id, remote);
+                return;
+            }
+
+            if (!remoteDocTime || itemTime(local) >= remoteDocTime) merged.set(id, local);
+        });
+
+        return Array.from(merged.values());
     },
 
     submissionStatusRank(status) {
@@ -224,19 +250,24 @@ const AssessmentStudioData = {
     },
 
     mergeStudio(remote, local) {
-        const authoritative = this.pickAuthoritativeStudio(remote, local);
-        if (authoritative) return this.normalizeStudio(authoritative);
-
         const a = this.normalizeStudio(remote);
         const b = this.normalizeStudio(local);
+        const remoteDocTime = Date.parse(a.updatedAt || 0) || 0;
+        const localDocTime = Date.parse(b.updatedAt || 0) || 0;
+
+        if (!remote || !remoteDocTime) return b;
+        if (!local || !localDocTime) return a;
+
         return this.normalizeStudio({
-            questionBucket: this.mergeById(a.questionBucket, b.questionBucket),
-            generators: this.mergeById(a.generators, b.generators),
+            ...(remoteDocTime >= localDocTime ? b : a),
+            ...(remoteDocTime >= localDocTime ? a : b),
+            questionBucket: this.mergeStudioItems(a.questionBucket, b.questionBucket, remoteDocTime, localDocTime),
+            generators: this.mergeStudioItems(a.generators, b.generators, remoteDocTime, localDocTime),
             submissions: this.mergeSubmissions(a.submissions, b.submissions),
-            groupings: this.mergeById(a.groupings, b.groupings),
-            tags: this.mergeById(a.tags, b.tags),
-            updatedAt: b.updatedAt || a.updatedAt,
-            updatedBy: b.updatedBy || a.updatedBy
+            groupings: this.mergeStudioItems(a.groupings, b.groupings, remoteDocTime, localDocTime),
+            tags: this.mergeStudioItems(a.tags, b.tags, remoteDocTime, localDocTime),
+            updatedAt: (localDocTime >= remoteDocTime ? b.updatedAt : a.updatedAt) || new Date().toISOString(),
+            updatedBy: (localDocTime >= remoteDocTime ? b.updatedBy : a.updatedBy) || this.editor()
         });
     },
 
@@ -261,6 +292,7 @@ const AssessmentStudioData = {
         const remoteStudio = await this.fetchDocument(ASSESSMENT_STUDIO_KEY, localStudio);
         this.state.studio = this.mergeStudio(remoteStudio, localStudio);
         localStorage.setItem(ASSESSMENT_STUDIO_LOCAL_KEY, JSON.stringify(this.state.studio));
+        localStorage.setItem(ASSESSMENT_STUDIO_KEY, JSON.stringify(this.state.studio));
 
         const legacyKeys = ['assessments', 'tests', 'submissions', 'records', 'users', 'rosters'];
         const values = await Promise.all(legacyKeys.map(key => this.fetchDocument(key, this.localRead(key, key === 'rosters' ? {} : []))));

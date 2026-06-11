@@ -85,7 +85,9 @@ const DataService = {
         return {
             entries: [],
             analytics: [],
-            annotations: []
+            annotations: [],
+            updatedAt: null,
+            updatedBy: null
         };
     },
 
@@ -264,6 +266,8 @@ const DataService = {
         if (!Array.isArray(store.entries)) store.entries = [];
         if (!Array.isArray(store.analytics)) store.analytics = [];
         if (!Array.isArray(store.annotations)) store.annotations = [];
+        store.updatedAt = store.updatedAt || nowIso();
+        store.updatedBy = store.updatedBy || getEditorName();
 
         store.entries = store.entries
             .filter(e => e && typeof e === 'object')
@@ -442,6 +446,8 @@ const DataService = {
 
     saveStore: async function(store, deferSync = false) {
         const normalized = this._normalizeStore(store);
+        normalized.updatedAt = nowIso();
+        normalized.updatedBy = getEditorName();
         localStorage.setItem(CONTENT_STUDIO_LOCAL_CACHE_KEY, JSON.stringify(normalized));
         localStorage.setItem(CONTENT_STUDIO_DATA_KEY, JSON.stringify(normalized));
         const hostNotified = this.notifyHostSave(normalized);
