@@ -4,6 +4,57 @@
 const ContentStudioLoader = {
     _windowMessageBound: false,
 
+    handleStudioSave: function(payload) {
+        const data = payload && typeof payload === 'object' ? payload : {};
+        const content = data.content && typeof data.content === 'object'
+            ? data.content
+            : null;
+        if (!content) return false;
+
+        try {
+            localStorage.setItem('content_studio_data', JSON.stringify(content));
+            localStorage.setItem('content_studio_data_local', JSON.stringify(content));
+            window.dispatchEvent(new CustomEvent('buildzone:data-changed', {
+                detail: { key: 'content_studio_data', source: 'content_studio_webview' }
+            }));
+        } catch (error) {
+            console.error('[Content Studio Loader] Host cache save failed:', error);
+            if (typeof showToast === 'function') showToast('Content Creator could not update host cache.', 'error');
+            return false;
+        }
+
+        if (typeof saveToServer === 'function') {
+            Promise.resolve(saveToServer(['content_studio_data'], true, true))
+                .then((ok) => {
+                    if (!ok && typeof showToast === 'function') {
+                        showToast('Content Creator saved locally, but cloud sync did not confirm.', 'warning');
+                    }
+                })
+                .catch((error) => {
+                    console.warn('[Content Studio Loader] Host cloud save failed:', error);
+                    if (typeof showToast === 'function') showToast('Content Creator saved locally. Cloud sync can retry after refresh.', 'warning');
+                });
+            return true;
+        }
+
+        if (window.supabaseClient && typeof window.supabaseClient.from === 'function') {
+            window.supabaseClient.from('app_documents').upsert({
+                key: 'content_studio_data',
+                content,
+                updated_at: new Date().toISOString()
+            }).select().then(({ data: savedData, error }) => {
+                if (error) throw error;
+                if (savedData && savedData[0] && savedData[0].updated_at) {
+                    localStorage.setItem('sync_ts_content_studio_data', savedData[0].updated_at);
+                }
+            }).catch((error) => {
+                console.warn('[Content Studio Loader] Direct cloud save failed:', error);
+            });
+        }
+
+        return true;
+    },
+
     launchLinkedQuiz: function(payload) {
         const testId = payload && payload.testId ? String(payload.testId) : '';
         if (!testId) return;
@@ -53,8 +104,38 @@ const ContentStudioLoader = {
         this._windowMessageBound = true;
         window.addEventListener('message', (event) => {
             const data = event && event.data ? event.data : null;
-            if (!data || data.type !== 'content-studio-open-quiz') return;
-            this.launchLinkedQuiz(data.payload || null);
+            if (!data) return;
+            if (data.type === 'content-studio-open-quiz') this.launchLinkedQuiz(data.payload || null);
+            if (data.type === 'content-studio-save') this.handleStudioSave(data.payload || null);
+        });
+    },
+
+    syncHostDataToWebview: function(webview) {
+        if (!webview || typeof webview.executeJavaScript !== 'function') return;
+        let content = null;
+        try {
+            content = JSON.parse(localStorage.getItem('content_studio_data') || 'null')
+                || JSON.parse(localStorage.getItem('content_studio_data_local') || 'null');
+        } catch (error) {
+            content = null;
+        }
+        if (!content || typeof content !== 'object') return;
+        const script = `
+            (() => {
+                try {
+                    const content = ${JSON.stringify(content)};
+                    localStorage.setItem('content_studio_data', JSON.stringify(content));
+                    localStorage.setItem('content_studio_data_local', JSON.stringify(content));
+                    if (window.DataService && typeof DataService.getStore === 'function') {
+                        if (window.App && typeof App.render === 'function') App.render();
+                    }
+                } catch (error) {
+                    console.warn('[Content Studio] Host data injection failed:', error);
+                }
+            })();
+        `;
+        webview.executeJavaScript(script, true).catch(error => {
+            console.warn('[Content Studio Loader] Host data sync failed:', error);
         });
     },
 
@@ -124,12 +205,13 @@ const ContentStudioLoader = {
 
         webview.addEventListener('dom-ready', () => {
             if (typeof applyThemeToWebview === 'function') applyThemeToWebview(webview);
+            ContentStudioLoader.syncHostDataToWebview(webview);
         });
 
         webview.addEventListener('ipc-message', (event) => {
-            if (!event || event.channel !== 'content-studio-open-quiz') return;
             const payload = Array.isArray(event.args) ? event.args[0] : null;
-            this.launchLinkedQuiz(payload);
+            if (event && event.channel === 'content-studio-open-quiz') this.launchLinkedQuiz(payload);
+            if (event && event.channel === 'content-studio-save') this.handleStudioSave(payload);
         });
 
         this.bindWindowMessageBridge();

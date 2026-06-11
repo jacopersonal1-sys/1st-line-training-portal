@@ -178,6 +178,17 @@ const AssessmentStudioData = {
         return Array.from(map.values());
     },
 
+    pickAuthoritativeStudio(remote, local) {
+        const remoteStudio = this.normalizeStudio(remote);
+        const localStudio = this.normalizeStudio(local);
+        const remoteTime = Date.parse(remoteStudio.updatedAt || 0) || 0;
+        const localTime = Date.parse(localStudio.updatedAt || 0) || 0;
+
+        if (!remote || !remoteTime) return localStudio;
+        if (!local || !localTime) return remoteStudio;
+        return localTime > remoteTime ? localStudio : remoteStudio;
+    },
+
     submissionStatusRank(status) {
         const value = String(status || '').trim().toLowerCase();
         if (value === 'completed') return 4;
@@ -213,6 +224,9 @@ const AssessmentStudioData = {
     },
 
     mergeStudio(remote, local) {
+        const authoritative = this.pickAuthoritativeStudio(remote, local);
+        if (authoritative) return this.normalizeStudio(authoritative);
+
         const a = this.normalizeStudio(remote);
         const b = this.normalizeStudio(local);
         return this.normalizeStudio({

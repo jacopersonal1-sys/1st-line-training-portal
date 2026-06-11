@@ -4,6 +4,7 @@ describe('Data Sync Module', () => {
     beforeEach(() => {
         localStorage.clear();
         jest.clearAllMocks();
+        global.CURRENT_USER = null;
     });
 
     test('performSmartMerge merges arrays without duplicates', () => {
@@ -53,6 +54,75 @@ describe('Data Sync Module', () => {
         expect(merged.submissions.find(item => item.id === 's1').feedbackStatus).toBe('received');
         expect(merged.groupings.map(item => item.id)).toEqual(['grp1']);
         expect(merged.tags.map(item => item.id)).toEqual(['tag1']);
+    });
+
+    test('performSmartMerge keeps Assessment Studio server deletes during pull', () => {
+        const server = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-10T10:00:00.000Z',
+                questionBucket: [{ id: 'q1', text: 'Server question', updatedAt: '2026-06-10T10:00:00.000Z' }],
+                generators: [],
+                submissions: [{ id: 's1', trainee: 'Alice', status: 'completed', percent: 80, updatedAt: '2026-06-10T10:00:00.000Z' }],
+                groupings: [],
+                tags: []
+            }
+        };
+        const local = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-10T09:00:00.000Z',
+                questionBucket: [
+                    { id: 'q1', text: 'Old local question', updatedAt: '2026-06-10T09:00:00.000Z' },
+                    { id: 'q_deleted', text: 'Deleted question', updatedAt: '2026-06-10T09:00:00.000Z' }
+                ],
+                generators: [{ id: 'g_deleted', assessment: 'Deleted generator', updatedAt: '2026-06-10T09:00:00.000Z' }],
+                submissions: [
+                    { id: 's1', trainee: 'Alice', status: 'pending_review', percent: 0, updatedAt: '2026-06-10T09:00:00.000Z' },
+                    { id: 's_deleted', trainee: 'Alice', status: 'pending_review', updatedAt: '2026-06-10T09:00:00.000Z' }
+                ],
+                groupings: [],
+                tags: []
+            }
+        };
+
+        const merged = DataModule.performSmartMerge(server, local, 'server_wins').assessment_studio_data;
+
+        expect(merged.questionBucket.map(item => item.id)).toEqual(['q1']);
+        expect(merged.questionBucket[0].text).toBe('Server question');
+        expect(merged.generators).toEqual([]);
+        expect(merged.submissions.map(item => item.id)).toEqual(['s1']);
+        expect(merged.submissions[0].status).toBe('completed');
+        expect(merged.submissions[0].percent).toBe(80);
+    });
+
+    test('performSmartMerge keeps newer current trainee Assessment Studio draft during pull', () => {
+        global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
+        const server = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-10T10:00:00.000Z',
+                questionBucket: [],
+                generators: [],
+                submissions: [],
+                groupings: [],
+                tags: []
+            }
+        };
+        const local = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-10T10:01:00.000Z',
+                questionBucket: [],
+                generators: [],
+                submissions: [
+                    { id: 's_new', trainee: 'Alice', status: 'pending_review', updatedAt: '2026-06-10T10:01:00.000Z' },
+                    { id: 's_other', trainee: 'Bob', status: 'pending_review', updatedAt: '2026-06-10T10:01:00.000Z' }
+                ],
+                groupings: [],
+                tags: []
+            }
+        };
+
+        const merged = DataModule.performSmartMerge(server, local, 'server_wins').assessment_studio_data;
+
+        expect(merged.submissions.map(item => item.id)).toEqual(['s_new']);
     });
 
     test('loadFromServer fetches stale blob keys and ignores row-synced blob keys', async () => {
@@ -227,6 +297,71 @@ describe('Data Sync Module', () => {
         expect(result).toBe(false);
         expect(upsertMock).toHaveBeenCalled();
         expect(localStorage.getItem('hash_map_records')).toBeNull();
+    });
+
+    test('saveToServer does not mark row hashes synced when a row table upload is not confirmed', async () => {
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        localStorage.setItem('monitor_history', JSON.stringify([
+            { id: 'monitor_history_alice_2026-06-11', user: 'Alice', date: '2026-06-11', details: [] }
+        ]));
+
+        const upsertMock = jest.fn().mockResolvedValue({
+            error: { code: 'PGRST205', message: 'does not exist' }
+        });
+
+        global.window.supabaseClient.from = jest.fn((table) => {
+            if (table === 'monitor_history') {
+                return { upsert: upsertMock };
+            }
+            return {
+                select: jest.fn(() => ({
+                    eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }) }))
+                })),
+                upsert: jest.fn().mockResolvedValue({ error: null }),
+                delete: jest.fn(() => ({ neq: jest.fn().mockResolvedValue({ error: null }) }))
+            };
+        });
+
+        const result = await DataModule.saveToServer(['monitor_history'], true, true);
+
+        expect(result).toBe(false);
+        expect(upsertMock).toHaveBeenCalled();
+        expect(localStorage.getItem('hash_map_monitor_history')).toBeNull();
+    });
+
+    test('saveToServer fails loudly for Assessment Studio explicit blob save errors', async () => {
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
+        localStorage.setItem('assessment_studio_data', JSON.stringify({
+            questionBucket: [],
+            generators: [],
+            submissions: [],
+            groupings: [],
+            tags: [],
+            updatedAt: '2026-06-11T08:00:00.000Z'
+        }));
+
+        const blobUpsertMock = jest.fn(() => ({
+            select: jest.fn().mockResolvedValue({
+                data: null,
+                error: { message: 'permission denied for table app_documents' }
+            })
+        }));
+
+        global.window.supabaseClient.from = jest.fn(() => ({
+            select: jest.fn(() => ({
+                eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }) }))
+            })),
+            upsert: blobUpsertMock,
+            delete: jest.fn(() => ({ neq: jest.fn().mockResolvedValue({ error: null }) }))
+        }));
+
+        const result = await DataModule.saveToServer(['assessment_studio_data'], true, true);
+
+        expect(result).toBe(false);
+        expect(blobUpsertMock).toHaveBeenCalled();
     });
 
     test('violation report sync strips inline screenshot payloads', () => {

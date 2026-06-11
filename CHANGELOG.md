@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.7.24 - 2026-06-11
+
+- **Critical Fix:** Restored confirmed cloud persistence for Assessment Studio and Content Creator by routing embedded saves through the host sync engine and surfacing failed Supabase writes instead of showing a false synced state.
+- **Recovery:** Added a one-time first-run recovery check for recent Schedule Studio and Assessment Studio local changes from the last 20 hours. If Supabase is missing or older than the local cache, the app republishes those documents before the normal server pull can overwrite them.
+- **Safety:** Row-table uploads now only mark local hashes as synced after Supabase confirms the write, preventing stale local data from being skipped after a failed upload.
+- **Fix:** Schedule Studio now merges Assessment Studio local/canonical caches for generator selection and displays the saved generator point leeway.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
+## 2.7.23 - 2026-06-10
+
+- **Critical Fix:** Assessment Studio now treats the synced `assessment_studio_data` document as authoritative for admin-created questions, generator details, grading results, and admin deletes, preventing deleted generators/submissions from coming back after refresh.
+- **Critical Fix:** Trainee sync now pulls Assessment Studio data and refreshes My Assessments / active Assessment Studio runtime when the shared document changes, so Pending Review updates to Completed with the admin score.
+- **Safety:** Trainee draft/submission protection is now scoped to the current trainee and only kept when it is newer than the server document, so one trainee cannot resurrect another trainee's deleted or graded test.
+- **Fix:** Schedule Studio now chooses the newest Assessment Studio cache by timestamp instead of item count, and keeps the saved generator point leeway when linking timeline items.
+- **Verification:** `npm.cmd test -- --runInBand` passed.
+
+> Release target: stable main channel.
+
+## 2.7.22 - 2026-06-10 (Test Build)
+
+- **Critical Fix:** Assessment Studio admin marking now instantly syncs to all admin instances. When one admin completes marking a test, other admins see the submission removed from their marking queues immediately, even on background tabs.
+- **Critical Fix:** Trainees now see completed assessments with updated marks instantly after admin grading. My Assessments view refreshes automatically when submissions/records update via realtime.
+- **Critical Fix:** Submission and record deletions now propagate to all users (admins and trainees). When an admin deletes a submission, it's immediately removed from all other admins' queues and trainees' assessment lists.
+- Implementation: `js/data.js` processIncomingDataQueue() now always triggers UI refresh for admin/trainee assessment views on submission/record changes (not just active tabs).
+- Implementation: `js/assessment_trainee.js` now listens for realtime submission/record changes and auto-refreshes My Assessments.
+- Implementation: `js/admin_grading.js` and `js/admin_history.js` now emit data-changed events and sync deletions after hardDelete() succeeds.
+- Test Build: Ready for QA testing of assessment studio sync and deletion workflows.
+
+> Release target: test channel.
+
 ## 2.7.20 - 2026-06-09
 
 - Fix: Timeline-linked Assessment Studio submissions now stay closed after submission and show Submitted or Graded instead of reopening the test.

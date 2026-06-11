@@ -496,7 +496,7 @@ const App = {
                     generator.assessment,
                     generator.phase && generator.phase !== 'Assessment' ? generator.phase : '',
                     generator.totalPoints ? `${generator.totalPoints} pts` : '',
-                    generator.totalPoints ? '+/- 7 pts' : ''
+                    generator.totalPoints ? `+/- ${generator.pointLeeway} pts` : ''
                 ].filter(Boolean);
                 assessmentStudioSelect.add(new Option(parts.join(' | '), generator.id));
             });

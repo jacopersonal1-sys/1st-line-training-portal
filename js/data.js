@@ -194,9 +194,23 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'admin_notifications',
     'test_integrity_overrides',
     'qa_data',
+    'assessment_studio_data',
+    'content_studio_data',
     'violation_reports',
     'graduated_agents',
-    'retrain_archives'
+    'retrain_archives',
+    'linkRequests',
+    'savedReports',
+    'insightReviews',
+    'auditLogs',
+    'error_reports',
+    'monitor_history',
+    'attendance_records',
+    'accessLogs',
+    'network_diagnostics',
+    'nps_responses',
+    'calendarEvents',
+    'tl_task_submissions'
 ]);
 
 // --- TRAINEE RUNTIME OPTIMIZATION ---
@@ -222,6 +236,8 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'course_progress_request_config',
     'admin_notifications',
     'qa_data',
+    'assessment_studio_data',
+    'content_studio_data',
     'live_booking_rules_config',
     'liveScheduleSettings',
     'cancellationCounts'
@@ -498,6 +514,95 @@ window.addEventListener('offline', () => {
     updateSyncUI('error');
 });
 
+const STUDIO_RECOVERY_MARKER_KEY = 'studio_recent_recovery_2026_06_11_v1';
+const STUDIO_RECOVERY_WINDOW_MS = 20 * 60 * 60 * 1000;
+
+function getMostRecentTimestampMs(value) {
+    let newest = 0;
+    const visit = (node) => {
+        if (!node) return;
+        if (Array.isArray(node)) {
+            node.forEach(visit);
+            return;
+        }
+        if (typeof node !== 'object') return;
+        [
+            node.updatedAt,
+            node.lastModified,
+            node.modifiedAt,
+            node.createdAt,
+            node.submittedAt,
+            node.gradedAt,
+            node.generatedAt
+        ].forEach(candidate => {
+            const ts = Date.parse(candidate || 0) || 0;
+            if (ts > newest) newest = ts;
+        });
+        Object.keys(node).forEach(key => {
+            const child = node[key];
+            if (child && typeof child === 'object') visit(child);
+        });
+    };
+    visit(value);
+    return newest;
+}
+
+async function runRecentStudioRecoveryOnce() {
+    if (!window.supabaseClient) return;
+    if (sessionStorage.getItem(`${STUDIO_RECOVERY_MARKER_KEY}_running`) === 'true') return;
+    if (localStorage.getItem(STUDIO_RECOVERY_MARKER_KEY) === 'complete') return;
+
+    sessionStorage.setItem(`${STUDIO_RECOVERY_MARKER_KEY}_running`, 'true');
+    const keysToCheck = ['schedules', 'assessment_studio_data'];
+    const keysToPush = [];
+    const cutoff = Date.now() - STUDIO_RECOVERY_WINDOW_MS;
+
+    try {
+        for (const key of keysToCheck) {
+            const localValue = safeLocalParse(key, null);
+            if (!localValue || typeof localValue !== 'object') continue;
+
+            const localTs = getMostRecentTimestampMs(localValue);
+            if (!localTs || localTs < cutoff) continue;
+
+            const remoteKey = IS_DEMO_MODE ? `demo_${key}` : key;
+            const { data: remoteRow, error } = await window.supabaseClient
+                .from('app_documents')
+                .select('updated_at, content')
+                .eq('key', remoteKey)
+                .maybeSingle();
+
+            if (error) throw error;
+
+            const remoteDocTs = Date.parse(remoteRow?.updated_at || 0) || 0;
+            const remoteContentTs = getMostRecentTimestampMs(remoteRow?.content || null);
+            const remoteTs = Math.max(remoteDocTs, remoteContentTs);
+
+            if (!remoteRow || remoteTs + 1000 < localTs) {
+                keysToPush.push(key);
+            }
+        }
+
+        if (keysToPush.length > 0) {
+            console.warn(`[Studio Recovery] Republishing recent local studio changes: ${keysToPush.join(', ')}`);
+            const ok = await saveToServer(keysToPush, true, false);
+            if (!ok) throw new Error('Recent studio recovery upload did not confirm.');
+            if (typeof showToast === 'function') {
+                showToast(`Recovered recent local ${keysToPush.join(' and ')} changes to Supabase.`, 'success');
+            }
+        }
+
+        localStorage.setItem(STUDIO_RECOVERY_MARKER_KEY, 'complete');
+    } catch (error) {
+        console.warn('[Studio Recovery] Recent local studio recovery skipped:', error);
+        if (typeof showToast === 'function') {
+            showToast('Studio recovery could not confirm. Manual republish is still available.', 'warning');
+        }
+    } finally {
+        sessionStorage.removeItem(`${STUDIO_RECOVERY_MARKER_KEY}_running`);
+    }
+}
+
 // 2. Load Data (UPDATED: HYBRID ROW-LEVEL SYNC)
 // Fetches Blobs for config/rosters AND Delta Rows for records/logs
 async function loadFromServer(silent = false) {
@@ -512,6 +617,7 @@ async function loadFromServer(silent = false) {
             return window.LOAD_FROM_SERVER_LAST_RESULT;
         }
         window.LOAD_FROM_SERVER_IN_FLIGHT = true;
+        await runRecentStudioRecoveryOnce();
         const showPullOverlay = !silent && typeof window.showAppBusyOverlay === 'function';
         if (showPullOverlay) {
             window.showAppBusyOverlay({
@@ -669,6 +775,10 @@ async function loadFromServer(silent = false) {
                 }
                 localStorage.setItem('sync_ts_' + localKey, doc.updated_at);
                 emitDataChange(localKey, 'load_from_server');
+                if (localKey === 'assessment_studio_data') {
+                    if (document.getElementById('my-tests')?.classList.contains('active') && typeof loadTraineeTests === 'function') loadTraineeTests();
+                    if (document.getElementById('assessment-studio-trainee')?.classList.contains('active') && typeof renderAssessmentStudioTraineeRuntime === 'function') renderAssessmentStudioTraineeRuntime();
+                }
                 if (localKey === 'violation_reports' && typeof updateNotifications === 'function') {
                     updateNotifications();
                 }
@@ -1505,6 +1615,100 @@ window.retrySync = async function() {
         if(el) el.innerHTML = '<i class="fas fa-times" style="color:#ff5252"></i> Offline';
         setTimeout(() => updateSyncUI('error'), 2000);
     }
+};
+
+window.republishLocalChangesToCloud = async function(options = {}) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const includeAuthoritative = !!opts.includeAuthoritative;
+    const extraKeys = Array.isArray(opts.extraKeys) ? opts.extraKeys : [];
+    const coreRecoveryKeys = [
+        'assessment_studio_data',
+        'content_studio_data',
+        'qa_data',
+        'admin_notifications',
+        'records',
+        'submissions',
+        'exemptions',
+        'linkRequests',
+        'savedReports',
+        'insightReviews',
+        'violation_reports',
+        'system_tombstones',
+        'monitor_history',
+        'attendance_records',
+        'accessLogs',
+        'auditLogs',
+        'error_reports',
+        'network_diagnostics',
+        'nps_responses',
+        'graduated_agents',
+        'tl_task_submissions',
+        'trainee_notes',
+        'trainee_bookmarks',
+        'monitor_whitelist',
+        'monitor_reviewed',
+        'sso_login_config',
+        'dailyTips',
+        'insight_rule_config',
+        'insight_progress_config',
+        'insight_hr_evidence',
+        'live_assessment_rules_config',
+        'live_booking_rules_config',
+        'training_rules_config',
+        'course_progress_request_config',
+        'test_integrity_overrides',
+        'retrain_archives',
+        'adminDecisions',
+        'cancellationCounts',
+        'liveScheduleSettings'
+    ];
+    const authoritativeKeys = [
+        'schedules',
+        'rosters',
+        'tests',
+        'liveSchedules',
+        'assessments',
+        'users',
+        'liveBookings',
+        'liveSessions'
+    ];
+    const keys = Array.from(new Set([
+        ...coreRecoveryKeys,
+        ...(includeAuthoritative ? authoritativeKeys : []),
+        ...extraKeys
+    ])).filter(key => {
+        try {
+            return localStorage.getItem(key) !== null;
+        } catch (error) {
+            return false;
+        }
+    });
+
+    if (keys.length === 0) {
+        if (typeof showToast === 'function') showToast('No local recovery keys were found to republish.', 'warning');
+        return { ok: false, keys: [], message: 'No local recovery keys found.' };
+    }
+
+    updateSyncUI('busy');
+    updateSyncDiagnostics({
+        status: 'busy',
+        statusText: 'Republishing local cache',
+        direction: 'upload',
+        phase: includeAuthoritative ? 'Force pushing local recovery keys' : 'Force pushing local non-authoritative keys',
+        item: keys.join(', '),
+        progressDone: 0,
+        progressTotal: keys.length,
+        startedAt: Date.now()
+    });
+
+    const ok = await saveToServer(keys, true, false);
+    if (ok) {
+        if (typeof showToast === 'function') showToast(`Republished ${keys.length} local data set(s) to Supabase.`, 'success');
+        return { ok: true, keys };
+    }
+
+    if (typeof showToast === 'function') showToast('Local recovery republish did not fully confirm. Check console for the failed key.', 'error');
+    return { ok: false, keys, message: 'Republish did not confirm.' };
 };
 
 window.SYNC_DIAGNOSTICS = window.SYNC_DIAGNOSTICS || {
@@ -2415,6 +2619,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
 
                     // BATCH UPLOAD: Prevent statement timeouts on large syncs
                     const BATCH_SIZE = 100; 
+                    let uploadConfirmed = true;
                     for (let i = 0; i < uploadRows.length; i += BATCH_SIZE) {
                         const chunk = uploadRows.slice(i, i + BATCH_SIZE);
                         if(!silent && uploadRows.length > BATCH_SIZE) console.log(`Uploading chunk ${i / BATCH_SIZE + 1} of ${Math.ceil(uploadRows.length / BATCH_SIZE)} to ${tableName}`);
@@ -2431,9 +2636,14 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                             // If table doesn't exist, warn and skip, don't crash the whole sync.
                             if (e.code === 'PGRST205' || (e.message && e.message.includes('does not exist'))) {
                                 console.warn(`Save failed for '${key}' because table '${tableName}' does not exist. Skipping.`);
+                                uploadConfirmed = false;
                                 break; // Break out of the chunk loop for this table
                             } else throw e; // Re-throw other errors to be caught by the main try/catch
                         }
+                    }
+
+                    if (!uploadConfirmed) {
+                        throw new Error(`Upload to '${tableName}' was not confirmed.`);
                     }
                     
                     itemsToUpload.forEach(entry => {
@@ -2868,6 +3078,9 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
         }
         // Case 2e: Assessment Studio (merge bucket, recipes, trainee snapshots and feedback/grading independently)
         else if (key === 'assessment_studio_data' && sVal && typeof sVal === 'object' && lVal && typeof lVal === 'object') {
+            const currentUserToken = normalizeIdentityValue((typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) || '');
+            const serverDocTime = Date.parse(sVal.updatedAt || 0) || 0;
+            const localDocTime = Date.parse(lVal.updatedAt || 0) || 0;
             const statusRank = (status) => {
                 const value = String(status || '').trim().toLowerCase();
                 if (value === 'completed') return 4;
@@ -2887,7 +3100,40 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 const incomingDate = dateFields.map(field => incoming[field]).find(Boolean) || '';
                 return String(incomingDate) >= String(existingDate) ? incoming : existing;
             };
-            const mergeById = (serverItems, localItems, dateFields) => {
+            const itemTime = (item, dateFields) => {
+                const value = dateFields
+                    .filter(field => field !== '__status_rank__')
+                    .map(field => item && item[field])
+                    .find(Boolean);
+                return Date.parse(value || 0) || 0;
+            };
+            const mergeAuthoritativeById = (serverItems, localItems, dateFields) => {
+                if (strategy === 'server_wins') {
+                    const remoteMap = new Map();
+                    (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
+                        if (!item || typeof item !== 'object') return;
+                        const id = String(item.id || '');
+                        if (id) remoteMap.set(id, item);
+                    });
+                    return Array.from(remoteMap.values());
+                }
+
+                const localMap = new Map();
+                (Array.isArray(localItems) ? localItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (id) localMap.set(id, item);
+                });
+
+                (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '');
+                    if (!id || localMap.has(id)) return;
+                    if (itemTime(item, dateFields) > localDocTime) localMap.set(id, item);
+                });
+                return Array.from(localMap.values());
+            };
+            const mergeSubmissions = (serverItems, localItems, dateFields) => {
                 const map = new Map();
                 (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
                     if (!item || typeof item !== 'object') return;
@@ -2897,18 +3143,30 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 (Array.isArray(localItems) ? localItems : []).forEach(item => {
                     if (!item || typeof item !== 'object') return;
                     const id = String(item.id || '');
-                    if (id) map.set(id, pickLatest(map.get(id), item, dateFields));
+                    if (!id) return;
+                    if (map.has(id)) {
+                        map.set(id, pickLatest(map.get(id), item, dateFields));
+                        return;
+                    }
+
+                    const itemUpdatedAt = itemTime(item, dateFields);
+                    const isCurrentTraineeSubmission = currentUserToken && normalizeIdentityValue(item.trainee) === currentUserToken;
+                    if (strategy === 'local_wins') {
+                        if (itemUpdatedAt >= serverDocTime) map.set(id, item);
+                    } else if (isCurrentTraineeSubmission && itemUpdatedAt > serverDocTime) {
+                        map.set(id, item);
+                    }
                 });
                 return Array.from(map.values());
             };
             const byUpdated = (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
             const bySubmitted = (a, b) => String(b.submittedAt || b.generatedAt || b.updatedAt || '').localeCompare(String(a.submittedAt || a.generatedAt || a.updatedAt || ''));
             const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
-            base.questionBucket = mergeById(sVal.questionBucket, lVal.questionBucket, ['updatedAt', 'createdAt']).sort(byUpdated);
-            base.generators = mergeById(sVal.generators, lVal.generators, ['updatedAt', 'createdAt']).sort(byUpdated);
-            base.submissions = mergeById(sVal.submissions, lVal.submissions, ['__status_rank__', 'updatedAt', 'gradedAt', 'submittedAt', 'generatedAt']).sort(bySubmitted);
-            base.groupings = mergeById(sVal.groupings, lVal.groupings, ['updatedAt', 'createdAt']).sort(byUpdated);
-            base.tags = mergeById(sVal.tags, lVal.tags, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.questionBucket = mergeAuthoritativeById(sVal.questionBucket, lVal.questionBucket, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.generators = mergeAuthoritativeById(sVal.generators, lVal.generators, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.submissions = mergeSubmissions(sVal.submissions, lVal.submissions, ['__status_rank__', 'updatedAt', 'gradedAt', 'submittedAt', 'generatedAt']).sort(bySubmitted);
+            base.groupings = mergeAuthoritativeById(sVal.groupings, lVal.groupings, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.tags = mergeAuthoritativeById(sVal.tags, lVal.tags, ['updatedAt', 'createdAt']).sort(byUpdated);
             merged[key] = base;
         }
         // Case 2: Objects (Rosters, Schedules)
@@ -4251,6 +4509,10 @@ function processIncomingDataQueue() {
                     }
                     if (p.new.updated_at) localStorage.setItem('sync_ts_' + key, p.new.updated_at);
                     emitDataChange(key, 'realtime');
+                    if (key === 'assessment_studio_data') {
+                        if (document.getElementById('my-tests')?.classList.contains('active') && typeof loadTraineeTests === 'function') loadTraineeTests();
+                        if (document.getElementById('assessment-studio-trainee')?.classList.contains('active') && typeof renderAssessmentStudioTraineeRuntime === 'function') renderAssessmentStudioTraineeRuntime();
+                    }
                     if (key === 'system_config') applySystemConfig();
                 }
             });
@@ -4310,12 +4572,46 @@ function processIncomingDataQueue() {
                 }
             });
             
-            // Soft UI Refreshes based on active view
+            // ===== CRITICAL FIX: Track if submissions or records were updated =====
+            let submissionsChanged = false;
+            let recordsChanged = false;
+            Object.keys(tableUpdates).forEach(table => {
+                if (table === 'submissions') submissionsChanged = true;
+                if (table === 'records') recordsChanged = true;
+            });
+
+            // ===== CRITICAL FIX: ALWAYS refresh assessment views when submissions change =====
+            if (submissionsChanged || recordsChanged) {
+                // For ADMINS: Refresh marking queue and test records (works on both active and background tabs)
+                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && ['admin', 'superadmin', 'team_lead'].includes(CURRENT_USER.role)) {
+                    // Always refresh these views after submission/record changes
+                    if (typeof loadMarkingQueue === 'function') {
+                        console.log('[REALTIME] Refreshing marking queue due to submission realtime update');
+                        loadMarkingQueue().catch(err => console.warn('loadMarkingQueue refresh:', err));
+                    }
+                    if (typeof loadTestRecords === 'function') {
+                        console.log('[REALTIME] Refreshing test records due to record realtime update');
+                        loadTestRecords().catch(err => console.warn('loadTestRecords refresh:', err));
+                    }
+                    if (typeof loadAssessmentDashboard === 'function') {
+                        loadAssessmentDashboard().catch(err => console.warn('loadAssessmentDashboard refresh:', err));
+                    }
+                }
+
+                // For TRAINEES: Refresh their assessment views
+                if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee') {
+                    if (typeof loadMyAssessments === 'function') {
+                        console.log('[REALTIME] Refreshing trainee assessments due to submission realtime update');
+                        loadMyAssessments().catch(err => console.warn('loadMyAssessments refresh:', err));
+                    }
+                }
+            }
+
+            // Fallback: Also refresh active views (existing logic preserved)
             if (typeof loadAdminDatabase === 'function' && document.getElementById('admin-view-data')?.classList.contains('active')) loadAdminDatabase();
             if (typeof renderMonthly === 'function' && document.getElementById('monthly')?.classList.contains('active')) renderMonthly();
             if (typeof loadTestRecords === 'function' && document.getElementById('test-records')?.classList.contains('active')) loadTestRecords();
             if (typeof loadManageTests === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadManageTests();
-            if (typeof loadMarkingQueue === 'function' && document.getElementById('test-manage')?.classList.contains('active')) loadMarkingQueue();
             if (typeof validateActiveMarkingModalLock === 'function') validateActiveMarkingModalLock();
         }
 

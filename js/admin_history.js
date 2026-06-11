@@ -555,6 +555,18 @@ async function deleteHistorySubmission(id) {
         localStorage.setItem('records', JSON.stringify(records));
     }
     
+    // ===== CRITICAL FIX: Broadcast deletion to all connected clients =====
+    console.log('[DELETE] History submission deleted, broadcasting to all clients:', id);
+    // Emit data-changed event so other views (trainee, other admins) refresh
+    if (typeof emitDataChange === 'function') {
+        emitDataChange('submissions', 'delete');
+        emitDataChange('records', 'delete');
+    }
+    // Force sync to ensure deletion propagates immediately (fallback to realtime)
+    if (typeof saveToServer === 'function') {
+        Promise.resolve(saveToServer(['submissions', 'records'], true)).catch(err => console.warn('Delete sync failed:', err));
+    }
+
     // FIX: Blur active element to prevent Electron focus loss
     if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();

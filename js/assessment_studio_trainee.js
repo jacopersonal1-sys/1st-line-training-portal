@@ -200,18 +200,34 @@ function astTraineeMergeSubmissions(remoteItems, localItems) {
     return Array.from(map.values());
 }
 
+function astTraineeMergeServerStoreWithLocalDrafts(remoteStore, localStore) {
+    const remote = astTraineeNormalizeStore(remoteStore);
+    const local = astTraineeNormalizeStore(localStore);
+    const currentUserToken = astTraineeIdentity(astTraineeCurrentUserName());
+    const remoteUpdatedAt = Date.parse(remote.updatedAt || 0) || 0;
+    const submissions = astTraineeMergeSubmissions(remote.submissions, local.submissions)
+        .filter((item) => {
+            const id = String(item && item.id || '');
+            if (!id) return false;
+            if ((remote.submissions || []).some(remoteItem => String(remoteItem && remoteItem.id || '') === id)) return true;
+
+            const localUpdatedAt = Date.parse(item.updatedAt || item.submittedAt || item.generatedAt || 0) || 0;
+            const isMine = currentUserToken && astTraineeIdentity(item.trainee) === currentUserToken;
+            return isMine && localUpdatedAt > remoteUpdatedAt;
+        });
+
+    return astTraineeNormalizeStore({
+        ...remote,
+        submissions,
+        updatedAt: remote.updatedAt || local.updatedAt,
+        updatedBy: remote.updatedBy || local.updatedBy
+    });
+}
+
 function astTraineeGetStore() {
     const local = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_LOCAL_KEY), null));
     const canonical = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_DATA_KEY), null));
-    return astTraineeNormalizeStore({
-        questionBucket: astTraineeMergeById(canonical.questionBucket, local.questionBucket),
-        generators: astTraineeMergeById(canonical.generators, local.generators),
-        submissions: astTraineeMergeSubmissions(canonical.submissions, local.submissions),
-        groupings: astTraineeMergeById(canonical.groupings, local.groupings),
-        tags: astTraineeMergeById(canonical.tags, local.tags),
-        updatedAt: local.updatedAt || canonical.updatedAt,
-        updatedBy: local.updatedBy || canonical.updatedBy
-    });
+    return astTraineeMergeServerStoreWithLocalDrafts(canonical, local);
 }
 
 async function refreshAssessmentStudioTraineeStoreFromServer() {
@@ -228,15 +244,10 @@ async function refreshAssessmentStudioTraineeStoreFromServer() {
         if (data && data.content && typeof data.content === 'object') {
             const remote = astTraineeNormalizeStore(data.content);
             const local = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_LOCAL_KEY), null));
-            const merged = astTraineeNormalizeStore({
-                questionBucket: astTraineeMergeById(remote.questionBucket, local.questionBucket),
-                generators: astTraineeMergeById(remote.generators, local.generators),
-                submissions: astTraineeMergeSubmissions(remote.submissions, local.submissions),
-                groupings: astTraineeMergeById(remote.groupings, local.groupings),
-                tags: astTraineeMergeById(remote.tags, local.tags),
-                updatedAt: remote.updatedAt || data.updated_at || new Date().toISOString(),
-                updatedBy: remote.updatedBy || 'System'
-            });
+            const merged = astTraineeMergeServerStoreWithLocalDrafts(
+                { ...remote, updatedAt: remote.updatedAt || data.updated_at || new Date().toISOString() },
+                local
+            );
             localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(remote));
             localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(merged));
             return true;

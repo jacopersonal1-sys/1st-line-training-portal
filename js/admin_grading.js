@@ -229,7 +229,7 @@ async function saveScores() {
     // --- CLOUD SYNC START ---
     // OPTIMISTIC SAVE: Don't block the UI. Sync in background.
     if(typeof saveToServer === 'function') {
-        saveToServer(['records'], false).catch(err => console.error("Background Sync Failed:", err));
+        Promise.resolve(saveToServer(['records'], false)).catch(err => console.error("Background Sync Failed:", err));
         if(typeof showToast === 'function') showToast("Scores saved. Syncing to cloud...", "info");
     }
     // --- CLOUD SYNC END ---
@@ -635,5 +635,17 @@ async function deleteSubmission(id) {
         localStorage.setItem('records', JSON.stringify(records));
     }
     
+    // ===== CRITICAL FIX: Broadcast deletion to all connected clients =====
+    console.log('[DELETE] Submission deleted locally, broadcasting to all clients:', id);
+    // Emit data-changed event so other views (trainee, other admins) refresh
+    if (typeof emitDataChange === 'function') {
+        emitDataChange('submissions', 'delete');
+        emitDataChange('records', 'delete');
+    }
+    // Force sync to ensure deletion propagates immediately
+    if (typeof saveToServer === 'function') {
+        Promise.resolve(saveToServer(['submissions', 'records'], true)).catch(err => console.warn('Delete sync failed:', err));
+    }
+
     loadTestRecords();
 }

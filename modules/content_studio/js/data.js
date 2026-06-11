@@ -443,6 +443,10 @@ const DataService = {
     saveStore: async function(store, deferSync = false) {
         const normalized = this._normalizeStore(store);
         localStorage.setItem(CONTENT_STUDIO_LOCAL_CACHE_KEY, JSON.stringify(normalized));
+        localStorage.setItem(CONTENT_STUDIO_DATA_KEY, JSON.stringify(normalized));
+        const hostNotified = this.notifyHostSave(normalized);
+        if (hostNotified) return normalized;
+
         if (deferSync) {
             this._queueCloudSync(normalized);
         } else {
@@ -471,6 +475,29 @@ const DataService = {
         } catch (err) {
             console.error('[Content Studio] Cloud sync failed:', err);
         }
+    },
+
+    notifyHostSave: function(store) {
+        const payload = {
+            key: CONTENT_STUDIO_DATA_KEY,
+            localKey: CONTENT_STUDIO_LOCAL_CACHE_KEY,
+            content: this._normalizeStore(store),
+            updatedAt: nowIso()
+        };
+        try {
+            const { ipcRenderer } = require('electron');
+            if (ipcRenderer && typeof ipcRenderer.sendToHost === 'function') {
+                ipcRenderer.sendToHost('content-studio-save', payload);
+                return true;
+            }
+        } catch (error) {}
+        try {
+            if (window.parent && typeof window.parent.postMessage === 'function') {
+                window.parent.postMessage({ type: 'content-studio-save', payload }, '*');
+                return true;
+            }
+        } catch (error) {}
+        return false;
     },
 
     _buildStoragePath: function(category, fileName) {

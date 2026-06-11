@@ -1,6 +1,33 @@
 /* ================= ASSESSMENT TRAINEE ================= */
 /* Test Taking, Scheduling, and Submission Logic */
 
+// ===== CRITICAL FIX: Listen for submission realtime updates =====
+// When admin marks a test, refresh trainee's view instantly
+(function initTraineeRealtimeListener() {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+
+    document.addEventListener('buildzone:data-changed', function(e) {
+        if (e.detail && (e.detail.key === 'submissions' || e.detail.key === 'records')) {
+            // Check if current user is a trainee
+            if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee') {
+                // Only refresh if we're actively viewing assessments
+                const assessmentTab = document.querySelector('[data-tab="assessments"]') ||
+                                      document.getElementById('my-assessments') ||
+                                      document.querySelector('.assessment-tab.active');
+
+                if (assessmentTab) {
+                    console.log('[TRAINEE] Detected submission/record change, refreshing assessments view...');
+                    if (typeof loadMyAssessments === 'function') {
+                        Promise.resolve(loadMyAssessments()).catch(err => console.warn('Trainee assessment view refresh:', err));
+                    } else if (typeof loadTraineeTests === 'function') {
+                        Promise.resolve(loadTraineeTests()).catch(err => console.warn('Trainee assessment view refresh:', err));
+                    }
+                }
+            }
+        }
+    });
+})();
+
 function assessmentReadJson(key, fallback) {
     if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
     try {

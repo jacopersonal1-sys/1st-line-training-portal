@@ -15,7 +15,6 @@ const AssessmentStudioLoader = {
         try {
             localStorage.setItem('assessment_studio_data', JSON.stringify(content));
             localStorage.setItem('assessment_studio_data_local', JSON.stringify(content));
-            localStorage.setItem('sync_ts_assessment_studio_data', data.updatedAt || new Date().toISOString());
             window.dispatchEvent(new CustomEvent('buildzone:data-changed', {
                 detail: { key: 'assessment_studio_data', source: 'assessment_studio_webview' }
             }));
@@ -49,6 +48,11 @@ const AssessmentStudioLoader = {
                 key: 'assessment_studio_data',
                 content,
                 updated_at: new Date().toISOString()
+            }).select().then(({ data: savedData, error }) => {
+                if (error) throw error;
+                if (savedData && savedData[0] && savedData[0].updated_at) {
+                    localStorage.setItem('sync_ts_assessment_studio_data', savedData[0].updated_at);
+                }
             }).catch((error) => {
                 console.warn('[Assessment Studio Loader] Direct cloud save failed:', error);
             });

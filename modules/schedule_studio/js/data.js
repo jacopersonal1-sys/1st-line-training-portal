@@ -99,7 +99,34 @@ const ScheduleData = {
                 + (Array.isArray(store.submissions) ? store.submissions.length : 0);
         };
 
-        const parsed = countItems(canonical) > countItems(local) ? canonical : local;
+        const mergeById = (leftItems, rightItems) => {
+            const map = new Map();
+            [...(Array.isArray(leftItems) ? leftItems : []), ...(Array.isArray(rightItems) ? rightItems : [])]
+                .forEach(item => {
+                    if (!item || typeof item !== 'object') return;
+                    const id = String(item.id || '').trim();
+                    if (!id) return;
+                    const existing = map.get(id);
+                    const existingTime = Date.parse(existing?.updatedAt || existing?.createdAt || 0) || 0;
+                    const itemTime = Date.parse(item.updatedAt || item.createdAt || 0) || 0;
+                    if (!existing || itemTime >= existingTime) map.set(id, item);
+                });
+            return Array.from(map.values());
+        };
+
+        const canonicalTime = Date.parse(canonical?.updatedAt || 0) || 0;
+        const localTime = Date.parse(local?.updatedAt || 0) || 0;
+        const parsed = canonical && local
+            ? {
+                ...(canonicalTime >= localTime ? local : canonical),
+                ...(canonicalTime >= localTime ? canonical : local),
+                questionBucket: mergeById(canonical.questionBucket, local.questionBucket),
+                generators: mergeById(canonical.generators, local.generators),
+                submissions: mergeById(canonical.submissions, local.submissions)
+            }
+            : (canonicalTime || localTime
+                ? (localTime > canonicalTime ? local : canonical)
+                : (countItems(canonical) > countItems(local) ? canonical : local));
         if (!parsed || typeof parsed !== 'object') return { questionBucket: [], generators: [], submissions: [] };
         if (!Array.isArray(parsed.questionBucket)) parsed.questionBucket = [];
         if (!Array.isArray(parsed.generators)) parsed.generators = [];
@@ -116,7 +143,7 @@ const ScheduleData = {
                 assessment: String(generator.assessment || '').trim(),
                 phase: String(generator.phase || 'Assessment').trim(),
                 totalPoints: Number(generator.totalPoints || generator.totalScore || 0),
-                pointLeeway: 7,
+                pointLeeway: Number.isFinite(Number(generator.pointLeeway)) ? Number(generator.pointLeeway) : 7,
                 allowedTypes: Array.isArray(generator.allowedTypes) ? generator.allowedTypes : [],
                 groupLimits: generator.groupLimits && typeof generator.groupLimits === 'object' && !Array.isArray(generator.groupLimits) ? generator.groupLimits : {}
             }))
