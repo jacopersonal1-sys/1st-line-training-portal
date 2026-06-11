@@ -314,18 +314,21 @@ const AssessmentStudioData = {
         this.state.studio = this.normalizeStudio(next);
         localStorage.setItem(ASSESSMENT_STUDIO_LOCAL_KEY, JSON.stringify(next));
         localStorage.setItem(ASSESSMENT_STUDIO_KEY, JSON.stringify(next));
-        const hostNotified = this.notifyHostSave(next);
+        this.notifyHostSave(next);
 
-        if (!hostNotified && AppContext.supabase) {
-            const { data, error } = await AppContext.supabase.from('app_documents').upsert({
-                key: ASSESSMENT_STUDIO_KEY,
-                content: this.state.studio,
-                updated_at: new Date().toISOString()
-            }).select('updated_at');
-            if (error) throw error;
-            const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
-            if (confirmedAt) localStorage.setItem(`sync_ts_${ASSESSMENT_STUDIO_KEY}`, confirmedAt);
+        if (!AppContext.supabase) {
+            throw new Error('Assessment Studio could not confirm Supabase connection for this save.');
         }
+
+        const { data, error } = await AppContext.supabase.from('app_documents').upsert({
+            key: ASSESSMENT_STUDIO_KEY,
+            content: this.state.studio,
+            updated_at: new Date().toISOString()
+        }).select('updated_at');
+        if (error) throw error;
+        const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+        if (!confirmedAt) throw new Error('Assessment Studio save was not confirmed by Supabase.');
+        localStorage.setItem(`sync_ts_${ASSESSMENT_STUDIO_KEY}`, confirmedAt);
 
         return this.state.studio;
     },

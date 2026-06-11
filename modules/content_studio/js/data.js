@@ -450,8 +450,7 @@ const DataService = {
         normalized.updatedBy = getEditorName();
         localStorage.setItem(CONTENT_STUDIO_LOCAL_CACHE_KEY, JSON.stringify(normalized));
         localStorage.setItem(CONTENT_STUDIO_DATA_KEY, JSON.stringify(normalized));
-        const hostNotified = this.notifyHostSave(normalized);
-        if (hostNotified) return normalized;
+        this.notifyHostSave(normalized);
 
         if (deferSync) {
             this._queueCloudSync(normalized);
@@ -470,17 +469,16 @@ const DataService = {
     },
 
     _syncToCloud: async function(payload) {
-        if (!AppContext.supabase) return;
-        try {
-            const { error } = await AppContext.supabase.from('app_documents').upsert({
-                key: CONTENT_STUDIO_DATA_KEY,
-                content: payload,
-                updated_at: nowIso()
-            });
-            if (error) throw error;
-        } catch (err) {
-            console.error('[Content Studio] Cloud sync failed:', err);
-        }
+        if (!AppContext.supabase) throw new Error('Content Creator could not confirm Supabase connection for this save.');
+        const { data, error } = await AppContext.supabase.from('app_documents').upsert({
+            key: CONTENT_STUDIO_DATA_KEY,
+            content: payload,
+            updated_at: nowIso()
+        }).select('updated_at');
+        if (error) throw error;
+        const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+        if (!confirmedAt) throw new Error('Content Creator save was not confirmed by Supabase.');
+        localStorage.setItem(`sync_ts_${CONTENT_STUDIO_DATA_KEY}`, confirmedAt);
     },
 
     notifyHostSave: function(store) {

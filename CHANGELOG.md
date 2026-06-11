@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.32 - 2026-06-11
+
+- **Critical Fix:** Assessment Studio generator saves now require a direct Supabase confirmation from the embedded studio, even when the host bridge is notified, preventing "saved" generator details from staying local and missing Schedule Studio/other admin PCs.
+- **Safety:** Content Creator uses the same direct Supabase confirmation pattern so module saves cannot silently depend on a flaky host bridge.
+- **Guardrail:** Assessment Studio and Content Creator now surface missing Supabase confirmation as a save error instead of showing false success.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.31 - 2026-06-11
 
 - **Fail-Safe:** Added shape validation for server-authoritative Schedule Studio, Q&A Hub, Assessment Studio, and Content Creator documents before pull, realtime, or upload can write them.
