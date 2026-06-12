@@ -136,6 +136,59 @@ function buildAssessmentSubmissionId(testId, trainee) {
     return `sub_${Date.now()}_${cleanUser}_${cleanTest}_${rand}`;
 }
 
+function markAssessmentSubmissionUploadStatus(submissionId, status, message = '') {
+    const id = String(submissionId || '').trim();
+    if (!id) return null;
+    const subs = assessmentReadArray('submissions');
+    const idx = subs.findIndex(s => s && String(s.id || '') === id);
+    if (idx < 0) return null;
+    if (status) {
+        subs[idx].syncStatus = status;
+        subs[idx].syncError = message || '';
+        subs[idx].syncUpdatedAt = new Date().toISOString();
+    } else {
+        delete subs[idx].syncStatus;
+        delete subs[idx].syncError;
+        delete subs[idx].syncUpdatedAt;
+    }
+    localStorage.setItem('submissions', JSON.stringify(subs));
+    return subs[idx];
+}
+
+async function retryAssessmentSubmissionUpload(submissionId) {
+    const id = String(submissionId || '').trim();
+    if (!id) return false;
+    const subs = assessmentReadArray('submissions');
+    const records = assessmentReadArray('records');
+    const submission = subs.find(s => s && String(s.id || '') === id);
+    if (!submission) {
+        if (typeof showToast === 'function') showToast('Local submission not found for re-upload.', 'error');
+        return false;
+    }
+    const record = findAssessmentFeedbackRecord(submission, records) || records.find(r => r && String(r.submissionId || '') === id) || null;
+    markAssessmentSubmissionUploadStatus(id, 'uploading', 'Re-uploading to Supabase.');
+    if (typeof loadTraineeTests === 'function') loadTraineeTests();
+    try {
+        if (typeof saveToServer === 'function') {
+            const keys = record ? ['submissions', 'records'] : ['submissions'];
+            const ok = await saveToServer(keys, true);
+            if (ok === false) throw new Error('Supabase did not confirm the re-upload.');
+        }
+        await ensureSubmissionRowsOnServer(submission, record);
+        markAssessmentSubmissionUploadStatus(id, '', '');
+        if (typeof loadTraineeTests === 'function') loadTraineeTests();
+        if (typeof showToast === 'function') showToast('Assessment submission re-uploaded.', 'success');
+        return true;
+    } catch (error) {
+        markAssessmentSubmissionUploadStatus(id, 'upload_failed', error.message || 'Re-upload failed.');
+        if (typeof loadTraineeTests === 'function') loadTraineeTests();
+        if (typeof showToast === 'function') showToast(error.message || 'Assessment submission re-upload failed.', 'error');
+        return false;
+    }
+}
+
+window.retryAssessmentSubmissionUpload = retryAssessmentSubmissionUpload;
+
 function getAssessmentFeedbackStatus(row) {
     const status = String(row && row.feedbackStatus || '').trim().toLowerCase();
     return status === 'requested' ? 'requested' : 'given';
@@ -656,11 +709,19 @@ function loadTraineeTests() {
         let feedbackHtml = '';
 
         if (sub && !liveBooking) {
+            const syncStatus = String(sub.syncStatus || '').trim();
+            const needsUploadRecovery = syncStatus === 'upload_failed';
+            const isUploadingRecovery = syncStatus === 'uploading';
+            const uploadHtml = needsUploadRecovery
+                ? `<span class="status-badge status-fail"><i class="fas fa-cloud-exclamation"></i> Upload Failed</span><button class="btn-warning btn-sm" onclick="retryAssessmentSubmissionUpload('${String(sub.id || '').replace(/'/g, "\\'")}')"><i class="fas fa-cloud-arrow-up"></i> Re-upload</button>`
+                : isUploadingRecovery
+                    ? '<span class="status-badge status-semi"><i class="fas fa-circle-notch fa-spin"></i> Re-uploading</span>'
+                    : '';
             if (sub.status === 'pending') {
                 statusHtml = '<span class="status-badge status-semi">Pending Review</span>';
                 actionBtn = (String(t.type || '').toLowerCase() === 'quiz' && !isLocked)
                     ? `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}', true, { popupMode: true, returnTab: 'my-tests' })">Retake Quiz</button>`
-                    : `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">In Review</button>`;
+                    : `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">In Review</button>${uploadHtml}`;
             } else {
                 let passLabel = "Fail";
                 let passClass = "status-fail";
@@ -670,7 +731,7 @@ function loadTraineeTests() {
                 statusHtml = `<span class="status-badge ${passClass}">${passLabel} (${sub.score}%)</span>`;
                 actionBtn = (String(t.type || '').toLowerCase() === 'quiz' && !isLocked)
                     ? `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}', true, { popupMode: true, returnTab: 'my-tests' })">Retake Quiz</button>`
-                    : `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">Completed</button>`;
+                    : `<button class="btn-secondary btn-sm" disabled style="opacity:0.5;">Completed</button>${uploadHtml}`;
                 const requestLocked = !!sub.feedbackRequestLocked;
                 const requested = getAssessmentFeedbackStatus(sub) === 'requested';
                 const feedbackButton = requestLocked
@@ -1244,6 +1305,9 @@ async function submitTest(forceSubmit = false, options = {}) {
         if (synced === false) throw new Error('Critical submission sync failed.');
     }
     await ensureSubmissionRowsOnServer(savedSubmissionForVerification, savedRecordForVerification);
+    if (savedSubmissionForVerification && savedSubmissionForVerification.id) {
+        markAssessmentSubmissionUploadStatus(savedSubmissionForVerification.id, '', '');
+    }
 
     if (typeof exitArena === 'function') {
         try {
@@ -1291,6 +1355,13 @@ async function submitTest(forceSubmit = false, options = {}) {
     
     } catch (error) {
         console.error("Submission UI Error:", error);
+        if (localSubmissionSaved && savedSubmissionForVerification && savedSubmissionForVerification.id) {
+            markAssessmentSubmissionUploadStatus(
+                savedSubmissionForVerification.id,
+                'upload_failed',
+                error.message || 'Local submission saved, but Supabase upload did not confirm.'
+            );
+        }
         if (localSubmissionSaved && localSubmissionWasVettingArena && typeof exitArena === 'function') {
             try {
                 await exitArena(true);

@@ -1007,6 +1007,40 @@ describe('Test engine edge cases', () => {
         expect(container.innerHTML).toContain('data-tooltip="Custom feedback tooltip for trainees"');
     });
 
+    test('trainee assessment card shows upload failed recovery action for local-only submissions', () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        const container = { innerHTML: '' };
+        global.document = {
+            getElementById: jest.fn((id) => id === 'myTestsList' ? container : null)
+        };
+        window.document = global.document;
+
+        localStorage.setItem('tests', JSON.stringify([
+            { id: 'test_1', title: 'Assessment A', type: 'standard', questions: [{ id: 'q1' }] }
+        ]));
+        localStorage.setItem('rosters', JSON.stringify({ group_1: ['Alice'] }));
+        localStorage.setItem('schedules', JSON.stringify({
+            sched_1: {
+                assigned: 'group_1',
+                items: [{ linkedTestId: 'test_1', dateRange: '2026-05-19', dueDate: '2026-05-19' }]
+            }
+        }));
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_failed_upload', trainee: 'Alice', testId: 'test_1', testTitle: 'Assessment A', status: 'pending', syncStatus: 'upload_failed' }
+        ]));
+        localStorage.setItem('records', JSON.stringify([]));
+
+        loadTraineeTests();
+
+        expect(container.innerHTML).toContain('Upload Failed');
+        expect(container.innerHTML).toContain('retryAssessmentSubmissionUpload');
+        expect(container.innerHTML).toContain('Re-upload');
+    });
+
     test('admin marks requested assessment feedback as given without unlocking trainee request', async () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
         eval(src);

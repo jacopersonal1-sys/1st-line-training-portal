@@ -185,4 +185,25 @@ describe('Assessment Studio trainee runtime', () => {
         const recoveredLocal = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
         expect(recoveredLocal.submissions.map(item => item.id)).toContain('ast_sydney');
     });
+
+    test('shows re-upload action when submitted Studio assessment is missing on Supabase', () => {
+        const localSubmission = makeSubmission({
+            id: 'ast_upload_failed',
+            status: 'pending_review',
+            submittedAt: '2026-06-12T12:00:00.000Z',
+            updatedAt: '2026-06-12T12:00:00.000Z'
+        });
+        const localStore = makeStore(localSubmission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(localStore));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(localStore));
+        localStorage.setItem('assessment_studio_upload_status', JSON.stringify({
+            ast_upload_failed: { state: 'missing', message: 'Submitted locally but not found on Supabase.' }
+        }));
+
+        const html = window.renderAssessmentStudioAssignmentsHtml();
+
+        expect(html).toContain('Upload Failed');
+        expect(html).toContain('retryAssessmentStudioSubmissionUpload');
+        expect(html).toContain('Re-upload');
+    });
 });

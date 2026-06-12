@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.43 - 2026-06-12
+
+- **Safety Rail:** Assessment Studio now checks local submitted assessments against Supabase and shows an **Upload Failed** badge with a **Re-upload** action when a local pending/completed submission is missing from the server document.
+- **Recovery:** Legacy Test Engine submissions now mark local-only submit failures with the same visible **Upload Failed / Re-upload** action in My Assessments.
+- **Guardrail:** Successful verified re-uploads clear the local warning; failed retries keep the warning visible instead of making a local-only submission look safely synced.
+- **Verification:** `npm.cmd test -- --runInBand` passed and `npm.cmd run pack` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.42 - 2026-06-12
 
 - **Critical Fix:** Assessment Studio trainee runtime now defers background re-renders while a trainee is typing/selecting answers, preventing text fields from losing focus after one character and preserving spacebar input.
