@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.42 - 2026-06-12
+
+- **Critical Fix:** Assessment Studio trainee runtime now defers background re-renders while a trainee is typing/selecting answers, preventing text fields from losing focus after one character and preserving spacebar input.
+- **Recovery:** Trainee devices now silently republish local submitted Assessment Studio submissions that are missing from the server document, so submitted-local cases can be recovered into the admin grading queue when the affected trainee opens My Assessments or the Studio runtime.
+- **Safety:** Submit now runs the same server recovery check after the confirmed local save, while still preserving server-authoritative questions, generators, and admin deletes.
+- **Verification:** `npm.cmd test -- --runInBand` passed and `npm.cmd run pack` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.41 - 2026-06-12
 
 - **Critical Fix:** Realtime queued-update status no longer opens or keeps the full-screen busy overlay, preventing trainees from being blocked mid-assessment while background updates wait to process.

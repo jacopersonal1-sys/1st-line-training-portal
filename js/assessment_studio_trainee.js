@@ -14,6 +14,8 @@ const AST_TRAINEE_TYPES = [
 
 let AST_ACTIVE_SUBMISSION_ID = '';
 let AST_ACTIVE_SUBMISSION_SNAPSHOT = null;
+let AST_TRAINEE_PENDING_RENDER = false;
+let AST_TRAINEE_RECOVERY_IN_FLIGHT = false;
 
 function astTraineeEsc(value) {
     return String(value === undefined || value === null ? '' : value)
@@ -49,6 +51,14 @@ function astTraineeRememberActiveSubmission(submission) {
 
 function astTraineeClearActiveSnapshot() {
     AST_ACTIVE_SUBMISSION_SNAPSHOT = null;
+}
+
+function astTraineeIsRuntimeInputFocused() {
+    const root = document.getElementById('assessmentStudioTraineeRuntime');
+    const active = document.activeElement;
+    if (!root || !active || typeof root.contains !== 'function' || !root.contains(active)) return false;
+    const tag = String(active.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || !!active.isContentEditable;
 }
 
 function astTraineeMakeId(prefix) {
@@ -273,6 +283,10 @@ function astTraineeSubmissionStatusRank(status) {
     return 0;
 }
 
+function astTraineeSubmissionTime(submission) {
+    return Date.parse(submission?.updatedAt || submission?.gradedAt || submission?.submittedAt || submission?.generatedAt || 0) || 0;
+}
+
 function astTraineePickSubmission(existing, incoming) {
     if (!existing) return incoming;
     const existingRank = astTraineeSubmissionStatusRank(existing.status);
@@ -356,6 +370,76 @@ async function refreshAssessmentStudioTraineeStoreFromServer() {
         window.__AST_TRAINEE_REFRESHING = false;
     }
     return false;
+}
+
+function astTraineeShouldRecoverLocalSubmission(localSub, remoteSub) {
+    if (!localSub || !String(localSub.id || '').trim()) return false;
+    const currentUserToken = astTraineeIdentity(astTraineeCurrentUserName());
+    if (!currentUserToken || astTraineeIdentity(localSub.trainee) !== currentUserToken) return false;
+    const status = String(localSub.status || '').trim();
+    if (!['pending_review', 'completed'].includes(status)) return false;
+    if (!remoteSub) return true;
+    const localRank = astTraineeSubmissionStatusRank(localSub.status);
+    const remoteRank = astTraineeSubmissionStatusRank(remoteSub.status);
+    if (localRank > remoteRank) return true;
+    if (localRank < remoteRank) return false;
+    return astTraineeSubmissionTime(localSub) > astTraineeSubmissionTime(remoteSub);
+}
+
+async function recoverLocalAssessmentStudioSubmissionsToServer({ silent = true } = {}) {
+    if (AST_TRAINEE_RECOVERY_IN_FLIGHT) return false;
+    if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') return false;
+    AST_TRAINEE_RECOVERY_IN_FLIGHT = true;
+    try {
+        const local = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_LOCAL_KEY), null));
+        const localCandidates = local.submissions.filter(sub => astTraineeShouldRecoverLocalSubmission(sub, null));
+        if (!localCandidates.length) return false;
+
+        const { data, error } = await window.supabaseClient
+            .from('app_documents')
+            .select('content, updated_at')
+            .eq('key', AST_TRAINEE_DATA_KEY)
+            .maybeSingle();
+        if (error) throw error;
+
+        const remote = astTraineeNormalizeStore(data && data.content && typeof data.content === 'object' ? data.content : null);
+        const remoteById = new Map(remote.submissions.map(sub => [String(sub.id), sub]));
+        const recoveries = localCandidates.filter(sub => astTraineeShouldRecoverLocalSubmission(sub, remoteById.get(String(sub.id))));
+        if (!recoveries.length) return false;
+
+        recoveries.forEach(sub => {
+            const id = String(sub.id);
+            const idx = remote.submissions.findIndex(item => String(item.id) === id);
+            if (idx >= 0) remote.submissions[idx] = sub;
+            else remote.submissions.unshift(sub);
+        });
+        remote.updatedAt = new Date().toISOString();
+        remote.updatedBy = astTraineeCurrentUserName() || 'Trainee recovery';
+
+        const { data: savedData, error: saveError } = await window.supabaseClient
+            .from('app_documents')
+            .upsert({
+                key: AST_TRAINEE_DATA_KEY,
+                content: remote,
+                updated_at: remote.updatedAt
+            })
+            .select('updated_at');
+        if (saveError) throw saveError;
+
+        localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(remote));
+        localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(astTraineeMergeServerStoreWithLocalDrafts(remote, local)));
+        const confirmedAt = Array.isArray(savedData) && savedData[0] && savedData[0].updated_at ? savedData[0].updated_at : remote.updatedAt;
+        if (confirmedAt) localStorage.setItem(`sync_ts_${AST_TRAINEE_DATA_KEY}`, confirmedAt);
+        if (!silent && typeof showToast === 'function') showToast(`Recovered ${recoveries.length} submitted Assessment Studio test(s) to the server.`, 'success');
+        if (typeof loadTraineeTests === 'function') loadTraineeTests();
+        return true;
+    } catch (error) {
+        console.warn('[Assessment Studio Trainee] local submission recovery failed:', error);
+        if (!silent && typeof showToast === 'function') showToast(error.message || 'Could not recover local Assessment Studio submissions yet.', 'error');
+        return false;
+    } finally {
+        AST_TRAINEE_RECOVERY_IN_FLIGHT = false;
+    }
 }
 
 async function astTraineeSaveStore(store, forceSync = false) {
@@ -559,6 +643,7 @@ async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, sched
 function getAssessmentStudioAssignmentsForCurrentUser() {
     const trainee = astTraineeCurrentUserName();
     if (!trainee) return [];
+    recoverLocalAssessmentStudioSubmissionsToServer({ silent: true });
     return astTraineeGetStore().submissions
         .filter(s => astTraineeIdentity(s.trainee) === astTraineeIdentity(trainee) && String(s.status || '') !== 'archived')
         .sort((a, b) => String(b.updatedAt || b.generatedAt || '').localeCompare(String(a.updatedAt || a.generatedAt || '')));
@@ -667,7 +752,7 @@ function openAssessmentStudioTraineeRuntime(submissionId) {
     }
     astTraineeRememberActiveSubmission(sub);
     if (typeof showTab === 'function') showTab('assessment-studio-trainee');
-    renderAssessmentStudioTraineeRuntime();
+    renderAssessmentStudioTraineeRuntime({ force: true });
 }
 
 function astTraineeGetActiveSubmission() {
@@ -699,9 +784,16 @@ function astTraineeAnswerCompleteness(sub) {
     return { answered, total: questions.length };
 }
 
-function renderAssessmentStudioTraineeRuntime() {
+function renderAssessmentStudioTraineeRuntime(options = {}) {
     const root = document.getElementById('assessmentStudioTraineeRuntime');
     if (!root) return;
+    if (!options.force && astTraineeIsRuntimeInputFocused()) {
+        AST_TRAINEE_PENDING_RENDER = true;
+        recoverLocalAssessmentStudioSubmissionsToServer({ silent: true });
+        return;
+    }
+    AST_TRAINEE_PENDING_RENDER = false;
+    recoverLocalAssessmentStudioSubmissionsToServer({ silent: true });
     const { sub } = astTraineeGetActiveSubmission();
     if (!sub) {
         root.innerHTML = `
@@ -971,6 +1063,7 @@ async function submitAssessmentStudioTest() {
     astTraineeRememberActiveSubmission(sub);
     try {
         await astTraineeSaveStore(store, true);
+        await recoverLocalAssessmentStudioSubmissionsToServer({ silent: true });
     } catch (error) {
         console.warn('[Assessment Studio Trainee] submit failed:', error);
         if (typeof showToast === 'function') showToast(error.message || 'Assessment submission could not be confirmed.', 'error');
@@ -1022,3 +1115,14 @@ window.renderAssessmentStudioTraineeRuntime = renderAssessmentStudioTraineeRunti
 window.renderAssessmentStudioAssignmentsHtml = renderAssessmentStudioAssignmentsHtml;
 window.requestAssessmentStudioFeedback = requestAssessmentStudioFeedback;
 window.refreshAssessmentStudioTraineeStoreFromServer = refreshAssessmentStudioTraineeStoreFromServer;
+window.recoverLocalAssessmentStudioSubmissionsToServer = recoverLocalAssessmentStudioSubmissionsToServer;
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('focusout', (event) => {
+        const root = document.getElementById('assessmentStudioTraineeRuntime');
+        if (!root || !AST_TRAINEE_PENDING_RENDER || !event || !event.target || typeof root.contains !== 'function' || !root.contains(event.target)) return;
+        setTimeout(() => {
+            if (AST_TRAINEE_PENDING_RENDER && !astTraineeIsRuntimeInputFocused()) renderAssessmentStudioTraineeRuntime({ force: true });
+        }, 150);
+    });
+}

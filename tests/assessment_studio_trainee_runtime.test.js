@@ -21,29 +21,8 @@ describe('Assessment Studio trainee runtime', () => {
         };
     }
 
-    beforeEach(() => {
-        localStorage.clear();
-        runtimeRoot = { innerHTML: '' };
-        global.window = {
-            CURRENT_USER: { user: 'Alice', role: 'trainee' },
-            LAST_INTERACTION: Date.now(),
-            addEventListener: jest.fn(),
-            supabaseClient: null
-        };
-        global.CURRENT_USER = global.window.CURRENT_USER;
-        global.document = {
-            getElementById: jest.fn((id) => id === 'assessmentStudioTraineeRuntime' ? runtimeRoot : null),
-            querySelectorAll: jest.fn(() => [])
-        };
-        global.showTab = jest.fn();
-        global.showToast = jest.fn();
-        global.loadTraineeTests = jest.fn();
-        global.saveToServer = jest.fn(() => Promise.resolve(true));
-        loadRuntime();
-    });
-
-    test('keeps an active assessment open when realtime refresh briefly omits the submission', () => {
-        const submission = {
+    function makeSubmission(overrides = {}) {
+        return {
             id: 'ast_1',
             trainee: 'Alice',
             assessment: 'Q Contact Assessment',
@@ -66,8 +45,39 @@ describe('Assessment Studio trainee runtime', () => {
                         points: 2
                     }
                 ]
-            }
+            },
+            ...overrides
         };
+    }
+
+    beforeEach(() => {
+        localStorage.clear();
+        runtimeRoot = {
+            innerHTML: '',
+            contains: jest.fn(() => false)
+        };
+        global.window = {
+            CURRENT_USER: { user: 'Alice', role: 'trainee' },
+            LAST_INTERACTION: Date.now(),
+            addEventListener: jest.fn(),
+            supabaseClient: null
+        };
+        global.CURRENT_USER = global.window.CURRENT_USER;
+        global.document = {
+            getElementById: jest.fn((id) => id === 'assessmentStudioTraineeRuntime' ? runtimeRoot : null),
+            querySelectorAll: jest.fn(() => []),
+            addEventListener: jest.fn(),
+            activeElement: null
+        };
+        global.showTab = jest.fn();
+        global.showToast = jest.fn();
+        global.loadTraineeTests = jest.fn();
+        global.saveToServer = jest.fn(() => Promise.resolve(true));
+        loadRuntime();
+    });
+
+    test('keeps an active assessment open when realtime refresh briefly omits the submission', () => {
+        const submission = makeSubmission();
         const initialStore = makeStore(submission);
         localStorage.setItem('assessment_studio_data', JSON.stringify(initialStore));
         localStorage.setItem('assessment_studio_data_local', JSON.stringify(initialStore));
@@ -108,5 +118,71 @@ describe('Assessment Studio trainee runtime', () => {
 
         expect(showTab).toHaveBeenCalledWith('my-tests');
         expect(runtimeRoot.innerHTML).not.toContain('Submitted question');
+    });
+
+    test('does not rerender and steal focus while trainee is typing', () => {
+        const submission = makeSubmission({
+            status: 'in_progress',
+            answers: { 0: 'A' },
+            testSnapshot: {
+                title: 'Q Contact Assessment',
+                questions: [{ id: 'q1', assessment: 'Q Contact Assessment', type: 'text', text: 'Type answer', points: 1 }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        window.openAssessmentStudioTraineeRuntime('ast_1');
+        const before = runtimeRoot.innerHTML;
+        runtimeRoot.innerHTML = `${before}<span id="typing-marker">still typing</span>`;
+        const activeTextarea = { tagName: 'TEXTAREA', isContentEditable: false };
+        runtimeRoot.contains = jest.fn((node) => node === activeTextarea);
+        document.activeElement = activeTextarea;
+
+        window.renderAssessmentStudioTraineeRuntime();
+
+        expect(runtimeRoot.innerHTML).toContain('typing-marker');
+        expect(runtimeRoot.contains).toHaveBeenCalledWith(activeTextarea);
+    });
+
+    test('recovers local submitted Studio submissions missing from the server document', async () => {
+        const localSubmission = makeSubmission({
+            id: 'ast_sydney',
+            trainee: 'Alice',
+            status: 'pending_review',
+            answers: { 0: 0 },
+            submittedAt: '2026-06-12T12:00:00.000Z',
+            updatedAt: '2026-06-12T12:00:00.000Z'
+        });
+        const localStore = makeStore(localSubmission);
+        const remoteStore = makeStore(null);
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(localStore));
+        localStorage.setItem('assessment_studio_data', JSON.stringify(remoteStore));
+
+        const maybeSingle = jest.fn().mockResolvedValue({
+            data: { content: remoteStore, updated_at: '2026-06-12T11:00:00.000Z' },
+            error: null
+        });
+        const selectRead = jest.fn(() => ({ eq: jest.fn(() => ({ maybeSingle })) }));
+        let upsertPayload = null;
+        const selectWrite = jest.fn().mockResolvedValue({ data: [{ updated_at: '2026-06-12T12:01:00.000Z' }], error: null });
+        const upsert = jest.fn((payload) => {
+            upsertPayload = payload;
+            return { select: selectWrite };
+        });
+        window.supabaseClient = {
+            from: jest.fn(() => ({
+                select: selectRead,
+                upsert
+            }))
+        };
+
+        await window.recoverLocalAssessmentStudioSubmissionsToServer({ silent: false });
+
+        expect(upsert).toHaveBeenCalled();
+        expect(upsertPayload.content.submissions.map(item => item.id)).toContain('ast_sydney');
+        expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Recovered 1 submitted'), 'success');
+        const recoveredLocal = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        expect(recoveredLocal.submissions.map(item => item.id)).toContain('ast_sydney');
     });
 });
