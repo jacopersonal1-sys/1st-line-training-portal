@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.47 - 2026-06-12
+
+- **Safety Rail:** Assessment Studio grading now mirrors trainee upload recovery: completed grades saved locally but not confirmed on Supabase are flagged with a **Grade Upload Failed** badge.
+- **Recovery:** Admins can retry a failed completed-grade upload from the grading/completed queue without reopening or losing the marked scores.
+- **Sync Guard:** Assessment Studio now verifies completed local grades against the server document on load/refresh and clears the warning once Supabase confirms the completed record.
+- **Verification:** Focused Assessment Studio grading tests passed; full-suite and package verification completed before release.
+
+> Release target: stable main channel.
+
 ## 2.7.46 - 2026-06-12
 
 - **Safety Rail:** Assessment Studio question validation now blocks duplicate choices/ranking items, incomplete matching pairs, invalid correct selections, and matrix answers that point to missing columns.

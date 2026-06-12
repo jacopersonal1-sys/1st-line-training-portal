@@ -9,6 +9,7 @@ const QUESTION_TYPES = [
 ];
 
 const AST_GRADING_LEASE_MS = 30 * 60 * 1000;
+const AST_GRADING_UPLOAD_STATUS_KEY = 'assessment_studio_grading_upload_status';
 
 const App = {
     view: 'bucket',
@@ -22,6 +23,7 @@ const App = {
         try {
             await AssessmentStudioData.load();
             await this.repairCompletedSubmissionLocks();
+            await this.verifyCompletedGradeUploads({ silent: true });
             this.render();
         } catch (error) {
             this.handleError(error, 'Assessment Studio could not load.');
@@ -74,11 +76,142 @@ const App = {
         }
         await AssessmentStudioData.load();
         await this.repairCompletedSubmissionLocks();
+        await this.verifyCompletedGradeUploads({ silent: true });
         this.render();
     },
 
     state() {
         return AssessmentStudioData.state;
+    },
+
+    gradingUploadStatusMap() {
+        try {
+            const raw = localStorage.getItem(AST_GRADING_UPLOAD_STATUS_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    },
+
+    setGradingUploadStatus(id, status) {
+        const key = String(id || '').trim();
+        if (!key) return;
+        const map = this.gradingUploadStatusMap();
+        map[key] = {
+            ...(status || {}),
+            updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(AST_GRADING_UPLOAD_STATUS_KEY, JSON.stringify(map));
+    },
+
+    clearGradingUploadStatus(id) {
+        const key = String(id || '').trim();
+        if (!key) return;
+        const map = this.gradingUploadStatusMap();
+        if (!map[key]) return;
+        delete map[key];
+        localStorage.setItem(AST_GRADING_UPLOAD_STATUS_KEY, JSON.stringify(map));
+    },
+
+    shouldRecoverCompletedGrade(localSub, remoteSub) {
+        if (!localSub || typeof localSub !== 'object') return false;
+        const localCompleted = String(localSub.status || '').toLowerCase() === 'completed' || !!localSub.gradedAt || !!localSub.gradedBy;
+        if (!localCompleted) return false;
+        if (!remoteSub) return true;
+        const remoteCompleted = String(remoteSub.status || '').toLowerCase() === 'completed' || !!remoteSub.gradedAt || !!remoteSub.gradedBy;
+        if (!remoteCompleted) return true;
+        return Date.parse(localSub.updatedAt || localSub.gradedAt || 0) > Date.parse(remoteSub.updatedAt || remoteSub.gradedAt || 0);
+    },
+
+    async fetchRemoteStudioDocument() {
+        if (!AppContext.supabase || typeof AppContext.supabase.from !== 'function') return null;
+        const { data, error } = await AppContext.supabase
+            .from('app_documents')
+            .select('content, updated_at')
+            .eq('key', 'assessment_studio_data')
+            .maybeSingle();
+        if (error) throw error;
+        return data || null;
+    },
+
+    async verifyCompletedGradeUploads({ silent = true } = {}) {
+        try {
+            const local = AssessmentStudioData.normalizeStudio(this.state().studio);
+            const candidates = local.submissions.filter(sub => this.shouldRecoverCompletedGrade(sub, null));
+            if (!candidates.length || !AppContext.supabase) return false;
+            const remoteDoc = await this.fetchRemoteStudioDocument();
+            const remote = AssessmentStudioData.normalizeStudio(remoteDoc && remoteDoc.content && typeof remoteDoc.content === 'object' ? remoteDoc.content : null);
+            const remoteById = new Map(remote.submissions.map(sub => [String(sub.id), sub]));
+            let changed = false;
+            candidates.forEach(sub => {
+                if (this.shouldRecoverCompletedGrade(sub, remoteById.get(String(sub.id)))) {
+                    this.setGradingUploadStatus(sub.id, {
+                        state: 'missing',
+                        message: 'Completed grade is saved locally but not confirmed on Supabase.',
+                        checkedAt: new Date().toISOString()
+                    });
+                    changed = true;
+                } else {
+                    this.clearGradingUploadStatus(sub.id);
+                }
+            });
+            if (changed && !silent) this.toast('Some completed grades still need upload recovery.', 'warn');
+            return changed;
+        } catch (error) {
+            console.warn('[Assessment Studio] grading upload verification failed:', error);
+            return false;
+        }
+    },
+
+    async recoverCompletedGradeToServer(id, { silent = false } = {}) {
+        const key = String(id || '').trim();
+        if (!key) return false;
+        const localSub = this.state().studio.submissions.find(sub => String(sub.id) === key);
+        if (!this.shouldRecoverCompletedGrade(localSub, null)) return false;
+        if (!AppContext.supabase) {
+            this.setGradingUploadStatus(key, { state: 'failed', message: 'Supabase connection is not available.' });
+            return false;
+        }
+        this.setGradingUploadStatus(key, { state: 'uploading', message: 'Re-uploading completed grade to Supabase.' });
+        this.render();
+        try {
+            const remoteDoc = await this.fetchRemoteStudioDocument();
+            const remote = AssessmentStudioData.normalizeStudio(remoteDoc && remoteDoc.content && typeof remoteDoc.content === 'object' ? remoteDoc.content : null);
+            const remoteIdx = remote.submissions.findIndex(sub => String(sub.id) === key);
+            if (remoteIdx >= 0) remote.submissions[remoteIdx] = AssessmentStudioData.normalizeSubmission(localSub);
+            else remote.submissions.unshift(AssessmentStudioData.normalizeSubmission(localSub));
+            remote.updatedAt = new Date().toISOString();
+            remote.updatedBy = AssessmentStudioData.editor();
+            const { data, error } = await AppContext.supabase.from('app_documents').upsert({
+                key: 'assessment_studio_data',
+                content: remote,
+                updated_at: remote.updatedAt
+            }).select('updated_at');
+            if (error) throw error;
+            this.state().studio = AssessmentStudioData.mergeStudio(remote, this.state().studio);
+            localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
+            localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
+            const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : remote.updatedAt;
+            if (confirmedAt) localStorage.setItem('sync_ts_assessment_studio_data', confirmedAt);
+            this.clearGradingUploadStatus(key);
+            if (!silent) this.toast('Completed grade re-uploaded to Supabase.', 'ok');
+            this.render();
+            return true;
+        } catch (error) {
+            console.warn('[Assessment Studio] completed grade recovery failed:', error);
+            this.setGradingUploadStatus(key, {
+                state: 'failed',
+                message: error.message || 'Completed grade re-upload failed.'
+            });
+            if (!silent) this.toast(error.message || 'Completed grade re-upload failed.', 'error');
+            this.render();
+            return false;
+        }
+    },
+
+    retryCompletedGradeUpload(id) {
+        return this.recoverCompletedGradeToServer(id, { silent: false });
     },
 
     async repairCompletedSubmissionLocks() {
@@ -1534,17 +1667,29 @@ const App = {
         const activeLock = s.source === 'studio' ? this.getActiveGradingLock(s) : null;
         const lockedByOther = activeLock && !this.isOwnGradingLock(activeLock);
         const lockBadge = s.source === 'studio' && String(s.status || '') === 'pending_review' ? this.gradingLockBadge(s) : '';
+        const uploadStatus = s.source === 'studio' ? this.gradingUploadStatusMap()[String(s.id)] : null;
+        const uploadState = String(uploadStatus && uploadStatus.state || '').trim();
+        const needsGradeUpload = ['missing', 'failed'].includes(uploadState);
+        const isGradeUploading = uploadState === 'uploading';
+        const uploadBadge = needsGradeUpload
+            ? `<span class="ast-lock-badge locked"><i class="fas fa-cloud-exclamation"></i> Grade Upload Failed</span>`
+            : isGradeUploading
+                ? '<span class="ast-lock-badge mine"><i class="fas fa-circle-notch fa-spin"></i> Re-uploading Grade</span>'
+                : '';
+        const uploadAction = needsGradeUpload
+            ? ` <button class="ast-btn small warn" onclick="App.retryCompletedGradeUpload('${this.esc(s.id)}')"><i class="fas fa-cloud-arrow-up"></i> Re-upload Grade</button>`
+            : '';
         const deleteAction = s.source === 'studio'
             ? ` <button class="ast-btn small danger" onclick="App.deleteSubmission('${this.esc(s.id)}')" ${lockedByOther ? 'disabled' : ''}><i class="fas fa-trash"></i></button>`
             : '';
         const action = s.source === 'studio'
             ? (options.gradingAction
-                ? `<button class="ast-btn small primary" onclick="App.selectSubmission('${this.esc(s.id)}')" ${lockedByOther ? 'disabled' : ''}><i class="fas fa-pen"></i> Grade</button>${s.status === 'assigned' ? ` <button class="ast-btn small" onclick="App.mockSubmit('${this.esc(s.id)}')">Demo Submit</button>` : ''}${deleteAction}`
-                : `<button class="ast-btn small" onclick="App.selectSubmission('${this.esc(s.id)}')"><i class="fas fa-pen-to-square"></i> Open Grading</button>${deleteAction}`)
+                ? `<button class="ast-btn small primary" onclick="App.selectSubmission('${this.esc(s.id)}')" ${lockedByOther ? 'disabled' : ''}><i class="fas fa-pen"></i> Grade</button>${s.status === 'assigned' ? ` <button class="ast-btn small" onclick="App.mockSubmit('${this.esc(s.id)}')">Demo Submit</button>` : ''}${uploadAction}${deleteAction}`
+                : `<button class="ast-btn small" onclick="App.selectSubmission('${this.esc(s.id)}')"><i class="fas fa-pen-to-square"></i> Open Grading</button>${uploadAction}${deleteAction}`)
             : '<span class="ast-muted">Legacy</span>';
         return `
             <tr data-completed-row data-search="${this.esc(`${s.trainee} ${s.assessment} ${s.groupID} ${s.status} ${s.source}`.toLowerCase())}" data-assessment="${this.esc(s.assessment)}" data-group="${this.esc(s.groupID || '')}" data-status="${this.esc(s.source === 'legacy' ? 'legacy' : s.status)}" data-source="${this.esc(s.source || 'studio')}" data-date="${this.esc(String(date).slice(0, 10))}">
-                <td>${this.esc(String(date).slice(0, 10) || '-')}</td><td>${this.esc(s.groupID || '-')}</td><td>${this.esc(s.trainee)}</td><td>${this.esc(s.assessment)}${lockBadge ? `<div class="ast-row-lock">${lockBadge}</div>` : ''}</td><td><span class="ast-status ${this.esc(s.status)}">${this.esc(s.source === 'legacy' ? 'legacy' : s.status)}</span></td><td>${score}</td><td>${action}</td>
+                <td>${this.esc(String(date).slice(0, 10) || '-')}</td><td>${this.esc(s.groupID || '-')}</td><td>${this.esc(s.trainee)}</td><td>${this.esc(s.assessment)}${lockBadge || uploadBadge ? `<div class="ast-row-lock">${lockBadge}${uploadBadge}</div>` : ''}</td><td><span class="ast-status ${this.esc(s.status)}">${this.esc(s.source === 'legacy' ? 'legacy' : s.status)}</span></td><td>${score}</td><td>${action}</td>
             </tr>
         `;
     },
@@ -1594,6 +1739,7 @@ const App = {
         const label = `${sub.trainee || 'Unknown trainee'} - ${sub.assessment || 'Assessment'}`;
         if (!confirm(`Delete this Assessment Studio test?\n\n${label}\n\nThis removes the generated snapshot, trainee answers, grading scores, and feedback state for this record.`)) return;
         sub.gradingLock = null;
+        this.clearGradingUploadStatus(id);
         studio.submissions = studio.submissions.filter(item => item.id !== id);
         if (this.selectedSubmissionId === id) this.selectedSubmissionId = null;
         studio.updatedAt = new Date().toISOString();
@@ -1939,8 +2085,22 @@ const App = {
         sub.gradingLock = null;
         if (!Array.isArray(sub.gradingAudit)) sub.gradingAudit = [];
         sub.gradingAudit.push({ at: sub.gradedAt, by: sub.gradedBy, earned: sub.earnedPoints, max: sub.maxPoints, percent: sub.percent });
-        await AssessmentStudioData.saveStudio();
-        this.toast('Grade saved. Scores remain editable from this queue.', 'ok');
+        try {
+            await AssessmentStudioData.saveStudio();
+            this.clearGradingUploadStatus(sub.id);
+            this.toast('Grade saved. Scores remain editable from this queue.', 'ok');
+        } catch (error) {
+            console.warn('[Assessment Studio] grade save could not confirm Supabase upload:', error);
+            this.setGradingUploadStatus(sub.id, {
+                state: 'failed',
+                message: error.message || 'Completed grade could not be confirmed on Supabase.'
+            });
+            try {
+                localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
+                localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
+            } catch (storageError) {}
+            this.toast('Grade saved locally, but upload failed. Use Re-upload Grade from the queue.', 'error');
+        }
         this.selectedSubmissionId = null;
         this.render();
     },

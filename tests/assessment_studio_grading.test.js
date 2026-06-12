@@ -5,6 +5,7 @@ describe('Assessment Studio grading auto scoring', () => {
     let App;
 
     beforeEach(() => {
+        localStorage.clear();
         global.AppContext = { user: { user: 'Admin', role: 'admin' } };
         global.AssessmentStudioData = {
             esc(value) {
@@ -22,7 +23,24 @@ describe('Assessment Studio grading auto scoring', () => {
                 return 'Admin';
             },
             state: { studio: { submissions: [] } },
-            saveStudio: jest.fn().mockResolvedValue({})
+            saveStudio: jest.fn().mockResolvedValue({}),
+            normalizeSubmission(submission) {
+                return { ...(submission || {}) };
+            },
+            normalizeStudio(studio) {
+                return {
+                    questionBucket: [],
+                    generators: [],
+                    submissions: Array.isArray(studio && studio.submissions) ? studio.submissions : [],
+                    groupings: [],
+                    tags: [],
+                    updatedAt: studio && studio.updatedAt || '2026-06-12T10:00:00.000Z',
+                    updatedBy: studio && studio.updatedBy || 'Admin'
+                };
+            },
+            mergeStudio(remote) {
+                return this.normalizeStudio(remote);
+            }
         };
 
         const src = fs.readFileSync(path.resolve(__dirname, '../modules/assessment_studio/js/main.js'), 'utf8');
@@ -210,6 +228,95 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(html).not.toContain('ast-row-lock');
         expect(html).toContain('completed');
         expect(html).toContain('82%');
+    });
+
+    test('completed queue rows show retry action when grade upload failed', () => {
+        App.setGradingUploadStatus('s_done', { state: 'failed', message: 'Upload failed' });
+
+        const html = App.renderCompletedRow({
+            id: 's_done',
+            source: 'studio',
+            trainee: 'Shane Jacobs',
+            assessment: 'Course 2',
+            groupID: '2026-06',
+            status: 'completed',
+            percent: 82,
+            submittedAt: '2026-06-12T10:00:00.000Z'
+        }, { gradingAction: true });
+
+        expect(html).toContain('Grade Upload Failed');
+        expect(html).toContain('retryCompletedGradeUpload');
+        expect(html).toContain('Re-upload Grade');
+    });
+
+    test('verifyCompletedGradeUploads flags completed local grades missing from Supabase', async () => {
+        global.AssessmentStudioData.state = {
+            studio: {
+                submissions: [{
+                    id: 's_missing',
+                    trainee: 'Shane Jacobs',
+                    assessment: 'Course 2',
+                    status: 'completed',
+                    gradedAt: '2026-06-12T10:00:00.000Z',
+                    updatedAt: '2026-06-12T10:00:00.000Z'
+                }]
+            }
+        };
+        global.AppContext.supabase = {
+            from: jest.fn(() => ({
+                select: jest.fn(() => ({
+                    eq: jest.fn(() => ({
+                        maybeSingle: jest.fn(() => Promise.resolve({
+                            data: { content: { submissions: [] }, updated_at: '2026-06-12T09:00:00.000Z' },
+                            error: null
+                        }))
+                    }))
+                }))
+            }))
+        };
+
+        await App.verifyCompletedGradeUploads({ silent: true });
+
+        expect(App.gradingUploadStatusMap().s_missing).toMatchObject({ state: 'missing' });
+    });
+
+    test('recoverCompletedGradeToServer uploads local completed grade and clears retry status', async () => {
+        global.AssessmentStudioData.state = {
+            studio: {
+                submissions: [{
+                    id: 's_retry',
+                    trainee: 'Shane Jacobs',
+                    assessment: 'Course 2',
+                    status: 'completed',
+                    percent: 82,
+                    gradedAt: '2026-06-12T10:00:00.000Z',
+                    updatedAt: '2026-06-12T10:00:00.000Z'
+                }]
+            }
+        };
+        const upsert = jest.fn(() => ({
+            select: jest.fn(() => Promise.resolve({ data: [{ updated_at: '2026-06-12T10:02:00.000Z' }], error: null }))
+        }));
+        global.AppContext.supabase = {
+            from: jest.fn(() => ({
+                select: jest.fn(() => ({
+                    eq: jest.fn(() => ({
+                        maybeSingle: jest.fn(() => Promise.resolve({
+                            data: { content: { submissions: [] }, updated_at: '2026-06-12T09:00:00.000Z' },
+                            error: null
+                        }))
+                    }))
+                })),
+                upsert
+            }))
+        };
+        App.setGradingUploadStatus('s_retry', { state: 'failed' });
+
+        const ok = await App.recoverCompletedGradeToServer('s_retry', { silent: true });
+
+        expect(ok).toBe(true);
+        expect(upsert).toHaveBeenCalled();
+        expect(App.gradingUploadStatusMap().s_retry).toBeUndefined();
     });
 
     test('matrix grading answer keeps column labels in headers only', () => {
