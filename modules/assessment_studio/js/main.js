@@ -1543,29 +1543,82 @@ const App = {
         this.render();
     },
 
+    answerAt(sub, idx) {
+        const answers = sub && sub.answers && typeof sub.answers === 'object' ? sub.answers : {};
+        if (Object.prototype.hasOwnProperty.call(answers, idx)) return answers[idx];
+        return answers[String(idx)];
+    },
+
+    scoreAt(sub, q, idx) {
+        const auto = this.autoScoreQuestion(q, this.answerAt(sub, idx));
+        if (String(sub && sub.status || '') !== 'completed' && !auto.manual) return auto.score;
+        const scores = sub && sub.questionScores && typeof sub.questionScores === 'object' ? sub.questionScores : {};
+        if (Object.prototype.hasOwnProperty.call(scores, idx)) return scores[idx];
+        if (Object.prototype.hasOwnProperty.call(scores, String(idx))) return scores[String(idx)];
+        return auto.score;
+    },
+
+    valueAt(answer, key) {
+        if (Array.isArray(answer)) return answer[key];
+        if (answer && typeof answer === 'object') {
+            if (Object.prototype.hasOwnProperty.call(answer, key)) return answer[key];
+            if (Object.prototype.hasOwnProperty.call(answer, String(key))) return answer[String(key)];
+        }
+        return undefined;
+    },
+
+    normalizeAnswerText(value) {
+        return String(value === undefined || value === null ? '' : value).trim().toLowerCase().replace(/\s+/g, ' ');
+    },
+
+    choiceIndex(q, value) {
+        if (value !== null && value !== undefined && String(value).trim() !== '' && Number.isInteger(Number(value))) return Number(value);
+        const wanted = this.normalizeAnswerText(value);
+        if (!wanted) return -1;
+        return (q.options || []).findIndex(option => this.normalizeAnswerText(option) === wanted);
+    },
+
+    choiceIndexSet(q, values) {
+        return new Set((Array.isArray(values) ? values : [])
+            .map(value => this.choiceIndex(q, value))
+            .filter(value => Number.isInteger(value) && value >= 0));
+    },
+
     autoScoreQuestion(q, answer) {
         const max = Number(q.points || 1);
         if (q.type === 'text') return { score: 0, max, manual: true };
-        if (q.type === 'multiple_choice') return { score: Number(answer) === Number(q.correct) ? max : 0, max, manual: false };
+        if (q.type === 'multiple_choice') {
+            const expected = this.choiceIndex(q, q.correct);
+            const got = this.choiceIndex(q, answer);
+            return { score: expected >= 0 && got === expected ? max : 0, max, manual: false };
+        }
         if (q.type === 'multi_select') {
-            const correct = new Set((Array.isArray(q.correct) ? q.correct : []).map(Number));
-            const got = new Set((Array.isArray(answer) ? answer : []).map(Number));
+            const correct = this.choiceIndexSet(q, Array.isArray(q.correct) ? q.correct : []);
+            const got = this.choiceIndexSet(q, Array.isArray(answer) ? answer : []);
             const ok = correct.size > 0 && correct.size === got.size && Array.from(correct).every(v => got.has(v));
             return { score: ok ? max : 0, max, manual: false };
         }
         if (q.type === 'matching') {
             const pairs = Array.isArray(q.pairs) ? q.pairs : [];
-            const correct = pairs.filter((p, idx) => answer && answer[idx] === p.right).length;
+            const correct = pairs.filter((p, idx) => this.normalizeAnswerText(this.valueAt(answer, idx)) === this.normalizeAnswerText(p.right)).length;
             return { score: pairs.length ? Math.round((correct / pairs.length) * max * 10) / 10 : 0, max, manual: false };
         }
         if (q.type === 'ranking') {
             const expected = Array.isArray(q.items) ? q.items : [];
             const got = Array.isArray(answer) ? answer : [];
-            return { score: expected.length && expected.length === got.length && expected.every((v, i) => got[i] === v) ? max : 0, max, manual: false };
+            return { score: expected.length && expected.length === got.length && expected.every((v, i) => this.normalizeAnswerText(got[i]) === this.normalizeAnswerText(v)) ? max : 0, max, manual: false };
         }
         if (q.type === 'matrix') {
             const rows = Array.isArray(q.rows) ? q.rows : [];
-            const correct = rows.filter((_, idx) => answer && Number(answer[idx]) === Number((q.matrixCorrect || {})[idx])).length;
+            const cols = Array.isArray(q.cols) ? q.cols : [];
+            const correct = rows.filter((_, idx) => {
+                const expected = this.valueAt(q.matrixCorrect || {}, idx);
+                const got = this.valueAt(answer, idx);
+                if (Number.isInteger(Number(expected)) || Number.isInteger(Number(got))) return Number(got) === Number(expected);
+                const expectedIndex = cols.findIndex(col => this.normalizeAnswerText(col) === this.normalizeAnswerText(expected));
+                const gotIndex = cols.findIndex(col => this.normalizeAnswerText(col) === this.normalizeAnswerText(got));
+                return expectedIndex >= 0 && gotIndex === expectedIndex;
+            }).length;
             return { score: rows.length ? Math.round((correct / rows.length) * max * 10) / 10 : 0, max, manual: false };
         }
         return { score: 0, max, manual: true };
@@ -1574,7 +1627,7 @@ const App = {
     renderGrader(sub) {
         const questions = sub.testSnapshot.questions || [];
         const total = questions.reduce((sum, q, idx) => {
-            const score = sub.questionScores[idx] !== undefined ? sub.questionScores[idx] : this.autoScoreQuestion(q, sub.answers[idx]).score;
+            const score = this.scoreAt(sub, q, idx);
             return sum + Number(score || 0);
         }, 0);
         const max = questions.reduce((sum, q) => sum + Number(q.points || 1), 0);
@@ -1608,16 +1661,17 @@ const App = {
     },
 
     renderGradeQuestion(sub, q, idx) {
-        const auto = this.autoScoreQuestion(q, sub.answers[idx]);
-        const score = sub.questionScores[idx] !== undefined ? sub.questionScores[idx] : auto.score;
+        const answer = this.answerAt(sub, idx);
+        const auto = this.autoScoreQuestion(q, answer);
+        const score = this.scoreAt(sub, q, idx);
         return `
             <article class="ast-grade-question">
                 <div class="ast-grade-top">
                     <strong>Q${idx + 1}. ${this.esc(q.text)}</strong>
-                    <span>${this.esc(this.typeLabel(q.type))} | ${auto.manual ? 'Manual' : 'Auto'} | Max ${this.esc(q.points)}</span>
+                    <span>${this.esc(this.typeLabel(q.type))} | ${auto.manual ? 'Manual' : `Auto ${this.esc(auto.score)}/${this.esc(auto.max)}`} | Max ${this.esc(q.points)}</span>
                 </div>
                 ${q.type === 'text' && q.suggestedAnswer ? `<div class="ast-suggested-answer"><strong>Suggested Answer</strong><p>${this.esc(q.suggestedAnswer)}</p></div>` : ''}
-                <div class="ast-answer">${this.renderAnswer(q, sub.answers[idx])}</div>
+                <div class="ast-answer">${this.renderAnswer(q, answer)}</div>
                 <label>Score</label>
                 <input class="grade-score" data-qidx="${idx}" type="number" min="0" max="${this.esc(q.points)}" step="0.5" value="${this.esc(score)}">
             </article>
@@ -1636,13 +1690,12 @@ const App = {
 
     renderMatchingAnswer(q, answer) {
         const pairs = Array.isArray(q.pairs) ? q.pairs : [];
-        const values = Array.isArray(answer) ? answer : [];
         if (!pairs.length) return '<span class="ast-muted">No matching pairs configured.</span>';
         return `
             <div class="ast-review-match-list" role="group" aria-label="Matching pairs answer">
                 ${pairs.map((pair, pairIdx) => {
-                    const traineeAnswer = values[pairIdx] || '';
-                    const isCorrect = traineeAnswer && traineeAnswer === pair.right;
+                    const traineeAnswer = this.valueAt(answer, pairIdx) || '';
+                    const isCorrect = traineeAnswer && this.normalizeAnswerText(traineeAnswer) === this.normalizeAnswerText(pair.right);
                     return `
                         <div class="ast-review-match-row ${isCorrect ? 'correct' : (traineeAnswer ? 'incorrect' : '')}">
                             <span class="ast-review-match-left">${this.esc(pair.left || '-')}</span>
@@ -1657,7 +1710,6 @@ const App = {
     renderMatrixAnswer(q, answer) {
         const rows = Array.isArray(q.rows) ? q.rows : [];
         const cols = Array.isArray(q.cols) ? q.cols : [];
-        const values = answer && typeof answer === 'object' ? answer : {};
         if (!rows.length || !cols.length) return '<span class="ast-muted">No matrix rows or columns configured.</span>';
         return `
             <div class="ast-review-matrix-scroll" role="region" aria-label="Matrix answer">
@@ -1667,8 +1719,10 @@ const App = {
                     ${rows.map((row, rowIdx) => `
                         <div class="ast-review-matrix-row-head">${this.esc(row)}</div>
                         ${cols.map((col, colIdx) => {
-                            const selected = Number(values[rowIdx]) === colIdx;
-                            const correct = Number((q.matrixCorrect || {})[rowIdx]) === colIdx;
+                            const selectedValue = this.valueAt(answer, rowIdx);
+                            const correctValue = this.valueAt(q.matrixCorrect || {}, rowIdx);
+                            const selected = Number(selectedValue) === colIdx || this.normalizeAnswerText(selectedValue) === this.normalizeAnswerText(col);
+                            const correct = Number(correctValue) === colIdx || this.normalizeAnswerText(correctValue) === this.normalizeAnswerText(col);
                             return `
                                 <div class="ast-review-matrix-cell ${selected ? 'selected' : ''} ${correct ? 'correct' : ''}" title="${this.esc(row)} - ${this.esc(col)}">
                                     <span class="ast-review-radio" aria-hidden="true">${selected ? '&bull;' : ''}</span>

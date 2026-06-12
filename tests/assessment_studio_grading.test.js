@@ -1,0 +1,66 @@
+const fs = require('fs');
+const path = require('path');
+
+describe('Assessment Studio grading auto scoring', () => {
+    let App;
+
+    beforeEach(() => {
+        global.AppContext = { user: { user: 'Admin', role: 'admin' } };
+        global.AssessmentStudioData = {
+            esc(value) {
+                return String(value === undefined || value === null ? '' : value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            },
+            normalizeText(value) {
+                return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+            },
+            editor() {
+                return 'Admin';
+            }
+        };
+
+        const src = fs.readFileSync(path.resolve(__dirname, '../modules/assessment_studio/js/main.js'), 'utf8');
+        eval(`${src}\nglobal.__AssessmentStudioApp = App;`);
+        App = global.__AssessmentStudioApp;
+    });
+
+    test('pending grading uses fresh auto scores for complex and choice questions', () => {
+        const questions = [
+            { type: 'multiple_choice', points: 2, options: ['A', 'B', 'C'], correct: 1 },
+            { type: 'multi_select', points: 3, options: ['A', 'B', 'C'], correct: [0, 2] },
+            { type: 'matching', points: 4, pairs: [{ left: 'ADS', right: 'Auth' }, { left: 'PPPoE', right: 'Public IP' }] },
+            { type: 'matrix', points: 6, rows: ['On Queue', 'Paused', 'Training'], cols: ['Receives customer comms', 'Internal calls only'], matrixCorrect: { 0: 0, 1: 0, 2: 1 } }
+        ];
+        const sub = {
+            status: 'pending_review',
+            answers: {
+                0: 1,
+                1: [0, 2],
+                2: { 0: 'Auth', 1: 'Public IP' },
+                3: { 0: 0, 1: 0, 2: 1 }
+            },
+            questionScores: { 0: 0, 1: 0, 2: 0, 3: 0 }
+        };
+
+        expect(App.scoreAt(sub, questions[0], 0)).toBe(2);
+        expect(App.scoreAt(sub, questions[1], 1)).toBe(3);
+        expect(App.scoreAt(sub, questions[2], 2)).toBe(4);
+        expect(App.scoreAt(sub, questions[3], 3)).toBe(6);
+    });
+
+    test('completed grading keeps admin corrected scores', () => {
+        const question = { type: 'matrix', points: 6, rows: ['On Queue'], cols: ['Correct', 'Wrong'], matrixCorrect: { 0: 0 } };
+        const sub = {
+            status: 'completed',
+            answers: { 0: { 0: 0 } },
+            questionScores: { 0: 4.5 }
+        };
+
+        expect(App.autoScoreQuestion(question, sub.answers[0]).score).toBe(6);
+        expect(App.scoreAt(sub, question, 0)).toBe(4.5);
+    });
+});

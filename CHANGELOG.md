@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.37 - 2026-06-12
+
+- **Fix:** Assessment Studio grading queue now recalculates fresh auto marks for pending auto-marked questions instead of trusting stale saved `questionScores`.
+- **Fix:** Matrix/Grid, Matching/Pairs, Multiple Choice, Multiple Answer, and Ranking auto-score logic now handles the stored trainee answer formats used by timeline-launched generated assessments.
+- **Safety:** Completed assessments keep admin-corrected scores when reopened, so manual score corrections are not overwritten by fresh auto scoring.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/assessment_studio_grading.test.js tests/sync.test.js tests/schedule_studio_recalculate.test.js tests/test_engine_edge_cases.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.36 - 2026-06-12
 
 - **Fix:** Assessment Studio admin grading now displays Matching/Pairs answers as structured pair rows instead of a flattened text string.
