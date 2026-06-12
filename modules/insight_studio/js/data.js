@@ -2372,16 +2372,22 @@ const InsightDataService = {
         this.saveCache();
 
         if (AppContext.supabase) {
-            const { error } = await AppContext.supabase.from('app_documents').upsert({
+            const { data, error } = await AppContext.supabase.from('app_documents').upsert({
                 key: INSIGHT_SUBJECT_REVIEW_KEY,
                 content: this.state.subjectReviews,
                 updated_at: updatedAt
-            });
+            }).select('updated_at');
 
             if (error) {
                 console.warn('[Insight] Failed to sync subject reviews:', error);
                 return { ok: false, message: 'Saved locally but failed to sync to cloud.' };
             }
+            const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+            if (!confirmedAt) {
+                console.warn('[Insight] Subject review sync did not return Supabase confirmation.');
+                return { ok: false, message: 'Saved locally but cloud confirmation was missing.' };
+            }
+            localStorage.setItem(`sync_ts_${INSIGHT_SUBJECT_REVIEW_KEY}`, confirmedAt);
         }
 
         return { ok: true };
@@ -2530,17 +2536,24 @@ const InsightDataService = {
         const nextRows = this.normalizeHrEvidence(rows);
         const updatedAt = timestamp || new Date().toISOString();
         if (AppContext.supabase) {
-            const { error } = await AppContext.supabase
+            const { data, error } = await AppContext.supabase
                 .from('app_documents')
                 .upsert({
                     key: INSIGHT_HR_EVIDENCE_KEY,
                     content: nextRows,
                     updated_at: updatedAt
-                }, { onConflict: 'key' });
+                }, { onConflict: 'key' })
+                .select('updated_at');
             if (error) {
                 console.warn('[Insight] Failed saving HR evidence:', error);
                 return { ok: false, message: 'Failed to save HR evidence to the server.' };
             }
+            const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+            if (!confirmedAt) {
+                console.warn('[Insight] HR evidence save did not return Supabase confirmation.');
+                return { ok: false, message: 'HR evidence was not confirmed by the server.' };
+            }
+            localStorage.setItem(`sync_ts_${INSIGHT_HR_EVIDENCE_KEY}`, confirmedAt);
         }
 
         this.state.hrEvidence = nextRows;

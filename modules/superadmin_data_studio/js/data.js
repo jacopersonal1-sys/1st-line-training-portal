@@ -169,13 +169,16 @@ const StudioData = {
     },
 
     async updateDocument(docKey, nextContent) {
-        const { error } = await AppContext.supabase.from('app_documents').upsert({
+        const { data, error } = await AppContext.supabase.from('app_documents').upsert({
             key: docKey,
             content: this.clone(nextContent),
             updated_at: new Date().toISOString()
-        });
+        }).select('updated_at');
 
         if (error) throw new Error(error.message || `Failed to save ${docKey}`);
+        const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+        if (!confirmedAt) throw new Error(`Supabase did not confirm saving ${docKey}`);
+        localStorage.setItem(`sync_ts_${docKey}`, confirmedAt);
         await this.loadAll(`app_documents:${docKey}`);
     },
 

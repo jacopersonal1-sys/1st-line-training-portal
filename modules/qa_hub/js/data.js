@@ -187,12 +187,15 @@ const QAData = {
                 normalized.updatedBy = this.getEditor();
             }
 
-            const { error } = await AppContext.supabase.from('app_documents').upsert({
+            const { data, error } = await AppContext.supabase.from('app_documents').upsert({
                 key: QA_DATA_KEY,
                 content: normalized,
                 updated_at: new Date().toISOString()
-            });
+            }).select('updated_at');
             if (error) throw error;
+            const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+            if (!confirmedAt) throw new Error('Q&A Hub save was not confirmed by Supabase.');
+            localStorage.setItem(`sync_ts_${QA_DATA_KEY}`, confirmedAt);
         }
 
         return normalized;

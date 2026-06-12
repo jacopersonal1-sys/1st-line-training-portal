@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.34 - 2026-06-12
+
+- **Audit Fix:** Extended the false-sync confirmation audit to more direct `app_documents` writers outside the main studio modules.
+- **Safety:** Q&A Hub, Insight subject/HR documents, Superadmin Data Studio document edits, and Hosted HTML Tool metadata now require a returned Supabase `updated_at` before treating a save as confirmed.
+- **Guardrail:** Confirmed writes now update local `sync_ts_*` markers so last-sync status cannot look newer than the server acknowledgement.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.33 - 2026-06-12
 
 - **Audit Fix:** Hardened additional direct `app_documents` save paths found by the false-confirmation scan.

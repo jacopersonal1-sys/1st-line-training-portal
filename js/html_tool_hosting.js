@@ -211,12 +211,15 @@ async function loadHostedHtmlToolUsage() {
 
 async function saveHostedToolRecord(record) {
     if (!window.supabaseClient) throw new Error('Supabase client is not available.');
-    const { error } = await window.supabaseClient.from('app_documents').upsert({
+    const { data, error } = await window.supabaseClient.from('app_documents').upsert({
         key: HTML_TOOL_HOSTING_DOC_KEY,
         content: record || {},
         updated_at: new Date().toISOString()
-    });
+    }).select('updated_at');
     if (error) throw error;
+    const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+    if (!confirmedAt) throw new Error('Supabase did not confirm the hosted tool record save.');
+    localStorage.setItem(`sync_ts_${HTML_TOOL_HOSTING_DOC_KEY}`, confirmedAt);
 }
 
 async function loadHostedHtmlTool() {
