@@ -8218,8 +8218,7 @@ body.theme-one-ui .app-loading-spinner {
 .ast-trainee-progress-list,
 .ast-option-list,
 .ast-match-list,
-.ast-rank-list,
-.ast-matrix-grid {
+.ast-rank-list {
     display: grid;
     gap: 10px;
 }
@@ -8232,8 +8231,7 @@ body.theme-one-ui .app-loading-spinner {
 .ast-trainee-progress-list a,
 .ast-option-list label,
 .ast-match-list label,
-.ast-rank-row,
-.ast-matrix-row {
+.ast-rank-row {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     background: var(--bg-input);
@@ -8311,20 +8309,26 @@ body.theme-one-ui .app-loading-spinner {
 
 .ast-option-list label,
 .ast-match-list label,
-.ast-rank-row,
-.ast-matrix-row {
+.ast-rank-row {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
 }
 
-.ast-match-list label {
-    justify-content: space-between;
+.ast-match-list label.ast-match-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.34fr) minmax(220px, 1fr);
+    align-items: center;
+    gap: 14px;
+    padding: 12px;
 }
 
-.ast-match-list span {
+.ast-match-left {
+    min-width: 0;
     font-weight: 700;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
 }
 
 .ast-rank-row span {
@@ -8341,7 +8345,8 @@ body.theme-one-ui .app-loading-spinner {
 
 .ast-match-list select,
 .ast-rank-row select {
-    min-width: min(360px, 55vw);
+    min-width: 0;
+    width: 100%;
 }
 
 .ast-match-list select,
@@ -8355,16 +8360,73 @@ body.theme-one-ui .app-loading-spinner {
 }
 
 .ast-option-list input,
-.ast-matrix-row input {
+.ast-matrix-cell input {
     accent-color: var(--primary);
 }
 
-.ast-matrix-row {
-    flex-wrap: wrap;
+.ast-matrix-scroll {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
 }
 
-.ast-matrix-row strong {
-    min-width: 150px;
+.ast-matrix-grid {
+    display: grid;
+    grid-template-columns: minmax(130px, 0.8fr) repeat(var(--ast-matrix-cols, 1), minmax(150px, 1fr));
+    min-width: min(100%, calc(130px + (var(--ast-matrix-cols, 1) * 150px)));
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-input);
+}
+
+.ast-matrix-corner,
+.ast-matrix-col-head,
+.ast-matrix-row-head,
+.ast-matrix-cell {
+    min-width: 0;
+    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ast-matrix-corner,
+.ast-matrix-col-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: color-mix(in srgb, var(--bg-card) 82%, var(--bg-input));
+}
+
+.ast-matrix-col-head,
+.ast-matrix-row-head {
+    padding: 11px 12px;
+    color: var(--text-main);
+    font-size: 0.86rem;
+    font-weight: 800;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.ast-matrix-row-head {
+    background: color-mix(in srgb, var(--bg-card) 72%, var(--bg-input));
+}
+
+.ast-matrix-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 50px;
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.ast-matrix-cell span {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
 }
 
 .ast-trainee-question textarea {
@@ -8407,11 +8469,22 @@ body.theme-one-ui .ast-trainee-progress-list a,
 body.theme-one-ui .ast-option-list label,
 body.theme-one-ui .ast-match-list label,
 body.theme-one-ui .ast-rank-row,
-body.theme-one-ui .ast-matrix-row,
 body.theme-one-ui .ast-match-list select,
 body.theme-one-ui .ast-rank-row select,
 body.theme-one-ui .ast-trainee-question textarea {
     background: color-mix(in srgb, var(--bg-input) 86%, var(--oneui-layer-2, var(--bg-card)));
+    border-color: color-mix(in srgb, var(--border-color) 82%, var(--primary));
+}
+
+body.theme-one-ui .ast-matrix-grid {
+    background: color-mix(in srgb, var(--bg-input) 86%, var(--oneui-layer-2, var(--bg-card)));
+    border-color: color-mix(in srgb, var(--border-color) 82%, var(--primary));
+}
+
+body.theme-one-ui .ast-matrix-corner,
+body.theme-one-ui .ast-matrix-col-head,
+body.theme-one-ui .ast-matrix-row-head,
+body.theme-one-ui .ast-matrix-cell {
     border-color: color-mix(in srgb, var(--border-color) 82%, var(--primary));
 }
 
@@ -8455,6 +8528,10 @@ body.theme-one-ui .ast-trainee-question textarea {
     .ast-rank-row {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .ast-match-list label.ast-match-row {
+        grid-template-columns: 1fr;
     }
 
     .ast-match-list select,

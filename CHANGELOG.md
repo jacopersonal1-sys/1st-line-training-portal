@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.35 - 2026-06-12
+
+- **Fix:** Assessment Studio trainee runtime now renders Matrix/Grid questions as a real responsive grid with column headers and one answer cell per row/column.
+- **Fix:** Matching/Pairs questions now use a clearer two-column pairing layout with full-width selects, preventing cramped or misleading answer rows during timeline-launched assessments.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js tests/test_engine_edge_cases.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.34 - 2026-06-12
 
 - **Audit Fix:** Extended the false-sync confirmation audit to more direct `app_documents` writers outside the main studio modules.

@@ -782,11 +782,14 @@ function renderAssessmentStudioTraineeInput(sub, q, idx, locked) {
     }
     if (q.type === 'matching') {
         const choices = astTraineeShuffle((q.pairs || []).map(p => p.right).filter(Boolean), `${sub.id}|${idx}|matching`);
-        return `<div class="ast-match-list">${(q.pairs || []).map((pair, pairIdx) => `
-            <label><span>${astTraineeEsc(pair.left)}</span><select ${disabled} onchange="setAssessmentStudioObjectAnswer(${idx}, ${pairIdx}, this.value)">
-                <option value="">Select match...</option>
-                ${choices.map(choice => `<option value="${astTraineeEsc(choice)}" ${answer && answer[pairIdx] === choice ? 'selected' : ''}>${astTraineeEsc(choice)}</option>`).join('')}
-            </select></label>
+        return `<div class="ast-match-list" role="group" aria-label="Matching pairs">${(q.pairs || []).map((pair, pairIdx) => `
+            <label class="ast-match-row">
+                <span class="ast-match-left">${astTraineeEsc(pair.left)}</span>
+                <select ${disabled} onchange="setAssessmentStudioObjectAnswer(${idx}, ${pairIdx}, this.value)" aria-label="Match for ${astTraineeEsc(pair.left)}">
+                    <option value="">Select match...</option>
+                    ${choices.map(choice => `<option value="${astTraineeEsc(choice)}" ${answer && answer[pairIdx] === choice ? 'selected' : ''}>${astTraineeEsc(choice)}</option>`).join('')}
+                </select>
+            </label>
         `).join('')}</div>`;
     }
     if (q.type === 'ranking') {
@@ -801,14 +804,22 @@ function renderAssessmentStudioTraineeInput(sub, q, idx, locked) {
         `).join('')}</div>`;
     }
     if (q.type === 'matrix') {
-        return `<div class="ast-matrix-grid">${(q.rows || []).map((row, rowIdx) => `
-            <div class="ast-matrix-row">
-                <strong>${astTraineeEsc(row)}</strong>
-                ${(q.cols || []).map((col, colIdx) => `
-                    <label><input type="radio" name="ast_matrix_${idx}_${rowIdx}" value="${colIdx}" ${answer && Number(answer[rowIdx]) === colIdx ? 'checked' : ''} ${disabled} onchange="setAssessmentStudioObjectAnswer(${idx}, ${rowIdx}, Number(this.value))"> ${astTraineeEsc(col)}</label>
+        const cols = Array.isArray(q.cols) ? q.cols : [];
+        return `<div class="ast-matrix-scroll" role="region" aria-label="Matrix question ${idx + 1}">
+            <div class="ast-matrix-grid" style="--ast-matrix-cols:${Math.max(cols.length, 1)}">
+                <div class="ast-matrix-corner" aria-hidden="true"></div>
+                ${cols.map(col => `<div class="ast-matrix-col-head">${astTraineeEsc(col)}</div>`).join('')}
+                ${(q.rows || []).map((row, rowIdx) => `
+                    <div class="ast-matrix-row-head">${astTraineeEsc(row)}</div>
+                    ${cols.map((col, colIdx) => `
+                        <label class="ast-matrix-cell" title="${astTraineeEsc(row)} - ${astTraineeEsc(col)}">
+                            <input type="radio" name="ast_matrix_${idx}_${rowIdx}" value="${colIdx}" ${answer && Number(answer[rowIdx]) === colIdx ? 'checked' : ''} ${disabled} onchange="setAssessmentStudioObjectAnswer(${idx}, ${rowIdx}, Number(this.value))">
+                            <span>${astTraineeEsc(col)}</span>
+                        </label>
+                    `).join('')}
                 `).join('')}
             </div>
-        `).join('')}</div>`;
+        </div>`;
     }
     return `<textarea rows="5" ${disabled} oninput="setAssessmentStudioAnswer(${idx}, this.value)" placeholder="Enter your answer...">${astTraineeEsc(answer || '')}</textarea>`;
 }
