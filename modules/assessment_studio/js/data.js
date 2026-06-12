@@ -126,7 +126,7 @@ const AssessmentStudioData = {
             percent: Number.isFinite(Number(s.percent)) ? Number(s.percent) : 0,
             graderNotes: String(s.graderNotes || '').trim(),
             gradingAudit: Array.isArray(s.gradingAudit) ? s.gradingAudit : [],
-            gradingLock: s.gradingLock && typeof s.gradingLock === 'object' ? s.gradingLock : null,
+            gradingLock: s.gradingLock && typeof s.gradingLock === 'object' && ['pending_review'].includes(String(s.status || '').trim()) ? s.gradingLock : null,
             generatedAt: s.generatedAt || s.createdAt || new Date().toISOString(),
             submittedAt: s.submittedAt || null,
             gradedAt: s.gradedAt || null,

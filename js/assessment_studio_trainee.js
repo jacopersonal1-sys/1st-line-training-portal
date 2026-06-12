@@ -812,9 +812,8 @@ function renderAssessmentStudioTraineeInput(sub, q, idx, locked) {
                 ${(q.rows || []).map((row, rowIdx) => `
                     <div class="ast-matrix-row-head">${astTraineeEsc(row)}</div>
                     ${cols.map((col, colIdx) => `
-                        <label class="ast-matrix-cell" title="${astTraineeEsc(row)} - ${astTraineeEsc(col)}">
+                        <label class="ast-matrix-cell">
                             <input type="radio" name="ast_matrix_${idx}_${rowIdx}" value="${colIdx}" ${answer && Number(answer[rowIdx]) === colIdx ? 'checked' : ''} ${disabled} onchange="setAssessmentStudioObjectAnswer(${idx}, ${rowIdx}, Number(this.value))">
-                            <span>${astTraineeEsc(col)}</span>
                         </label>
                     `).join('')}
                 `).join('')}

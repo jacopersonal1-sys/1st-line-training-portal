@@ -8422,13 +8422,6 @@ body.theme-one-ui .app-loading-spinner {
     cursor: pointer;
 }
 
-.ast-matrix-cell span {
-    color: var(--text-muted);
-    font-size: 0.76rem;
-    line-height: 1.2;
-    overflow-wrap: anywhere;
-}
-
 .ast-trainee-question textarea {
     width: 100%;
     min-height: 140px;

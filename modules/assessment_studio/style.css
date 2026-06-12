@@ -542,12 +542,6 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
     padding: 10px;
     text-align: center;
 }
-.ast-review-matrix-cell span:last-child {
-    color: var(--ast-muted);
-    font-size: .75rem;
-    line-height: 1.2;
-    overflow-wrap: anywhere;
-}
 .ast-review-matrix-cell.selected {
     background: color-mix(in srgb, var(--ast-primary) 12%, var(--ast-card-2));
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ast-primary) 55%, transparent);

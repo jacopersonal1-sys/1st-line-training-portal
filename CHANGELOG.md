@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.38 - 2026-06-12
+
+- **Fix:** Assessment Studio grading locks now fail closed for completed/non-review submissions so stale "currently marking" badges do not linger on other admin screens after a test is marked or removed.
+- **Fix:** Matrix/Grid answer cells now show only the selection dot in trainee and admin views; column names remain in the grid header only.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/assessment_studio_grading.test.js tests/sync.test.js tests/schedule_studio_recalculate.test.js tests/test_engine_edge_cases.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.37 - 2026-06-12
 
 - **Fix:** Assessment Studio grading queue now recalculates fresh auto marks for pending auto-marked questions instead of trusting stale saved `questionScores`.

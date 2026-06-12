@@ -1412,6 +1412,7 @@ const App = {
     },
 
     getActiveGradingLock(submission) {
+        if (!submission || String(submission.status || '') !== 'pending_review') return null;
         const lock = submission && submission.gradingLock;
         if (!lock || !lock.expiresAt) return null;
         return new Date(lock.expiresAt).getTime() > Date.now() ? lock : null;
@@ -1431,6 +1432,7 @@ const App = {
     async claimSubmissionLock(id) {
         const sub = this.state().studio.submissions.find(s => s.id === id);
         if (!sub) return false;
+        if (String(sub.status || '') !== 'pending_review') return true;
         const activeLock = this.getActiveGradingLock(sub);
         if (activeLock && !this.isOwnGradingLock(activeLock)) {
             this.toast(`${activeLock.marker || 'Another admin'} is already grading this test.`, 'warn');
@@ -1534,6 +1536,7 @@ const App = {
         if (!sub) return this.toast('Assessment Studio submission not found.', 'warn');
         const label = `${sub.trainee || 'Unknown trainee'} - ${sub.assessment || 'Assessment'}`;
         if (!confirm(`Delete this Assessment Studio test?\n\n${label}\n\nThis removes the generated snapshot, trainee answers, grading scores, and feedback state for this record.`)) return;
+        sub.gradingLock = null;
         studio.submissions = studio.submissions.filter(item => item.id !== id);
         if (this.selectedSubmissionId === id) this.selectedSubmissionId = null;
         studio.updatedAt = new Date().toISOString();
@@ -1724,9 +1727,8 @@ const App = {
                             const selected = Number(selectedValue) === colIdx || this.normalizeAnswerText(selectedValue) === this.normalizeAnswerText(col);
                             const correct = Number(correctValue) === colIdx || this.normalizeAnswerText(correctValue) === this.normalizeAnswerText(col);
                             return `
-                                <div class="ast-review-matrix-cell ${selected ? 'selected' : ''} ${correct ? 'correct' : ''}" title="${this.esc(row)} - ${this.esc(col)}">
+                                <div class="ast-review-matrix-cell ${selected ? 'selected' : ''} ${correct ? 'correct' : ''}">
                                     <span class="ast-review-radio" aria-hidden="true">${selected ? '&bull;' : ''}</span>
-                                    <span>${this.esc(col)}</span>
                                 </div>
                             `;
                         }).join('')}

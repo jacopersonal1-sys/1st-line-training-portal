@@ -63,4 +63,40 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(App.autoScoreQuestion(question, sub.answers[0]).score).toBe(6);
         expect(App.scoreAt(sub, question, 0)).toBe(4.5);
     });
+
+    test('completed submissions do not keep stale active grading locks', () => {
+        const staleLockedCompleted = {
+            status: 'completed',
+            gradingLock: {
+                marker: 'Other Admin',
+                markerSession: 'other::session',
+                expiresAt: new Date(Date.now() + 60000).toISOString()
+            }
+        };
+        const activePending = {
+            status: 'pending_review',
+            gradingLock: {
+                marker: 'Other Admin',
+                markerSession: 'other::session',
+                expiresAt: new Date(Date.now() + 60000).toISOString()
+            }
+        };
+
+        expect(App.getActiveGradingLock(staleLockedCompleted)).toBeNull();
+        expect(App.getActiveGradingLock(activePending)).toBe(activePending.gradingLock);
+    });
+
+    test('matrix grading answer keeps column labels in headers only', () => {
+        const question = {
+            type: 'matrix',
+            rows: ['Number of wrap-ups completed today'],
+            cols: ['Wrap-up types', 'Queue wait time'],
+            matrixCorrect: { 0: 1 }
+        };
+
+        const html = App.renderMatrixAnswer(question, { 0: 1 });
+        expect(html.match(/Wrap-up types/g) || []).toHaveLength(1);
+        expect(html.match(/Queue wait time/g) || []).toHaveLength(1);
+        expect(html).toContain('ast-review-radio');
+    });
 });
