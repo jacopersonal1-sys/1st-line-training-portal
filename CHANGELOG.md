@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.36 - 2026-06-12
+
+- **Fix:** Assessment Studio admin grading now displays Matching/Pairs answers as structured pair rows instead of a flattened text string.
+- **Fix:** Assessment Studio admin grading now displays Matrix/Grid answers in the same grid-style layout trainees see when taking timeline-launched generated assessments.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js tests/test_engine_edge_cases.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.35 - 2026-06-12
 
 - **Fix:** Assessment Studio trainee runtime now renders Matrix/Grid questions as a real responsive grid with column headers and one answer cell per row/column.

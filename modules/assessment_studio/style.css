@@ -464,6 +464,110 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
     margin-bottom: 8px;
     overflow-wrap: anywhere;
 }
+.ast-review-match-list {
+    display: grid;
+    gap: 8px;
+}
+.ast-review-match-row {
+    display: grid;
+    grid-template-columns: minmax(130px, .34fr) minmax(220px, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--ast-border);
+    border-radius: var(--ast-radius-sm);
+    background: var(--ast-card-2);
+}
+.ast-review-match-row.correct { border-color: color-mix(in srgb, var(--ast-primary-2) 55%, var(--ast-border)); }
+.ast-review-match-row.incorrect { border-color: color-mix(in srgb, var(--ast-warn) 55%, var(--ast-border)); }
+.ast-review-match-left {
+    min-width: 0;
+    font-weight: 900;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.ast-review-match-value {
+    min-width: 0;
+    padding: 9px 11px;
+    border: 1px solid var(--ast-border);
+    border-radius: var(--ast-radius-sm);
+    background: var(--ast-card);
+    color: var(--ast-text);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.ast-review-matrix-scroll {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+.ast-review-matrix-grid {
+    display: grid;
+    grid-template-columns: minmax(130px, .8fr) repeat(var(--ast-review-matrix-cols, 1), minmax(150px, 1fr));
+    min-width: min(100%, calc(130px + (var(--ast-review-matrix-cols, 1) * 150px)));
+    border: 1px solid var(--ast-border);
+    border-radius: var(--ast-radius-sm);
+    overflow: hidden;
+    background: var(--ast-card-2);
+}
+.ast-review-matrix-corner,
+.ast-review-matrix-col-head,
+.ast-review-matrix-row-head,
+.ast-review-matrix-cell {
+    min-width: 0;
+    border-right: 1px solid var(--ast-border);
+    border-bottom: 1px solid var(--ast-border);
+}
+.ast-review-matrix-corner,
+.ast-review-matrix-col-head {
+    background: color-mix(in srgb, var(--ast-card) 86%, var(--ast-card-2));
+}
+.ast-review-matrix-col-head,
+.ast-review-matrix-row-head {
+    padding: 10px 12px;
+    font-size: .84rem;
+    font-weight: 900;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.ast-review-matrix-row-head {
+    background: color-mix(in srgb, var(--ast-card) 74%, var(--ast-card-2));
+}
+.ast-review-matrix-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 50px;
+    padding: 10px;
+    text-align: center;
+}
+.ast-review-matrix-cell span:last-child {
+    color: var(--ast-muted);
+    font-size: .75rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+.ast-review-matrix-cell.selected {
+    background: color-mix(in srgb, var(--ast-primary) 12%, var(--ast-card-2));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ast-primary) 55%, transparent);
+}
+.ast-review-matrix-cell.correct:not(.selected) {
+    background: color-mix(in srgb, var(--ast-primary-2) 8%, var(--ast-card-2));
+}
+.ast-review-radio {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    border: 1px solid var(--ast-border);
+    border-radius: 50%;
+    color: var(--ast-primary);
+    font-size: .95rem;
+    line-height: 1;
+}
 .grade-score { max-width: 160px; }
 .ast-lock-badge {
     display: inline-flex;
@@ -514,7 +618,8 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
     .ast-side { position: static; }
     .ast-filters, .ast-grid-3 { grid-template-columns: 1fr; }
     .ast-pair-row,
-    .ast-builder-row {
+    .ast-builder-row,
+    .ast-review-match-row {
         grid-template-columns: 1fr;
         align-items: stretch;
     }

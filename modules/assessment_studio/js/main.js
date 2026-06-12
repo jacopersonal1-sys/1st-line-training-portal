@@ -1628,10 +1628,58 @@ const App = {
         if (answer === undefined || answer === null || answer === '') return '<span class="ast-muted">No answer captured.</span>';
         if (q.type === 'multiple_choice') return this.esc((q.options || [])[Number(answer)] || answer);
         if (q.type === 'multi_select') return this.esc((Array.isArray(answer) ? answer : []).map(i => (q.options || [])[Number(i)]).filter(Boolean).join(', '));
-        if (q.type === 'matching') return this.esc((q.pairs || []).map((p, i) => `${p.left} -> ${answer[i] || '-'}`).join(' | '));
+        if (q.type === 'matching') return this.renderMatchingAnswer(q, answer);
         if (q.type === 'ranking') return this.esc((Array.isArray(answer) ? answer : []).join(' > '));
-        if (q.type === 'matrix') return this.esc((q.rows || []).map((row, i) => `${row}: ${(q.cols || [])[Number(answer[i])] || '-'}`).join(' | '));
+        if (q.type === 'matrix') return this.renderMatrixAnswer(q, answer);
         return this.esc(answer);
+    },
+
+    renderMatchingAnswer(q, answer) {
+        const pairs = Array.isArray(q.pairs) ? q.pairs : [];
+        const values = Array.isArray(answer) ? answer : [];
+        if (!pairs.length) return '<span class="ast-muted">No matching pairs configured.</span>';
+        return `
+            <div class="ast-review-match-list" role="group" aria-label="Matching pairs answer">
+                ${pairs.map((pair, pairIdx) => {
+                    const traineeAnswer = values[pairIdx] || '';
+                    const isCorrect = traineeAnswer && traineeAnswer === pair.right;
+                    return `
+                        <div class="ast-review-match-row ${isCorrect ? 'correct' : (traineeAnswer ? 'incorrect' : '')}">
+                            <span class="ast-review-match-left">${this.esc(pair.left || '-')}</span>
+                            <span class="ast-review-match-value">${this.esc(traineeAnswer || 'No match selected')}</span>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    },
+
+    renderMatrixAnswer(q, answer) {
+        const rows = Array.isArray(q.rows) ? q.rows : [];
+        const cols = Array.isArray(q.cols) ? q.cols : [];
+        const values = answer && typeof answer === 'object' ? answer : {};
+        if (!rows.length || !cols.length) return '<span class="ast-muted">No matrix rows or columns configured.</span>';
+        return `
+            <div class="ast-review-matrix-scroll" role="region" aria-label="Matrix answer">
+                <div class="ast-review-matrix-grid" style="--ast-review-matrix-cols:${Math.max(cols.length, 1)}">
+                    <div class="ast-review-matrix-corner" aria-hidden="true"></div>
+                    ${cols.map(col => `<div class="ast-review-matrix-col-head">${this.esc(col)}</div>`).join('')}
+                    ${rows.map((row, rowIdx) => `
+                        <div class="ast-review-matrix-row-head">${this.esc(row)}</div>
+                        ${cols.map((col, colIdx) => {
+                            const selected = Number(values[rowIdx]) === colIdx;
+                            const correct = Number((q.matrixCorrect || {})[rowIdx]) === colIdx;
+                            return `
+                                <div class="ast-review-matrix-cell ${selected ? 'selected' : ''} ${correct ? 'correct' : ''}" title="${this.esc(row)} - ${this.esc(col)}">
+                                    <span class="ast-review-radio" aria-hidden="true">${selected ? '&bull;' : ''}</span>
+                                    <span>${this.esc(col)}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    `).join('')}
+                </div>
+            </div>
+        `;
     },
 
     async mockSubmit(id) {
