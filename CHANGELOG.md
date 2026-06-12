@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.48 - 2026-06-12
+
+- **Emergency Fix:** Assessment Studio data normalization no longer crashes while loading question bucket or generated submission snapshots.
+- **Recovery:** Restores the Grading Queue, Completed Tests, bucket questions, and generated tests after the broken `2.7.47` rollout made Studio data appear empty.
+- **Safety Rail:** Added a direct normalizer regression test with bucket questions and completed submissions so this blank-screen failure is caught before release.
+- **Verification:** Focused Assessment Studio grading tests passed; full-suite and package verification completed before release.
+
+> Release target: stable main channel.
+
 ## 2.7.47 - 2026-06-12
 
 - **Safety Rail:** Assessment Studio grading now mirrors trainee upload recovery: completed grades saved locally but not confirmed on Supabase are flagged with a **Grade Upload Failed** badge.

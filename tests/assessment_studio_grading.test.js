@@ -3,6 +3,7 @@ const path = require('path');
 
 describe('Assessment Studio grading auto scoring', () => {
     let App;
+    let Data;
 
     beforeEach(() => {
         localStorage.clear();
@@ -46,6 +47,59 @@ describe('Assessment Studio grading auto scoring', () => {
         const src = fs.readFileSync(path.resolve(__dirname, '../modules/assessment_studio/js/main.js'), 'utf8');
         eval(`${src}\nglobal.__AssessmentStudioApp = App;`);
         App = global.__AssessmentStudioApp;
+        const dataSrc = fs.readFileSync(path.resolve(__dirname, '../modules/assessment_studio/js/data.js'), 'utf8');
+        eval(`${dataSrc}\nglobal.__AssessmentStudioDataModule = AssessmentStudioData;`);
+        Data = global.__AssessmentStudioDataModule;
+    });
+
+    test('Assessment Studio data normalizer loads questions and completed submissions', () => {
+        const studio = Data.normalizeStudio({
+            questionBucket: [{
+                id: 'q_bucket',
+                assessment: 'Course 2',
+                type: 'multiple_choice',
+                text: 'Choose one.',
+                points: 2,
+                options: ['A', 'B'],
+                correct: 0
+            }],
+            generators: [{
+                id: 'gen_1',
+                assessment: 'Course 2',
+                totalPoints: 2,
+                allowedTypes: ['multiple_choice']
+            }],
+            submissions: [{
+                id: 's_done',
+                trainee: 'Shane Jacobs',
+                assessment: 'Course 2',
+                status: 'pending_review',
+                gradedAt: '2026-06-12T10:00:00.000Z',
+                gradedBy: 'Netta',
+                gradingLock: { marker: 'Netta' },
+                testSnapshot: {
+                    title: 'Course 2',
+                    questions: [{
+                        id: 'q_snap',
+                        assessment: 'Course 2',
+                        type: 'multiple_choice',
+                        text: 'Choose one.',
+                        points: 2,
+                        options: ['A', 'B'],
+                        correct: 0
+                    }]
+                }
+            }],
+            groupings: [],
+            tags: []
+        });
+
+        expect(studio.questionBucket).toHaveLength(1);
+        expect(studio.generators).toHaveLength(1);
+        expect(studio.submissions).toHaveLength(1);
+        expect(studio.submissions[0].status).toBe('completed');
+        expect(studio.submissions[0].gradingLock).toBeNull();
+        expect(studio.submissions[0].testSnapshot.questions).toHaveLength(1);
     });
 
     test('pending grading uses fresh auto scores for complex and choice questions', () => {

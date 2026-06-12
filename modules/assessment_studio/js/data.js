@@ -55,9 +55,6 @@ const AssessmentStudioData = {
         const q = raw && typeof raw === 'object' ? raw : {};
         const type = String(q.type || 'multiple_choice').trim();
         const points = Number(q.points);
-        const status = String(s.status || 'assigned').trim();
-        const normalizedStatus = status.toLowerCase();
-        const isCompleted = normalizedStatus === 'completed' || !!s.gradedAt || !!s.gradedBy || (Array.isArray(s.gradingAudit) && s.gradingAudit.length > 0);
         return {
             id: String(q.id || this.makeId('qb')).trim(),
             assessment: String(q.assessment || '').trim(),
@@ -109,6 +106,9 @@ const AssessmentStudioData = {
         const snapshot = s.testSnapshot && typeof s.testSnapshot === 'object' ? s.testSnapshot : { questions: [] };
         const maxPoints = Number(s.maxPoints || snapshot.totalPoints || 0);
         const earnedPoints = Number(s.earnedPoints || s.pointsEarned || 0);
+        const status = String(s.status || 'assigned').trim();
+        const normalizedStatus = status.toLowerCase();
+        const isCompleted = normalizedStatus === 'completed' || !!s.gradedAt || !!s.gradedBy || (Array.isArray(s.gradingAudit) && s.gradingAudit.length > 0);
         return {
             id: String(s.id || this.makeId('ast_sub')).trim(),
             generatorId: String(s.generatorId || '').trim(),
