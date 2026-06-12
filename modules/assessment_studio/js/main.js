@@ -1587,6 +1587,10 @@ const App = {
             .filter(value => Number.isInteger(value) && value >= 0));
     },
 
+    roundScore(value) {
+        return Math.round((Number(value) || 0) * 10) / 10;
+    },
+
     autoScoreQuestion(q, answer) {
         const max = Number(q.points || 1);
         if (q.type === 'text') return { score: 0, max, manual: true };
@@ -1598,8 +1602,12 @@ const App = {
         if (q.type === 'multi_select') {
             const correct = this.choiceIndexSet(q, Array.isArray(q.correct) ? q.correct : []);
             const got = this.choiceIndexSet(q, Array.isArray(answer) ? answer : []);
-            const ok = correct.size > 0 && correct.size === got.size && Array.from(correct).every(v => got.has(v));
-            return { score: ok ? max : 0, max, manual: false };
+            if (!correct.size) return { score: 0, max, manual: false };
+            const correctSelected = Array.from(got).filter(v => correct.has(v)).length;
+            const wrongSelected = Array.from(got).filter(v => !correct.has(v)).length;
+            const unit = max / correct.size;
+            const score = Math.max(0, Math.min(max, (correctSelected - wrongSelected) * unit));
+            return { score: this.roundScore(score), max, manual: false };
         }
         if (q.type === 'matching') {
             const pairs = Array.isArray(q.pairs) ? q.pairs : [];
@@ -1609,7 +1617,9 @@ const App = {
         if (q.type === 'ranking') {
             const expected = Array.isArray(q.items) ? q.items : [];
             const got = Array.isArray(answer) ? answer : [];
-            return { score: expected.length && expected.length === got.length && expected.every((v, i) => this.normalizeAnswerText(got[i]) === this.normalizeAnswerText(v)) ? max : 0, max, manual: false };
+            if (!expected.length) return { score: 0, max, manual: false };
+            const correctPositions = expected.filter((v, i) => this.normalizeAnswerText(got[i]) === this.normalizeAnswerText(v)).length;
+            return { score: this.roundScore((correctPositions / expected.length) * max), max, manual: false };
         }
         if (q.type === 'matrix') {
             const rows = Array.isArray(q.rows) ? q.rows : [];

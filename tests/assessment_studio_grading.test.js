@@ -64,6 +64,30 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(App.scoreAt(sub, question, 0)).toBe(4.5);
     });
 
+    test('multiple answer gives partial credit and deducts for extra selections', () => {
+        const question = {
+            type: 'multi_select',
+            points: 5,
+            options: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+            correct: [0, 1, 2, 3, 4]
+        };
+
+        expect(App.autoScoreQuestion(question, [0, 1, 2, 3, 4]).score).toBe(5);
+        expect(App.autoScoreQuestion(question, [0, 1, 2, 3, 4, 5]).score).toBe(4);
+        expect(App.autoScoreQuestion(question, [0, 1, 2, 5]).score).toBe(2);
+    });
+
+    test('ranking order gives credit for every correct position, including later positions', () => {
+        const question = {
+            type: 'ranking',
+            points: 5,
+            items: ['First', 'Second', 'Third', 'Fourth', 'Fifth']
+        };
+
+        expect(App.autoScoreQuestion(question, ['Second', 'First', 'Third', 'Fourth', 'Fifth']).score).toBe(3);
+        expect(App.autoScoreQuestion(question, ['Wrong', 'Second', 'Wrong', 'Fourth', 'Fifth']).score).toBe(3);
+    });
+
     test('completed submissions do not keep stale active grading locks', () => {
         const staleLockedCompleted = {
             status: 'completed',

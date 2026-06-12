@@ -206,4 +206,50 @@ describe('Assessment Studio trainee runtime', () => {
         expect(html).toContain('retryAssessmentStudioSubmissionUpload');
         expect(html).toContain('Re-upload');
     });
+
+    test('submit stores partial auto scores for multiple answer and ranking questions', async () => {
+        const submission = makeSubmission({
+            id: 'ast_partial_scores',
+            status: 'in_progress',
+            answers: {
+                0: [0, 1, 2, 3, 4, 5],
+                1: ['Second', 'First', 'Third', 'Fourth', 'Fifth']
+            },
+            testSnapshot: {
+                title: 'Partial Score Assessment',
+                questions: [
+                    {
+                        id: 'q_multi',
+                        assessment: 'Partial Score Assessment',
+                        type: 'multi_select',
+                        text: 'Select all correct answers.',
+                        points: 5,
+                        options: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+                        correct: [0, 1, 2, 3, 4]
+                    },
+                    {
+                        id: 'q_rank',
+                        assessment: 'Partial Score Assessment',
+                        type: 'ranking',
+                        text: 'Order the steps.',
+                        points: 5,
+                        items: ['First', 'Second', 'Third', 'Fourth', 'Fifth']
+                    }
+                ]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        window.openAssessmentStudioTraineeRuntime('ast_partial_scores');
+
+        await window.submitAssessmentStudioTest();
+
+        const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        const submitted = saved.submissions.find(item => item.id === 'ast_partial_scores');
+        expect(submitted.status).toBe('pending_review');
+        expect(submitted.questionScores['0']).toBe(4);
+        expect(submitted.questionScores['1']).toBe(3);
+        expect(submitted.earnedPoints).toBe(7);
+    });
 });

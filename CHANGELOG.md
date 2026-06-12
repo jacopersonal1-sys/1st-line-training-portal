@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.44 - 2026-06-12
+
+- **Fix:** Assessment Studio Ranking Order auto-marking now awards proportional points for every item in the correct position, including later correct positions after earlier mistakes.
+- **Fix:** Assessment Studio Multiple Answer auto-marking now gives partial credit for correct selections and deducts the same per-option value for extra/wrong selections.
+- **Consistency:** Trainee submit-time scores and admin grading queue recalculation now use the same partial-credit rules.
+- **Verification:** `npm.cmd test -- --runInBand` passed and `npm.cmd run pack` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.43 - 2026-06-12
 
 - **Safety Rail:** Assessment Studio now checks local submitted assessments against Supabase and shows an **Upload Failed** badge with a **Re-upload** action when a local pending/completed submission is missing from the server document.

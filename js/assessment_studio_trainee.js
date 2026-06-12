@@ -1116,15 +1116,40 @@ async function saveAssessmentStudioDraft() {
     }
 }
 
+function astTraineeScoreRound(value) {
+    return Math.round((Number(value) || 0) * 10) / 10;
+}
+
+function astTraineeScoreText(value) {
+    return String(value === undefined || value === null ? '' : value).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function astTraineeChoiceIndex(q, value) {
+    if (value !== null && value !== undefined && String(value).trim() !== '' && Number.isInteger(Number(value))) return Number(value);
+    const wanted = astTraineeScoreText(value);
+    if (!wanted) return -1;
+    return (q.options || []).findIndex(option => astTraineeScoreText(option) === wanted);
+}
+
+function astTraineeChoiceIndexSet(q, values) {
+    return new Set((Array.isArray(values) ? values : [])
+        .map(value => astTraineeChoiceIndex(q, value))
+        .filter(value => Number.isInteger(value) && value >= 0));
+}
+
 function scoreAssessmentStudioQuestion(q, answer) {
     const max = Number(q.points || 1);
     if (q.type === 'text') return { score: 0, max, manual: true };
-    if (q.type === 'multiple_choice') return { score: Number(answer) === Number(q.correct) ? max : 0, max, manual: false };
+    if (q.type === 'multiple_choice') return { score: astTraineeChoiceIndex(q, answer) === astTraineeChoiceIndex(q, q.correct) ? max : 0, max, manual: false };
     if (q.type === 'multi_select') {
-        const correct = new Set((Array.isArray(q.correct) ? q.correct : []).map(Number));
-        const got = new Set((Array.isArray(answer) ? answer : []).map(Number));
-        const ok = correct.size > 0 && correct.size === got.size && Array.from(correct).every(v => got.has(v));
-        return { score: ok ? max : 0, max, manual: false };
+        const correct = astTraineeChoiceIndexSet(q, Array.isArray(q.correct) ? q.correct : []);
+        const got = astTraineeChoiceIndexSet(q, Array.isArray(answer) ? answer : []);
+        if (!correct.size) return { score: 0, max, manual: false };
+        const correctSelected = Array.from(got).filter(v => correct.has(v)).length;
+        const wrongSelected = Array.from(got).filter(v => !correct.has(v)).length;
+        const unit = max / correct.size;
+        const score = Math.max(0, Math.min(max, (correctSelected - wrongSelected) * unit));
+        return { score: astTraineeScoreRound(score), max, manual: false };
     }
     if (q.type === 'matching') {
         const pairs = Array.isArray(q.pairs) ? q.pairs : [];
@@ -1134,7 +1159,9 @@ function scoreAssessmentStudioQuestion(q, answer) {
     if (q.type === 'ranking') {
         const expected = Array.isArray(q.items) ? q.items : [];
         const got = Array.isArray(answer) ? answer : [];
-        return { score: expected.length && expected.length === got.length && expected.every((v, i) => got[i] === v) ? max : 0, max, manual: false };
+        if (!expected.length) return { score: 0, max, manual: false };
+        const correctPositions = expected.filter((v, i) => astTraineeScoreText(got[i]) === astTraineeScoreText(v)).length;
+        return { score: astTraineeScoreRound((correctPositions / expected.length) * max), max, manual: false };
     }
     if (q.type === 'matrix') {
         const rows = Array.isArray(q.rows) ? q.rows : [];
@@ -1229,6 +1256,7 @@ window.openAssessmentStudioFromSchedule = openAssessmentStudioFromSchedule;
 window.openAssessmentStudioTraineeRuntime = openAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioTraineeRuntime = renderAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioAssignmentsHtml = renderAssessmentStudioAssignmentsHtml;
+window.submitAssessmentStudioTest = submitAssessmentStudioTest;
 window.requestAssessmentStudioFeedback = requestAssessmentStudioFeedback;
 window.refreshAssessmentStudioTraineeStoreFromServer = refreshAssessmentStudioTraineeStoreFromServer;
 window.recoverLocalAssessmentStudioSubmissionsToServer = recoverLocalAssessmentStudioSubmissionsToServer;
