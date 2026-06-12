@@ -90,6 +90,55 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(App.autoScoreQuestion(question, ['Wrong', 'Second', 'Wrong', 'Fourth', 'Fifth']).score).toBe(3);
     });
 
+    test('question safety catches invalid scoring setup before generation or grading', () => {
+        expect(App.questionSafetyErrors({
+            assessment: 'Course 2',
+            type: 'multi_select',
+            text: 'Select correct answers.',
+            points: 5,
+            options: ['A', 'A', 'B'],
+            correct: [0, 1]
+        }).join(' ')).toContain('options must be unique');
+
+        expect(App.questionSafetyErrors({
+            assessment: 'Course 2',
+            type: 'ranking',
+            text: 'Order steps.',
+            points: 5,
+            items: ['Open', 'Open']
+        }).join(' ')).toContain('Ranking items must be unique');
+
+        expect(App.questionSafetyErrors({
+            assessment: 'Course 2',
+            type: 'matrix',
+            text: 'Match rows.',
+            points: 5,
+            rows: ['Row 1'],
+            cols: ['Col 1'],
+            matrixCorrect: { 0: 3 }
+        }).join(' ')).toContain('must match an available column');
+    });
+
+    test('grade score collection blocks duplicate or missing score inputs', () => {
+        const questions = [{ points: 5 }, { points: 5 }];
+        const good = [
+            { dataset: { qidx: '0' }, value: '4', max: '5' },
+            { dataset: { qidx: '1' }, value: '5', max: '5' }
+        ];
+        const duplicate = [
+            { dataset: { qidx: '0' }, value: '4', max: '5' },
+            { dataset: { qidx: '0' }, value: '5', max: '5' }
+        ];
+        const missing = [
+            { dataset: { qidx: '1' }, value: '5', max: '5' },
+            { dataset: { qidx: '2' }, value: '5', max: '5' }
+        ];
+
+        expect(App.collectGradeScores(good, questions)).toMatchObject({ ok: true, scores: { 0: 4, 1: 5 } });
+        expect(App.collectGradeScores(duplicate, questions)).toMatchObject({ ok: false });
+        expect(App.collectGradeScores(missing, questions)).toMatchObject({ ok: false });
+    });
+
     test('completed submissions do not keep stale active grading locks', () => {
         const staleLockedCompleted = {
             status: 'completed',

@@ -213,26 +213,48 @@ function astTraineeQuestionSafetyErrors(question) {
     const q = question && typeof question === 'object' ? question : {};
     const errors = [];
     const type = String(q.type || '').trim();
+    const optionTexts = Array.isArray(q.options) ? q.options.map(value => String(value || '').trim()).filter(Boolean) : [];
+    const duplicateOption = optionTexts.find((value, idx) => optionTexts.findIndex(other => astTraineeNormalize(other) === astTraineeNormalize(value)) !== idx);
     if (!String(q.assessment || '').trim()) errors.push('A generated question is missing its assessment.');
     if (!String(q.text || '').trim()) errors.push('A generated question is missing its question text.');
     if (!AST_TRAINEE_TYPES.some(item => item.key === type)) errors.push('A generated question has an unsupported type.');
     if (!(Number(q.points) > 0)) errors.push('A generated question has invalid points.');
     if (type === 'multiple_choice') {
         if (!Array.isArray(q.options) || q.options.length < 2) errors.push('A multiple choice question is missing options.');
-        if (!Number.isInteger(Number(q.correct)) || Number(q.correct) < 0 || Number(q.correct) >= (q.options || []).length) errors.push('A multiple choice question is missing its correct answer.');
+        if (duplicateOption) errors.push('A multiple choice question has duplicate options.');
+        if (astTraineeChoiceIndex(q, q.correct) < 0) errors.push('A multiple choice question is missing its correct answer.');
     }
     if (type === 'multi_select') {
         if (!Array.isArray(q.options) || q.options.length < 2) errors.push('A multiple answer question is missing options.');
         if (!Array.isArray(q.correct) || q.correct.length < 1) errors.push('A multiple answer question is missing correct answers.');
+        if (duplicateOption) errors.push('A multiple answer question has duplicate options.');
+        const correctIndexes = (Array.isArray(q.correct) ? q.correct : []).map(value => astTraineeChoiceIndex(q, value));
+        if (correctIndexes.some(value => value < 0)) errors.push('A multiple answer question has a correct answer that does not match an option.');
+        if (new Set(correctIndexes.filter(value => value >= 0)).size !== correctIndexes.filter(value => value >= 0).length) errors.push('A multiple answer question has duplicate correct answers.');
     }
-    if (type === 'matching' && (!Array.isArray(q.pairs) || q.pairs.length < 1)) errors.push('A matching question is missing pairs.');
-    if (type === 'ranking' && (!Array.isArray(q.items) || q.items.length < 2)) errors.push('A ranking question is missing ordered items.');
+    if (type === 'matching') {
+        if (!Array.isArray(q.pairs) || q.pairs.length < 1) errors.push('A matching question is missing pairs.');
+        if ((q.pairs || []).some(pair => !String(pair.left || '').trim() || !String(pair.right || '').trim())) errors.push('A matching question has an incomplete pair.');
+    }
+    if (type === 'ranking') {
+        const items = Array.isArray(q.items) ? q.items.map(value => String(value || '').trim()).filter(Boolean) : [];
+        const duplicateItem = items.find((value, idx) => items.findIndex(other => astTraineeNormalize(other) === astTraineeNormalize(value)) !== idx);
+        if (!Array.isArray(q.items) || q.items.length < 2) errors.push('A ranking question is missing ordered items.');
+        if (duplicateItem) errors.push('A ranking question has duplicate ordered items.');
+    }
     if (type === 'matrix') {
         const rowCount = Array.isArray(q.rows) ? q.rows.length : 0;
         const colCount = Array.isArray(q.cols) ? q.cols.length : 0;
         const correctCount = q.matrixCorrect && typeof q.matrixCorrect === 'object' ? Object.keys(q.matrixCorrect).length : 0;
         if (!rowCount || !colCount) errors.push('A matrix question is missing rows or columns.');
         if (rowCount && correctCount < rowCount) errors.push('A matrix question is missing correct answers.');
+        const invalidMatrix = Array.from({ length: rowCount }).some((_, rowIdx) => {
+            const value = astTraineeGetValueAt(q.matrixCorrect || {}, rowIdx);
+            const asIndex = Number(value);
+            if (Number.isInteger(asIndex)) return asIndex < 0 || asIndex >= colCount;
+            return (q.cols || []).findIndex(col => astTraineeNormalize(col) === astTraineeNormalize(value)) < 0;
+        });
+        if (invalidMatrix) errors.push('A matrix question has a correct answer that does not match a column.');
     }
     return errors;
 }
@@ -260,14 +282,31 @@ function astTraineeValidateGenerator(store, generator) {
 
 function astTraineeAnswerIsComplete(question, value) {
     const q = question && typeof question === 'object' ? question : {};
-    if (q.type === 'multi_select' || q.type === 'ranking') return Array.isArray(value) && value.length > 0;
+    if (q.type === 'multiple_choice') return astTraineeChoiceIndex(q, value) >= 0;
+    if (q.type === 'multi_select') {
+        const options = Array.isArray(q.options) ? q.options : [];
+        return Array.isArray(value) && value.length > 0 && value.every(item => astTraineeChoiceIndex(q, item) >= 0 && astTraineeChoiceIndex(q, item) < options.length);
+    }
+    if (q.type === 'ranking') {
+        const expected = Array.isArray(q.items) ? q.items : [];
+        if (!Array.isArray(value) || value.length !== expected.length) return false;
+        const expectedSet = new Set(expected.map(astTraineeScoreText));
+        const gotSet = new Set(value.map(astTraineeScoreText));
+        return expectedSet.size === gotSet.size && Array.from(expectedSet).every(item => gotSet.has(item));
+    }
     if (q.type === 'matching') {
         const pairCount = Array.isArray(q.pairs) ? q.pairs.length : 0;
         return value && typeof value === 'object' && Object.keys(value).length >= pairCount && Object.values(value).every(v => String(v || '').trim());
     }
     if (q.type === 'matrix') {
         const rowCount = Array.isArray(q.rows) ? q.rows.length : 0;
-        return value && typeof value === 'object' && Object.keys(value).length >= rowCount;
+        const colCount = Array.isArray(q.cols) ? q.cols.length : 0;
+        return value && typeof value === 'object' && Object.keys(value).length >= rowCount && Array.from({ length: rowCount }).every((_, rowIdx) => {
+            const answer = astTraineeGetValueAt(value, rowIdx);
+            const index = Number(answer);
+            if (Number.isInteger(index)) return index >= 0 && index < colCount;
+            return (q.cols || []).some(col => astTraineeNormalize(col) === astTraineeNormalize(answer));
+        });
     }
     return value !== undefined && value !== null && String(value).trim() !== '';
 }
@@ -1122,6 +1161,15 @@ function astTraineeScoreRound(value) {
 
 function astTraineeScoreText(value) {
     return String(value === undefined || value === null ? '' : value).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function astTraineeGetValueAt(value, key) {
+    if (Array.isArray(value)) return value[key];
+    if (value && typeof value === 'object') {
+        if (Object.prototype.hasOwnProperty.call(value, key)) return value[key];
+        if (Object.prototype.hasOwnProperty.call(value, String(key))) return value[String(key)];
+    }
+    return undefined;
 }
 
 function astTraineeChoiceIndex(q, value) {

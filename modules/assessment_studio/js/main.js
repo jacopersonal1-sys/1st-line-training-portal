@@ -258,6 +258,9 @@ const App = {
         const q = question && typeof question === 'object' ? question : {};
         const errors = [];
         const type = String(q.type || '').trim();
+        const optionTexts = Array.isArray(q.options) ? q.options.map(value => String(value || '').trim()).filter(Boolean) : [];
+        const duplicateOption = optionTexts.find((value, idx) => optionTexts.findIndex(other => this.normalize(other) === this.normalize(value)) !== idx);
+        const normalizeCorrectIndex = (value) => this.choiceIndex(q, value);
         if (!String(q.assessment || '').trim()) errors.push('Choose the Standard Assessment before saving the question.');
         if (!String(q.text || '').trim()) errors.push('Enter the trainee-facing question text.');
         if (!QUESTION_TYPES.some(item => item.key === type)) errors.push('Choose a supported question type.');
@@ -265,20 +268,40 @@ const App = {
 
         if (type === 'multiple_choice') {
             if (!Array.isArray(q.options) || q.options.length < 2) errors.push('Multiple choice questions need at least two options.');
-            if (!Number.isInteger(Number(q.correct)) || Number(q.correct) < 0 || Number(q.correct) >= (q.options || []).length) errors.push('Mark one correct multiple choice answer.');
+            if (duplicateOption) errors.push(`Multiple choice options must be unique. Duplicate found: "${duplicateOption}".`);
+            if (normalizeCorrectIndex(q.correct) < 0) errors.push('Mark one correct multiple choice answer.');
         }
         if (type === 'multi_select') {
             if (!Array.isArray(q.options) || q.options.length < 2) errors.push('Multiple answer questions need at least two options.');
             if (!Array.isArray(q.correct) || q.correct.length < 1) errors.push('Mark at least one correct multiple answer option.');
+            if (duplicateOption) errors.push(`Multiple answer options must be unique. Duplicate found: "${duplicateOption}".`);
+            const correctIndexes = (Array.isArray(q.correct) ? q.correct : []).map(value => normalizeCorrectIndex(value));
+            if (correctIndexes.some(value => value < 0)) errors.push('Every correct multiple answer selection must match an available option.');
+            if (new Set(correctIndexes.filter(value => value >= 0)).size !== correctIndexes.filter(value => value >= 0).length) errors.push('Correct multiple answer selections must not contain duplicates.');
         }
-        if (type === 'matching' && (!Array.isArray(q.pairs) || q.pairs.length < 1)) errors.push('Matching questions need at least one complete pair.');
-        if (type === 'ranking' && (!Array.isArray(q.items) || q.items.length < 2)) errors.push('Ranking questions need at least two ordered items.');
+        if (type === 'matching') {
+            if (!Array.isArray(q.pairs) || q.pairs.length < 1) errors.push('Matching questions need at least one complete pair.');
+            if ((q.pairs || []).some(pair => !String(pair.left || '').trim() || !String(pair.right || '').trim())) errors.push('Every matching pair needs both sides filled in.');
+        }
+        if (type === 'ranking') {
+            const items = Array.isArray(q.items) ? q.items.map(value => String(value || '').trim()).filter(Boolean) : [];
+            const duplicateItem = items.find((value, idx) => items.findIndex(other => this.normalize(other) === this.normalize(value)) !== idx);
+            if (!Array.isArray(q.items) || q.items.length < 2) errors.push('Ranking questions need at least two ordered items.');
+            if (duplicateItem) errors.push(`Ranking items must be unique. Duplicate found: "${duplicateItem}".`);
+        }
         if (type === 'matrix') {
             const rowCount = Array.isArray(q.rows) ? q.rows.length : 0;
             const colCount = Array.isArray(q.cols) ? q.cols.length : 0;
             const correctCount = q.matrixCorrect && typeof q.matrixCorrect === 'object' ? Object.keys(q.matrixCorrect).length : 0;
             if (!rowCount || !colCount) errors.push('Matrix questions need rows and columns.');
             if (rowCount && correctCount < rowCount) errors.push('Select a correct matrix answer for every row.');
+            const invalidMatrix = Array.from({ length: rowCount }).some((_, rowIdx) => {
+                const value = this.valueAt(q.matrixCorrect || {}, rowIdx);
+                const asIndex = Number(value);
+                if (Number.isInteger(asIndex)) return asIndex < 0 || asIndex >= colCount;
+                return (q.cols || []).findIndex(col => this.normalize(col) === this.normalize(value)) < 0;
+            });
+            if (invalidMatrix) errors.push('Every correct matrix answer must match an available column.');
         }
         return errors;
     },
@@ -1595,6 +1618,39 @@ const App = {
         return auto.score;
     },
 
+    collectGradeScores(scoreInputs, questions) {
+        const inputs = Array.from(scoreInputs || []);
+        const questionList = Array.isArray(questions) ? questions : [];
+        if (inputs.length !== questionList.length) {
+            return { ok: false, message: 'Every generated question must have a score before completing grading.', scores: {} };
+        }
+        const scores = {};
+        const seen = new Set();
+        for (const input of inputs) {
+            const qidx = String(input.dataset?.qidx ?? '').trim();
+            const index = Number(qidx);
+            if (!Number.isInteger(index) || index < 0 || index >= questionList.length) {
+                return { ok: false, message: 'A score input is not linked to a generated question.', scores: {} };
+            }
+            if (seen.has(qidx)) {
+                return { ok: false, message: `Question ${index + 1} has duplicate score inputs. Refresh and grade again.`, scores: {} };
+            }
+            seen.add(qidx);
+            const rawScore = Number(input.value);
+            const maxScore = Number(input.max || questionList[index]?.points || 0);
+            if (!Number.isFinite(rawScore) || rawScore < 0 || rawScore > maxScore) {
+                return { ok: false, message: 'Every score must be between zero and the question max.', scores: {} };
+            }
+            scores[qidx] = this.roundScore(rawScore);
+        }
+        for (let idx = 0; idx < questionList.length; idx += 1) {
+            if (!seen.has(String(idx))) {
+                return { ok: false, message: `Question ${idx + 1} is missing a score input. Refresh and grade again.`, scores: {} };
+            }
+        }
+        return { ok: true, message: '', scores };
+    },
+
     valueAt(answer, key) {
         if (Array.isArray(answer)) return answer[key];
         if (answer && typeof answer === 'object') {
@@ -1864,15 +1920,9 @@ const App = {
         const scores = {};
         const scoreInputs = Array.from(document.querySelectorAll('.grade-score'));
         const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
-        if (scoreInputs.length !== questions.length) return this.toast('Every generated question must have a score before completing grading.', 'warn');
-        for (const input of scoreInputs) {
-            const rawScore = Number(input.value);
-            const maxScore = Number(input.max || 0);
-            if (!Number.isFinite(rawScore) || rawScore < 0 || rawScore > maxScore) {
-                return this.toast('Every score must be between zero and the question max.', 'warn');
-            }
-            scores[input.dataset.qidx] = Math.round(rawScore * 10) / 10;
-        }
+        const scoreResult = this.collectGradeScores(scoreInputs, questions);
+        if (!scoreResult.ok) return this.toast(scoreResult.message, 'warn');
+        Object.assign(scores, scoreResult.scores);
         const earned = Object.values(scores).reduce((sum, value) => sum + Number(value || 0), 0);
         const max = (sub.testSnapshot.questions || []).reduce((sum, q) => sum + Number(q.points || 1), 0);
         if (!(max > 0)) return this.toast('Cannot complete grading because this test has no valid maximum score.', 'error');

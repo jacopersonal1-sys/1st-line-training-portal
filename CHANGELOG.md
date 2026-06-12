@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.46 - 2026-06-12
+
+- **Safety Rail:** Assessment Studio question validation now blocks duplicate choices/ranking items, incomplete matching pairs, invalid correct selections, and matrix answers that point to missing columns.
+- **Safety Rail:** Trainee Assessment Studio submission now refuses invalid complete-looking answers, including ranking answers with duplicate or missing ordered items.
+- **Safety Rail:** Admin grading save now refuses duplicate, missing, out-of-range, or unlinked score inputs before completing a test.
+- **Verification:** Focused Assessment Studio grading/trainee runtime tests passed; full-suite and package verification completed before release.
+
+> Release target: stable main channel.
+
 ## 2.7.45 - 2026-06-12
 
 - **Fix:** Assessment Studio completed grading now clears stale active grading locks during load/refresh, so rows no longer show an admin as still marking after the test is completed.

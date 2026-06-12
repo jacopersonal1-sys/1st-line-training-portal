@@ -252,4 +252,36 @@ describe('Assessment Studio trainee runtime', () => {
         expect(submitted.questionScores['1']).toBe(3);
         expect(submitted.earnedPoints).toBe(7);
     });
+
+    test('submit blocks invalid complete-looking ranking answers before grading', async () => {
+        const submission = makeSubmission({
+            id: 'ast_bad_ranking',
+            status: 'in_progress',
+            answers: {
+                0: ['First', 'Second', 'Second']
+            },
+            testSnapshot: {
+                title: 'Ranking Guard Assessment',
+                questions: [{
+                    id: 'q_rank',
+                    assessment: 'Ranking Guard Assessment',
+                    type: 'ranking',
+                    text: 'Order the steps.',
+                    points: 3,
+                    items: ['First', 'Second', 'Third']
+                }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        window.openAssessmentStudioTraineeRuntime('ast_bad_ranking');
+
+        await window.submitAssessmentStudioTest();
+
+        const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        const blocked = saved.submissions.find(item => item.id === 'ast_bad_ranking');
+        expect(blocked.status).toBe('in_progress');
+        expect(global.showToast).toHaveBeenCalledWith('Question 1 still needs an answer.', 'warning');
+    });
 });
