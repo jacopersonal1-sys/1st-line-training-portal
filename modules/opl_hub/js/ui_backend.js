@@ -51,91 +51,125 @@ const BackendUI = {
     },
 
     saveDocument: async function() {
-        const result = await DataService.upsertDocument(this.form);
-        if (!result.ok) {
-            alert(result.message || 'Failed to save DOC entry.');
-            return;
+        try {
+            const result = await DataService.upsertDocument(this.form);
+            if (!result.ok) {
+                alert(result.message || 'Failed to save DOC entry.');
+                return;
+            }
+            this.resetForm();
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to save DOC entry.');
         }
-        this.resetForm();
     },
 
     deleteDocument: async function(id) {
         if (!confirm('Delete this DOC entry?')) return;
-        const result = await DataService.deleteDocument(id);
-        if (!result.ok) {
-            alert(result.message || 'Failed to delete DOC entry.');
-            return;
+        try {
+            const result = await DataService.deleteDocument(id);
+            if (!result.ok) {
+                alert(result.message || 'Failed to delete DOC entry.');
+                return;
+            }
+            if (this.form.id === id) this.resetForm();
+            App.render();
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to delete DOC entry.');
         }
-        if (this.form.id === id) this.resetForm();
-        App.render();
     },
 
     addLinkedContent: async function() {
         const input = document.getElementById('opl-linked-content-new');
         const value = input ? input.value : '';
-        const result = await DataService.addLinkedContent(value);
-        if (!result.ok) {
-            alert(result.message || 'Failed to add linked content.');
-            return;
+        try {
+            const result = await DataService.addLinkedContent(value);
+            if (!result.ok) {
+                alert(result.message || 'Failed to add linked content.');
+                return;
+            }
+            if (input) input.value = '';
+            App.render();
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to add linked content.');
         }
-        if (input) input.value = '';
-        App.render();
     },
 
     updateLinkedContent: async function(index, value) {
-        const result = await DataService.updateLinkedContent(index, value);
-        if (!result.ok) {
-            alert(result.message || 'Failed to update linked content.');
+        try {
+            const result = await DataService.updateLinkedContent(index, value);
+            if (!result.ok) {
+                alert(result.message || 'Failed to update linked content.');
+                App.render();
+                return;
+            }
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to update linked content.');
             App.render();
-            return;
         }
     },
 
     removeLinkedContent: async function(index) {
         if (!confirm('Remove this linked content option?')) return;
-        const result = await DataService.removeLinkedContent(index);
-        if (!result.ok) {
-            alert(result.message || 'Failed to remove linked content.');
-            return;
+        try {
+            const result = await DataService.removeLinkedContent(index);
+            if (!result.ok) {
+                alert(result.message || 'Failed to remove linked content.');
+                return;
+            }
+            if (this.form.linkedContent && !DataService.getLinkedContents().includes(this.form.linkedContent)) {
+                this.form.linkedContent = '';
+            }
+            App.render();
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to remove linked content.');
         }
-        if (this.form.linkedContent && !DataService.getLinkedContents().includes(this.form.linkedContent)) {
-            this.form.linkedContent = '';
-        }
-        App.render();
     },
 
     addClassifier: async function() {
         const input = document.getElementById('opl-classifier-new');
         const value = input ? input.value : '';
-        const result = await DataService.addClassifier(value);
-        if (!result.ok) {
-            alert(result.message || 'Failed to add classifier.');
-            return;
+        try {
+            const result = await DataService.addClassifier(value);
+            if (!result.ok) {
+                alert(result.message || 'Failed to add classifier.');
+                return;
+            }
+            if (input) input.value = '';
+            App.render();
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to add classifier.');
         }
-        if (input) input.value = '';
-        App.render();
     },
 
     updateClassifier: async function(index, value) {
-        const result = await DataService.updateClassifier(index, value);
-        if (!result.ok) {
-            alert(result.message || 'Failed to update classifier.');
+        try {
+            const result = await DataService.updateClassifier(index, value);
+            if (!result.ok) {
+                alert(result.message || 'Failed to update classifier.');
+                App.render();
+                return;
+            }
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to update classifier.');
             App.render();
-            return;
         }
     },
 
     removeClassifier: async function(index) {
         if (!confirm('Remove this classifier option?')) return;
-        const result = await DataService.removeClassifier(index);
-        if (!result.ok) {
-            alert(result.message || 'Failed to remove classifier.');
-            return;
+        try {
+            const result = await DataService.removeClassifier(index);
+            if (!result.ok) {
+                alert(result.message || 'Failed to remove classifier.');
+                return;
+            }
+            if (this.form.classifier && !DataService.getClassifiers().includes(this.form.classifier)) {
+                this.form.classifier = '';
+            }
+            App.render();
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Failed to remove classifier.');
         }
-        if (this.form.classifier && !DataService.getClassifiers().includes(this.form.classifier)) {
-            this.form.classifier = '';
-        }
-        App.render();
     },
 
     renderCollapsibleCard: function(config) {

@@ -345,7 +345,7 @@ const FeedbackUI = {
         this.formData.answers[questionId] = value;
     },
 
-    saveFeedback: function() {
+    saveFeedback: async function() {
         const questions = this.getQuestionList();
         const answers = questions.map(question => ({
             id: question.id,
@@ -369,7 +369,11 @@ const FeedbackUI = {
 
         const allFeedback = DataService.getAgentFeedback();
         allFeedback.push(payload);
-        DataService.saveAgentFeedback(allFeedback);
+        const synced = await DataService.saveAgentFeedback(allFeedback);
+        if (!synced) {
+            alert('Production feedback was saved locally, but Supabase did not confirm the sync. Please refresh and retry before relying on it from another PC.');
+            return;
+        }
 
         alert("Production feedback saved successfully!");
         this.isCapturing = false;

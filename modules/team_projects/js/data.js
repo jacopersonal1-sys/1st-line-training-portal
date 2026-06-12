@@ -116,10 +116,10 @@ const DataService = {
         return parsed;
     },
 
-    saveBackendData: function(data) {
-        if (!AppContext.user) return;
+    saveBackendData: async function(data) {
+        if (!AppContext.user) return false;
         localStorage.setItem('tl_backend_data', JSON.stringify(data));
-        this.syncTable('tl_backend_data', data);
+        return await this.syncTable('tl_backend_data', data);
     },
 
     // --- AGENT FEEDBACK LOGS ---
@@ -127,24 +127,31 @@ const DataService = {
         return this.readArray('tl_agent_feedback');
     },
 
-    saveAgentFeedback: function(data) {
-        if (!AppContext.user) return;
+    saveAgentFeedback: async function(data) {
+        if (!AppContext.user) return false;
         localStorage.setItem('tl_agent_feedback', JSON.stringify(data));
-        this.syncTable('tl_agent_feedback', data);
+        return await this.syncTable('tl_agent_feedback', data);
     },
 
     // --- INTERNAL SYNC HELPER ---
     // Mimics the main app's saveToServer for BLOB data
     syncTable: async function(table, data) {
-        if (!AppContext.supabase) return; // Offline mode
+        if (!AppContext.supabase) return false; // Offline mode
         
         try {
-            const { error } = await AppContext.supabase.from('app_documents').upsert({
+            const { data: savedData, error } = await AppContext.supabase.from('app_documents').upsert({
                 key: table,
                 content: data,
                 updated_at: new Date().toISOString()
-            });
+            }).select('updated_at');
             if (error) throw error;
-        } catch (e) { console.error(`[Module Sync] Failed to sync ${table}:`, e); }
+            const confirmedAt = Array.isArray(savedData) && savedData[0] && savedData[0].updated_at ? savedData[0].updated_at : '';
+            if (!confirmedAt) throw new Error(`Team Hub save for ${table} was not confirmed by Supabase.`);
+            localStorage.setItem(`sync_ts_${table}`, confirmedAt);
+            return true;
+        } catch (e) {
+            console.error(`[Module Sync] Failed to sync ${table}:`, e);
+            return false;
+        }
     }
 };

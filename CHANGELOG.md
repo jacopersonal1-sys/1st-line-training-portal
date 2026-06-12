@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.33 - 2026-06-12
+
+- **Audit Fix:** Hardened additional direct `app_documents` save paths found by the false-confirmation scan.
+- **Critical Fix:** OPL Hub now requires Supabase confirmation for document/backend saves and surfaces save failures instead of swallowing cloud sync errors.
+- **Safety:** Team Projects production feedback now waits for Supabase confirmation before showing "saved successfully"; unconfirmed feedback stays local with a warning.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/sync.test.js tests/schedule_studio_recalculate.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.32 - 2026-06-11
 
 - **Critical Fix:** Assessment Studio generator saves now require a direct Supabase confirmation from the embedded studio, even when the host bridge is notified, preventing "saved" generator details from staying local and missing Schedule Studio/other admin PCs.

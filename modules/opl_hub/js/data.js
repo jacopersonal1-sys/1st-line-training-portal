@@ -132,17 +132,16 @@ const DataService = {
     },
 
     _syncToCloud: async function(payload) {
-        if (!AppContext.supabase) return;
-        try {
-            const { error } = await AppContext.supabase.from('app_documents').upsert({
-                key: OPL_DATA_KEY,
-                content: payload,
-                updated_at: new Date().toISOString()
-            });
-            if (error) throw error;
-        } catch (err) {
-            console.error('[OPL Hub] Cloud sync failed:', err);
-        }
+        if (!AppContext.supabase) throw new Error('OPL Hub could not confirm Supabase connection for this save.');
+        const { data, error } = await AppContext.supabase.from('app_documents').upsert({
+            key: OPL_DATA_KEY,
+            content: payload,
+            updated_at: new Date().toISOString()
+        }).select('updated_at');
+        if (error) throw error;
+        const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
+        if (!confirmedAt) throw new Error('OPL Hub save was not confirmed by Supabase.');
+        localStorage.setItem(`sync_ts_${OPL_DATA_KEY}`, confirmedAt);
     },
 
     getLinkedContents: function() {
