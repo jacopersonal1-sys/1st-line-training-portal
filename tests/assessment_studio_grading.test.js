@@ -99,4 +99,44 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(html.match(/Queue wait time/g) || []).toHaveLength(1);
         expect(html).toContain('ast-review-radio');
     });
+
+    test('multiple choice grading answer shows all trainee options', () => {
+        const question = { type: 'multiple_choice', options: ['Alpha', 'Bravo', 'Charlie'], correct: 2 };
+
+        const html = App.renderAnswer(question, 1);
+
+        expect(html).toContain('Alpha');
+        expect(html).toContain('Bravo');
+        expect(html).toContain('Charlie');
+        expect(html).toContain('ast-review-choice-row incorrect');
+        expect(html).toContain('ast-review-choice-row expected');
+    });
+
+    test('matrix grading answer marks selected wrong and correct cells', () => {
+        const question = {
+            type: 'matrix',
+            rows: ['First row'],
+            cols: ['Wrong option', 'Correct option'],
+            matrixCorrect: { 0: 1 }
+        };
+
+        const html = App.renderMatrixAnswer(question, { 0: 0 });
+
+        expect(html).toContain('ast-review-matrix-cell selected  incorrect');
+        expect(html).toContain('ast-review-matrix-cell  correct');
+        expect(html).toContain('fa-xmark');
+        expect(html).toContain('fa-check');
+    });
+
+    test('ranking grading answer shows each position correctness', () => {
+        const question = { type: 'ranking', items: ['Open profile', 'Search ticket', 'Add note'] };
+
+        const html = App.renderAnswer(question, ['Open profile', 'Add note', 'Search ticket']);
+
+        expect(html).toContain('ast-review-rank-row correct');
+        expect(html).toContain('ast-review-rank-row incorrect');
+        expect(html).toContain('Open profile');
+        expect(html).toContain('Search ticket');
+        expect(html).toContain('Add note');
+    });
 });

@@ -1683,12 +1683,35 @@ const App = {
 
     renderAnswer(q, answer) {
         if (answer === undefined || answer === null || answer === '') return '<span class="ast-muted">No answer captured.</span>';
-        if (q.type === 'multiple_choice') return this.esc((q.options || [])[Number(answer)] || answer);
-        if (q.type === 'multi_select') return this.esc((Array.isArray(answer) ? answer : []).map(i => (q.options || [])[Number(i)]).filter(Boolean).join(', '));
+        if (q.type === 'multiple_choice') return this.renderChoiceAnswer(q, answer, false);
+        if (q.type === 'multi_select') return this.renderChoiceAnswer(q, answer, true);
         if (q.type === 'matching') return this.renderMatchingAnswer(q, answer);
-        if (q.type === 'ranking') return this.esc((Array.isArray(answer) ? answer : []).join(' > '));
+        if (q.type === 'ranking') return this.renderRankingAnswer(q, answer);
         if (q.type === 'matrix') return this.renderMatrixAnswer(q, answer);
         return this.esc(answer);
+    },
+
+    renderChoiceAnswer(q, answer, isMulti) {
+        const options = Array.isArray(q.options) ? q.options : [];
+        if (!options.length) return '<span class="ast-muted">No options configured.</span>';
+        const selected = isMulti ? this.choiceIndexSet(q, Array.isArray(answer) ? answer : []) : new Set([this.choiceIndex(q, answer)]);
+        const correct = isMulti ? this.choiceIndexSet(q, Array.isArray(q.correct) ? q.correct : []) : new Set([this.choiceIndex(q, q.correct)]);
+        return `
+            <div class="ast-review-choice-list" role="group" aria-label="${isMulti ? 'Multiple answer' : 'Multiple choice'} answer">
+                ${options.map((option, optionIdx) => {
+                    const isSelected = selected.has(optionIdx);
+                    const isCorrect = correct.has(optionIdx);
+                    const state = isSelected && isCorrect ? 'correct' : (isSelected && !isCorrect ? 'incorrect' : (isCorrect ? 'expected' : ''));
+                    return `
+                        <div class="ast-review-choice-row ${state}">
+                            <span class="ast-review-choice-dot ${isSelected ? 'selected' : ''}">${isSelected ? '&bull;' : ''}</span>
+                            <span class="ast-review-choice-text">${this.esc(option)}</span>
+                            <span class="ast-review-choice-mark">${isSelected && isCorrect ? '<i class="fas fa-check"></i>' : (isSelected && !isCorrect ? '<i class="fas fa-xmark"></i>' : (isCorrect ? '<i class="fas fa-check"></i>' : ''))}</span>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
     },
 
     renderMatchingAnswer(q, answer) {
@@ -1726,14 +1749,40 @@ const App = {
                             const correctValue = this.valueAt(q.matrixCorrect || {}, rowIdx);
                             const selected = Number(selectedValue) === colIdx || this.normalizeAnswerText(selectedValue) === this.normalizeAnswerText(col);
                             const correct = Number(correctValue) === colIdx || this.normalizeAnswerText(correctValue) === this.normalizeAnswerText(col);
+                            const mark = selected && correct ? '<i class="fas fa-check"></i>' : (selected && !correct ? '<i class="fas fa-xmark"></i>' : (correct ? '<i class="fas fa-check"></i>' : ''));
                             return `
-                                <div class="ast-review-matrix-cell ${selected ? 'selected' : ''} ${correct ? 'correct' : ''}">
+                                <div class="ast-review-matrix-cell ${selected ? 'selected' : ''} ${correct ? 'correct' : ''} ${selected && !correct ? 'incorrect' : ''}">
                                     <span class="ast-review-radio" aria-hidden="true">${selected ? '&bull;' : ''}</span>
+                                    <span class="ast-review-cell-mark" aria-hidden="true">${mark}</span>
                                 </div>
                             `;
                         }).join('')}
                     `).join('')}
                 </div>
+            </div>
+        `;
+    },
+
+    renderRankingAnswer(q, answer) {
+        const expected = Array.isArray(q.items) ? q.items : [];
+        const got = Array.isArray(answer) ? answer : [];
+        if (!expected.length) return '<span class="ast-muted">No ranking items configured.</span>';
+        const rowCount = Math.max(expected.length, got.length);
+        return `
+            <div class="ast-review-rank-list" role="group" aria-label="Ranking answer">
+                ${Array.from({ length: rowCount }).map((_, idx) => {
+                    const trainee = got[idx] || '';
+                    const correct = expected[idx] || '';
+                    const isCorrect = trainee && this.normalizeAnswerText(trainee) === this.normalizeAnswerText(correct);
+                    return `
+                        <div class="ast-review-rank-row ${isCorrect ? 'correct' : 'incorrect'}">
+                            <span class="ast-review-rank-pos">${idx + 1}</span>
+                            <span class="ast-review-rank-answer">${this.esc(trainee || 'No answer')}</span>
+                            <span class="ast-review-rank-expected">${this.esc(correct || '-')}</span>
+                            <span class="ast-review-rank-mark">${isCorrect ? '<i class="fas fa-check"></i>' : '<i class="fas fa-xmark"></i>'}</span>
+                        </div>
+                    `;
+                }).join('')}
             </div>
         `;
     },

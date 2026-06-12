@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.39 - 2026-06-12
+
+- **Fix:** Assessment Studio admin grading now shows every Multiple Choice and Multiple Answer option, matching the context the trainee saw instead of only showing the selected answer.
+- **Fix:** Matrix/Grid grading now marks selected wrong cells and correct cells with clear red/green indicators.
+- **Fix:** Ranking Order grading now displays each position as a readable row with correct/incorrect styling and the expected answer beside the trainee answer.
+- **Verification:** `npm.cmd test -- --runTestsByPath tests/assessment_studio_grading.test.js tests/sync.test.js tests/schedule_studio_recalculate.test.js tests/test_engine_edge_cases.test.js` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.38 - 2026-06-12
 
 - **Fix:** Assessment Studio grading locks now fail closed for completed/non-review submissions so stale "currently marking" badges do not linger on other admin screens after a test is marked or removed.

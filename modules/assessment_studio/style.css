@@ -464,6 +464,96 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
     margin-bottom: 8px;
     overflow-wrap: anywhere;
 }
+.ast-review-choice-list,
+.ast-review-rank-list {
+    display: grid;
+    gap: 8px;
+}
+.ast-review-choice-row,
+.ast-review-rank-row {
+    display: grid;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--ast-border);
+    border-radius: var(--ast-radius-sm);
+    background: var(--ast-card-2);
+}
+.ast-review-choice-row {
+    grid-template-columns: 22px minmax(0, 1fr) 26px;
+}
+.ast-review-choice-row.correct,
+.ast-review-rank-row.correct {
+    border-color: color-mix(in srgb, var(--ast-primary-2) 58%, var(--ast-border));
+    background: color-mix(in srgb, var(--ast-primary-2) 10%, var(--ast-card-2));
+}
+.ast-review-choice-row.expected {
+    border-color: color-mix(in srgb, var(--ast-primary-2) 46%, var(--ast-border));
+}
+.ast-review-choice-row.incorrect,
+.ast-review-rank-row.incorrect {
+    border-color: color-mix(in srgb, var(--ast-danger) 58%, var(--ast-border));
+    background: color-mix(in srgb, var(--ast-danger) 10%, var(--ast-card-2));
+}
+.ast-review-choice-dot,
+.ast-review-radio {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    border: 1px solid var(--ast-border);
+    border-radius: 50%;
+    color: var(--ast-primary);
+    font-size: .95rem;
+    line-height: 1;
+}
+.ast-review-choice-text,
+.ast-review-rank-answer,
+.ast-review-rank-expected {
+    min-width: 0;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.ast-review-choice-mark,
+.ast-review-rank-mark,
+.ast-review-cell-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    min-height: 18px;
+    color: var(--ast-muted);
+}
+.ast-review-choice-row.correct .ast-review-choice-mark,
+.ast-review-choice-row.expected .ast-review-choice-mark,
+.ast-review-rank-row.correct .ast-review-rank-mark,
+.ast-review-matrix-cell.correct .ast-review-cell-mark {
+    color: var(--ast-primary-2);
+}
+.ast-review-choice-row.incorrect .ast-review-choice-mark,
+.ast-review-rank-row.incorrect .ast-review-rank-mark,
+.ast-review-matrix-cell.incorrect .ast-review-cell-mark {
+    color: var(--ast-danger);
+}
+.ast-review-rank-row {
+    grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr) 26px;
+}
+.ast-review-rank-pos {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--ast-card);
+    border: 1px solid var(--ast-border);
+    font-weight: 900;
+}
+.ast-review-rank-expected {
+    color: var(--ast-muted);
+}
 .ast-review-match-list {
     display: grid;
     gap: 8px;
@@ -549,18 +639,9 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
 .ast-review-matrix-cell.correct:not(.selected) {
     background: color-mix(in srgb, var(--ast-primary-2) 8%, var(--ast-card-2));
 }
-.ast-review-radio {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    flex: 0 0 auto;
-    border: 1px solid var(--ast-border);
-    border-radius: 50%;
-    color: var(--ast-primary);
-    font-size: .95rem;
-    line-height: 1;
+.ast-review-matrix-cell.incorrect {
+    background: color-mix(in srgb, var(--ast-danger) 10%, var(--ast-card-2));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ast-danger) 55%, transparent);
 }
 .grade-score { max-width: 160px; }
 .ast-lock-badge {
@@ -613,7 +694,8 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
     .ast-filters, .ast-grid-3 { grid-template-columns: 1fr; }
     .ast-pair-row,
     .ast-builder-row,
-    .ast-review-match-row {
+    .ast-review-match-row,
+    .ast-review-rank-row {
         grid-template-columns: 1fr;
         align-items: stretch;
     }
