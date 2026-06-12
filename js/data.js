@@ -340,6 +340,9 @@ let QUEUE_PROCESSOR_INTERVAL = null;
 let IS_PROCESSING_INCOMING_QUEUE = false;
 const INCOMING_QUEUE_BATCH_SIZE = 120;
 const INCOMING_QUEUE_CONTINUE_DELAY_MS = 120;
+const INCOMING_QUEUE_TYPING_GRACE_MS = 8000;
+const INCOMING_QUEUE_MAX_ATTEMPTS = 3;
+let INCOMING_QUEUE_BLOCKED_SINCE = 0;
 window.ACTIVE_USERS_CACHE = {}; // Realtime Presence Cache
 
 window.GLOBAL_CHANGES_CHANNEL = null;
@@ -1945,7 +1948,8 @@ function updateSyncDiagnostics(patch = {}) {
     if (!next.server || next.server === '-') next.server = getActiveSyncServerLabel();
     if (!next.statusText) next.statusText = next.status || 'Idle';
     window.SYNC_DIAGNOSTICS = next;
-    if (typeof window.updateAppBusyOverlay === 'function') {
+    const shouldShowBlockingOverlay = ['busy', 'syncing'].includes(String(next.status || ''));
+    if (shouldShowBlockingOverlay && typeof window.updateAppBusyOverlay === 'function') {
         window.updateAppBusyOverlay({
             title: next.statusText || 'Syncing workspace data',
             detail: next.item && next.item !== '-' ? String(next.item) : 'Reading Supabase updates.',
@@ -1953,6 +1957,8 @@ function updateSyncDiagnostics(patch = {}) {
             progressDone: next.progressDone,
             progressTotal: next.progressTotal
         });
+    } else if (!shouldShowBlockingOverlay && typeof window.hideAppBusyOverlay === 'function') {
+        window.hideAppBusyOverlay();
     }
     renderSyncDiagnostics();
 }
@@ -4483,7 +4489,7 @@ function isHighPriorityIncomingPayload(item) {
     if (item.type === 'app_documents') {
         const rawKey = String(item.payload?.new?.key || '').trim();
         const key = IS_DEMO_MODE ? rawKey.replace(/^demo_/, '') : rawKey;
-        return ['users', 'rosters', 'schedules', 'tests', 'liveSchedules', 'system_config'].includes(key);
+        return ['users', 'rosters', 'schedules', 'tests', 'liveSchedules', 'assessment_studio_data', 'content_studio_data', 'qa_data', 'system_config'].includes(key);
     }
 
     if (item.type === 'generic_rows') {
@@ -4505,6 +4511,7 @@ function processIncomingDataQueue() {
     if (IS_PROCESSING_INCOMING_QUEUE) return;
 
     if (INCOMING_DATA_QUEUE.length === 0) {
+        INCOMING_QUEUE_BLOCKED_SINCE = 0;
         const el = document.getElementById('sync-indicator');
         if (el && (el.innerHTML.includes('Queued:') || el.innerHTML.includes('Processing'))) {
             updateSyncUI('success');
@@ -4523,8 +4530,13 @@ function processIncomingDataQueue() {
     // it is absolutely safe to block this background queue to prevent DOM wipes and cursor stealing.
     if (isUserTyping() && timeSinceInteraction < 30000) {
         const hasHighPriority = INCOMING_DATA_QUEUE.some(isHighPriorityIncomingPayload);
-        if (!hasHighPriority) return;
+        if (!hasHighPriority) {
+            const now = Date.now();
+            if (!INCOMING_QUEUE_BLOCKED_SINCE) INCOMING_QUEUE_BLOCKED_SINCE = now;
+            if ((now - INCOMING_QUEUE_BLOCKED_SINCE) < INCOMING_QUEUE_TYPING_GRACE_MS) return;
+        }
     }
+    INCOMING_QUEUE_BLOCKED_SINCE = 0;
 
     IS_PROCESSING_INCOMING_QUEUE = true;
 
@@ -4790,7 +4802,14 @@ function processIncomingDataQueue() {
         // After processing, update the indicator with the current queue state.
         updateQueueIndicator();
     } catch (err) {
-        INCOMING_DATA_QUEUE = queue.concat(INCOMING_DATA_QUEUE);
+        const retryable = queue
+            .map(item => ({ ...item, attempts: Number(item.attempts || 0) + 1 }))
+            .filter(item => {
+                if (item.attempts < INCOMING_QUEUE_MAX_ATTEMPTS) return true;
+                console.warn('[Realtime Queue] Dropping realtime payload after repeated processing failures:', item, err);
+                return false;
+            });
+        INCOMING_DATA_QUEUE = retryable.concat(INCOMING_DATA_QUEUE);
         console.error("Incoming realtime queue processing failed:", err);
         updateSyncUI('error');
         updateQueueIndicator();
@@ -5619,7 +5638,9 @@ if (typeof module !== 'undefined' && module.exports) {
         sanitizeViolationReportsForTrainee,
         getMonitorHistoryRepairRows,
         validateServerAuthorityBlob,
-        writeServerAuthorityBlobToLocal
+        writeServerAuthorityBlobToLocal,
+        updateSyncDiagnostics,
+        isHighPriorityIncomingPayload
     };
 }
 

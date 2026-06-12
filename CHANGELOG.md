@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.41 - 2026-06-12
+
+- **Critical Fix:** Realtime queued-update status no longer opens or keeps the full-screen busy overlay, preventing trainees from being blocked mid-assessment while background updates wait to process.
+- **Safety:** Incoming realtime queues now have a short typing grace period, priority handling for Assessment Studio, Content Creator, Q&A, schedules, and tests, and repeated-failure protection so one bad payload cannot block every later sync event.
+- **Verification:** `npm.cmd test -- --runInBand` passed and `npm.cmd run pack` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.40 - 2026-06-12
 
 - **Critical Fix:** Assessment Studio trainee runtime now keeps the active in-progress submission open through realtime/server refresh gaps, preventing timeline-launched assessments from closing a few seconds after launch.

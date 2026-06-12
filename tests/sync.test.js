@@ -287,6 +287,97 @@ describe('Data Sync Module', () => {
         expect(localStorage.getItem('sync_ts_users')).toBe('2025-01-01T00:00:00.000Z');
     });
 
+    test('realtime queue diagnostics do not block the app with a full-screen overlay', () => {
+        window.SYNC_DIAGNOSTICS = {
+            status: 'idle',
+            statusText: 'Idle',
+            direction: 'idle',
+            phase: 'Waiting',
+            item: '-',
+            server: '-',
+            progressDone: 0,
+            progressTotal: 0,
+            bytesDone: 0,
+            bytesTotal: 0,
+            queuedIncoming: 0,
+            queuedSaves: 0,
+            pendingDeletes: 0,
+            latencyMs: 0,
+            startedAt: 0,
+            updatedAt: Date.now(),
+            lastSuccessAt: 0,
+            lastError: ''
+        };
+        window.updateAppBusyOverlay = jest.fn();
+        window.hideAppBusyOverlay = jest.fn();
+
+        DataModule.updateSyncDiagnostics({
+            status: 'processing_queue',
+            statusText: 'Realtime queue waiting',
+            phase: 'Queued incoming updates',
+            item: '85 waiting',
+            progressDone: 0,
+            progressTotal: 85
+        });
+
+        expect(window.updateAppBusyOverlay).not.toHaveBeenCalled();
+        expect(window.hideAppBusyOverlay).toHaveBeenCalled();
+    });
+
+    test('upload and download diagnostics can still update the app busy overlay', () => {
+        window.SYNC_DIAGNOSTICS = {
+            status: 'idle',
+            statusText: 'Idle',
+            direction: 'idle',
+            phase: 'Waiting',
+            item: '-',
+            server: '-',
+            progressDone: 0,
+            progressTotal: 0,
+            bytesDone: 0,
+            bytesTotal: 0,
+            queuedIncoming: 0,
+            queuedSaves: 0,
+            pendingDeletes: 0,
+            latencyMs: 0,
+            startedAt: 0,
+            updatedAt: Date.now(),
+            lastSuccessAt: 0,
+            lastError: ''
+        };
+        window.updateAppBusyOverlay = jest.fn();
+        window.hideAppBusyOverlay = jest.fn();
+
+        DataModule.updateSyncDiagnostics({
+            status: 'busy',
+            statusText: 'Uploading changes',
+            item: 'assessment_studio_data',
+            progressDone: 0,
+            progressTotal: 1
+        });
+
+        expect(window.updateAppBusyOverlay).toHaveBeenCalledWith(expect.objectContaining({
+            title: 'Uploading changes',
+            detail: 'assessment_studio_data'
+        }));
+        expect(window.hideAppBusyOverlay).not.toHaveBeenCalled();
+    });
+
+    test('Assessment Studio and admin library documents are high-priority realtime payloads', () => {
+        expect(DataModule.isHighPriorityIncomingPayload({
+            type: 'app_documents',
+            payload: { new: { key: 'assessment_studio_data' } }
+        })).toBe(true);
+        expect(DataModule.isHighPriorityIncomingPayload({
+            type: 'app_documents',
+            payload: { new: { key: 'content_studio_data' } }
+        })).toBe(true);
+        expect(DataModule.isHighPriorityIncomingPayload({
+            type: 'app_documents',
+            payload: { new: { key: 'qa_data' } }
+        })).toBe(true);
+    });
+
     test('performSmartMerge respects revokedUsers blacklist', () => {
         const server = { 
             users: [{ user: 'DeletedUser', role: 'trainee' }, { user: 'ActiveUser', role: 'trainee' }] 
