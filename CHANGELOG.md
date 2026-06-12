@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.40 - 2026-06-12
+
+- **Critical Fix:** Assessment Studio trainee runtime now keeps the active in-progress submission open through realtime/server refresh gaps, preventing timeline-launched assessments from closing a few seconds after launch.
+- **Safety:** The runtime fallback only preserves assigned/in-progress active submissions and still blocks submitted/completed assessments from reopening.
+- **Verification:** `npm.cmd test -- --runInBand` passed and `npm.cmd run pack` passed.
+
+> Release target: stable main channel.
+
 ## 2.7.39 - 2026-06-12
 
 - **Fix:** Assessment Studio admin grading now shows every Multiple Choice and Multiple Answer option, matching the context the trainee saw instead of only showing the selected answer.

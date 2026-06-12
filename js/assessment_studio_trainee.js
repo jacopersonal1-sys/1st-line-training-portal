@@ -13,6 +13,7 @@ const AST_TRAINEE_TYPES = [
 ];
 
 let AST_ACTIVE_SUBMISSION_ID = '';
+let AST_ACTIVE_SUBMISSION_SNAPSHOT = null;
 
 function astTraineeEsc(value) {
     return String(value === undefined || value === null ? '' : value)
@@ -31,6 +32,23 @@ function astTraineeParse(raw, fallback) {
     } catch (error) {
         return fallback;
     }
+}
+
+function astTraineeClone(value) {
+    return astTraineeParse(JSON.stringify(value || null), null);
+}
+
+function astTraineeCanKeepRuntimeOpen(submission) {
+    return submission && ['assigned', 'in_progress'].includes(String(submission.status || ''));
+}
+
+function astTraineeRememberActiveSubmission(submission) {
+    if (!submission || String(submission.id || '') !== String(AST_ACTIVE_SUBMISSION_ID || '')) return;
+    AST_ACTIVE_SUBMISSION_SNAPSHOT = astTraineeClone(submission);
+}
+
+function astTraineeClearActiveSnapshot() {
+    AST_ACTIVE_SUBMISSION_SNAPSHOT = null;
 }
 
 function astTraineeMakeId(prefix) {
@@ -620,6 +638,7 @@ function openAssessmentStudioTraineeRuntime(submissionId) {
     const sub = store.submissions.find(item => String(item.id) === AST_ACTIVE_SUBMISSION_ID);
     if (!sub) {
         AST_ACTIVE_SUBMISSION_ID = '';
+        astTraineeClearActiveSnapshot();
         if (typeof showToast === 'function') showToast('Assessment Studio test could not be found. Refresh My Assessments and try again.', 'error');
         if (typeof showTab === 'function') showTab('my-tests');
         return;
@@ -627,12 +646,14 @@ function openAssessmentStudioTraineeRuntime(submissionId) {
     const safetyErrors = astTraineeSubmissionSafetyErrors(sub);
     if (safetyErrors.length) {
         AST_ACTIVE_SUBMISSION_ID = '';
+        astTraineeClearActiveSnapshot();
         if (typeof showToast === 'function') showToast(safetyErrors[0], 'error');
         if (typeof showTab === 'function') showTab('my-tests');
         return;
     }
     if (sub && !['assigned', 'in_progress'].includes(String(sub.status || ''))) {
         AST_ACTIVE_SUBMISSION_ID = '';
+        astTraineeClearActiveSnapshot();
         if (typeof showToast === 'function') showToast('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
         if (typeof showTab === 'function') showTab('my-tests');
         if (typeof loadTraineeTests === 'function') loadTraineeTests();
@@ -641,15 +662,27 @@ function openAssessmentStudioTraineeRuntime(submissionId) {
     if (sub && sub.status === 'assigned') {
         sub.status = 'in_progress';
         sub.updatedAt = new Date().toISOString();
+        astTraineeRememberActiveSubmission(sub);
         astTraineeSaveStore(store, false);
     }
+    astTraineeRememberActiveSubmission(sub);
     if (typeof showTab === 'function') showTab('assessment-studio-trainee');
     renderAssessmentStudioTraineeRuntime();
 }
 
 function astTraineeGetActiveSubmission() {
     const store = astTraineeGetStore();
-    const sub = store.submissions.find(item => String(item.id) === String(AST_ACTIVE_SUBMISSION_ID));
+    let sub = store.submissions.find(item => String(item.id) === String(AST_ACTIVE_SUBMISSION_ID));
+    if (!sub && AST_ACTIVE_SUBMISSION_SNAPSHOT && String(AST_ACTIVE_SUBMISSION_SNAPSHOT.id || '') === String(AST_ACTIVE_SUBMISSION_ID || '')) {
+        const snapshot = astTraineeNormalizeSubmission(AST_ACTIVE_SUBMISSION_SNAPSHOT);
+        if (astTraineeCanKeepRuntimeOpen(snapshot)) {
+            store.submissions.unshift(snapshot);
+            localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(store));
+            sub = snapshot;
+        }
+    }
+    if (sub && astTraineeCanKeepRuntimeOpen(sub)) astTraineeRememberActiveSubmission(sub);
+    if (sub && !astTraineeCanKeepRuntimeOpen(sub)) astTraineeClearActiveSnapshot();
     return { store, sub };
 }
 
@@ -829,6 +862,7 @@ function setAssessmentStudioAnswer(idx, value) {
     sub.answers[String(idx)] = value;
     sub.status = 'in_progress';
     sub.updatedAt = new Date().toISOString();
+    astTraineeRememberActiveSubmission(sub);
     astTraineeSaveStore(store, false);
 }
 
@@ -841,6 +875,7 @@ function toggleAssessmentStudioMultiAnswer(idx, optionIdx, checked) {
     sub.answers[String(idx)] = Array.from(current).sort((a, b) => a - b);
     sub.status = 'in_progress';
     sub.updatedAt = new Date().toISOString();
+    astTraineeRememberActiveSubmission(sub);
     astTraineeSaveStore(store, false);
 }
 
@@ -852,6 +887,7 @@ function setAssessmentStudioObjectAnswer(idx, key, value) {
     sub.answers[String(idx)] = current;
     sub.status = 'in_progress';
     sub.updatedAt = new Date().toISOString();
+    astTraineeRememberActiveSubmission(sub);
     astTraineeSaveStore(store, false);
 }
 
@@ -865,6 +901,7 @@ async function saveAssessmentStudioDraft() {
     if (!sub) return;
     sub.status = 'in_progress';
     sub.updatedAt = new Date().toISOString();
+    astTraineeRememberActiveSubmission(sub);
     try {
         await astTraineeSaveStore(store, true);
         if (typeof showToast === 'function') showToast('Assessment Studio draft saved.', 'success');
@@ -931,6 +968,7 @@ async function submitAssessmentStudioTest() {
     sub.submittedAt = new Date().toISOString();
     sub.updatedAt = sub.submittedAt;
     sub.feedbackStatus = sub.feedbackStatus || 'none';
+    astTraineeRememberActiveSubmission(sub);
     try {
         await astTraineeSaveStore(store, true);
     } catch (error) {
@@ -940,6 +978,8 @@ async function submitAssessmentStudioTest() {
         return;
     }
     if (typeof showToast === 'function') showToast('Assessment submitted to the grading queue.', 'success');
+    AST_ACTIVE_SUBMISSION_ID = '';
+    astTraineeClearActiveSnapshot();
     if (typeof loadTraineeTests === 'function') loadTraineeTests();
     if (typeof showTab === 'function') showTab('my-tests');
 }
