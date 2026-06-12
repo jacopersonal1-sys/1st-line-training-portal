@@ -3259,16 +3259,28 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 if (value === 'assigned') return 1;
                 return 0;
             };
+            const isCompletedSubmission = (item) => {
+                if (!item || typeof item !== 'object') return false;
+                return String(item.status || '').trim().toLowerCase() === 'completed' || !!item.gradedAt || !!item.gradedBy || (Array.isArray(item.gradingAudit) && item.gradingAudit.length > 0);
+            };
+            const sanitizeSubmission = (item) => {
+                if (!item || typeof item !== 'object') return item;
+                if (!isCompletedSubmission(item)) return item;
+                return { ...item, status: 'completed', gradingLock: null };
+            };
             const pickLatest = (existing, incoming, dateFields) => {
                 if (!existing) return incoming;
+                const existingCompleted = isCompletedSubmission(existing);
+                const incomingCompleted = isCompletedSubmission(incoming);
+                if (existingCompleted !== incomingCompleted) return incomingCompleted ? sanitizeSubmission(incoming) : sanitizeSubmission(existing);
                 if (dateFields.includes('__status_rank__')) {
                     const existingRank = statusRank(existing.status);
                     const incomingRank = statusRank(incoming.status);
-                    if (incomingRank !== existingRank) return incomingRank > existingRank ? incoming : existing;
+                    if (incomingRank !== existingRank) return incomingRank > existingRank ? sanitizeSubmission(incoming) : sanitizeSubmission(existing);
                 }
                 const existingDate = dateFields.map(field => existing[field]).find(Boolean) || '';
                 const incomingDate = dateFields.map(field => incoming[field]).find(Boolean) || '';
-                return String(incomingDate) >= String(existingDate) ? incoming : existing;
+                return sanitizeSubmission(String(incomingDate) >= String(existingDate) ? incoming : existing);
             };
             const itemTime = (item, dateFields) => {
                 const value = dateFields
@@ -3308,7 +3320,7 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
                     if (!item || typeof item !== 'object') return;
                     const id = String(item.id || '');
-                    if (id) map.set(id, item);
+                    if (id) map.set(id, sanitizeSubmission(item));
                 });
                 (Array.isArray(localItems) ? localItems : []).forEach(item => {
                     if (!item || typeof item !== 'object') return;
@@ -3322,9 +3334,9 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                     const itemUpdatedAt = itemTime(item, dateFields);
                     const isCurrentTraineeSubmission = currentUserToken && normalizeIdentityValue(item.trainee) === currentUserToken;
                     if (strategy === 'local_wins') {
-                        if (itemUpdatedAt >= serverDocTime) map.set(id, item);
+                        if (itemUpdatedAt >= serverDocTime) map.set(id, sanitizeSubmission(item));
                     } else if (isCurrentTraineeSubmission && itemUpdatedAt > serverDocTime) {
-                        map.set(id, item);
+                        map.set(id, sanitizeSubmission(item));
                     }
                 });
                 return Array.from(map.values());

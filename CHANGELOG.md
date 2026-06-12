@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.45 - 2026-06-12
+
+- **Fix:** Assessment Studio completed grading now clears stale active grading locks during load/refresh, so rows no longer show an admin as still marking after the test is completed.
+- **Sync Guard:** Assessment Studio merge logic now keeps completed/graded submissions authoritative over stale pending-review copies, even when the stale copy has a newer lock timestamp.
+- **UI Guard:** Completed queue rows no longer render grading lock badges.
+- **Verification:** Focused Assessment Studio grading/sync tests passed; full-suite and package verification completed before release.
+
+> Release target: stable main channel.
+
 ## 2.7.44 - 2026-06-12
 
 - **Fix:** Assessment Studio Ranking Order auto-marking now awards proportional points for every item in the correct position, including later correct positions after earlier mistakes.

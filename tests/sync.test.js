@@ -125,6 +125,58 @@ describe('Data Sync Module', () => {
         expect(merged.submissions.map(item => item.id)).toEqual(['s_new']);
     });
 
+    test('performSmartMerge keeps completed Assessment Studio grading over stale pending locks', () => {
+        const server = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-12T10:00:00.000Z',
+                questionBucket: [],
+                generators: [],
+                submissions: [{
+                    id: 's_done',
+                    trainee: 'Shane Jacobs',
+                    status: 'completed',
+                    percent: 82,
+                    gradedAt: '2026-06-12T10:00:00.000Z',
+                    gradedBy: 'Netta',
+                    gradingLock: null,
+                    updatedAt: '2026-06-12T10:00:00.000Z'
+                }],
+                groupings: [],
+                tags: []
+            }
+        };
+        const local = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-12T10:05:00.000Z',
+                questionBucket: [],
+                generators: [],
+                submissions: [{
+                    id: 's_done',
+                    trainee: 'Shane Jacobs',
+                    status: 'pending_review',
+                    percent: 0,
+                    gradingLock: {
+                        marker: 'Netta',
+                        markerSession: 'Netta::old',
+                        expiresAt: '2026-06-12T10:35:00.000Z'
+                    },
+                    updatedAt: '2026-06-12T10:05:00.000Z'
+                }],
+                groupings: [],
+                tags: []
+            }
+        };
+
+        const pulled = DataModule.performSmartMerge(server, local, 'server_wins').assessment_studio_data;
+        const pushing = DataModule.performSmartMerge(server, local, 'local_wins').assessment_studio_data;
+
+        expect(pulled.submissions[0].status).toBe('completed');
+        expect(pulled.submissions[0].gradingLock).toBeNull();
+        expect(pulled.submissions[0].percent).toBe(82);
+        expect(pushing.submissions[0].status).toBe('completed');
+        expect(pushing.submissions[0].gradingLock).toBeNull();
+    });
+
     test('performSmartMerge keeps Q&A admin library server-authoritative during pull', () => {
         const server = {
             qa_data: {

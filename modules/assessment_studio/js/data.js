@@ -55,6 +55,9 @@ const AssessmentStudioData = {
         const q = raw && typeof raw === 'object' ? raw : {};
         const type = String(q.type || 'multiple_choice').trim();
         const points = Number(q.points);
+        const status = String(s.status || 'assigned').trim();
+        const normalizedStatus = status.toLowerCase();
+        const isCompleted = normalizedStatus === 'completed' || !!s.gradedAt || !!s.gradedBy || (Array.isArray(s.gradingAudit) && s.gradingAudit.length > 0);
         return {
             id: String(q.id || this.makeId('qb')).trim(),
             assessment: String(q.assessment || '').trim(),
@@ -113,7 +116,7 @@ const AssessmentStudioData = {
             groupID: String(s.groupID || '').trim(),
             assessment: String(s.assessment || snapshot.title || '').trim(),
             phase: String(s.phase || snapshot.phase || 'Assessment').trim(),
-            status: String(s.status || 'assigned').trim(),
+            status: isCompleted ? 'completed' : status,
             feedbackStatus: String(s.feedbackStatus || 'none').trim(),
             testSnapshot: {
                 ...snapshot,
@@ -126,7 +129,7 @@ const AssessmentStudioData = {
             percent: Number.isFinite(Number(s.percent)) ? Number(s.percent) : 0,
             graderNotes: String(s.graderNotes || '').trim(),
             gradingAudit: Array.isArray(s.gradingAudit) ? s.gradingAudit : [],
-            gradingLock: s.gradingLock && typeof s.gradingLock === 'object' && ['pending_review'].includes(String(s.status || '').trim()) ? s.gradingLock : null,
+            gradingLock: !isCompleted && s.gradingLock && typeof s.gradingLock === 'object' && normalizedStatus === 'pending_review' ? s.gradingLock : null,
             generatedAt: s.generatedAt || s.createdAt || new Date().toISOString(),
             submittedAt: s.submittedAt || null,
             gradedAt: s.gradedAt || null,
@@ -224,8 +227,16 @@ const AssessmentStudioData = {
         return 0;
     },
 
+    isCompletedSubmission(submission) {
+        if (!submission || typeof submission !== 'object') return false;
+        return String(submission.status || '').trim().toLowerCase() === 'completed' || !!submission.gradedAt || !!submission.gradedBy || (Array.isArray(submission.gradingAudit) && submission.gradingAudit.length > 0);
+    },
+
     pickSubmission(existing, incoming) {
         if (!existing) return incoming;
+        const existingCompleted = this.isCompletedSubmission(existing);
+        const incomingCompleted = this.isCompletedSubmission(incoming);
+        if (existingCompleted !== incomingCompleted) return incomingCompleted ? incoming : existing;
         const existingRank = this.submissionStatusRank(existing.status);
         const incomingRank = this.submissionStatusRank(incoming.status);
         if (incomingRank !== existingRank) return incomingRank > existingRank ? incoming : existing;

@@ -20,7 +20,9 @@ describe('Assessment Studio grading auto scoring', () => {
             },
             editor() {
                 return 'Admin';
-            }
+            },
+            state: { studio: { submissions: [] } },
+            saveStudio: jest.fn().mockResolvedValue({})
         };
 
         const src = fs.readFileSync(path.resolve(__dirname, '../modules/assessment_studio/js/main.js'), 'utf8');
@@ -108,6 +110,57 @@ describe('Assessment Studio grading auto scoring', () => {
 
         expect(App.getActiveGradingLock(staleLockedCompleted)).toBeNull();
         expect(App.getActiveGradingLock(activePending)).toBe(activePending.gradingLock);
+    });
+
+    test('repairCompletedSubmissionLocks clears stale pending locks from graded submissions', async () => {
+        global.AssessmentStudioData.state = {
+            studio: {
+                submissions: [{
+                    id: 's_done',
+                    trainee: 'Shane Jacobs',
+                    assessment: 'Course 2',
+                    status: 'pending_review',
+                    gradedAt: '2026-06-12T10:00:00.000Z',
+                    gradedBy: 'Netta',
+                    gradingLock: {
+                        marker: 'Netta',
+                        markerSession: 'Netta::old',
+                        expiresAt: new Date(Date.now() + 60000).toISOString()
+                    }
+                }]
+            }
+        };
+
+        await App.repairCompletedSubmissionLocks();
+
+        const repaired = global.AssessmentStudioData.state.studio.submissions[0];
+        expect(repaired.status).toBe('completed');
+        expect(repaired.gradingLock).toBeNull();
+        expect(global.AssessmentStudioData.saveStudio).toHaveBeenCalled();
+        expect(App.gradingLockBadge(repaired)).toContain('Available');
+    });
+
+    test('completed queue rows do not render stale grading lock badges', () => {
+        const html = App.renderCompletedRow({
+            id: 's_done',
+            source: 'studio',
+            trainee: 'Shane Jacobs',
+            assessment: 'Course 2',
+            groupID: '2026-06',
+            status: 'completed',
+            percent: 82,
+            submittedAt: '2026-06-12T10:00:00.000Z',
+            gradingLock: {
+                marker: 'Netta',
+                markerSession: 'Netta::old',
+                expiresAt: new Date(Date.now() + 60000).toISOString()
+            }
+        }, { gradingAction: true });
+
+        expect(html).not.toContain('Netta is grading');
+        expect(html).not.toContain('ast-row-lock');
+        expect(html).toContain('completed');
+        expect(html).toContain('82%');
     });
 
     test('matrix grading answer keeps column labels in headers only', () => {

@@ -21,6 +21,7 @@ const App = {
         root.innerHTML = '<div class="ast-card ast-loading"><i class="fas fa-circle-notch fa-spin"></i><p>Loading Assessment Studio...</p></div>';
         try {
             await AssessmentStudioData.load();
+            await this.repairCompletedSubmissionLocks();
             this.render();
         } catch (error) {
             this.handleError(error, 'Assessment Studio could not load.');
@@ -72,11 +73,44 @@ const App = {
             this.selectedSubmissionId = null;
         }
         await AssessmentStudioData.load();
+        await this.repairCompletedSubmissionLocks();
         this.render();
     },
 
     state() {
         return AssessmentStudioData.state;
+    },
+
+    async repairCompletedSubmissionLocks() {
+        const studio = this.state().studio;
+        if (!studio || !Array.isArray(studio.submissions)) return false;
+        let changed = false;
+        studio.submissions.forEach(sub => {
+            if (!sub || typeof sub !== 'object') return;
+            const isCompleted = String(sub.status || '').toLowerCase() === 'completed' || !!sub.gradedAt || !!sub.gradedBy || (Array.isArray(sub.gradingAudit) && sub.gradingAudit.length > 0);
+            if (!isCompleted) return;
+            if (sub.status !== 'completed') {
+                sub.status = 'completed';
+                changed = true;
+            }
+            if (sub.gradingLock) {
+                sub.gradingLock = null;
+                changed = true;
+            }
+        });
+        if (!changed) return false;
+        studio.updatedAt = new Date().toISOString();
+        studio.updatedBy = AssessmentStudioData.editor();
+        try {
+            await AssessmentStudioData.saveStudio();
+        } catch (error) {
+            console.warn('[Assessment Studio] Completed lock repair could not sync immediately:', error);
+            try {
+                localStorage.setItem('assessment_studio_data_local', JSON.stringify(studio));
+                localStorage.setItem('assessment_studio_data', JSON.stringify(studio));
+            } catch (storageError) {}
+        }
+        return true;
     },
 
     assessmentOptions() {
@@ -1476,7 +1510,7 @@ const App = {
         const score = s.status === 'completed' ? `${Math.round(Number(s.percent || 0))}%` : '-';
         const activeLock = s.source === 'studio' ? this.getActiveGradingLock(s) : null;
         const lockedByOther = activeLock && !this.isOwnGradingLock(activeLock);
-        const lockBadge = s.source === 'studio' ? this.gradingLockBadge(s) : '';
+        const lockBadge = s.source === 'studio' && String(s.status || '') === 'pending_review' ? this.gradingLockBadge(s) : '';
         const deleteAction = s.source === 'studio'
             ? ` <button class="ast-btn small danger" onclick="App.deleteSubmission('${this.esc(s.id)}')" ${lockedByOther ? 'disabled' : ''}><i class="fas fa-trash"></i></button>`
             : '';
