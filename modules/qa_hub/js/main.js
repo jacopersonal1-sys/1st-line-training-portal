@@ -150,11 +150,13 @@ const App = {
 
     renderQuestionRow(q) {
         const active = this.mode !== 'new' && String(q.id || '') === String(this.selectedId || '') ? ' active' : '';
-        const resources = Array.isArray(q.resources) ? q.resources.length : 0;
+        const resourceList = Array.isArray(q.resources) ? q.resources : [];
+        const resources = resourceList.length;
+        const resourceSearch = resourceList.map(r => [r?.label, r?.name, r?.url, r?.type, r?.mime].filter(Boolean).join(' ')).join(' ');
         return `
-            <button type="button" class="qa-row${active}" data-id="${this.esc(q.id)}" data-search="${this.esc(`${q.question} ${q.answer} ${(q.tags || []).join(' ')}`.toLowerCase())}">
+            <button type="button" class="qa-row${active}" data-id="${this.esc(q.id)}" data-search="${this.esc(`${q.question} ${q.answer} ${(q.tags || []).join(' ')} ${resourceSearch}`.toLowerCase())}">
                 <span>${this.esc(q.question)}</span>
-                <small>${this.esc(q.status)} &middot; ${resources} resource${resources === 1 ? '' : 's'}</small>
+                <small>${this.esc(q.status)} &middot; ${resources ? `${resources} linked material${resources === 1 ? '' : 's'}` : 'no linked material'}</small>
             </button>
         `;
     },
@@ -224,14 +226,22 @@ const App = {
 
     renderResources() {
         if (!this.resources.length) return '<div class="qa-empty compact">No answer resources linked yet.</div>';
-        return this.resources.map((r, i) => `
+        return this.resources.map((r, i) => {
+            const target = r.url || r.dataUrl || '';
+            const label = r.label || r.name || r.url || 'Resource';
+            const meta = [r.type || 'document', r.url ? 'URL attached' : (r.dataUrl ? (r.name || 'file attached') : 'missing link')].filter(Boolean).join(' | ');
+            return `
             <div class="qa-resource">
                 <i class="fas ${this.esc(this.iconFor(r.type))}"></i>
-                <span>${this.esc(r.label || r.name || r.url || 'Resource')}</span>
-                <small>${this.esc(r.type || 'document')}</small>
+                <span class="qa-resource-label">
+                    <strong>${this.esc(label)}</strong>
+                    <small>${this.esc(meta)}</small>
+                </span>
+                ${target ? `<a class="qa-resource-open" href="${this.esc(target)}" target="_blank" rel="noopener"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>` : '<small class="qa-resource-missing">No link</small>'}
                 <button type="button" class="qa-icon-btn" data-resource-index="${i}"><i class="fas fa-xmark"></i></button>
             </div>
-        `).join('');
+        `;
+        }).join('');
     },
 
     renderSubmission(s) {

@@ -603,15 +603,23 @@ const TraineePortalApp = {
     renderQaQuestionRow(question) {
         const resources = Array.isArray(question.resources) ? question.resources : [];
         const resourceLinks = resources.length
-            ? resources.map(resource => `
-                <button class="portal-resource-link" data-action="qa-resource" data-resource-id="${this.esc(resource.id || '')}">
+            ? resources.map((resource, index) => `
+                <button class="portal-resource-link" data-action="qa-resource" data-resource-id="${this.esc(resource.id || '')}" data-resource-index="${index}">
                     <i class="fas ${this.esc(this.iconForQaResource(resource.type))}"></i>
-                    ${this.esc(resource.label || resource.name || 'Open answer')}
+                    <span>${this.esc(resource.label || resource.name || 'Open answer')}</span>
+                    <small>${this.esc(resource.url || resource.name || resource.type || 'linked material')}</small>
                 </button>
             `).join('')
             : '';
         const tags = Array.isArray(question.tags) ? question.tags.join(' ') : String(question.tags || '');
-        const searchable = `${question.question || ''} ${question.answer || ''} ${tags}`.toLowerCase();
+        const resourceSearch = resources.map(resource => [
+            resource?.label,
+            resource?.name,
+            resource?.url,
+            resource?.type,
+            resource?.mime
+        ].filter(Boolean).join(' ')).join(' ');
+        const searchable = `${question.question || ''} ${question.answer || ''} ${tags} ${resourceSearch}`.toLowerCase();
         return `
             <article class="portal-qa-item" data-qa-id="${this.esc(question.id || '')}" data-qa-search="${this.esc(searchable)}">
                 <button class="portal-qa-question" data-action="qa-toggle">
@@ -882,9 +890,13 @@ const TraineePortalApp = {
         const item = button.closest('.portal-qa-item');
         const question = this.getQaQuestionById(item ? item.dataset.qaId : '');
         const resourceId = String(button.dataset.resourceId || '');
-        const resource = question && Array.isArray(question.resources)
+        const resourceIndex = Number(button.dataset.resourceIndex);
+        let resource = question && Array.isArray(question.resources)
             ? question.resources.find(r => String(r.id || '') === resourceId)
             : null;
+        if (!resource && question && Array.isArray(question.resources) && Number.isInteger(resourceIndex)) {
+            resource = question.resources[resourceIndex] || null;
+        }
         if (!resource) {
             this.notify('Answer resource was not found.', 'warning');
             return;

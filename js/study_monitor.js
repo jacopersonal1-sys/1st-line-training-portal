@@ -19,6 +19,9 @@ const StudyMonitor = {
     violationReviewSelection: new Set(),
     cachedWhitelist: [], // Cache for performance
     lastSyncedPayload: null, // OPTIMIZATION: Track last sync to prevent duplicate pushes
+    lastMonitorCloudSyncAt: 0,
+    pendingMonitorCloudSyncTimer: null,
+    monitorCloudSyncMinIntervalMs: 30000,
     pendingViolationPrompt: null,
     currentViolationReportId: null,
     studyEngagementPoller: null,
@@ -686,7 +689,7 @@ const StudyMonitor = {
         // --- DAILY ARCHIVE CHECK ---
         await this.checkDailyReset(); // Await this before starting pollers
 
-        // Start periodic sync (every 10s)
+        // Start periodic sync; local activity is saved immediately, cloud writes are throttled in sync().
         this.syncInterval = setInterval(() => this.sync(), 10000);
         this.track("System: App Loaded");
 
@@ -1046,7 +1049,7 @@ const StudyMonitor = {
                 content: tombstones,
                 updated_at: new Date().toISOString()
             })
-            .select();
+            .select('updated_at');
         if (tombstoneErr) throw tombstoneErr;
         if (tombstoneData && tombstoneData[0]) localStorage.setItem('sync_ts_system_tombstones', tombstoneData[0].updated_at);
 
@@ -1058,7 +1061,7 @@ const StudyMonitor = {
                 content: finalReports,
                 updated_at: new Date().toISOString()
             })
-            .select();
+            .select('updated_at');
         if (saveErr) throw saveErr;
         if (savedData && savedData[0]) localStorage.setItem('sync_ts_violation_reports', savedData[0].updated_at);
         return finalReports;
@@ -1154,7 +1157,7 @@ const StudyMonitor = {
                             <select id="violationContact_${promptId}">${contactOptions}</select>
                         </div>
                     </div>
-                    <button class="btn-danger btn-lg" style="width:100%; margin-top:16px;" onclick="StudyMonitor.submitViolationReason('${promptId}')">
+                    <button class="btn-danger btn-lg" style="width:100%; margin-top:16px;" data-violation-submit="${promptId}" onclick="StudyMonitor.submitViolationReason('${promptId}')">
                         <i class="fas fa-lock"></i> Submit Violation Explanation
                     </button>
                 </div>
@@ -1333,6 +1336,7 @@ const StudyMonitor = {
     submitViolationReason: async function(promptId) {
         const prompt = this.pendingViolationPrompt;
         if (!prompt || prompt.id !== promptId) return;
+        if (prompt.submitting) return;
 
         const reasonEl = document.getElementById(`violationReason_${promptId}`);
         const platformEl = document.getElementById(`violationPlatform_${promptId}`);
@@ -1344,10 +1348,21 @@ const StudyMonitor = {
         if (!reason) return alert("Please provide the reason for this violation.");
         if (!platform || !contact) return alert("Please specify how and who you informed.");
 
+        prompt.submitting = true;
+        const submitButton = document.querySelector(`[data-violation-submit="${promptId}"]`);
+        if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving explanation...';
+        }
+
         const skipEvidence = this.shouldSkipViolationEvidenceCapture(prompt.trigger, prompt.activity);
         if (!prompt.evidence && !skipEvidence) {
-            await this.captureViolationEvidence(promptId);
+            const started = Date.now();
+            while (!prompt.evidence && Date.now() - started < 1500) {
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
         }
+        const rawEvidence = prompt.evidence || {};
 
         const reports = this.getViolationReports();
         const record = {
@@ -1366,22 +1381,64 @@ const StudyMonitor = {
             reviewedAt: null,
             reviewedBy: '',
             adminComment: '',
-            evidence: this.buildEmptyViolationEvidence(prompt.evidence || {})
+            evidence: this.buildEmptyViolationEvidence(rawEvidence),
+            syncStatus: 'queued',
+            syncError: ''
         };
-        record.evidence = skipEvidence
-            ? await this.normalizeSkippedViolationEvidence(record, prompt.evidence || {})
-            : await this.uploadViolationEvidence(record, prompt.evidence || {});
 
         reports.push(record);
         this.writeViolationReports(reports);
         this.currentViolationReportId = record.id;
         this.pendingViolationPrompt = null;
 
-        if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
         if (typeof updateNotifications === 'function') updateNotifications();
 
         document.getElementById('external-app-warning-modal')?.remove();
-        if (typeof showToast === 'function') showToast("Violation explanation submitted for review.", "warning");
+        if (typeof showToast === 'function') showToast("Violation explanation saved. Syncing evidence in the background.", "warning");
+
+        const monitor = this;
+        Promise.resolve().then(async () => {
+            const evidence = skipEvidence
+                ? await monitor.normalizeSkippedViolationEvidence(record, rawEvidence)
+                : await monitor.uploadViolationEvidence(record, rawEvidence);
+            const latest = monitor.getRawViolationReports();
+            const idx = latest.findIndex(item => String(item.id || '') === String(record.id));
+            if (idx >= 0) {
+                latest[idx] = {
+                    ...latest[idx],
+                    evidence,
+                    syncStatus: 'syncing',
+                    syncError: ''
+                };
+                monitor.writeViolationReports(latest);
+            }
+            if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
+            const synced = monitor.getRawViolationReports();
+            const syncedIdx = synced.findIndex(item => String(item.id || '') === String(record.id));
+            if (syncedIdx >= 0) {
+                synced[syncedIdx] = {
+                    ...synced[syncedIdx],
+                    syncStatus: 'synced',
+                    syncedAt: new Date().toISOString(),
+                    syncError: ''
+                };
+                monitor.writeViolationReports(synced);
+            }
+            if (typeof updateNotifications === 'function') updateNotifications();
+        }).catch(error => {
+            console.error('Violation report background sync failed:', error);
+            const latest = monitor.getRawViolationReports();
+            const idx = latest.findIndex(item => String(item.id || '') === String(record.id));
+            if (idx >= 0) {
+                latest[idx] = {
+                    ...latest[idx],
+                    syncStatus: 'sync_failed',
+                    syncError: String(error && error.message || error || 'Cloud sync failed')
+                };
+                monitor.writeViolationReports(latest);
+            }
+            if (typeof showToast === 'function') showToast('Violation saved locally, but cloud sync failed. It will retry with the next sync.', 'error');
+        });
     },
 
     track: function(activityName) {
@@ -1419,7 +1476,7 @@ const StudyMonitor = {
         }
 
         // Instant local save (optional)
-        this.sync(); // Trigger sync check immediately on activity change
+        this.sync(); // Trigger local save immediately; cloud push is throttled.
     },
 
     recordClick: function() {
@@ -1505,8 +1562,21 @@ const StudyMonitor = {
                 
                 // UPDATED: Force a silent background push to ensure Admin sees this.
                 // We use 'false' for safe merge and 'true' for silent mode.
+                const now = Date.now();
+                const elapsedSinceCloudSync = now - (this.lastMonitorCloudSyncAt || 0);
+                if (elapsedSinceCloudSync < this.monitorCloudSyncMinIntervalMs) {
+                    if (!this.pendingMonitorCloudSyncTimer) {
+                        this.pendingMonitorCloudSyncTimer = setTimeout(() => {
+                            this.pendingMonitorCloudSyncTimer = null;
+                            this.sync().catch(error => console.error("Monitor deferred sync failed", error));
+                        }, Math.max(1000, this.monitorCloudSyncMinIntervalMs - elapsedSinceCloudSync));
+                    }
+                    return;
+                }
+
                 if (typeof saveToServer === 'function') {
                     await saveToServer(['monitor_data'], false, true);
+                    this.lastMonitorCloudSyncAt = Date.now();
                     this.lastSyncedPayload = payloadStr; // Update cache on success
                 }
                 
@@ -4183,23 +4253,33 @@ StudyMonitor.deleteSelectedViolationReports = async function() {
     const selected = Array.from(this.violationReviewSelection || []);
     if (selected.length === 0) return;
     if (!confirm(`Delete ${selected.length} selected violation report${selected.length === 1 ? '' : 's'}? This will also remove any attached screenshot evidence.`)) return;
+    const deleteBtn = document.getElementById('vioReviewDeleteSelected');
+    if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+    }
     const selectedSet = new Set(selected);
     const rawReports = this.getRawViolationReports();
     const toDelete = rawReports.filter(report => selectedSet.has(String(report.id || '')));
-    for (const report of toDelete) await this.deleteViolationEvidenceFiles(report, 'report_deleted');
     const reports = rawReports.filter(report => !selectedSet.has(String(report.id || '')));
     this.violationReviewSelection.clear();
-    try {
-        await this.persistViolationReportDeletion(reports, selected);
-    } catch (error) {
-        console.error('Violation report delete sync failed:', error);
-        this.writeViolationReports(reports);
-        if (typeof showToast === 'function') showToast('Deleted locally, but cloud sync failed. Please sync again before refreshing.', 'error');
-        else alert('Deleted locally, but cloud sync failed. Please sync again before refreshing.');
-    }
+    this.addViolationReportTombstones(selected);
+    this.writeViolationReports(reports);
     this.renderViolationReviewRows();
     renderActivityMonitorContent();
     if (typeof updateNotifications === 'function') updateNotifications();
+    if (typeof showToast === 'function') showToast('Violation report deleted locally. Cloud sync is running.', 'warning');
+
+    const monitor = this;
+    Promise.resolve().then(async () => {
+        for (const report of toDelete) await monitor.deleteViolationEvidenceFiles(report, 'report_deleted');
+        await monitor.persistViolationReportDeletion(reports, selected);
+        if (typeof updateNotifications === 'function') updateNotifications();
+    }).catch(error => {
+        console.error('Violation report delete sync failed:', error);
+        if (typeof showToast === 'function') showToast('Deleted locally, but cloud sync failed. Please sync again before refreshing.', 'error');
+        else alert('Deleted locally, but cloud sync failed. Please sync again before refreshing.');
+    });
 };
 
 StudyMonitor.openViolationEvidence = async function(reportId) {
@@ -4216,6 +4296,8 @@ StudyMonitor.openViolationEvidence = async function(reportId) {
         alert('No screenshot evidence is attached to this violation.');
         return;
     }
+    const reportStatus = String(report.status || (report.reviewed ? 'reviewed' : 'pending_review'));
+    const isReviewed = !!report.reviewed || reportStatus === 'reviewed' || reportStatus === 'not_approved';
     const html = `<div class="modal-overlay" id="violationEvidenceModal" style="z-index:10010;">
         <div class="modal-box violation-evidence-workspace">
             <div class="violation-evidence-header">
@@ -4224,6 +4306,10 @@ StudyMonitor.openViolationEvidence = async function(reportId) {
                     <div style="font-size:0.82rem; color:var(--text-muted); margin-top:4px;">Admin-only screenshots for ${this.escapeHtml(report.user || '-')}.</div>
                 </div>
                 <div class="violation-evidence-toolbar">
+                    ${isReviewed ? `<span class="violation-review-meta">${this.escapeHtml(reportStatus === 'not_approved' ? 'Not Approved' : 'Reviewed')}</span>` : `
+                        <button id="violationEvidenceApprove" class="btn-success btn-sm" type="button" title="Approve and open next"><i class="fas fa-check"></i> Approve</button>
+                        <button id="violationEvidenceReject" class="btn-danger btn-sm" type="button" title="Not approved and open next"><i class="fas fa-ban"></i> Not Approved</button>
+                    `}
                     <button id="violationEvidenceZoomOut" class="btn-secondary btn-sm" type="button" title="Zoom out"><i class="fas fa-search-minus"></i></button>
                     <button id="violationEvidenceZoomReset" class="btn-secondary btn-sm" type="button" title="Reset zoom"><i class="fas fa-compress-arrows-alt"></i> <span id="violationEvidenceZoomLabel">100%</span></button>
                     <button id="violationEvidenceZoomIn" class="btn-secondary btn-sm" type="button" title="Zoom in"><i class="fas fa-search-plus"></i></button>
@@ -4237,6 +4323,8 @@ StudyMonitor.openViolationEvidence = async function(reportId) {
     </div>`;
     document.getElementById('violationEvidenceModal')?.remove();
     document.body.insertAdjacentHTML('beforeend', html);
+    document.getElementById('violationEvidenceApprove')?.addEventListener('click', () => this.markViolationReviewedFromEvidence(reportId, 'approved'));
+    document.getElementById('violationEvidenceReject')?.addEventListener('click', () => this.markViolationReviewedFromEvidence(reportId, 'not_approved'));
     document.getElementById('violationEvidenceZoomOut')?.addEventListener('click', () => this.adjustViolationEvidenceZoom(-0.15));
     document.getElementById('violationEvidenceZoomReset')?.addEventListener('click', () => this.resetViolationEvidenceZoom());
     document.getElementById('violationEvidenceZoomIn')?.addEventListener('click', () => this.adjustViolationEvidenceZoom(0.15));
@@ -4279,6 +4367,50 @@ StudyMonitor.openViolationEvidence = async function(reportId) {
     }
 };
 
+StudyMonitor.getNextViolationEvidenceReportId = function(currentId) {
+    const reports = this.getRawViolationReports();
+    const byId = new Map(reports.map(report => [String(report.id || ''), report]));
+    const orderedIds = (Array.isArray(this.visibleViolationReviewIds) && this.visibleViolationReviewIds.length
+        ? this.visibleViolationReviewIds
+        : reports.map(report => String(report.id || '')).filter(Boolean));
+    const foundIndex = orderedIds.findIndex(id => String(id) === String(currentId));
+    const currentIndex = foundIndex >= 0 ? foundIndex : -1;
+    const rotatedIds = orderedIds.slice(currentIndex + 1).concat(currentIndex >= 0 ? orderedIds.slice(0, currentIndex) : []);
+    const hasEvidence = (report) => {
+        const evidence = report?.evidence && typeof report.evidence === 'object' ? report.evidence : {};
+        return (Array.isArray(evidence.files) && evidence.files.length > 0)
+            || (Array.isArray(evidence.screenshots) && evidence.screenshots.length > 0);
+    };
+    return rotatedIds.find(id => {
+        const report = byId.get(String(id));
+        if (!report || String(report.id || '') === String(currentId)) return false;
+        const status = String(report.status || (report.reviewed ? 'reviewed' : 'pending_review'));
+        if (report.reviewed || status !== 'pending_review') return false;
+        if (this.shouldSkipViolationEvidenceCapture(report.trigger, report.activity)) return false;
+        return hasEvidence(report);
+    }) || '';
+};
+
+StudyMonitor.markViolationReviewedFromEvidence = async function(reportId, decision = 'approved') {
+    const buttons = document.querySelectorAll('#violationEvidenceApprove, #violationEvidenceReject');
+    buttons.forEach(button => {
+        button.disabled = true;
+        button.classList.add('disabled');
+    });
+    const nextId = this.getNextViolationEvidenceReportId(reportId);
+    const ok = await this.markViolationReviewed(reportId, decision);
+    if (!ok) {
+        document.getElementById('violationEvidenceModal')?.remove();
+        return;
+    }
+    if (nextId) {
+        await this.openViolationEvidence(nextId);
+        return;
+    }
+    document.getElementById('violationEvidenceModal')?.remove();
+    if (typeof showToast === 'function') showToast('No more pending screenshot evidence in this view.', 'success');
+};
+
 StudyMonitor.applyViolationEvidenceZoom = function(zoom) {
     const body = document.getElementById('violationEvidenceBody');
     if (!body) return;
@@ -4302,17 +4434,17 @@ StudyMonitor.resetViolationEvidenceZoom = function() {
     this.applyViolationEvidenceZoom(1);
 };
 
-StudyMonitor.markViolationReviewed = async function(reportId, decision = 'approved') {
+StudyMonitor.markViolationReviewed = async function(reportId, decision = 'approved', options = {}) {
     const reports = this.getRawViolationReports();
     const idx = reports.findIndex(r => String(r.id || '') === String(reportId || ''));
-    if (idx < 0) return;
+    if (idx < 0) return false;
 
     const approved = decision !== 'not_approved';
+    const originalReport = reports[idx];
     const nextEvidence = reports[idx].evidence && typeof reports[idx].evidence === 'object'
         ? { ...reports[idx].evidence }
         : {};
     if (approved && ((Array.isArray(nextEvidence.screenshots) && nextEvidence.screenshots.length > 0) || (Array.isArray(nextEvidence.files) && nextEvidence.files.length > 0))) {
-        await this.deleteViolationEvidenceFiles(reports[idx], 'approved_by_admin');
         nextEvidence.deletedAt = new Date().toISOString();
         nextEvidence.deletedReason = 'approved_by_admin';
         nextEvidence.deletedScreenshotCount = (nextEvidence.screenshots || []).length + (nextEvidence.files || []).length;
@@ -4328,13 +4460,47 @@ StudyMonitor.markViolationReviewed = async function(reportId, decision = 'approv
         decision: approved ? 'approved' : 'not_approved',
         reviewedAt: new Date().toISOString(),
         reviewedBy: CURRENT_USER?.user || 'admin',
-        evidence: nextEvidence
+        evidence: nextEvidence,
+        reviewSyncStatus: 'queued',
+        reviewSyncError: ''
     };
     this.writeViolationReports(reports);
-    if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
     this.renderViolationReviewRows();
     renderActivityMonitorContent();
     if (typeof updateNotifications === 'function') updateNotifications();
+
+    const monitor = this;
+    Promise.resolve().then(async () => {
+        if (approved) await monitor.deleteViolationEvidenceFiles(originalReport, 'approved_by_admin');
+        if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
+        const latest = monitor.getRawViolationReports();
+        const latestIdx = latest.findIndex(r => String(r.id || '') === String(reportId || ''));
+        if (latestIdx >= 0) {
+            latest[latestIdx] = {
+                ...latest[latestIdx],
+                reviewSyncStatus: 'synced',
+                reviewSyncedAt: new Date().toISOString(),
+                reviewSyncError: ''
+            };
+            monitor.writeViolationReports(latest);
+        }
+        if (typeof updateNotifications === 'function') updateNotifications();
+    }).catch(error => {
+        console.error('Violation review sync failed:', error);
+        const latest = monitor.getRawViolationReports();
+        const latestIdx = latest.findIndex(r => String(r.id || '') === String(reportId || ''));
+        if (latestIdx >= 0) {
+            latest[latestIdx] = {
+                ...latest[latestIdx],
+                reviewSyncStatus: 'sync_failed',
+                reviewSyncError: String(error && error.message || error || 'Cloud sync failed')
+            };
+            monitor.writeViolationReports(latest);
+        }
+        if (typeof showToast === 'function') showToast('Review saved locally, but cloud sync failed. Please sync again before refreshing.', 'error');
+    });
+
+    return true;
 };
 
 StudyMonitor.archiveLog = async function() {

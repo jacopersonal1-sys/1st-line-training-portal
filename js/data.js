@@ -254,6 +254,25 @@ const TRAINEE_DEFAULT_SAVE_KEYS = new Set([
     'nps_responses'
 ]);
 
+const APP_DOCUMENT_FETCH_PRIORITY = [
+    'system_config',
+    'revokedUsers',
+    'accessControl',
+    'sso_login_config',
+    'rosters',
+    'schedules',
+    'liveSchedules',
+    'tests',
+    'assessments',
+    'system_tombstones',
+    'violation_reports',
+    'qa_data',
+    'assessment_studio_data',
+    'content_studio_data'
+];
+
+const APP_DOCUMENT_FETCH_BATCH_SIZE = 4;
+
 const TRAINEE_SKIP_ROW_TABLES = new Set([
     'users',
     'audit_logs',
@@ -332,7 +351,7 @@ let SAVE_QUEUE = new Set();
 const EXPLICIT_SAVE_KEYS = new Set();
 let SAVE_TIMEOUT = null;
 window._SAVE_QUEUE_NOT_SILENT = false;
-const SAVE_DEBOUNCE_MS = 500; // 500ms (High-Speed Server Authority)
+const SAVE_DEBOUNCE_MS = 1500; // Keep bursts of local edits from becoming DB write storms.
 
 // --- NEW: INCOMING DATA QUEUE (STABILITY) ---
 let INCOMING_DATA_QUEUE = [];
@@ -803,25 +822,51 @@ async function loadFromServer(silent = false) {
         }
 
         // Fetch Stale Blobs
-        pullProgressTotal += keysToFetch.length;
+        const orderedKeysToFetch = keysToFetch
+            .slice()
+            .sort((a, b) => {
+                const aLocal = IS_DEMO_MODE ? a.replace(/^demo_/, '') : a;
+                const bLocal = IS_DEMO_MODE ? b.replace(/^demo_/, '') : b;
+                const aIndex = APP_DOCUMENT_FETCH_PRIORITY.indexOf(aLocal);
+                const bIndex = APP_DOCUMENT_FETCH_PRIORITY.indexOf(bLocal);
+                const aRank = aIndex === -1 ? APP_DOCUMENT_FETCH_PRIORITY.length : aIndex;
+                const bRank = bIndex === -1 ? APP_DOCUMENT_FETCH_PRIORITY.length : bIndex;
+                if (aRank !== bRank) return aRank - bRank;
+                return aLocal.localeCompare(bLocal);
+            });
+        pullProgressTotal += orderedKeysToFetch.length;
         updateSyncDiagnostics({
-            phase: keysToFetch.length > 0 ? 'Downloading document keys' : 'No blob changes',
-            item: keysToFetch.length > 0 ? keysToFetch.join(', ') : 'No stale blob docs',
+            phase: orderedKeysToFetch.length > 0 ? 'Downloading document keys' : 'No blob changes',
+            item: orderedKeysToFetch.length > 0 ? orderedKeysToFetch.join(', ') : 'No stale blob docs',
             progressDone: pullProgressDone,
             progressTotal: pullProgressTotal,
             bytesDone: pullBytesDone,
             bytesTotal: pullBytesTotal
         });
 
-        if (keysToFetch.length > 0) {
-            if(!silent) console.log(`Syncing updates for: ${keysToFetch.join(', ')}`);
-            
-            const { data: docs, error: fetchErr } = await window.supabaseClient
-                .from('app_documents')
-                .select('key, content, updated_at')
-                .in('key', keysToFetch);
-            
-            if (fetchErr) throw fetchErr;
+        if (orderedKeysToFetch.length > 0) {
+            if(!silent) console.log(`Syncing updates for: ${orderedKeysToFetch.join(', ')}`);
+
+            const docs = [];
+            for (let i = 0; i < orderedKeysToFetch.length; i += APP_DOCUMENT_FETCH_BATCH_SIZE) {
+                const keyBatch = orderedKeysToFetch.slice(i, i + APP_DOCUMENT_FETCH_BATCH_SIZE);
+                updateSyncDiagnostics({
+                    phase: 'Downloading document batch',
+                    item: keyBatch.join(', '),
+                    progressDone: pullProgressDone,
+                    progressTotal: pullProgressTotal,
+                    bytesDone: pullBytesDone,
+                    bytesTotal: pullBytesTotal
+                });
+
+                const { data: batchDocs, error: fetchErr } = await window.supabaseClient
+                    .from('app_documents')
+                    .select('key, content, updated_at')
+                    .in('key', keyBatch);
+
+                if (fetchErr) throw fetchErr;
+                docs.push(...(Array.isArray(batchDocs) ? batchDocs : []));
+            }
 
             docs.sort((a, b) => {
                 const aKey = IS_DEMO_MODE ? a.key.replace('demo_', '') : a.key;
@@ -2816,7 +2861,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                         content: finalContent,
                         updated_at: new Date().toISOString()
                     })
-                    .select();
+                    .select('updated_at');
 
                 if (saveErr) throw saveErr;
                 
@@ -4501,7 +4546,7 @@ function isHighPriorityIncomingPayload(item) {
     if (item.type === 'app_documents') {
         const rawKey = String(item.payload?.new?.key || '').trim();
         const key = IS_DEMO_MODE ? rawKey.replace(/^demo_/, '') : rawKey;
-        return ['users', 'rosters', 'schedules', 'tests', 'liveSchedules', 'assessment_studio_data', 'content_studio_data', 'qa_data', 'system_config'].includes(key);
+        return isRealtimePriorityAppDocumentKey(key);
     }
 
     if (item.type === 'generic_rows') {
@@ -4510,6 +4555,99 @@ function isHighPriorityIncomingPayload(item) {
     }
 
     return ['monitor', 'attendance', 'bookings'].includes(item.type);
+}
+
+function isRealtimePriorityAppDocumentKey(key) {
+    return [
+        'users',
+        'rosters',
+        'schedules',
+        'tests',
+        'liveSchedules',
+        'assessment_studio_data',
+        'content_studio_data',
+        'qa_data',
+        'system_config'
+    ].includes(String(key || '').trim());
+}
+
+function isRealtimeImmediateAppDocumentKey(key) {
+    return [
+        'schedules',
+        'liveSchedules',
+        'tests',
+        'rosters',
+        'assessment_studio_data',
+        'content_studio_data',
+        'qa_data',
+        'system_config'
+    ].includes(String(key || '').trim());
+}
+
+function applyAppDocumentRealtimePayload(p) {
+    if (!p || !p.new || !['UPDATE', 'INSERT'].includes(p.eventType)) return '';
+    const rawKey = String(p.new.key || '').trim();
+    if (!rawKey) return '';
+
+    // ISOLATION BARRIER
+    if (IS_DEMO_MODE && !rawKey.startsWith('demo_')) return '';
+    if (!IS_DEMO_MODE && rawKey.startsWith('demo_')) return '';
+
+    const key = IS_DEMO_MODE ? rawKey.replace('demo_', '') : rawKey;
+    if (ROW_MAP[key]) return '';
+    const content = p.new.content;
+
+    // Trainee Data Minimization (Security)
+    const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
+    if (isTrainee && !TRAINEE_ALLOWED_BLOB_KEYS.has(key)) return '';
+    if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(key)) return '';
+
+    const localVal = safeLocalParse(key, null);
+    const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
+
+    if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(key)) {
+        const merged = performSmartMerge({[key]: content}, {[key]: localVal}, 'server_wins');
+        const mergedContent = key === 'violation_reports'
+            ? sanitizeViolationReportsForSync(merged[key])
+            : merged[key];
+        if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) {
+            writeServerAuthorityBlobToLocal(key, mergedContent, 'realtime');
+        } else {
+            localStorage.setItem(key, JSON.stringify(mergedContent));
+        }
+    } else {
+        const docContent = key === 'violation_reports'
+            ? sanitizeViolationReportsForSync(content)
+            : content;
+        if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) {
+            writeServerAuthorityBlobToLocal(key, docContent, 'realtime');
+        } else {
+            const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
+            localStorage.setItem(key, serialized);
+        }
+    }
+    if (key === 'system_tombstones' || key === 'violation_reports') {
+        pruneLocalViolationReportsByTombstones();
+    }
+    if (p.new.updated_at) localStorage.setItem('sync_ts_' + key, p.new.updated_at);
+    emitDataChange(key, 'realtime');
+    if (key === 'assessment_studio_data') {
+        if (document.getElementById('my-tests')?.classList.contains('active') && typeof loadTraineeTests === 'function') loadTraineeTests();
+        if (document.getElementById('assessment-studio-trainee')?.classList.contains('active') && typeof renderAssessmentStudioTraineeRuntime === 'function') renderAssessmentStudioTraineeRuntime();
+    }
+    if (key === 'system_config') applySystemConfig();
+    return key;
+}
+
+function refreshAppDocumentDependentUI(changedKeys = []) {
+    if (!Array.isArray(changedKeys) || changedKeys.length === 0) return;
+
+    // UI PROTECTION: Block schedule list re-renders if an Admin is actively editing a schedule item.
+    // This prevents array index shifting from corrupting data upon save.
+    const isEditingSchedule = document.getElementById('scheduleModal') && !document.getElementById('scheduleModal').classList.contains('hidden');
+    if (typeof refreshAllDropdowns === 'function' && !isEditingSchedule) {
+        refreshAllDropdowns();
+    }
 }
 
 // --- NEW: QUEUE PROCESSOR ---
@@ -4659,66 +4797,8 @@ function processIncomingDataQueue() {
 
         // 4. Process App Documents (Settings, Rosters, Users)
         if (batches.app_documents.length > 0) {
-            batches.app_documents.forEach(p => {
-                if (p.eventType === 'UPDATE' || p.eventType === 'INSERT') {
-                    const rawKey = p.new.key;
-                    
-                    // ISOLATION BARRIER
-                    if (IS_DEMO_MODE && !rawKey.startsWith('demo_')) return;
-                    if (!IS_DEMO_MODE && rawKey.startsWith('demo_')) return;
-                    
-                    const key = IS_DEMO_MODE ? rawKey.replace('demo_', '') : rawKey;
-                    if (ROW_MAP[key]) return;
-                    const content = p.new.content;
-                    
-                    // Trainee Data Minimization (Security)
-                    const isTrainee = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
-                    if (isTrainee && !TRAINEE_ALLOWED_BLOB_KEYS.has(key)) return;
-                    if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(key)) return;
-
-                    const localVal = safeLocalParse(key, null);
-                    const noMergeKeys = ['rosters', 'schedules', 'tests', 'vettingTopics', 'liveSchedules', 'assessments'];
-                    
-                    if (localVal && (Array.isArray(localVal) || typeof localVal === 'object') && !noMergeKeys.includes(key)) {
-                        const merged = performSmartMerge({[key]: content}, {[key]: localVal}, 'server_wins');
-                        const mergedContent = key === 'violation_reports'
-                            ? sanitizeViolationReportsForSync(merged[key])
-                            : merged[key];
-                        if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) {
-                            writeServerAuthorityBlobToLocal(key, mergedContent, 'realtime');
-                        } else {
-                            localStorage.setItem(key, JSON.stringify(mergedContent));
-                        }
-                    } else {
-                        const docContent = key === 'violation_reports'
-                            ? sanitizeViolationReportsForSync(content)
-                            : content;
-                        if (SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) {
-                            writeServerAuthorityBlobToLocal(key, docContent, 'realtime');
-                        } else {
-                            const serialized = (typeof docContent === 'undefined') ? JSON.stringify(null) : JSON.stringify(docContent);
-                            localStorage.setItem(key, serialized);
-                        }
-                    }
-                    if (key === 'system_tombstones' || key === 'violation_reports') {
-                        pruneLocalViolationReportsByTombstones();
-                    }
-                    if (p.new.updated_at) localStorage.setItem('sync_ts_' + key, p.new.updated_at);
-                    emitDataChange(key, 'realtime');
-                    if (key === 'assessment_studio_data') {
-                        if (document.getElementById('my-tests')?.classList.contains('active') && typeof loadTraineeTests === 'function') loadTraineeTests();
-                        if (document.getElementById('assessment-studio-trainee')?.classList.contains('active') && typeof renderAssessmentStudioTraineeRuntime === 'function') renderAssessmentStudioTraineeRuntime();
-                    }
-                    if (key === 'system_config') applySystemConfig();
-                }
-            });
-            
-            // UI PROTECTION: Block schedule list re-renders if an Admin is actively editing a schedule item.
-            // This prevents array index shifting from corrupting data upon save.
-            const isEditingSchedule = document.getElementById('scheduleModal') && !document.getElementById('scheduleModal').classList.contains('hidden');
-            if (typeof refreshAllDropdowns === 'function' && !isEditingSchedule) {
-                refreshAllDropdowns();
-            }
+            const changedKeys = batches.app_documents.map(p => applyAppDocumentRealtimePayload(p)).filter(Boolean);
+            refreshAppDocumentDependentUI(changedKeys);
         }
 
         // 5. Process Generic Rows (Records, Submissions, Logs)
@@ -5275,12 +5355,16 @@ function handleSessionRealtime(payload) {
 }
 
 function handleAppDocumentRealtime(payload) {
+    const rawKey = String(payload?.new?.key || payload?.old?.key || '').trim();
+    const localKey = IS_DEMO_MODE ? rawKey.replace(/^demo_/, '') : rawKey;
     if (isTraineeRuntime()) {
-        const rawKey = String(payload?.new?.key || payload?.old?.key || '').trim();
-        if (rawKey) {
-            const localKey = IS_DEMO_MODE ? rawKey.replace(/^demo_/, '') : rawKey;
-            if (!TRAINEE_ALLOWED_BLOB_KEYS.has(localKey)) return;
-        }
+        if (rawKey && !TRAINEE_ALLOWED_BLOB_KEYS.has(localKey)) return;
+    }
+    if (isRealtimeImmediateAppDocumentKey(localKey)) {
+        const changedKey = applyAppDocumentRealtimePayload(payload);
+        refreshAppDocumentDependentUI(changedKey ? [changedKey] : []);
+        updateQueueIndicator();
+        return;
     }
     INCOMING_DATA_QUEUE.push({ type: 'app_documents', payload });
     updateQueueIndicator();

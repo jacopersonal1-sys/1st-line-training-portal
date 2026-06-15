@@ -97,6 +97,14 @@ function astTraineeNormalize(value) {
     return String(value || '').trim().toLowerCase().replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function astTraineeNormalizeFormattedText(value) {
+    return String(value || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/[ \t]+$/gm, '')
+        .replace(/^\n+|\n+$/g, '');
+}
+
 function astTraineeIdentity(value) {
     return astTraineeNormalize(value).replace(/\s+/g, '');
 }
@@ -123,9 +131,9 @@ function astTraineeNormalizeQuestion(raw) {
         assessment: String(q.assessment || '').trim(),
         phase: String(q.phase || 'Assessment').trim(),
         type: String(q.type || 'multiple_choice').trim(),
-        text: String(q.text || q.question || '').trim(),
+        text: astTraineeNormalizeFormattedText(q.text || q.question || ''),
         points: Number.isFinite(points) && points > 0 ? Math.round(points * 10) / 10 : 1,
-        suggestedAnswer: String(q.suggestedAnswer || q.suggested_answer || '').trim(),
+        suggestedAnswer: astTraineeNormalizeFormattedText(q.suggestedAnswer || q.suggested_answer || ''),
         grouping: String(q.grouping || q.group || '').trim(),
         options: Array.isArray(q.options) ? q.options.map(v => String(v || '').trim()).filter(Boolean) : [],
         pairs: Array.isArray(q.pairs) ? q.pairs.map(p => ({ left: String(p.left || '').trim(), right: String(p.right || '').trim() })).filter(p => p.left || p.right) : [],
@@ -364,6 +372,12 @@ function astTraineePickSubmission(existing, incoming) {
     return String(incomingDate) >= String(existingDate) ? incoming : existing;
 }
 
+function astTraineeCompareAssignmentPriority(a, b) {
+    const rankDiff = astTraineeSubmissionStatusRank(b && b.status) - astTraineeSubmissionStatusRank(a && a.status);
+    if (rankDiff) return rankDiff;
+    return astTraineeSubmissionTime(b) - astTraineeSubmissionTime(a);
+}
+
 function astTraineeMergeSubmissions(remoteItems, localItems) {
     const map = new Map();
     (Array.isArray(remoteItems) ? remoteItems : []).forEach(item => {
@@ -392,7 +406,12 @@ function astTraineeMergeServerStoreWithLocalDrafts(remoteStore, localStore) {
 
             const localUpdatedAt = Date.parse(item.updatedAt || item.submittedAt || item.generatedAt || 0) || 0;
             const isMine = currentUserToken && astTraineeIdentity(item.trainee) === currentUserToken;
-            return isMine && localUpdatedAt > remoteUpdatedAt;
+            const status = String(item.status || '').trim().toLowerCase();
+            const hasAnswers = item.answers && typeof item.answers === 'object' && Object.keys(item.answers).length > 0;
+            const isActiveRuntimeSubmission = AST_ACTIVE_SUBMISSION_ID && String(item.id || '') === String(AST_ACTIVE_SUBMISSION_ID);
+            const isSubmittedOrGraded = ['pending_review', 'completed'].includes(status);
+            const isWorkingDraft = ['assigned', 'in_progress'].includes(status) && (hasAnswers || isActiveRuntimeSubmission);
+            return isMine && (isSubmittedOrGraded || isWorkingDraft || localUpdatedAt > remoteUpdatedAt);
         });
 
     return astTraineeNormalizeStore({
@@ -731,11 +750,13 @@ async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, sched
     if (!trainee) throw new Error('Assessment Studio could not identify the current trainee.');
 
     const store = astTraineeGetStore();
-    const existing = store.submissions.find(s =>
+    const existing = store.submissions
+        .filter(s =>
         String(s.generatorId || '') === cleanGeneratorId &&
         astTraineeIdentity(s.trainee) === astTraineeIdentity(trainee) &&
         String(s.status || '') !== 'archived'
-    );
+        )
+        .sort(astTraineeCompareAssignmentPriority)[0];
     if (existing) {
         const existingErrors = astTraineeSubmissionSafetyErrors(existing);
         if (existingErrors.length) throw new Error(existingErrors[0]);
@@ -771,8 +792,16 @@ function getAssessmentStudioAssignmentsForCurrentUser() {
     const trainee = astTraineeCurrentUserName();
     if (!trainee) return [];
     verifyLocalAssessmentStudioSubmittedUploads({ silent: true });
-    return astTraineeGetStore().submissions
+    const byGenerator = new Map();
+    astTraineeGetStore().submissions
         .filter(s => astTraineeIdentity(s.trainee) === astTraineeIdentity(trainee) && String(s.status || '') !== 'archived')
+        .forEach(sub => {
+            const generatorKey = String(sub.generatorId || sub.id || '').trim();
+            const key = generatorKey || String(sub.id || '');
+            const current = byGenerator.get(key);
+            if (!current || astTraineeCompareAssignmentPriority(sub, current) < 0) byGenerator.set(key, sub);
+        });
+    return Array.from(byGenerator.values())
         .sort((a, b) => String(b.updatedAt || b.generatedAt || '').localeCompare(String(a.updatedAt || a.generatedAt || '')));
 }
 
@@ -1033,7 +1062,7 @@ function renderAssessmentStudioTraineeQuestion(sub, q, idx, locked) {
             <div class="ast-trainee-question-head">
                 <div>
                     <span>Question ${idx + 1}</span>
-                    <h3>${astTraineeEsc(q.text)}</h3>
+                    <h3 class="ast-trainee-question-text">${astTraineeEsc(q.text)}</h3>
                 </div>
                 <div class="ast-trainee-question-meta">${astTraineeEsc(astTraineeTypeLabel(q.type))} | ${astTraineeEsc(q.points)} pts</div>
             </div>
@@ -1257,8 +1286,14 @@ async function submitAssessmentStudioTest() {
             state: 'failed',
             message: error.message || 'Assessment submission could not be confirmed on Supabase.'
         });
-        if (typeof showToast === 'function') showToast(error.message || 'Assessment submission could not be confirmed.', 'error');
+        localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(store));
+        localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(astTraineeMergeServerStoreWithLocalDrafts(astTraineeGetStore(), store)));
+        AST_ACTIVE_SUBMISSION_ID = '';
+        astTraineeClearActiveSnapshot();
+        if (typeof showToast === 'function') showToast('Assessment submitted locally, but upload failed. Use Re-upload from My Assessments.', 'error');
         else alert(error.message || 'Assessment submission could not be confirmed.');
+        if (typeof loadTraineeTests === 'function') loadTraineeTests();
+        if (typeof showTab === 'function') showTab('my-tests');
         return;
     }
     if (typeof showToast === 'function') showToast('Assessment submitted to the grading queue.', 'success');

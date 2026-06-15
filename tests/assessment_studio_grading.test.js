@@ -102,6 +102,21 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(studio.submissions[0].testSnapshot.questions).toHaveLength(1);
     });
 
+    test('Assessment Studio keeps formatted question and suggested answer text', () => {
+        const formattedQuestion = '\n\nReview the following:\n\n  - First bullet\n  - Second bullet\n\nThen answer below.\n';
+        const formattedSuggested = 'Expected points:\n  1. Check details\n  2. Confirm outcome\n';
+        const question = Data.normalizeQuestion({
+            assessment: 'Course 2',
+            type: 'text',
+            text: formattedQuestion,
+            suggestedAnswer: formattedSuggested,
+            points: 2
+        });
+
+        expect(question.text).toBe('Review the following:\n\n  - First bullet\n  - Second bullet\n\nThen answer below.');
+        expect(question.suggestedAnswer).toBe('Expected points:\n  1. Check details\n  2. Confirm outcome');
+    });
+
     test('pending grading uses fresh auto scores for complex and choice questions', () => {
         const questions = [
             { type: 'multiple_choice', points: 2, options: ['A', 'B', 'C'], correct: 1 },
@@ -282,6 +297,67 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(html).not.toContain('ast-row-lock');
         expect(html).toContain('completed');
         expect(html).toContain('82%');
+    });
+
+    test('own abandoned grading locks are cleared while preserving the active target lock', async () => {
+        App.markerSessionId = 'session_a';
+        const ownSession = App.markerSessionKey();
+        global.AssessmentStudioData.state = {
+            studio: {
+                submissions: [
+                    {
+                        id: 'keep',
+                        trainee: 'Alice',
+                        assessment: 'Course 2',
+                        status: 'pending_review',
+                        gradingLock: { marker: 'Admin', markerSession: ownSession, expiresAt: new Date(Date.now() + 60000).toISOString() }
+                    },
+                    {
+                        id: 'clear',
+                        trainee: 'Bob',
+                        assessment: 'Course 2',
+                        status: 'pending_review',
+                        gradingLock: { marker: 'Admin', markerSession: ownSession, expiresAt: new Date(Date.now() + 60000).toISOString() }
+                    },
+                    {
+                        id: 'other',
+                        trainee: 'Charlie',
+                        assessment: 'Course 2',
+                        status: 'pending_review',
+                        gradingLock: { marker: 'Other Admin', markerSession: 'Other::session', expiresAt: new Date(Date.now() + 60000).toISOString() }
+                    }
+                ]
+            }
+        };
+
+        await App.repairOwnAbandonedGradingLocks({ keepId: 'keep' });
+
+        const rows = global.AssessmentStudioData.state.studio.submissions;
+        expect(rows.find(item => item.id === 'keep').gradingLock).toBeTruthy();
+        expect(rows.find(item => item.id === 'clear').gradingLock).toBeNull();
+        expect(rows.find(item => item.id === 'other').gradingLock).toBeTruthy();
+        expect(global.AssessmentStudioData.saveStudio).toHaveBeenCalled();
+    });
+
+    test('failed grading lock claim rolls back local lock instead of showing a false owner badge', async () => {
+        App.markerSessionId = 'session_fail';
+        global.AssessmentStudioData.state = {
+            studio: {
+                submissions: [{
+                    id: 's_lock_fail',
+                    trainee: 'Alice',
+                    assessment: 'Course 2',
+                    status: 'pending_review',
+                    gradingLock: null
+                }]
+            }
+        };
+        global.AssessmentStudioData.saveStudio = jest.fn().mockRejectedValue(new Error('network timeout'));
+
+        const claimed = await App.claimSubmissionLock('s_lock_fail');
+
+        expect(claimed).toBe(false);
+        expect(global.AssessmentStudioData.state.studio.submissions[0].gradingLock).toBeNull();
     });
 
     test('completed queue rows show retry action when grade upload failed', () => {

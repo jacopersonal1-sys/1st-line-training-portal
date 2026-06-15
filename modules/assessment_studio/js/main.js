@@ -23,6 +23,7 @@ const App = {
         try {
             await AssessmentStudioData.load();
             await this.repairCompletedSubmissionLocks();
+            await this.repairOwnAbandonedGradingLocks();
             await this.verifyCompletedGradeUploads({ silent: true });
             this.render();
         } catch (error) {
@@ -48,6 +49,10 @@ const App = {
     },
 
     toast(message, type = 'ok') {
+        if (typeof document === 'undefined' || typeof document.createElement !== 'function' || !document.body) {
+            console.log(`[Assessment Studio:${type}] ${message}`);
+            return;
+        }
         const el = document.createElement('div');
         el.className = `ast-toast ${type}`;
         el.textContent = message;
@@ -76,6 +81,7 @@ const App = {
         }
         await AssessmentStudioData.load();
         await this.repairCompletedSubmissionLocks();
+        await this.repairOwnAbandonedGradingLocks();
         await this.verifyCompletedGradeUploads({ silent: true });
         this.render();
     },
@@ -238,6 +244,38 @@ const App = {
             await AssessmentStudioData.saveStudio();
         } catch (error) {
             console.warn('[Assessment Studio] Completed lock repair could not sync immediately:', error);
+            try {
+                localStorage.setItem('assessment_studio_data_local', JSON.stringify(studio));
+                localStorage.setItem('assessment_studio_data', JSON.stringify(studio));
+            } catch (storageError) {}
+        }
+        return true;
+    },
+
+    async repairOwnAbandonedGradingLocks({ keepId = '' } = {}) {
+        const studio = this.state().studio;
+        if (!studio || !Array.isArray(studio.submissions)) return false;
+        const keep = String(keepId || '').trim();
+        let changed = false;
+        const now = new Date().toISOString();
+        studio.submissions.forEach(sub => {
+            if (!sub || typeof sub !== 'object') return;
+            if (String(sub.status || '').toLowerCase() !== 'pending_review') return;
+            if (keep && String(sub.id || '') === keep) return;
+            const activeLock = this.getActiveGradingLock(sub);
+            if (!activeLock || !this.isOwnGradingLock(activeLock)) return;
+            sub.gradingLock = null;
+            sub.updatedAt = now;
+            sub.updatedBy = this.markerName();
+            changed = true;
+        });
+        if (!changed) return false;
+        studio.updatedAt = now;
+        studio.updatedBy = this.markerName();
+        try {
+            await AssessmentStudioData.saveStudio();
+        } catch (error) {
+            console.warn('[Assessment Studio] Own abandoned lock cleanup could not sync immediately:', error);
             try {
                 localStorage.setItem('assessment_studio_data_local', JSON.stringify(studio));
                 localStorage.setItem('assessment_studio_data', JSON.stringify(studio));
@@ -613,7 +651,7 @@ const App = {
                             <button class="ast-btn primary" type="button" onclick="App.saveNewQuestionTag()"><i class="fas fa-save"></i> Save Tag</button>
                             <button class="ast-btn ghost" type="button" onclick="App.cancelNewQuestionTag()"><i class="fas fa-xmark"></i> Cancel</button>
                         </div>
-                        <label>Question Text<textarea id="questionText" rows="3" placeholder="Question shown to trainee">${this.esc(item.text || '')}</textarea></label>
+                        <label>Question Text<textarea id="questionText" rows="7" placeholder="Question shown to trainee. Bullets, spacing, and line breaks are preserved.">${this.esc(item.text || '')}</textarea></label>
                         <div id="typeHelp">${this.renderTypeHelpHtml(item)}</div>
                         <div class="ast-actions ast-modal-actions">
                             <button class="ast-btn primary" type="submit"><i class="fas fa-save"></i> Save Question</button>
@@ -1070,7 +1108,7 @@ const App = {
             id,
             assessment: document.getElementById('questionAssessment').value.trim(),
             type,
-            text: document.getElementById('questionText').value.trim(),
+            text: AssessmentStudioData.normalizeFormattedText(document.getElementById('questionText')?.value || ''),
             points: Number(document.getElementById('questionPoints').value || 1),
             grouping,
             tags: tag ? [tag] : [],
@@ -1103,7 +1141,7 @@ const App = {
                 ? validRows.map((row, idx) => row.correct ? idx : null).filter(value => value !== null)
                 : validRows.findIndex(row => row.correct);
         } else {
-            question.suggestedAnswer = String(document.getElementById('questionSuggestedAnswer')?.value || '').trim();
+            question.suggestedAnswer = AssessmentStudioData.normalizeFormattedText(document.getElementById('questionSuggestedAnswer')?.value || '');
         }
 
         const questionErrors = this.questionSafetyErrors(question);
@@ -1633,6 +1671,7 @@ const App = {
     },
 
     async claimSubmissionLock(id) {
+        await this.repairOwnAbandonedGradingLocks({ keepId: id });
         const sub = this.state().studio.submissions.find(s => s.id === id);
         if (!sub) return false;
         if (String(sub.status || '') !== 'pending_review') return true;
@@ -1651,8 +1690,20 @@ const App = {
         };
         sub.updatedAt = now.toISOString();
         sub.updatedBy = this.markerName();
-        await AssessmentStudioData.saveStudio();
-        return true;
+        try {
+            await AssessmentStudioData.saveStudio();
+            return true;
+        } catch (error) {
+            sub.gradingLock = null;
+            sub.updatedAt = new Date().toISOString();
+            sub.updatedBy = this.markerName();
+            try {
+                localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
+                localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
+            } catch (storageError) {}
+            this.handleError(error, 'Could not reserve this test for grading. Please retry after sync catches up.');
+            return false;
+        }
     },
 
     async releaseSubmissionLock(id) {
@@ -1663,7 +1714,15 @@ const App = {
         sub.gradingLock = null;
         sub.updatedAt = new Date().toISOString();
         sub.updatedBy = this.markerName();
-        await AssessmentStudioData.saveStudio();
+        try {
+            await AssessmentStudioData.saveStudio();
+        } catch (error) {
+            console.warn('[Assessment Studio] Grading lock release could not sync immediately:', error);
+            try {
+                localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
+                localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
+            } catch (storageError) {}
+        }
     },
 
     async closeGrader() {
@@ -1729,6 +1788,12 @@ const App = {
     },
 
     async selectSubmission(id) {
+        if (typeof AssessmentStudioData.loadStudioOnly === 'function') {
+            await AssessmentStudioData.loadStudioOnly();
+        } else {
+            await AssessmentStudioData.load();
+        }
+        await this.repairCompletedSubmissionLocks();
         const sub = this.state().studio.submissions.find(s => s.id === id);
         const safetyErrors = this.submissionSafetyErrors(sub);
         if (safetyErrors.length) {
@@ -1740,9 +1805,17 @@ const App = {
             this.render();
             return;
         }
-        this.selectedSubmissionId = id;
-        this.view = 'grading';
-        this.render();
+        try {
+            this.selectedSubmissionId = id;
+            this.view = 'grading';
+            this.render();
+        } catch (error) {
+            await this.releaseSubmissionLock(id);
+            this.selectedSubmissionId = null;
+            this.view = 'grading';
+            this.handleError(error, 'Could not open the grading workspace.');
+            this.render();
+        }
     },
 
     async deleteSubmission(id) {
@@ -1929,7 +2002,7 @@ const App = {
         return `
             <article class="ast-grade-question">
                 <div class="ast-grade-top">
-                    <strong>Q${idx + 1}. ${this.esc(q.text)}</strong>
+                    <div class="ast-grade-question-text"><strong>Q${idx + 1}.</strong><span>${this.esc(q.text)}</span></div>
                     <span>${this.esc(this.typeLabel(q.type))} | ${auto.manual ? 'Manual' : `Auto ${this.esc(auto.score)}/${this.esc(auto.max)}`} | Max ${this.esc(q.points)}</span>
                 </div>
                 ${q.type === 'text' && q.suggestedAnswer ? `<div class="ast-suggested-answer"><strong>Suggested Answer</strong><p>${this.esc(q.suggestedAnswer)}</p></div>` : ''}

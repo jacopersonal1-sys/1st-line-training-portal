@@ -33,6 +33,14 @@ const AssessmentStudioData = {
         return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
     },
 
+    normalizeFormattedText(value) {
+        return String(value || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .replace(/[ \t]+$/gm, '')
+            .replace(/^\n+|\n+$/g, '');
+    },
+
     safeParse(raw, fallback) {
         try {
             if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
@@ -60,9 +68,9 @@ const AssessmentStudioData = {
             assessment: String(q.assessment || '').trim(),
             phase: String(q.phase || 'Assessment').trim(),
             type,
-            text: String(q.text || q.question || '').trim(),
+            text: this.normalizeFormattedText(q.text || q.question || ''),
             points: Number.isFinite(points) && points > 0 ? Math.round(points * 10) / 10 : 1,
-            suggestedAnswer: String(q.suggestedAnswer || q.suggested_answer || '').trim(),
+            suggestedAnswer: this.normalizeFormattedText(q.suggestedAnswer || q.suggested_answer || ''),
             grouping: String(q.grouping || q.group || '').trim(),
             options: Array.isArray(q.options) ? q.options.map(v => String(v || '').trim()).filter(Boolean) : [],
             correct: q.correct !== undefined ? q.correct : null,
@@ -299,11 +307,7 @@ const AssessmentStudioData = {
     },
 
     async load() {
-        const localStudio = this.normalizeStudio(this.localRead(ASSESSMENT_STUDIO_LOCAL_KEY, this.defaultStudio()));
-        const remoteStudio = await this.fetchDocument(ASSESSMENT_STUDIO_KEY, localStudio);
-        this.state.studio = this.mergeStudio(remoteStudio, localStudio);
-        localStorage.setItem(ASSESSMENT_STUDIO_LOCAL_KEY, JSON.stringify(this.state.studio));
-        localStorage.setItem(ASSESSMENT_STUDIO_KEY, JSON.stringify(this.state.studio));
+        await this.loadStudioOnly();
 
         const legacyKeys = ['assessments', 'tests', 'submissions', 'records', 'users', 'rosters'];
         const values = await Promise.all(legacyKeys.map(key => this.fetchDocument(key, this.localRead(key, key === 'rosters' ? {} : []))));
@@ -316,6 +320,15 @@ const AssessmentStudioData = {
             rosters: values[5] && typeof values[5] === 'object' && !Array.isArray(values[5]) ? values[5] : {}
         };
         return this.state;
+    },
+
+    async loadStudioOnly() {
+        const localStudio = this.normalizeStudio(this.localRead(ASSESSMENT_STUDIO_LOCAL_KEY, this.defaultStudio()));
+        const remoteStudio = await this.fetchDocument(ASSESSMENT_STUDIO_KEY, localStudio);
+        this.state.studio = this.mergeStudio(remoteStudio, localStudio);
+        localStorage.setItem(ASSESSMENT_STUDIO_LOCAL_KEY, JSON.stringify(this.state.studio));
+        localStorage.setItem(ASSESSMENT_STUDIO_KEY, JSON.stringify(this.state.studio));
+        return this.state.studio;
     },
 
     async saveStudio() {

@@ -465,6 +465,17 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
 }
 .ast-grade-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .ast-grade-top span { color: var(--ast-muted); font-size: .84rem; }
+.ast-grade-question-text {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+.ast-grade-question-text span,
+.ast-suggested-answer p {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
+}
 .ast-answer {
     color: var(--ast-text);
     background: var(--ast-card);

@@ -120,6 +120,29 @@ describe('Assessment Studio trainee runtime', () => {
         expect(runtimeRoot.innerHTML).not.toContain('Submitted question');
     });
 
+    test('renders formatted question text without flattening bullets or spacing', () => {
+        const submission = makeSubmission({
+            testSnapshot: {
+                title: 'Q Contact Assessment',
+                questions: [{
+                    id: 'q_format',
+                    assessment: 'Q Contact Assessment',
+                    type: 'text',
+                    text: '\nExplain the checks:\n\n  - Verify account\n  - Confirm contact\n',
+                    points: 2
+                }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+
+        window.openAssessmentStudioTraineeRuntime('ast_1');
+
+        expect(runtimeRoot.innerHTML).toContain('ast-trainee-question-text');
+        expect(runtimeRoot.innerHTML).toContain('Explain the checks:\n\n  - Verify account\n  - Confirm contact');
+    });
+
     test('does not rerender and steal focus while trainee is typing', () => {
         const submission = makeSubmission({
             status: 'in_progress',
@@ -205,6 +228,151 @@ describe('Assessment Studio trainee runtime', () => {
         expect(html).toContain('Upload Failed');
         expect(html).toContain('retryAssessmentStudioSubmissionUpload');
         expect(html).toContain('Re-upload');
+    });
+
+    test('keeps local submitted snapshot when newer server data is missing it', async () => {
+        const submitted = makeSubmission({
+            id: 'ast_failed_upload',
+            generatorId: 'gen_1',
+            status: 'pending_review',
+            submittedAt: '2026-06-12T12:00:00.000Z',
+            updatedAt: '2026-06-12T12:00:00.000Z',
+            answers: { 0: 0 },
+            testSnapshot: {
+                title: 'Original Snapshot',
+                signature: 'original_snapshot',
+                questions: [{
+                    id: 'q_original',
+                    assessment: 'Q Contact Assessment',
+                    type: 'multiple_choice',
+                    text: 'Original submitted question.',
+                    options: ['A', 'B'],
+                    correct: 0,
+                    points: 2
+                }]
+            }
+        });
+        const localStore = makeStore(submitted);
+        localStore.updatedAt = '2026-06-12T12:00:00.000Z';
+        const remoteStore = {
+            questionBucket: [{
+                id: 'q_new',
+                assessment: 'Q Contact Assessment',
+                type: 'multiple_choice',
+                text: 'New question that must not replace submitted work.',
+                options: ['A', 'B'],
+                correct: 1,
+                points: 2,
+                status: 'active'
+            }],
+            generators: [{
+                id: 'gen_1',
+                assessment: 'Q Contact Assessment',
+                phase: 'Assessment',
+                totalPoints: 2,
+                pointLeeway: 0,
+                allowedTypes: ['multiple_choice'],
+                status: 'active'
+            }],
+            submissions: [],
+            groupings: [],
+            tags: [],
+            updatedAt: '2026-06-12T12:05:00.000Z',
+            updatedBy: 'Admin'
+        };
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(localStore));
+        localStorage.setItem('assessment_studio_data', JSON.stringify(remoteStore));
+
+        const opened = await window.openAssessmentStudioFromSchedule('gen_1', { courseName: 'Course 2' });
+
+        expect(opened).toBe(false);
+        expect(showToast).toHaveBeenCalledWith('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
+        const merged = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        const rows = merged.submissions.filter(item => String(item.generatorId) === 'gen_1');
+        expect(rows).toHaveLength(1);
+        expect(rows[0].id).toBe('ast_failed_upload');
+        expect(rows[0].testSnapshot.signature).toBe('original_snapshot');
+    });
+
+    test('prefers submitted assignment over duplicate newly generated assignment for the same generator', async () => {
+        const submitted = makeSubmission({
+            id: 'ast_original_submitted',
+            generatorId: 'gen_1',
+            status: 'pending_review',
+            submittedAt: '2026-06-12T12:00:00.000Z',
+            updatedAt: '2026-06-12T12:00:00.000Z',
+            answers: { 0: 0 },
+            testSnapshot: {
+                title: 'Original Snapshot',
+                signature: 'original_snapshot',
+                questions: [{
+                    id: 'q_original',
+                    assessment: 'Q Contact Assessment',
+                    type: 'multiple_choice',
+                    text: 'Original submitted question.',
+                    options: ['A', 'B'],
+                    correct: 0,
+                    points: 2
+                }]
+            }
+        });
+        const duplicateAssigned = makeSubmission({
+            id: 'ast_duplicate_new',
+            generatorId: 'gen_1',
+            status: 'assigned',
+            generatedAt: '2026-06-12T12:10:00.000Z',
+            updatedAt: '2026-06-12T12:10:00.000Z',
+            testSnapshot: {
+                title: 'New Snapshot',
+                signature: 'new_snapshot',
+                questions: [{
+                    id: 'q_new',
+                    assessment: 'Q Contact Assessment',
+                    type: 'multiple_choice',
+                    text: 'New question trainee must not write.',
+                    options: ['A', 'B'],
+                    correct: 1,
+                    points: 2
+                }]
+            }
+        });
+        const store = makeStore(null);
+        store.submissions = [duplicateAssigned, submitted];
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+
+        const html = window.renderAssessmentStudioAssignmentsHtml();
+        const opened = await window.openAssessmentStudioFromSchedule('gen_1', { courseName: 'Course 2' });
+
+        expect(html).toContain('original_sna');
+        expect(html).not.toContain('new_snapshot');
+        expect(opened).toBe(false);
+        expect(showToast).toHaveBeenCalledWith('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
+    });
+
+    test('failed submit leaves submitted local snapshot with upload retry instead of reopening questions', async () => {
+        const submission = makeSubmission({
+            id: 'ast_submit_fails',
+            status: 'in_progress',
+            answers: { 0: 0 }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        global.saveToServer = jest.fn(() => Promise.resolve(false));
+        window.supabaseClient = null;
+        window.openAssessmentStudioTraineeRuntime('ast_submit_fails');
+
+        await window.submitAssessmentStudioTest();
+
+        const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        const submitted = saved.submissions.find(item => item.id === 'ast_submit_fails');
+        expect(submitted.status).toBe('pending_review');
+        expect(submitted.answers['0']).toBe(0);
+        expect(submitted.testSnapshot.questions[0].text).toBe('Choose the correct Q Contact action.');
+        expect(JSON.parse(localStorage.getItem('assessment_studio_upload_status')).ast_submit_fails.state).toBe('failed');
+        expect(showTab).toHaveBeenCalledWith('my-tests');
+        expect(loadTraineeTests).toHaveBeenCalled();
     });
 
     test('submit stores partial auto scores for multiple answer and ranking questions', async () => {

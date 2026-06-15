@@ -225,6 +225,43 @@ label {
     padding: 10px;
 }
 
+.qa-resource-label {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.qa-resource-label strong,
+.qa-resource-label small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.qa-resource-open {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 5px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-main);
+    text-decoration: none;
+    background: var(--bg-card);
+}
+
+.qa-resource-open:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.qa-resource-missing {
+    color: #ffb4b4;
+    font-weight: 700;
+}
+
 .qa-submission {
     grid-template-columns: minmax(0, 1fr) auto;
 }

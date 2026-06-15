@@ -11,7 +11,7 @@ window.NetworkDiag = {
     popoutInterval: null,
     popoutWindow: null,
     oneHourMs: 60 * 60 * 1000,
-    reportEveryMs: 10 * 60 * 1000,
+    reportEveryMs: 30 * 60 * 1000,
     consoleLimit: 180,
     history: { gateway: [], internet: [], server: [], dbQuery: [] },
     lastResults: {
@@ -29,8 +29,8 @@ window.NetworkDiag = {
     publicIP: 'Loading...',
     dbProbe: {
         timeoutMs: 3500,
-        attempts: 2,
-        intervalMs: 10000,
+        attempts: 1,
+        intervalMs: 60000,
         lastRunAt: 0,
         inFlight: null,
         healthTableAvailable: null,
@@ -338,7 +338,7 @@ window.NetworkDiag = {
         this.backgroundReportInFlight = (async () => {
             try {
                 await this.ensurePublicIP();
-                await this.runDiagnosticPass({ render: false, forceDbQuery: true });
+                await this.runDiagnosticPass({ render: false, forceDbQuery: false });
                 await this.reportToCloud();
             } catch (error) {
                 console.warn('Background network diagnostics report failed:', error);

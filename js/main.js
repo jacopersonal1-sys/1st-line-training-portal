@@ -5582,6 +5582,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.50": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio Recovery:</strong> Submitted trainee snapshots now stay preserved locally if Supabase upload fails, with a clear Re-upload action instead of generating a new test.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio Sync:</strong> Local submitted and in-progress trainee work now survives newer server refreshes that are missing that submission.</li>
+                <li style="margin-bottom: 8px;"><strong>Grading Safety:</strong> Admin grading locks now clean up abandoned own locks and roll back if the lock cannot be confirmed on Supabase.</li>
+                <li style="margin-bottom: 8px;"><strong>Performance:</strong> High-priority Schedule, Assessment Studio, Content Creator, and Q&A updates apply faster without waiting behind the general realtime queue.</li>
+            </ul>`,
         "2.7.49": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Attendance Review:</strong> Admins can now review trainee weekdays with no clock-in and record whether the reason is valid.</li>

@@ -732,6 +732,77 @@ describe('Data Sync Module', () => {
         expect(JSON.parse(localStorage.getItem('system_tombstones') || '[]')).toEqual(['violation_report:vio_deleted']);
     });
 
+    test('loadFromServer batches stale app document fetches for smoother startup', async () => {
+        const mockContent = [
+            { key: 'system_config', updated_at: '2026-06-15T08:00:00.000Z', content: { security: {} } },
+            { key: 'revokedUsers', updated_at: '2026-06-15T08:00:00.000Z', content: [] },
+            { key: 'accessControl', updated_at: '2026-06-15T08:00:00.000Z', content: { enabled: false, whitelist: [] } },
+            { key: 'sso_login_config', updated_at: '2026-06-15T08:00:00.000Z', content: {} },
+            { key: 'rosters', updated_at: '2026-06-15T08:00:00.000Z', content: {} },
+            { key: 'schedules', updated_at: '2026-06-15T08:00:00.000Z', content: { G1: { items: [] } } },
+            { key: 'qa_data', updated_at: '2026-06-15T08:00:00.000Z', content: { questions: [], submissions: [] } },
+            {
+                key: 'assessment_studio_data',
+                updated_at: '2026-06-15T08:00:00.000Z',
+                content: { questionBucket: [], generators: [], submissions: [], groupings: [], tags: [] }
+            },
+            {
+                key: 'content_studio_data',
+                updated_at: '2026-06-15T08:00:00.000Z',
+                content: { entries: [], analytics: [], annotations: [] }
+            }
+        ];
+        const mockMeta = mockContent.map(({ key, updated_at }) => ({ key, updated_at }));
+        const batchRequests = [];
+
+        const buildRowQuery = () => {
+            const chain = {
+                gt: jest.fn(() => chain),
+                order: jest.fn(() => chain),
+                eq: jest.fn(() => chain),
+                ilike: jest.fn(() => chain),
+                limit: jest.fn().mockResolvedValue({ data: [], error: null })
+            };
+            return chain;
+        };
+
+        const appDocumentsSelect = jest.fn((columns) => {
+            if (columns === 'key, updated_at') {
+                return {
+                    not: jest.fn().mockResolvedValue({ data: mockMeta, error: null }),
+                    like: jest.fn().mockResolvedValue({ data: mockMeta, error: null })
+                };
+            }
+
+            if (columns === 'key, content, updated_at') {
+                return {
+                    in: jest.fn((column, keys) => {
+                        expect(column).toBe('key');
+                        batchRequests.push(keys);
+                        return Promise.resolve({
+                            data: mockContent.filter(row => keys.includes(row.key)),
+                            error: null
+                        });
+                    })
+                };
+            }
+
+            throw new Error(`Unexpected app_documents select: ${columns}`);
+        });
+
+        global.window.supabaseClient.from = jest.fn((table) => {
+            if (table === 'app_documents') return { select: appDocumentsSelect };
+            return { select: jest.fn(() => buildRowQuery()) };
+        });
+
+        await DataModule.loadFromServer(true);
+
+        expect(batchRequests.length).toBeGreaterThan(1);
+        expect(batchRequests.every(keys => keys.length <= 4)).toBe(true);
+        expect(batchRequests[0]).toEqual(['system_config', 'revokedUsers', 'accessControl', 'sso_login_config']);
+        expect(JSON.parse(localStorage.getItem('qa_data') || '{}')).toEqual({ questions: [], submissions: [] });
+    });
+
     test('trainee violation report cache hides evidence pointers', () => {
         global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
 
