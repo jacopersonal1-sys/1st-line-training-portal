@@ -117,6 +117,15 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
 .ast-form textarea, .ast-grader textarea { resize: vertical; }
 .ast-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .ast-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ast-grid-5 { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(170px, 1fr) minmax(90px, .55fr) minmax(160px, 1fr) minmax(150px, 1fr); gap: 10px; align-items: end; }
+.ast-question-meta-grid {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    padding: 0 0 10px;
+    background: var(--ast-card);
+    border-bottom: 1px solid var(--ast-border);
+}
 .ast-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; color: var(--ast-text); }
 .ast-note {
     border: 1px dashed var(--ast-border);
@@ -691,7 +700,7 @@ button, input, select, textarea { outline-color: var(--ast-primary); }
 @media (max-width: 1100px) {
     .ast-layout, .ast-completed-layout, .ast-grading-layout, .ast-matrix-builder-controls { grid-template-columns: 1fr; }
     .ast-side { position: static; }
-    .ast-filters, .ast-grid-3 { grid-template-columns: 1fr; }
+    .ast-filters, .ast-grid-3, .ast-grid-5 { grid-template-columns: 1fr; }
     .ast-pair-row,
     .ast-builder-row,
     .ast-review-match-row,

@@ -583,38 +583,38 @@ const App = {
                     </div>
                     <form id="questionForm" class="ast-form" onsubmit="event.preventDefault(); App.saveQuestion();">
                         <input type="hidden" id="questionId" value="${this.esc(item.id || '')}">
-                        <div class="ast-grid-3">
+                        <div class="ast-grid-5 ast-question-meta-grid">
                             <label>Standard Assessment<input id="questionAssessment" list="assessmentNames" value="${this.esc(item.assessment || '')}" placeholder="Assessment name"></label>
                             <label>Question Type<select id="questionType" onchange="App.renderTypeHelp()">${QUESTION_TYPES.map(t => `<option value="${t.key}" ${item.type === t.key ? 'selected' : ''}>${this.esc(t.label)}</option>`).join('')}</select></label>
                             <label>Points<input id="questionPoints" type="number" min="0.5" step="0.5" value="${this.esc(item.points || 1)}"></label>
+                            <label>Grouping
+                                <select id="questionGrouping" onfocus="this.dataset.previous = this.value" onchange="App.handleQuestionGroupingSelect(this)">
+                                    <option value="">No grouping</option>
+                                    ${groupingOptions.map(name => `<option value="${this.esc(name)}" ${selectedGrouping === name ? 'selected' : ''}>${this.esc(name)}</option>`).join('')}
+                                    <option value="__add_new__">+ Add new grouping...</option>
+                                </select>
+                            </label>
+                            <label>Question Tag
+                                <select id="questionTag" onfocus="this.dataset.previous = this.value" onchange="App.handleQuestionTagSelect(this)">
+                                    <option value="">No tag</option>
+                                    ${tagOptions.map(name => `<option value="${this.esc(name)}" ${selectedTag === name ? 'selected' : ''}>${this.esc(name)}</option>`).join('')}
+                                    <option value="__add_new__">+ Add new tag...</option>
+                                </select>
+                            </label>
                         </div>
                         <datalist id="assessmentNames">${assessments.map(name => `<option value="${this.esc(name)}"></option>`).join('')}</datalist>
-                        <label>Question Text<textarea id="questionText" rows="3" placeholder="Question shown to trainee">${this.esc(item.text || '')}</textarea></label>
-                        <div id="typeHelp">${this.renderTypeHelpHtml(item)}</div>
-                        <label>Grouping
-                            <select id="questionGrouping" onfocus="this.dataset.previous = this.value" onchange="App.handleQuestionGroupingSelect(this)">
-                                <option value="">No grouping</option>
-                                ${groupingOptions.map(name => `<option value="${this.esc(name)}" ${selectedGrouping === name ? 'selected' : ''}>${this.esc(name)}</option>`).join('')}
-                                <option value="__add_new__">+ Add new grouping...</option>
-                            </select>
-                        </label>
                         <div id="questionGroupingCreate" class="ast-inline-create hidden">
                             <input id="questionGroupingNewName" placeholder="New grouping name">
                             <button class="ast-btn primary" type="button" onclick="App.saveNewQuestionGrouping()"><i class="fas fa-save"></i> Save Group</button>
                             <button class="ast-btn ghost" type="button" onclick="App.cancelNewQuestionGrouping()"><i class="fas fa-xmark"></i> Cancel</button>
                         </div>
-                        <label>Question Tag
-                            <select id="questionTag" onfocus="this.dataset.previous = this.value" onchange="App.handleQuestionTagSelect(this)">
-                                <option value="">No tag</option>
-                                ${tagOptions.map(name => `<option value="${this.esc(name)}" ${selectedTag === name ? 'selected' : ''}>${this.esc(name)}</option>`).join('')}
-                                <option value="__add_new__">+ Add new tag...</option>
-                            </select>
-                        </label>
                         <div id="questionTagCreate" class="ast-inline-create hidden">
                             <input id="questionTagNewName" placeholder="New tag name">
                             <button class="ast-btn primary" type="button" onclick="App.saveNewQuestionTag()"><i class="fas fa-save"></i> Save Tag</button>
                             <button class="ast-btn ghost" type="button" onclick="App.cancelNewQuestionTag()"><i class="fas fa-xmark"></i> Cancel</button>
                         </div>
+                        <label>Question Text<textarea id="questionText" rows="3" placeholder="Question shown to trainee">${this.esc(item.text || '')}</textarea></label>
+                        <div id="typeHelp">${this.renderTypeHelpHtml(item)}</div>
                         <div class="ast-actions ast-modal-actions">
                             <button class="ast-btn primary" type="submit"><i class="fas fa-save"></i> Save Question</button>
                             <button class="ast-btn ghost" type="button" onclick="App.closeQuestionModal()">Cancel</button>
@@ -1118,14 +1118,16 @@ const App = {
         await AssessmentStudioData.saveStudio();
         this.toast('Question saved.', 'ok');
         if (isNewQuestion) {
-            this.resetQuestionModalForNext(question.assessment);
+            this.resetQuestionModalForNext(question);
             return;
         }
         this.render();
     },
 
-    resetQuestionModalForNext(assessment) {
-        const keepAssessment = String(assessment || '').trim();
+    resetQuestionModalForNext(previousQuestion = {}) {
+        const keepAssessment = String(previousQuestion.assessment || '').trim();
+        const keepGrouping = String(previousQuestion.grouping || '').trim();
+        const keepTag = String(Array.isArray(previousQuestion.tags) ? (previousQuestion.tags[0] || '') : '').trim();
         const currentType = document.getElementById('questionType')?.value || 'multiple_choice';
         const modal = document.querySelector('.ast-question-modal');
         if (!modal) {
@@ -1133,6 +1135,16 @@ const App = {
             setTimeout(() => {
                 const assessmentInput = document.getElementById('questionAssessment');
                 if (assessmentInput) assessmentInput.value = keepAssessment;
+                const groupingSelect = document.getElementById('questionGrouping');
+                if (groupingSelect) {
+                    groupingSelect.value = keepGrouping;
+                    groupingSelect.dataset.previous = keepGrouping;
+                }
+                const tagSelect = document.getElementById('questionTag');
+                if (tagSelect) {
+                    tagSelect.value = keepTag;
+                    tagSelect.dataset.previous = keepTag;
+                }
             }, 0);
             return;
         }
@@ -1144,15 +1156,15 @@ const App = {
         if (typeSelect) typeSelect.value = currentType;
         const groupingSelect = document.getElementById('questionGrouping');
         if (groupingSelect) {
-            groupingSelect.value = '';
-            groupingSelect.dataset.previous = '';
+            groupingSelect.value = keepGrouping;
+            groupingSelect.dataset.previous = keepGrouping;
         }
         const groupingBox = document.getElementById('questionGroupingCreate');
         if (groupingBox) groupingBox.classList.add('hidden');
         const tagSelect = document.getElementById('questionTag');
         if (tagSelect) {
-            tagSelect.value = '';
-            tagSelect.dataset.previous = '';
+            tagSelect.value = keepTag;
+            tagSelect.dataset.previous = keepTag;
         }
         const tagBox = document.getElementById('questionTagCreate');
         if (tagBox) tagBox.classList.add('hidden');
@@ -1535,7 +1547,7 @@ const App = {
     },
 
     renderGradingQueue() {
-        const rows = this.getCombinedSubmissions().filter(s => s.source === 'studio' && ['pending_review', 'completed'].includes(String(s.status || '')));
+        const rows = this.getCombinedSubmissions().filter(s => s.source === 'studio' && String(s.status || '') === 'pending_review');
         const selected = this.selectedSubmissionId ? this.state().studio.submissions.find(s => s.id === this.selectedSubmissionId) : null;
         if (selected) {
             return `
@@ -1548,7 +1560,7 @@ const App = {
             <main class="ast-single-layout">
                 <section class="ast-card">
                     <div class="ast-card-head"><div><h2>Grading Queue</h2><p>Dedicated review workspace for generated Assessment Studio submissions.</p></div></div>
-                    ${this.renderCompletedFilters({ includeSource: false })}
+                    ${this.renderCompletedFilters({ includeSource: false, defaultStatus: 'pending_review' })}
                     <div class="ast-table-wrap ast-grade-queue-table">
                         <table class="ast-table"><thead><tr><th>Date</th><th>Group</th><th>Trainee</th><th>Assessment</th><th>Status</th><th>Score</th><th>Action</th></tr></thead><tbody id="completedRows">${rows.length ? rows.map(s => this.renderCompletedRow(s, { gradingAction: true })).join('') : '<tr><td colspan="7" class="ast-empty">No Assessment Studio submissions found.</td></tr>'}</tbody></table>
                     </div>
@@ -1563,12 +1575,13 @@ const App = {
             : this.getCombinedSubmissions();
         const assessments = Array.from(new Set(rows.map(s => s.assessment).filter(Boolean))).sort();
         const groups = Array.from(new Set(rows.map(s => s.groupID).filter(Boolean))).sort((a, b) => String(b).localeCompare(String(a), undefined, { numeric: true }));
+        const defaultStatus = String(options.defaultStatus || '').trim();
         return `
             <div class="ast-filters">
                 <input id="completedTraineeFilter" type="search" placeholder="Search trainee..." oninput="App.filterCompleted()">
                 <select id="completedAssessmentFilter" onchange="App.filterCompleted()"><option value="">All assessments</option>${assessments.map(name => `<option>${this.esc(name)}</option>`).join('')}</select>
                 <select id="completedGroupFilter" onchange="App.filterCompleted()"><option value="">All groups</option><option value="__none__">No group</option>${groups.map(group => `<option value="${this.esc(group)}">${this.esc(group)}</option>`).join('')}</select>
-                <select id="completedStatusFilter" onchange="App.filterCompleted()"><option value="">All statuses</option><option value="assigned">Assigned</option><option value="pending_review">Pending Review</option><option value="completed">Completed</option><option value="legacy">Legacy</option></select>
+                <select id="completedStatusFilter" onchange="App.filterCompleted()"><option value="" ${!defaultStatus ? 'selected' : ''}>All statuses</option><option value="assigned" ${defaultStatus === 'assigned' ? 'selected' : ''}>Assigned</option><option value="pending_review" ${defaultStatus === 'pending_review' ? 'selected' : ''}>Pending Review</option><option value="completed" ${defaultStatus === 'completed' ? 'selected' : ''}>Completed</option><option value="legacy" ${defaultStatus === 'legacy' ? 'selected' : ''}>Legacy</option></select>
                 ${options.includeSource === false ? '' : '<select id="completedSourceFilter" onchange="App.filterCompleted()"><option value="">All sources</option><option value="studio">Assessment Studio</option><option value="legacy">Legacy Test Engine</option></select>'}
                 <input id="completedDateFromFilter" type="date" title="From date" onchange="App.filterCompleted()">
                 <input id="completedDateToFilter" type="date" title="To date" onchange="App.filterCompleted()">

@@ -5582,6 +5582,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.49": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Attendance Review:</strong> Admins can now review trainee weekdays with no clock-in and record whether the reason is valid.</li>
+                <li style="margin-bottom: 8px;"><strong>Sync Safety:</strong> Reviewed missing attendance days are saved as synced attendance rows so other admins see the review instead of a generated missing day.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Grading Queue now opens on pending-review work only, keeping completed tests in Completed Tests.</li>
+                <li style="margin-bottom: 8px;"><strong>Question Entry:</strong> Assessment, Grouping, Tag, and Type stay at the top of the question editor and carry forward while adding questions.</li>
+            </ul>`,
         "2.7.20": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Timeline-linked tests now stay closed after submission and show Submitted or Graded instead of reopening the paper.</li>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.7.49 - 2026-06-15
+
+- **Attendance Review:** Attendance Register now flags trainee weekdays with no clock-in as **Missing Reviews**, so admins can review the day and record whether the reason is valid.
+- **Sync Guard:** Reviewed missing days are saved as attendance rows with reviewer, reason, validity, and timestamp so the review syncs to other admins and does not reappear as an unreviewed generated absence.
+- **Assessment Studio:** Grading Queue now defaults to pending-review submissions only, keeping completed tests in Completed Tests instead of mixing them into active grading work.
+- **Question Entry Speed:** Assessment Studio question editing now keeps Assessment, Grouping, Tag, and Type pinned at the top and preserves the previous grouping/tag after saving a new question.
+- **Verification:** Full Jest suite passed before release.
+
+> Release target: stable main channel.
+
 ## 2.7.48 - 2026-06-12
 
 - **Emergency Fix:** Assessment Studio data normalization no longer crashes while loading question bucket or generated submission snapshots.

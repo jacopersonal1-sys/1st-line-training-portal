@@ -502,6 +502,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.7.49 (Attendance Missing-Day Review + Studio Queue Defaults, 2026-06-15):** Attendance Register now calculates missing weekday clock-ins for selected trainees, surfaces Missing Reviews in the admin register, and saves reviewed missing days as synced attendance rows with absence reason, validity, reviewer, and timestamp. Assessment Studio Grading Queue now defaults to pending-review submissions only, while question entry keeps Assessment, Grouping, Tag, and Type pinned at the top and carries the previous grouping/tag into the next new question. Regression verification: full Jest suite.
+
 - **v2.7.25 (Expanded Studio/Q&A Recovery, 2026-06-11):** Extends the one-time 20-hour local recovery probe to `content_studio_data` and `qa_data` in addition to `schedules` and `assessment_studio_data`, and bumps the recovery marker so clients that already ran the prior probe re-check the expanded affected document set once.
 
 - **v2.7.24 (Studio Sync Recovery Hotfix, 2026-06-11):** Restores confirmed host-mediated persistence for `assessment_studio_data` and `content_studio_data`, makes critical explicit blob/row save failures visible, and adds a one-time first-run recovery probe for recent local `schedules` and `assessment_studio_data` changes from the last 20 hours. The recovery runs before normal server pulls and republishes only those two studio documents if Supabase is missing or older than local cache. Schedule Studio also merges local/canonical Assessment Studio caches when listing generators and preserves/display generator point leeway.

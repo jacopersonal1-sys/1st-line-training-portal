@@ -73,6 +73,10 @@ function mergeAttendanceRecord(existing, incoming) {
         isLate: Boolean(existing.isLate || incoming.isLate),
         lateConfirmed: Boolean(existing.lateConfirmed || incoming.lateConfirmed),
         isIgnored: Boolean(existing.isIgnored || incoming.isIgnored),
+        isAbsent: Boolean(existing.isAbsent || incoming.isAbsent),
+        absenceReviewed: Boolean(existing.absenceReviewed || incoming.absenceReviewed),
+        absenceValid: Boolean(existing.absenceValid || incoming.absenceValid),
+        absenceReason: incoming.absenceReason || existing.absenceReason || '',
         adminComment: incoming.adminComment || existing.adminComment || '',
         updatedAt: incoming.updatedAt || existing.updatedAt || null
     };
@@ -146,6 +150,79 @@ function findAttendanceRecord(records, user, dateIso) {
     const targetUser = normalizeAttendanceUser(user);
     const targetDate = String(dateIso || '').trim();
     return (records || []).find(r => normalizeAttendanceUser(r.user) === targetUser && String(r.date || '').trim() === targetDate);
+}
+
+function getAttendanceAbsentId(user, dateIso) {
+    const token = normalizeAttendanceUser(user).replace(/\s+/g, '_') || 'unknown';
+    return `absent_${token}_${String(dateIso || '').trim()}`;
+}
+
+function parseAttendanceAbsentId(id) {
+    const value = String(id || '');
+    const match = value.match(/^absent_(.+)_(\d{4}-\d{2}-\d{2})$/);
+    if (match) return { userToken: match[1], date: match[2] };
+    if (value.startsWith('absent_')) return { userToken: '', date: value.replace('absent_', '') };
+    return { userToken: '', date: '' };
+}
+
+function buildMissingAttendanceDays(username, records, options = {}) {
+    const today = new Date();
+    const cutoff = new Date();
+    cutoff.setDate(today.getDate() - Number(options.days || 30));
+    const userRecords = (records || []).filter(r => normalizeAttendanceUser(r.user) === normalizeAttendanceUser(username));
+    const existingDates = new Set(userRecords.map(r => String(r.date || '').trim()).filter(Boolean));
+    const missing = [];
+
+    for (let d = new Date(cutoff); d < today; d.setDate(d.getDate() + 1)) {
+        const dayOfWeek = d.getDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+        const dateStr = getLocalISODate(d);
+        if (existingDates.has(dateStr)) continue;
+        missing.push({
+            id: getAttendanceAbsentId(username, dateStr),
+            date: dateStr,
+            user: username,
+            clockIn: '',
+            clockOut: '',
+            isAbsent: true,
+            absenceReviewed: false,
+            isGeneratedMissing: true
+        });
+    }
+
+    return missing;
+}
+
+async function saveAttendanceRecordToServer(record, username = '') {
+    if (!record) return false;
+    record.updatedAt = new Date().toISOString();
+    if (window.supabaseClient) {
+        const { error } = await window.supabaseClient.from('attendance').upsert({
+            id: record.id,
+            user_id: username || record.user,
+            data: record,
+            updated_at: record.updatedAt
+        });
+        if (error) throw error;
+        return true;
+    }
+    return false;
+}
+
+async function promptAttendanceReview(title, message, fallback = '') {
+    if (typeof customPrompt === 'function') return customPrompt(title, message, fallback);
+    return prompt(`${title}\n\n${message}`, fallback);
+}
+
+function getAttendanceReviewMembers() {
+    const rosters = attendanceReadObject('rosters');
+    const schedules = attendanceReadObject('schedules');
+    const activeGroups = new Set();
+    Object.values(schedules).forEach(s => {
+        if (s && s.assigned && Array.isArray(rosters[s.assigned])) activeGroups.add(s.assigned);
+    });
+    const sourceGroups = activeGroups.size ? Array.from(activeGroups) : Object.keys(rosters);
+    return [...new Set(sourceGroups.flatMap(group => Array.isArray(rosters[group]) ? rosters[group] : []))].filter(Boolean);
 }
 
 function escapeAttendanceHtml(value) {
@@ -600,6 +677,7 @@ function renderAttendanceRegister(options = {}) {
     const openClockOuts = visibleRecords.filter(r => r.date === todayIso && r.clockIn && !r.clockOut && !r.isIgnored).length;
     const totalLates = visibleRecords.filter(r => r.isLate && !r.isIgnored).length;
     const pendingLateCount = visibleRecords.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored && r.date >= getLocalISODate(new Date(Date.now() - 1000 * 60 * 60 * 24 * 45))).length;
+    const pendingMissingCount = members.reduce((sum, member) => sum + buildMissingAttendanceDays(member, records).length, 0);
 
     if (statsContainer) {
         statsContainer.innerHTML = `
@@ -607,19 +685,20 @@ function renderAttendanceRegister(options = {}) {
             <div class="workspace-stat"><span>Clocked In</span><strong>${todayPresent}</strong></div>
             <div class="workspace-stat"><span>Open Clock-Outs</span><strong>${openClockOuts}</strong></div>
             <div class="workspace-stat"><span>Late Reviews</span><strong>${pendingLateCount}</strong></div>
+            <div class="workspace-stat"><span>Missing Reviews</span><strong>${pendingMissingCount}</strong></div>
         `;
     }
 
     let html = `
         <div class="attendance-register-card">
         <table class="admin-table">
-            <thead><tr><th>Agent</th><th>Today</th><th>Total Days</th><th>Lates</th><th>Unconfirmed</th><th>Action</th></tr></thead><tbody>
+            <thead><tr><th>Agent</th><th>Today</th><th>Total Days</th><th>Lates</th><th>Late Reviews</th><th>Missing Days</th><th>Action</th></tr></thead><tbody>
     `;
 
     if (members.length === 0) {
-        html += `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:18px;">No roster members found for this attendance filter.</td></tr>`;
+        html += `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:18px;">No roster members found for this attendance filter.</td></tr>`;
     } else if (visibleRecords.length === 0 && records.length > 0) {
-        html += `<tr><td colspan="6" style="text-align:center; color:#f1c40f; padding:14px;">Attendance records exist locally, but none match the selected roster filter. Try Active Schedules or verify roster names.</td></tr>`;
+        html += `<tr><td colspan="7" style="text-align:center; color:#f1c40f; padding:14px;">Attendance records exist locally, but none match the selected roster filter. Try Active Schedules or verify roster names.</td></tr>`;
     }
 
     members.forEach(m => {
@@ -628,6 +707,7 @@ function renderAttendanceRegister(options = {}) {
         const lates = myRecs.filter(r => r.isLate && !r.isIgnored).length;
         // Unconfirmed: Late AND (lateConfirmed is undefined or false)
         const unconfirmed = myRecs.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored && r.date >= getLocalISODate(new Date(Date.now() - 1000 * 60 * 60 * 24 * 45)));
+        const missingDays = buildMissingAttendanceDays(m, records);
         const todayRecord = myRecs.find(r => r.date === todayIso);
         let todayStatus = '<span class="attendance-health danger"><i class="fas fa-circle"></i> Not clocked</span>';
         let todayNote = 'No clock-in for today';
@@ -643,6 +723,9 @@ function renderAttendanceRegister(options = {}) {
         const unconfDisplay = unconfirmed.length > 0 
             ? `<span class="badge-count" style="position:static; background:#ff5252; font-size:0.85rem; padding:2px 8px; border-radius:12px;">${unconfirmed.length}</span>` 
             : `<span style="color:var(--text-muted); opacity:0.5;">-</span>`;
+        const missingDisplay = missingDays.length > 0
+            ? `<span class="badge-count" style="position:static; background:#d99124; font-size:0.85rem; padding:2px 8px; border-radius:12px;">${missingDays.length}</span>`
+            : `<span style="color:var(--text-muted); opacity:0.5;">-</span>`;
 
         let actionBtn = `<button class="btn-secondary btn-sm" onclick="manageAgentAttendance('${safeUser}')">View/Edit</button>`;
 
@@ -653,6 +736,11 @@ function renderAttendanceRegister(options = {}) {
                 <button class="btn-danger btn-sm" onclick="deleteLateEntry('${unconfirmed[0].id}')" style="margin-left:5px;" title="Delete Entry"><i class="fas fa-trash"></i></button>
                 <button class="btn-secondary btn-sm" onclick="manageAgentAttendance('${safeUser}')" style="margin-left:5px;">View/Edit</button>
             `;
+        } else if (missingDays.length > 0) {
+            actionBtn = `
+                <button class="btn-warning btn-sm" onclick="reviewMissingAttendance('${safeUser}', '${missingDays[0].date}')" title="Review Missing Day">Review Missing</button>
+                <button class="btn-secondary btn-sm" onclick="manageAgentAttendance('${safeUser}')" style="margin-left:5px;">View/Edit</button>
+            `;
         }
 
         html += `<tr>
@@ -661,11 +749,12 @@ function renderAttendanceRegister(options = {}) {
             <td>${total}</td>
             <td>${lates > 0 ? `<span style="color:#f1c40f; font-weight:bold;">${lates}</span>` : lates}</td>
             <td>${unconfDisplay}</td>
+            <td>${missingDisplay}</td>
             <td>${actionBtn}</td>
         </tr>`;
     });
     html += `</tbody></table></div>`;
-    const renderKey = `${gid}|${records.length}|${records.map(r => `${r.id}:${r.updatedAt || r.clockIn || ''}:${r.clockOut || ''}:${r.lateConfirmed ? 1 : 0}`).join(',')}`;
+    const renderKey = `${gid}|${records.length}|${pendingMissingCount}|${records.map(r => `${r.id}:${r.updatedAt || r.clockIn || ''}:${r.clockOut || ''}:${r.lateConfirmed ? 1 : 0}:${r.absenceReviewed ? 1 : 0}`).join(',')}`;
     if (!options.force && renderKey === attendanceAdminLastRenderKey && container.innerHTML) return;
     attendanceAdminLastRenderKey = renderKey;
     attendanceAdminPendingRefresh = false;
@@ -737,36 +826,63 @@ async function deleteLateEntry(recordId) {
     if(typeof checkMissingClockIns === 'function') checkMissingClockIns();
 }
 
+async function reviewMissingAttendance(username, dateIso) {
+    const safeUser = String(username || '').trim();
+    const safeDate = String(dateIso || '').trim();
+    if (!safeUser || !safeDate) return;
+
+    const reason = await promptAttendanceReview(
+        'Review Missing Attendance',
+        `Review missing clock-in day for ${safeUser}.\n\nDate: ${safeDate}\n\nEnter the valid reason or admin note for why the trainee did not clock in:`,
+        ''
+    );
+    if (reason === null) return;
+    const cleanReason = String(reason || '').trim();
+    if (!cleanReason) return alert('Please enter a reason before marking the missing day reviewed.');
+
+    const valid = confirm('Mark this missing day as a VALID absence?\n\nOK = Valid reason accepted\nCancel = Reviewed, but not accepted as valid');
+    const records = readAttendanceRecords();
+    const id = getAttendanceAbsentId(safeUser, safeDate);
+    let rec = records.find(r => r.id === id || (normalizeAttendanceUser(r.user) === normalizeAttendanceUser(safeUser) && String(r.date || '') === safeDate));
+    if (!rec) {
+        rec = {
+            id,
+            user: safeUser,
+            date: safeDate,
+            clockIn: '',
+            clockOut: '',
+            isAbsent: true
+        };
+        records.push(rec);
+    }
+
+    rec.isAbsent = true;
+    rec.absenceReviewed = true;
+    rec.absenceValid = !!valid;
+    rec.absenceReason = cleanReason;
+    rec.adminComment = cleanReason;
+    rec.reviewedBy = (CURRENT_USER && CURRENT_USER.user) || 'admin';
+    rec.reviewedAt = new Date().toISOString();
+
+    try {
+        await saveAttendanceRecordToServer(rec, safeUser);
+    } catch (error) {
+        console.warn('Missing attendance review save failed:', error);
+        return alert('Failed to save missing attendance review to the server. Please check your connection and try again.');
+    }
+
+    writeAttendanceRecords(records);
+    if (!window.supabaseClient && typeof saveToServer === 'function') saveToServer(['attendance_records'], false);
+    if (typeof showToast === 'function') showToast('Missing attendance day reviewed.', 'success');
+    manageAgentAttendance(safeUser);
+    if (typeof checkMissingClockIns === 'function') checkMissingClockIns();
+}
+
 function manageAgentAttendance(username) {
     const container = document.getElementById('attAdminContent');
     const records = readAttendanceRecords();
     let myRecs = records.filter(r => normalizeAttendanceUser(r.user) === normalizeAttendanceUser(username));
-    
-    // --- AUTO-GENERATE ABSENTEEISM ---
-    // Scan last 30 days for missing weekdays
-    const today = new Date();
-    const cutoff = new Date();
-    cutoff.setDate(today.getDate() - 30); // Look back 30 days
-
-    const existingDates = new Set(myRecs.map(r => r.date));
-    const absents = [];
-
-    for (let d = new Date(cutoff); d < today; d.setDate(d.getDate() + 1)) {
-        const dayOfWeek = d.getDay();
-        if (dayOfWeek === 0 || dayOfWeek === 6) continue; // Skip Sat/Sun
-        
-        const dateStr = getLocalISODate(d);
-        if (!existingDates.has(dateStr)) {
-            absents.push({
-                id: 'absent_' + dateStr,
-                date: dateStr,
-                user: username,
-                clockIn: '-',
-                clockOut: '-',
-                isAbsent: true
-            });
-        }
-    }
+    const absents = buildMissingAttendanceDays(username, records);
     
     // Merge real records with generated absents
     myRecs = [...myRecs, ...absents];
@@ -800,21 +916,23 @@ function manageAgentAttendance(username) {
     } else {
         myRecs.forEach(r => {
             let status = '';
-            if (r.isAbsent) status = '<span style="color:#e74c3c; font-weight:bold;">Absent</span>';
+            if (r.isAbsent && r.absenceReviewed) status = `<span style="color:${r.absenceValid ? '#2ecc71' : '#f1c40f'}; font-weight:bold;">${r.absenceValid ? 'Valid Absence' : 'Absence Reviewed'}</span>`;
+            else if (r.isAbsent) status = '<span style="color:#e74c3c; font-weight:bold;">Missing Clock-In</span>';
             else if (r.isIgnored) status = '<span style="color:var(--text-muted);">Ignored</span>';
             else if (r.isLate) status = '<span style="color:#ff5252;">Late</span>';
             else status = '<span style="color:#2ecc71;">On Time</span>';
 
             const safeUser = username.replace(/'/g, "\\\\'");
             const commentHtml = r.adminComment ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px; font-style:italic;">Admin: ${escapeAttendanceHtml(r.adminComment)}</div>` : '';
+            const absenceReasonHtml = r.absenceReason ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Reason: ${escapeAttendanceHtml(r.absenceReason)}</div>` : '';
             html += `
                 <tr>
                     <td>${escapeAttendanceHtml(r.date)}</td>
                     <td>${escapeAttendanceHtml(r.clockIn || '-')}</td>
                     <td>${escapeAttendanceHtml(r.clockOut || '-')}</td>
-                    <td>${status}${commentHtml}</td>
+                    <td>${status}${commentHtml}${absenceReasonHtml}</td>
                     <td>
-                        <button class="btn-secondary btn-sm" onclick="editAttendanceRecord('${r.id}', '${safeUser}')" title="Edit Record"><i class="fas fa-pen"></i></button>
+                        ${r.isAbsent && !r.absenceReviewed ? `<button class="btn-warning btn-sm" onclick="reviewMissingAttendance('${safeUser}', '${r.date}')" title="Review Missing Day">Review</button>` : `<button class="btn-secondary btn-sm" onclick="editAttendanceRecord('${r.id}', '${safeUser}')" title="Edit Record"><i class="fas fa-pen"></i></button>`}
                         ${!r.isAbsent ? `<button class="btn-danger btn-sm" onclick="deleteAttendanceRecord('${r.id}', '${safeUser}')" title="Delete Record"><i class="fas fa-trash"></i></button>` : ''}
                     </td>
                 </tr>
@@ -832,7 +950,7 @@ function editAttendanceRecord(id, username) {
 
     // Handle Generated Absent Record (Create temporary object for editing)
     if (!rec && id.startsWith('absent_')) {
-        const dateStr = id.replace('absent_', '');
+        const dateStr = parseAttendanceAbsentId(id).date;
         rec = {
             id: id,
             date: dateStr,
@@ -916,12 +1034,15 @@ window.saveAttendanceEdit = async function(id, username) {
     }
 
     // Direct DB Write (Atomic)
-    if (window.supabaseClient) {
-        const { error } = await window.supabaseClient.from('attendance').upsert({ id: rec.id, user_id: username, data: rec, updated_at: new Date().toISOString() });
-        if (error) return alert("Failed to save edit to server.");
+    try {
+        await saveAttendanceRecordToServer(rec, username);
+    } catch (error) {
+        console.warn('Attendance edit save failed:', error);
+        return alert("Failed to save edit to server.");
     }
 
     records = writeAttendanceRecords(records);
+    if (!window.supabaseClient && typeof saveToServer === 'function') saveToServer(['attendance_records'], false);
     
     // Close modal FIRST to ensure UI responsiveness
     const modal = document.getElementById('attendanceEditModal');
@@ -957,14 +1078,17 @@ function checkMissingClockIns() {
     
     // Count Unconfirmed Lates
     const unconfirmedCount = records.filter(r => r.isLate && !r.lateConfirmed && !r.isIgnored).length;
+    const members = getAttendanceReviewMembers();
+    const missingCount = members.reduce((sum, member) => sum + buildMissingAttendanceDays(member, records).length, 0);
+    const totalReviewCount = unconfirmedCount + missingCount;
     
     const widget = document.getElementById('attAlertWidget');
     // We don't use the widget anymore, we use the Dashboard Badge.
     // But we can update the badge here if called.
     const badge = document.getElementById('badgeAtt');
     if(badge) {
-        if(unconfirmedCount > 0) {
-            badge.innerText = unconfirmedCount;
+        if(totalReviewCount > 0) {
+            badge.innerText = totalReviewCount;
             badge.classList.remove('hidden');
         } else {
             badge.classList.add('hidden');
