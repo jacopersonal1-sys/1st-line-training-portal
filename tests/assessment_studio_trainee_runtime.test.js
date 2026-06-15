@@ -230,6 +230,50 @@ describe('Assessment Studio trainee runtime', () => {
         expect(html).toContain('Re-upload');
     });
 
+    test('shows scheduled Assessment Studio generator in My Assessments before local submission exists', () => {
+        const store = makeStore(null);
+        store.generators = [{
+            id: 'gen_scheduled',
+            assessment: 'Scheduled Studio Assessment',
+            phase: 'Assessment',
+            totalPoints: 2,
+            pointLeeway: 0,
+            allowedTypes: ['multiple_choice'],
+            status: 'active'
+        }];
+        store.questionBucket = [{
+            id: 'q_sched',
+            assessment: 'Scheduled Studio Assessment',
+            type: 'multiple_choice',
+            text: 'Scheduled question.',
+            options: ['A', 'B'],
+            correct: 0,
+            points: 2,
+            status: 'active'
+        }];
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        localStorage.setItem('rosters', JSON.stringify({ group_1: ['Alice'] }));
+        localStorage.setItem('schedules', JSON.stringify({
+            sched_1: {
+                assigned: 'group_1',
+                startDate: '2026-06-15',
+                items: [{
+                    courseName: 'Course 2',
+                    linkedAssessmentStudioGeneratorId: 'gen_scheduled',
+                    linkedAssessmentStudioLabel: 'Scheduled Studio Assessment',
+                    dateRange: '2026-06-15'
+                }]
+            }
+        }));
+
+        const html = window.renderAssessmentStudioAssignmentsHtml();
+
+        expect(html).toContain('Scheduled Studio Assessment');
+        expect(html).toContain('Ready to generate');
+        expect(html).toContain("openAssessmentStudioFromSchedule('gen_scheduled')");
+    });
+
     test('keeps local submitted snapshot when newer server data is missing it', async () => {
         const submitted = makeSubmission({
             id: 'ast_failed_upload',

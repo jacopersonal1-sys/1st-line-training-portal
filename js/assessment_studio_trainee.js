@@ -121,6 +121,11 @@ function astTraineeDefaultStore() {
     return { questionBucket: [], generators: [], submissions: [], groupings: [], tags: [], updatedAt: null, updatedBy: null };
 }
 
+function astTraineeReadObject(key) {
+    const parsed = astTraineeParse(localStorage.getItem(key), {});
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+}
+
 function astTraineeNormalizeQuestion(raw) {
     const q = raw && typeof raw === 'object' ? raw : {};
     const points = Number(q.points);
@@ -655,12 +660,54 @@ function astTraineeCreateFeedbackNotification(submission) {
 }
 
 function astTraineeFindGroup(trainee) {
-    const rosters = astTraineeParse(localStorage.getItem('rosters'), {});
+    const rosters = astTraineeReadObject('rosters');
     const target = astTraineeIdentity(trainee);
     for (const [groupId, members] of Object.entries(rosters || {})) {
         if (Array.isArray(members) && members.some(name => astTraineeIdentity(name) === target)) return groupId;
     }
     return '';
+}
+
+function astTraineeScheduledGeneratorAssignments(store) {
+    const trainee = astTraineeCurrentUserName();
+    const groupId = astTraineeFindGroup(trainee);
+    if (!trainee || !groupId) return [];
+    const schedules = astTraineeReadObject('schedules');
+    const generators = Array.isArray(store && store.generators) ? store.generators : [];
+    const rows = [];
+
+    Object.entries(schedules).forEach(([scheduleId, schedule]) => {
+        if (!schedule || String(schedule.assigned || '') !== String(groupId)) return;
+        (Array.isArray(schedule.items) ? schedule.items : []).forEach((item, itemIdx) => {
+            const generatorId = String(item && item.linkedAssessmentStudioGeneratorId || '').trim();
+            if (!generatorId) return;
+            const generator = generators.find(g => String(g.id) === generatorId && g.status !== 'archived');
+            const label = (generator && generator.assessment) || item.linkedAssessmentStudioLabel || item.title || item.courseName || 'Assessment Studio Test';
+            const row = astTraineeNormalizeSubmission({
+                id: `ast_schedule_${scheduleId}_${itemIdx}_${generatorId}`,
+                generatorId,
+                trainee,
+                groupID: groupId,
+                assessment: label,
+                phase: (generator && generator.phase) || 'Assessment',
+                status: 'assigned',
+                feedbackStatus: 'none',
+                testSnapshot: {
+                    title: label,
+                    generatorId,
+                    signature: 'scheduled',
+                    questions: []
+                },
+                maxPoints: Number(generator && generator.totalPoints || 0),
+                generatedAt: item.dueDate || item.dateRange || schedule.startDate || new Date().toISOString(),
+                updatedAt: item.updatedAt || schedule.updatedAt || item.dueDate || item.dateRange || schedule.startDate || new Date().toISOString()
+            });
+            row._scheduleOnly = true;
+            rows.push(row);
+        });
+    });
+
+    return rows;
 }
 
 function astTraineeShuffle(items, seedText) {
@@ -792,8 +839,9 @@ function getAssessmentStudioAssignmentsForCurrentUser() {
     const trainee = astTraineeCurrentUserName();
     if (!trainee) return [];
     verifyLocalAssessmentStudioSubmittedUploads({ silent: true });
+    const store = astTraineeGetStore();
     const byGenerator = new Map();
-    astTraineeGetStore().submissions
+    store.submissions
         .filter(s => astTraineeIdentity(s.trainee) === astTraineeIdentity(trainee) && String(s.status || '') !== 'archived')
         .forEach(sub => {
             const generatorKey = String(sub.generatorId || sub.id || '').trim();
@@ -801,6 +849,10 @@ function getAssessmentStudioAssignmentsForCurrentUser() {
             const current = byGenerator.get(key);
             if (!current || astTraineeCompareAssignmentPriority(sub, current) < 0) byGenerator.set(key, sub);
         });
+    astTraineeScheduledGeneratorAssignments(store).forEach(sub => {
+        const key = String(sub.generatorId || sub.id || '').trim();
+        if (key && !byGenerator.has(key)) byGenerator.set(key, sub);
+    });
     return Array.from(byGenerator.values())
         .sort((a, b) => String(b.updatedAt || b.generatedAt || '').localeCompare(String(a.updatedAt || a.generatedAt || '')));
 }
@@ -820,6 +872,12 @@ function renderAssessmentStudioAssignmentsHtml() {
         const statusLabel = status === 'pending_review' ? 'Pending Review' : status === 'completed' ? `Completed (${Math.round(Number(sub.percent || 0))}%)` : status === 'in_progress' ? 'In Progress' : 'Not Started';
         const statusClass = status === 'completed' ? 'status-pass' : status === 'pending_review' ? 'status-semi' : 'status-improve';
         const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions.length : 0;
+        const questionLabel = sub._scheduleOnly ? 'Ready to generate' : `${questions} Questions`;
+        const actionHtml = sub._scheduleOnly
+            ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioFromSchedule('${astTraineeEsc(sub.generatorId)}')">Start Studio Test</button>`
+            : isOpen
+                ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioTraineeRuntime('${astTraineeEsc(sub.id)}')">${status === 'in_progress' ? 'Resume' : 'Start'} Studio Test</button>`
+                : '<button class="btn-secondary btn-sm" disabled>Submitted</button>';
         const uploadHtml = needsUploadRecovery
             ? `<span class="status-badge status-fail"><i class="fas fa-cloud-exclamation"></i> Upload Failed</span><button class="btn-warning btn-sm" onclick="retryAssessmentStudioSubmissionUpload('${astTraineeEsc(sub.id)}')"><i class="fas fa-cloud-arrow-up"></i> Re-upload</button>`
             : isUploadingRecovery
@@ -836,13 +894,13 @@ function renderAssessmentStudioAssignmentsHtml() {
                     <strong>${astTraineeEsc(sub.assessment || 'Assessment Studio Test')}</strong>
                     <div class="test-card-meta">
                         <span><i class="fas fa-clipboard-list"></i> Assessment Studio</span>
-                        <span><i class="fas fa-list-ol"></i> ${questions} Questions</span>
+                        <span><i class="fas fa-list-ol"></i> ${astTraineeEsc(questionLabel)}</span>
                         <span><i class="fas fa-shield-halved"></i> Snapshot ${astTraineeEsc(sub.testSnapshot?.signature || sub.id).slice(0, 12)}</span>
                     </div>
                 </div>
                 <div class="test-card-actions" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                     <span class="status-badge ${statusClass}">${astTraineeEsc(statusLabel)}</span>
-                    ${isOpen ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioTraineeRuntime('${astTraineeEsc(sub.id)}')">${status === 'in_progress' ? 'Resume' : 'Start'} Studio Test</button>` : '<button class="btn-secondary btn-sm" disabled>Submitted</button>'}
+                    ${actionHtml}
                     ${uploadHtml}
                     ${feedbackHtml}
                 </div>

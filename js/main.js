@@ -5582,6 +5582,11 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.51": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio Hotfix:</strong> My Assessments now shows scheduled Assessment Studio tests even before a trainee submission row has been generated locally.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Recovery:</strong> Submitted or in-progress Studio work still takes priority over newly scheduled generator cards, so recovery snapshots are not hidden.</li>
+            </ul>`,
         "2.7.50": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Assessment Studio Recovery:</strong> Submitted trainee snapshots now stay preserved locally if Supabase upload fails, with a clear Re-upload action instead of generating a new test.</li>
