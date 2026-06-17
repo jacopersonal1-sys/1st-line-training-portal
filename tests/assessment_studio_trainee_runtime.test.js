@@ -198,6 +198,41 @@ describe('Assessment Studio trainee runtime', () => {
         expect(runtimeRoot.contains).toHaveBeenCalledWith(activeTextarea);
     });
 
+    test('save draft captures visible answer selections before cloud save refreshes state', async () => {
+        const submission = makeSubmission({
+            id: 'ast_visible_answer',
+            status: 'in_progress',
+            answers: {},
+            testSnapshot: {
+                title: 'Visible Answer Assessment',
+                questions: [{
+                    id: 'q_choice',
+                    assessment: 'Visible Answer Assessment',
+                    type: 'multiple_choice',
+                    text: 'Pick the visible option.',
+                    options: ['Old', 'Visible'],
+                    correct: 1,
+                    points: 2
+                }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        window.openAssessmentStudioTraineeRuntime('ast_visible_answer');
+        document.querySelectorAll = jest.fn(selector => {
+            if (selector === '#astq0 input[type="radio"]:checked') return [{ value: '1' }];
+            return [];
+        });
+
+        await window.saveAssessmentStudioDraft();
+
+        const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        const draft = saved.submissions.find(item => item.id === 'ast_visible_answer');
+        expect(draft.answers['0']).toBe(1);
+        expect(draft.status).toBe('in_progress');
+    });
+
     test('recovers local submitted Studio submissions missing from the server document', async () => {
         const localSubmission = makeSubmission({
             id: 'ast_sydney',
@@ -292,7 +327,7 @@ describe('Assessment Studio trainee runtime', () => {
                     courseName: 'Course 2',
                     linkedAssessmentStudioGeneratorId: 'gen_scheduled',
                     linkedAssessmentStudioLabel: 'Scheduled Studio Assessment',
-                    dateRange: '2026-06-15'
+                    dateRange: 'Always Available'
                 }]
             }
         }));
@@ -302,6 +337,108 @@ describe('Assessment Studio trainee runtime', () => {
         expect(html).toContain('Scheduled Studio Assessment');
         expect(html).toContain('Ready to generate');
         expect(html).toContain("openAssessmentStudioFromSchedule('gen_scheduled')");
+    });
+
+    test('blocks expired scheduled Assessment Studio generator before creating trainee snapshot', async () => {
+        const store = makeStore(null);
+        store.generators = [{
+            id: 'gen_expired',
+            assessment: 'Expired Studio Assessment',
+            phase: 'Assessment',
+            totalPoints: 2,
+            pointLeeway: 0,
+            allowedTypes: ['multiple_choice'],
+            status: 'active'
+        }];
+        store.questionBucket = [{
+            id: 'q_expired',
+            assessment: 'Expired Studio Assessment',
+            type: 'multiple_choice',
+            text: 'Expired question.',
+            options: ['A', 'B'],
+            correct: 0,
+            points: 2,
+            status: 'active'
+        }];
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        localStorage.setItem('rosters', JSON.stringify({ group_1: ['Alice'] }));
+        localStorage.setItem('schedules', JSON.stringify({
+            sched_1: {
+                assigned: 'group_1',
+                items: [{
+                    courseName: 'Expired Course',
+                    linkedAssessmentStudioGeneratorId: 'gen_expired',
+                    linkedAssessmentStudioLabel: 'Expired Studio Assessment',
+                    dateRange: '2000-01-01',
+                    dueDate: '2000-01-01'
+                }]
+            }
+        }));
+
+        const html = window.renderAssessmentStudioAssignmentsHtml();
+        const opened = await window.openAssessmentStudioFromSchedule('gen_expired');
+
+        expect(html).toContain('Assessment window has closed');
+        expect(html).not.toContain("openAssessmentStudioFromSchedule('gen_expired')");
+        expect(opened).toBe(false);
+        const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        expect(saved.submissions).toHaveLength(0);
+        expect(showToast).toHaveBeenCalledWith('Assessment window has closed', 'error');
+    });
+
+    test('blocks scheduled Assessment Studio generator after configured close time', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-06-17T15:30:00'));
+        try {
+            const store = makeStore(null);
+            store.generators = [{
+                id: 'gen_time_closed',
+                assessment: 'Time Closed Studio Assessment',
+                phase: 'Assessment',
+                totalPoints: 2,
+                pointLeeway: 0,
+                allowedTypes: ['multiple_choice'],
+                status: 'active'
+            }];
+            store.questionBucket = [{
+                id: 'q_time_closed',
+                assessment: 'Time Closed Studio Assessment',
+                type: 'multiple_choice',
+                text: 'Time closed question.',
+                options: ['A', 'B'],
+                correct: 0,
+                points: 2,
+                status: 'active'
+            }];
+            localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+            localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+            localStorage.setItem('rosters', JSON.stringify({ group_1: ['Alice'] }));
+            localStorage.setItem('schedules', JSON.stringify({
+                sched_1: {
+                    assigned: 'group_1',
+                    items: [{
+                        courseName: 'Time Closed Course',
+                        linkedAssessmentStudioGeneratorId: 'gen_time_closed',
+                        linkedAssessmentStudioLabel: 'Time Closed Studio Assessment',
+                        dateRange: '2026-06-17',
+                        dueDate: '2026-06-17',
+                        openTime: '08:00',
+                        closeTime: '09:00',
+                        ignoreTime: false
+                    }]
+                }
+            }));
+
+            const html = window.renderAssessmentStudioAssignmentsHtml();
+            const opened = await window.openAssessmentStudioFromSchedule('gen_time_closed');
+
+            expect(html).toContain('Closed after 09:00');
+            expect(opened).toBe(false);
+            const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+            expect(saved.submissions).toHaveLength(0);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test('creates one sealed Assessment Studio snapshot from a manual catch-up assignment', async () => {

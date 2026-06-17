@@ -1540,6 +1540,10 @@ const App = {
                 courseName: item.courseName || '',
                 dateRange: item.dateRange || '',
                 dueDate: item.dueDate || '',
+                openTime: item.openTime || '',
+                closeTime: item.closeTime || '',
+                ignoreTime: Boolean(item.ignoreTime),
+                availabilityExceptionUsers: Array.isArray(item.availabilityExceptionUsers) ? item.availabilityExceptionUsers : [],
                 scheduleId: this.state.activeScheduleId
             });
             return;

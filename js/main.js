@@ -5601,6 +5601,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.55": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio Drafts:</strong> Save Draft and Submit now capture the visible answer controls before saving, so recent selections do not disappear after a refresh.</li>
+                <li style="margin-bottom: 8px;"><strong>Schedule Windows:</strong> Assessment Studio tests linked from Schedule Studio now enforce the configured date and time window before opening.</li>
+                <li style="margin-bottom: 8px;"><strong>Safety:</strong> Expired or time-closed Studio timeline items cannot create a trainee snapshot outside the allowed availability window.</li>
+            </ul>`,
         "2.7.54": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Catch-up Push now lives inside Assessment Studio instead of the legacy Test Engine overview.</li>

@@ -126,6 +126,110 @@ function astTraineeReadObject(key) {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
 }
 
+function astTraineeTodayString() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function astTraineeCurrentMinutes() {
+    const now = new Date();
+    return (now.getHours() * 60) + now.getMinutes();
+}
+
+function astTraineeNormalizeDate(value) {
+    const raw = String(value || '').trim();
+    if (!raw || /^always available$/i.test(raw) || /^no dates set$/i.test(raw)) return '';
+    const normalized = raw.replace(/\//g, '-');
+    const match = normalized.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (!match) return '';
+    return `${match[1]}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`;
+}
+
+function astTraineeScheduleItemSnapshot(item = {}, scheduleId = '', itemIndex = null) {
+    const raw = item && typeof item === 'object' ? item : {};
+    return {
+        scheduleId: String(raw.scheduleId || scheduleId || '').trim(),
+        itemIndex: raw.itemIndex !== undefined ? raw.itemIndex : itemIndex,
+        courseName: String(raw.courseName || raw.title || '').trim(),
+        dateRange: String(raw.dateRange || '').trim(),
+        dueDate: String(raw.dueDate || '').trim(),
+        openTime: String(raw.openTime || '').trim(),
+        closeTime: String(raw.closeTime || '').trim(),
+        ignoreTime: Boolean(raw.ignoreTime),
+        availabilityExceptionUsers: Array.isArray(raw.availabilityExceptionUsers)
+            ? raw.availabilityExceptionUsers.map(value => String(value || '').trim()).filter(Boolean)
+            : []
+    };
+}
+
+function astTraineeScheduleRange(item = {}) {
+    const rawRange = String(item && item.dateRange || '').trim();
+    if (/^always available$/i.test(rawRange)) return { always: true, start: '', end: '' };
+    let start = '';
+    let end = '';
+    if (rawRange.includes('-') && rawRange.length > 11) {
+        const parts = rawRange.split('-').map(part => astTraineeNormalizeDate(part)).filter(Boolean);
+        start = parts[0] || '';
+        end = parts[1] || parts[0] || '';
+    } else {
+        start = astTraineeNormalizeDate(rawRange);
+        end = start;
+    }
+    const dueDate = astTraineeNormalizeDate(item && item.dueDate);
+    if (dueDate) end = dueDate;
+    return { always: false, start, end };
+}
+
+function astTraineeTimeToMinutes(value) {
+    const [hoursRaw, minutesRaw] = String(value || '00:00').split(':');
+    const hours = Number(hoursRaw);
+    const minutes = Number(minutesRaw);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0;
+    return Math.max(0, Math.min(1439, (hours * 60) + minutes));
+}
+
+function astTraineeIsAvailabilityException(item = {}) {
+    const trainee = astTraineeCurrentUserName();
+    if (!trainee || !Array.isArray(item.availabilityExceptionUsers)) return false;
+    return item.availabilityExceptionUsers.some(entry => astTraineeIdentity(entry) === astTraineeIdentity(trainee));
+}
+
+function astTraineeScheduleAvailability(item = {}) {
+    const scheduleItem = astTraineeScheduleItemSnapshot(item);
+    if (astTraineeIsAvailabilityException(scheduleItem)) {
+        return { available: true, label: 'Available by trainee exception' };
+    }
+    const range = astTraineeScheduleRange(scheduleItem);
+    if (range.always) return { available: true, label: 'Available' };
+    const today = astTraineeTodayString();
+    const releaseDate = range.end || range.start;
+    if (!releaseDate) return { available: true, label: 'Available' };
+    if (today < releaseDate) return { available: false, label: `Assessment unlocks on ${releaseDate}` };
+    if (today > releaseDate) return { available: false, label: 'Assessment window has closed' };
+    if (scheduleItem.ignoreTime) return { available: true, label: 'Available today' };
+    const nowMinutes = astTraineeCurrentMinutes();
+    const openMinutes = astTraineeTimeToMinutes(scheduleItem.openTime || '00:00');
+    const closeMinutes = scheduleItem.closeTime ? astTraineeTimeToMinutes(scheduleItem.closeTime) : null;
+    if (nowMinutes < openMinutes) return { available: false, label: `Available today at ${scheduleItem.openTime || '00:00'}` };
+    if (closeMinutes !== null && nowMinutes > closeMinutes) return { available: false, label: `Closed after ${scheduleItem.closeTime}` };
+    return { available: true, label: 'Available now' };
+}
+
+function astTraineeFindScheduleItemForGenerator(generatorId) {
+    const cleanGeneratorId = String(generatorId || '').trim();
+    const trainee = astTraineeCurrentUserName();
+    const groupId = astTraineeFindGroup(trainee);
+    if (!cleanGeneratorId || !groupId) return null;
+    const schedules = astTraineeReadObject('schedules');
+    for (const [scheduleId, schedule] of Object.entries(schedules)) {
+        if (!schedule || String(schedule.assigned || '') !== String(groupId)) continue;
+        const items = Array.isArray(schedule.items) ? schedule.items : [];
+        const itemIndex = items.findIndex(item => String(item && item.linkedAssessmentStudioGeneratorId || '').trim() === cleanGeneratorId);
+        if (itemIndex >= 0) return astTraineeScheduleItemSnapshot(items[itemIndex], scheduleId, itemIndex);
+    }
+    return null;
+}
+
 function astTraineeNormalizeQuestion(raw) {
     const q = raw && typeof raw === 'object' ? raw : {};
     const points = Number(q.points);
@@ -187,6 +291,7 @@ function astTraineeNormalizeSubmission(raw) {
         status: String(s.status || 'assigned').trim(),
         feedbackStatus: String(s.feedbackStatus || 'none').trim() || 'none',
         testSnapshot: { ...snapshot, questions },
+        scheduleItem: s.scheduleItem && typeof s.scheduleItem === 'object' ? astTraineeScheduleItemSnapshot(s.scheduleItem) : null,
         answers: s.answers && typeof s.answers === 'object' ? s.answers : {},
         questionScores: s.questionScores && typeof s.questionScores === 'object' ? s.questionScores : {},
         maxPoints: Number.isFinite(maxPoints) && maxPoints > 0 ? Math.round(maxPoints * 10) / 10 : 0,
@@ -684,6 +789,7 @@ function astTraineeScheduledGeneratorAssignments(store) {
             if (!generatorId) return;
             const generator = generators.find(g => String(g.id) === generatorId && g.status !== 'archived');
             const label = (generator && generator.assessment) || item.linkedAssessmentStudioLabel || item.title || item.courseName || 'Assessment Studio Test';
+            const scheduleItem = astTraineeScheduleItemSnapshot(item, scheduleId, itemIdx);
             const row = astTraineeNormalizeSubmission({
                 id: `ast_schedule_${scheduleId}_${itemIdx}_${generatorId}`,
                 generatorId,
@@ -700,10 +806,13 @@ function astTraineeScheduledGeneratorAssignments(store) {
                     questions: []
                 },
                 maxPoints: Number(generator && generator.totalPoints || 0),
+                scheduleItem,
                 generatedAt: item.dueDate || item.dateRange || schedule.startDate || new Date().toISOString(),
                 updatedAt: item.updatedAt || schedule.updatedAt || item.dueDate || item.dateRange || schedule.startDate || new Date().toISOString()
             });
             row._scheduleOnly = true;
+            row._scheduleItem = scheduleItem;
+            row._scheduleAvailability = astTraineeScheduleAvailability(scheduleItem);
             rows.push(row);
         });
     });
@@ -833,6 +942,12 @@ async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, sched
     const trainee = astTraineeCurrentUserName();
     if (!cleanGeneratorId) throw new Error('This timeline item is missing its Assessment Studio generator link.');
     if (!trainee) throw new Error('Assessment Studio could not identify the current trainee.');
+    const scheduleSnapshot = astTraineeScheduleItemSnapshot(scheduleItem && Object.keys(scheduleItem || {}).length ? scheduleItem : (astTraineeFindScheduleItemForGenerator(cleanGeneratorId) || {}));
+    const hasScheduleWindow = !!(scheduleSnapshot.dateRange || scheduleSnapshot.dueDate || scheduleSnapshot.openTime || scheduleSnapshot.closeTime || scheduleSnapshot.ignoreTime || scheduleSnapshot.scheduleId);
+    if (hasScheduleWindow) {
+        const availability = astTraineeScheduleAvailability(scheduleSnapshot);
+        if (!availability.available) throw new Error(availability.label || 'This Assessment Studio test is not available right now.');
+    }
 
     const store = astTraineeGetStore();
     const existing = store.submissions
@@ -853,7 +968,7 @@ async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, sched
     const generatorSafety = astTraineeValidateGenerator(store, generator);
     if (generatorSafety.errors.length) throw new Error(generatorSafety.errors[0]);
 
-    const snapshot = astTraineeGenerateSnapshot(store, generator, trainee, scheduleItem);
+    const snapshot = astTraineeGenerateSnapshot(store, generator, trainee, hasScheduleWindow ? scheduleSnapshot : scheduleItem);
     const submission = astTraineeNormalizeSubmission({
         id: astTraineeMakeId('ast_sub'),
         generatorId: generator.id,
@@ -864,6 +979,7 @@ async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, sched
         status: 'assigned',
         feedbackStatus: 'none',
         testSnapshot: snapshot,
+        scheduleItem: hasScheduleWindow ? scheduleSnapshot : null,
         maxPoints: snapshot.totalPoints,
         generatedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -957,7 +1073,17 @@ function getAssessmentStudioAssignmentsForCurrentUser() {
         });
     astTraineeScheduledGeneratorAssignments(store).forEach(sub => {
         const key = String(sub.generatorId || sub.id || '').trim();
-        if (key && !byGenerator.has(key)) byGenerator.set(key, sub);
+        if (!key) return;
+        const current = byGenerator.get(key);
+        if (!current) {
+            byGenerator.set(key, sub);
+            return;
+        }
+        if (['assigned', 'in_progress'].includes(String(current.status || '').trim())) {
+            current._scheduleItem = sub._scheduleItem || sub.scheduleItem || null;
+            current._scheduleAvailability = sub._scheduleAvailability || (current._scheduleItem ? astTraineeScheduleAvailability(current._scheduleItem) : null);
+            if (!current.scheduleItem && current._scheduleItem) current.scheduleItem = current._scheduleItem;
+        }
     });
     astTraineeManualGeneratorAssignments(store).forEach(sub => {
         const manualAssignmentId = String(sub.manualAssignmentId || '').trim();
@@ -984,12 +1110,18 @@ function renderAssessmentStudioAssignmentsHtml() {
         const statusClass = status === 'completed' ? 'status-pass' : status === 'pending_review' ? 'status-semi' : 'status-improve';
         const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions.length : 0;
         const questionLabel = sub._scheduleOnly ? 'Ready to generate' : `${questions} Questions`;
+        const scheduleAvailability = sub._scheduleAvailability || (sub.scheduleItem ? astTraineeScheduleAvailability(sub.scheduleItem) : null);
+        const scheduleLocked = scheduleAvailability && !scheduleAvailability.available;
         const actionHtml = sub._manualOnly
             ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioFromManualAssignment('${astTraineeEsc(sub.manualAssignmentId)}')">Start Catch-up</button>`
             : sub._scheduleOnly
-            ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioFromSchedule('${astTraineeEsc(sub.generatorId)}')">Start Studio Test</button>`
+            ? scheduleLocked
+                ? `<button class="btn-secondary btn-sm" disabled>${astTraineeEsc(scheduleAvailability.label || 'Locked')}</button>`
+                : `<button class="btn-primary btn-sm" onclick="openAssessmentStudioFromSchedule('${astTraineeEsc(sub.generatorId)}')">Start Studio Test</button>`
             : isOpen
-                ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioTraineeRuntime('${astTraineeEsc(sub.id)}')">${status === 'in_progress' ? 'Resume' : 'Start'} Studio Test</button>`
+                ? scheduleLocked
+                    ? `<button class="btn-secondary btn-sm" disabled>${astTraineeEsc(scheduleAvailability.label || 'Locked')}</button>`
+                    : `<button class="btn-primary btn-sm" onclick="openAssessmentStudioTraineeRuntime('${astTraineeEsc(sub.id)}')">${status === 'in_progress' ? 'Resume' : 'Start'} Studio Test</button>`
                 : '<button class="btn-secondary btn-sm" disabled>Submitted</button>';
         const uploadHtml = needsUploadRecovery
             ? `<span class="status-badge status-fail"><i class="fas fa-cloud-exclamation"></i> Upload Failed</span><button class="btn-warning btn-sm" onclick="retryAssessmentStudioSubmissionUpload('${astTraineeEsc(sub.id)}')"><i class="fas fa-cloud-arrow-up"></i> Re-upload</button>`
@@ -1009,6 +1141,7 @@ function renderAssessmentStudioAssignmentsHtml() {
                         <span><i class="fas fa-clipboard-list"></i> Assessment Studio</span>
                         <span><i class="fas fa-list-ol"></i> ${astTraineeEsc(questionLabel)}</span>
                         ${sub.manualAssignmentId ? '<span><i class="fas fa-paper-plane"></i> Manual Catch-up</span>' : ''}
+                        ${scheduleAvailability ? `<span><i class="fas fa-clock"></i> ${astTraineeEsc(scheduleAvailability.label)}</span>` : ''}
                         <span><i class="fas fa-shield-halved"></i> Snapshot ${astTraineeEsc(sub.testSnapshot?.signature || sub.id).slice(0, 12)}</span>
                     </div>
                 </div>
@@ -1116,6 +1249,19 @@ function openAssessmentStudioTraineeRuntime(submissionId) {
         if (typeof showTab === 'function') showTab('my-tests');
         if (typeof loadTraineeTests === 'function') loadTraineeTests();
         return;
+    }
+    const scheduleItem = sub.scheduleItem || astTraineeFindScheduleItemForGenerator(sub.generatorId);
+    if (!sub.manualAssignmentId && scheduleItem) {
+        const availability = astTraineeScheduleAvailability(scheduleItem);
+        if (!availability.available) {
+            AST_ACTIVE_SUBMISSION_ID = '';
+            astTraineeClearActiveSnapshot();
+            if (typeof showToast === 'function') showToast(availability.label || 'This Assessment Studio test is not available right now.', 'warning');
+            if (typeof showTab === 'function') showTab('my-tests');
+            if (typeof loadTraineeTests === 'function') loadTraineeTests();
+            return;
+        }
+        sub.scheduleItem = astTraineeScheduleItemSnapshot(scheduleItem);
     }
     if (sub && sub.status === 'assigned') {
         sub.status = 'in_progress';
@@ -1380,9 +1526,65 @@ function setAssessmentStudioRankingAnswer(idx) {
     setAssessmentStudioAnswer(idx, rows.map(select => select.value).filter(Boolean));
 }
 
+function astTraineeDomValueForQuestion(q, idx) {
+    if (!document || typeof document.querySelectorAll !== 'function') return undefined;
+    const rootSelector = `#astq${Number(idx)}`;
+    if (q.type === 'multiple_choice') {
+        const checked = Array.from(document.querySelectorAll(`${rootSelector} input[type="radio"]:checked`))[0];
+        return checked ? Number(checked.value) : undefined;
+    }
+    if (q.type === 'multi_select') {
+        const checked = Array.from(document.querySelectorAll(`${rootSelector} input[type="checkbox"]:checked`));
+        return checked.length ? checked.map(input => Number(input.value)).filter(value => Number.isFinite(value)).sort((a, b) => a - b) : undefined;
+    }
+    if (q.type === 'matching') {
+        const selects = Array.from(document.querySelectorAll(`${rootSelector} .ast-match-row select`));
+        if (!selects.length) return undefined;
+        const answer = {};
+        selects.forEach((select, pairIdx) => {
+            if (String(select.value || '').trim()) answer[String(pairIdx)] = select.value;
+        });
+        return Object.keys(answer).length ? answer : undefined;
+    }
+    if (q.type === 'ranking') {
+        const selects = Array.from(document.querySelectorAll(`${rootSelector} .ast-rank-row select`));
+        return selects.length ? selects.map(select => select.value).filter(Boolean) : undefined;
+    }
+    if (q.type === 'matrix') {
+        const checked = Array.from(document.querySelectorAll(`${rootSelector} .ast-matrix-cell input[type="radio"]:checked`));
+        if (!checked.length) return undefined;
+        const answer = {};
+        checked.forEach(input => {
+            const match = String(input.name || '').match(/ast_matrix_\d+_(\d+)/);
+            const rowIdx = match ? match[1] : String(Object.keys(answer).length);
+            answer[rowIdx] = Number(input.value);
+        });
+        return Object.keys(answer).length ? answer : undefined;
+    }
+    const textareas = Array.from(document.querySelectorAll(`${rootSelector} textarea`));
+    return textareas.length ? String(textareas[0].value || '') : undefined;
+}
+
+function astTraineeFlushVisibleAnswers(sub) {
+    if (!sub || !sub.answers || typeof sub.answers !== 'object') return false;
+    const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions : [];
+    let changed = false;
+    questions.forEach((q, idx) => {
+        const domValue = astTraineeDomValueForQuestion(q, idx);
+        if (domValue === undefined) return;
+        const key = String(idx);
+        if (JSON.stringify(sub.answers[key]) !== JSON.stringify(domValue)) {
+            sub.answers[key] = domValue;
+            changed = true;
+        }
+    });
+    return changed;
+}
+
 async function saveAssessmentStudioDraft() {
     const { store, sub } = astTraineeGetActiveSubmission();
     if (!sub) return;
+    astTraineeFlushVisibleAnswers(sub);
     sub.status = 'in_progress';
     sub.updatedAt = new Date().toISOString();
     astTraineeRememberActiveSubmission(sub);
@@ -1463,6 +1665,19 @@ function scoreAssessmentStudioQuestion(q, answer) {
 async function submitAssessmentStudioTest() {
     const { store, sub } = astTraineeGetActiveSubmission();
     if (!sub || !['assigned', 'in_progress'].includes(sub.status)) return;
+    const scheduleItem = sub.scheduleItem || astTraineeFindScheduleItemForGenerator(sub.generatorId);
+    if (!sub.manualAssignmentId && scheduleItem) {
+        const availability = astTraineeScheduleAvailability(scheduleItem);
+        if (!availability.available) {
+            if (typeof showToast === 'function') showToast(availability.label || 'This Assessment Studio test is not available right now.', 'warning');
+            else alert(availability.label || 'This Assessment Studio test is not available right now.');
+            if (typeof loadTraineeTests === 'function') loadTraineeTests();
+            if (typeof showTab === 'function') showTab('my-tests');
+            return;
+        }
+        sub.scheduleItem = astTraineeScheduleItemSnapshot(scheduleItem);
+    }
+    astTraineeFlushVisibleAnswers(sub);
     const completeness = astTraineeAnswerCompleteness(sub);
     const safetyErrors = astTraineeSubmissionSafetyErrors(sub, { requireAnswers: true });
     if (safetyErrors.length) {
@@ -1560,6 +1775,7 @@ window.openAssessmentStudioFromManualAssignment = openAssessmentStudioFromManual
 window.openAssessmentStudioTraineeRuntime = openAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioTraineeRuntime = renderAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioAssignmentsHtml = renderAssessmentStudioAssignmentsHtml;
+window.saveAssessmentStudioDraft = saveAssessmentStudioDraft;
 window.submitAssessmentStudioTest = submitAssessmentStudioTest;
 window.requestAssessmentStudioFeedback = requestAssessmentStudioFeedback;
 window.refreshAssessmentStudioTraineeStoreFromServer = refreshAssessmentStudioTraineeStoreFromServer;
