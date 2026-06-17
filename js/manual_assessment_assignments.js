@@ -126,7 +126,8 @@ function manualAssignmentGetTrainees() {
     return Array.from(names).sort((a, b) => a.localeCompare(b));
 }
 
-function manualAssignmentGetOptions() {
+function manualAssignmentGetOptions(filterType = '') {
+    const cleanFilter = String(filterType || '').trim();
     const testOptions = manualAssignmentReadArray('tests')
         .filter(test => test && test.id && String(test.type || 'standard').toLowerCase() !== 'vetting')
         .map(test => ({
@@ -142,38 +143,54 @@ function manualAssignmentGetOptions() {
             label: `Assessment Studio | ${generator.assessment || generator.title || generator.id}`,
             title: String(generator.assessment || generator.title || generator.id || '').trim()
         }));
-    return [...testOptions, ...studioOptions].sort((a, b) => a.label.localeCompare(b.label));
+    const options = cleanFilter === 'assessment_studio'
+        ? studioOptions
+        : cleanFilter === 'test_engine'
+            ? testOptions
+            : [...testOptions, ...studioOptions];
+    return options.sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function renderManualAssessmentPushPanel() {
+function renderManualAssessmentPushPanel(config = {}) {
+    const mode = String(config.mode || '').trim();
+    const assessmentFirst = !!config.assessmentFirst;
     const trainees = manualAssignmentGetTrainees();
-    const options = manualAssignmentGetOptions();
+    const options = manualAssignmentGetOptions(mode);
     const recent = getManualAssessmentAssignments().slice(0, 6);
+    const title = config.title || 'Manual Assessment Push';
+    const description = config.description || 'Assign a catch-up Test Engine or Assessment Studio assessment directly to one trainee.';
+    const assessmentLabel = mode === 'assessment_studio' ? 'Assessment Studio Test' : 'Assessment';
+    const buttonLabel = config.buttonLabel || 'Push Assignment';
+    const assessmentControl = `
+        <label>${manualAssignmentEsc(assessmentLabel)}
+            <select id="manualAssignmentTarget">
+                <option value="">Select assessment...</option>
+                ${options.map(option => `<option value="${manualAssignmentEsc(option.value)}" data-title="${manualAssignmentEsc(option.title)}">${manualAssignmentEsc(option.label)}</option>`).join('')}
+            </select>
+        </label>
+    `;
+    const traineeControl = `
+        <label>Trainee
+            <select id="manualAssignmentTrainee">
+                <option value="">Select trainee...</option>
+                ${trainees.map(name => `<option value="${manualAssignmentEsc(name)}">${manualAssignmentEsc(name)}</option>`).join('')}
+            </select>
+        </label>
+    `;
     return `
         <div class="card manual-assignment-card">
             <div class="manual-assignment-head">
                 <div>
-                    <h3 style="margin:0;">Manual Assessment Push</h3>
-                    <p style="margin:4px 0 0; color:var(--text-muted); font-size:0.9rem;">Assign a catch-up Test Engine or Assessment Studio assessment directly to one trainee.</p>
+                    <h3 style="margin:0;">${manualAssignmentEsc(title)}</h3>
+                    <p style="margin:4px 0 0; color:var(--text-muted); font-size:0.9rem;">${manualAssignmentEsc(description)}</p>
                 </div>
             </div>
-            <div class="manual-assignment-grid">
-                <label>Trainee
-                    <select id="manualAssignmentTrainee">
-                        <option value="">Select trainee...</option>
-                        ${trainees.map(name => `<option value="${manualAssignmentEsc(name)}">${manualAssignmentEsc(name)}</option>`).join('')}
-                    </select>
-                </label>
-                <label>Assessment
-                    <select id="manualAssignmentTarget">
-                        <option value="">Select assessment...</option>
-                        ${options.map(option => `<option value="${manualAssignmentEsc(option.value)}" data-title="${manualAssignmentEsc(option.title)}">${manualAssignmentEsc(option.label)}</option>`).join('')}
-                    </select>
-                </label>
+            <div class="manual-assignment-grid ${assessmentFirst ? 'manual-assignment-grid--assessment-first' : ''}">
+                ${assessmentFirst ? assessmentControl + traineeControl : traineeControl + assessmentControl}
                 <label>Note
                     <input id="manualAssignmentNote" placeholder="Optional note for trainee">
                 </label>
-                <button class="btn-primary" onclick="pushManualAssessmentAssignment()"><i class="fas fa-paper-plane"></i> Push Assignment</button>
+                <button class="btn-primary" onclick="pushManualAssessmentAssignment()"><i class="fas fa-paper-plane"></i> ${manualAssignmentEsc(buttonLabel)}</button>
             </div>
             <div class="manual-assignment-recent">
                 ${recent.length ? recent.map(item => `
@@ -186,14 +203,16 @@ function renderManualAssessmentPushPanel() {
     `;
 }
 
-function mountManualAssessmentPushPanel() {
-    const host = document.getElementById('manualAssessmentPushPanel');
+function mountManualAssessmentPushPanel(config = {}) {
+    const hostId = String(config.hostId || 'manualAssessmentPushPanel');
+    const host = document.getElementById(hostId);
     if (!host) return;
+    window.__manualAssessmentPanelConfig = { ...config, hostId };
     if (!window.CURRENT_USER || !['admin', 'super_admin'].includes(String(window.CURRENT_USER.role || '').toLowerCase())) {
         host.innerHTML = '';
         return;
     }
-    host.innerHTML = renderManualAssessmentPushPanel();
+    host.innerHTML = renderManualAssessmentPushPanel(config);
 }
 
 async function pushManualAssessmentAssignment() {
@@ -250,7 +269,8 @@ async function pushManualAssessmentAssignment() {
             return false;
         }
     }
-    mountManualAssessmentPushPanel();
+    if (window.__manualAssessmentPanelConfig) mountManualAssessmentPushPanel(window.__manualAssessmentPanelConfig);
+    else mountManualAssessmentPushPanel();
     if (typeof showToast === 'function') showToast('Manual assessment pushed to trainee.', 'success');
     return true;
 }

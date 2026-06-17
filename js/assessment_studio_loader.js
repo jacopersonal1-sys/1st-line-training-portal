@@ -169,6 +169,57 @@ const AssessmentStudioLoader = {
         });
     },
 
+    renderCatchupUI: function() {
+        const container = document.getElementById('assessment-studio-content');
+        if (!container) {
+            console.error('[Assessment Studio Loader] Container not found.');
+            return;
+        }
+
+        if (!CURRENT_USER || !['admin', 'super_admin'].includes(CURRENT_USER.role)) {
+            container.innerHTML = `
+                <div class="card" style="max-width:760px; margin:24px auto; text-align:center; border-color:#ff5252;">
+                    <h3 style="color:#ff5252; margin-bottom:8px;">Access Denied</h3>
+                    <p style="color:var(--text-muted); margin:0;">Assessment Studio is restricted to Admin and Super Admin sessions only.</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="embedded-program-shell">
+                <div class="embedded-program-header">
+                    <div>
+                        <div class="embedded-program-title"><i class="fas fa-paper-plane"></i> Assessment Studio Catch-up Push</div>
+                        <div class="embedded-program-subtitle">Select an Assessment Studio generator, choose catch-up, then assign it to one trainee.</div>
+                    </div>
+                    <div class="embedded-program-actions">
+                        <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                        <button class="btn-secondary btn-sm" onclick="AssessmentStudioLoader.renderUI()"><i class="fas fa-clipboard-list"></i> Studio</button>
+                        <button class="btn-secondary btn-sm" onclick="AssessmentStudioLoader.renderCatchupUI()"><i class="fas fa-rotate-right"></i> Refresh</button>
+                    </div>
+                </div>
+                <div class="embedded-program-body">
+                    <div id="assessmentStudioCatchupPanel"></div>
+                </div>
+            </div>
+        `;
+
+        if (typeof mountManualAssessmentPushPanel === 'function') {
+            mountManualAssessmentPushPanel({
+                hostId: 'assessmentStudioCatchupPanel',
+                mode: 'assessment_studio',
+                assessmentFirst: true,
+                title: 'Catch-up Assignment',
+                description: 'Push one generated Assessment Studio test directly to a selected trainee without using a Schedule Studio timeline item.',
+                buttonLabel: 'Push Catch-up'
+            });
+        } else {
+            const panel = document.getElementById('assessmentStudioCatchupPanel');
+            if (panel) panel.innerHTML = '<div class="card"><p style="margin:0; color:var(--text-muted);">Manual catch-up tools are not loaded. Refresh the app and try again.</p></div>';
+        }
+    },
+
     renderUI: function() {
         const container = document.getElementById('assessment-studio-content');
         if (!container) {
@@ -201,6 +252,7 @@ const AssessmentStudioLoader = {
                     </div>
                     <div class="embedded-program-actions">
                         <button class="btn-secondary btn-sm" onclick="goWorkspaceHome()"><i class="fas fa-house"></i> Home</button>
+                        <button class="btn-secondary btn-sm" onclick="AssessmentStudioLoader.renderCatchupUI()"><i class="fas fa-paper-plane"></i> Catch-up Push</button>
                         <button class="btn-secondary btn-sm" onclick="AssessmentStudioLoader.renderUI()"><i class="fas fa-rotate-right"></i> Refresh</button>
                     </div>
                 </div>

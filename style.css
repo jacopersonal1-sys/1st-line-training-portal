@@ -1334,6 +1334,9 @@ body.app-child-window .top-header {
     background: var(--bg-card);
     box-shadow: 0 10px 30px rgba(0,0,0,0.2);
 }
+.embedded-program-body {
+    min-height: calc(100vh - 230px);
+}
 
 /* ================= ANIMATIONS ================= */
 .views-container {

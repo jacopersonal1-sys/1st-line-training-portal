@@ -2782,6 +2782,7 @@ const ADVANCED_ADMIN_NAV_GROUPS = [
                 { label: 'Completed Tests', type: 'assessment-studio', view: 'completed' },
                 { label: 'Grading Queue', type: 'assessment-studio', view: 'grading' },
                 { label: 'Feedback Sessions', type: 'assessment-studio', view: 'feedback' },
+                { label: 'Catch-up Push', type: 'assessment-studio', view: 'catchup' },
                 { label: 'Universal Search', type: 'assessment-studio', view: 'search' }
             ] },
             { id: 'content-studio', title: 'Content Creator', text: 'Content Creator', icon: 'fas fa-photo-film', subItems: [
@@ -3032,6 +3033,7 @@ function getNavigationSubItemIcon(sub) {
         'assessment-studio:completed': 'fas fa-clipboard-check',
         'assessment-studio:grading': 'fas fa-pen-to-square',
         'assessment-studio:feedback': 'fas fa-comments',
+        'assessment-studio:catchup': 'fas fa-paper-plane',
         'assessment-studio:search': 'fas fa-magnifying-glass',
         'content-studio:view': 'fas fa-eye',
         'content-studio:builder': 'fas fa-hammer',
@@ -3221,7 +3223,11 @@ window.navigateAdvancedSubMenu = function navigateAdvancedSubMenu(tabId, type, v
         } else if (kind === 'opl') {
             navigateOplHubView(subView);
         } else if (kind === 'assessment-studio') {
-            navigateGenericWebviewApp('assessment-studio-webview', subView);
+            if (subView === 'catchup' && typeof AssessmentStudioLoader !== 'undefined' && typeof AssessmentStudioLoader.renderCatchupUI === 'function') {
+                AssessmentStudioLoader.renderCatchupUI();
+            } else {
+                navigateGenericWebviewApp('assessment-studio-webview', subView);
+            }
         } else if (kind === 'content-studio') {
             navigateGenericWebviewApp('content-studio-webview', subView);
         } else if (kind === 'teamleader-hub') {
@@ -4575,7 +4581,6 @@ function renderViewById(id, options = {}) {
     }
 
     if (id === 'test-manage') {
-        if (typeof mountManualAssessmentPushPanel === 'function') mountManualAssessmentPushPanel();
         if (typeof loadManageTests === 'function') loadManageTests();
         if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
         if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
@@ -5596,6 +5601,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.54": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Catch-up Push now lives inside Assessment Studio instead of the legacy Test Engine overview.</li>
+                <li style="margin-bottom: 8px;"><strong>Catch-up Flow:</strong> Admins select an Assessment Studio test first, then choose the trainee to receive the catch-up assignment.</li>
+                <li style="margin-bottom: 8px;"><strong>Navigation:</strong> Catch-up Push is available from the Assessment Studio submenu and header action.</li>
+            </ul>`,
         "2.7.53": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Manual Catch-up:</strong> Admins can now push a selected Test Engine or Assessment Studio assessment directly to one trainee without adding a Schedule Studio timeline item.</li>
