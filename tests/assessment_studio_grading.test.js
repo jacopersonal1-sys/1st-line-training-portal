@@ -117,6 +117,23 @@ describe('Assessment Studio grading auto scoring', () => {
         expect(question.suggestedAnswer).toBe('Expected points:\n  1. Check details\n  2. Confirm outcome');
     });
 
+    test('Assessment Studio question pictures survive normalization and render in grading', () => {
+        const imageLink = 'data:image/png;base64,abc123';
+        const question = Data.normalizeQuestion({
+            assessment: 'Course 2',
+            type: 'multiple_choice',
+            text: 'Use the picture below.',
+            imageLink,
+            points: 2,
+            options: ['A', 'B'],
+            correct: 0
+        });
+
+        expect(question.imageLink).toBe(imageLink);
+        expect(App.renderGradeQuestion({ answers: { 0: 0 }, questionScores: {} }, question, 0)).toContain(`<img src="${imageLink}"`);
+        expect(App.renderQuestionImage('javascript:alert(1)')).toBe('');
+    });
+
     test('pending grading uses fresh auto scores for complex and choice questions', () => {
         const questions = [
             { type: 'multiple_choice', points: 2, options: ['A', 'B', 'C'], correct: 1 },

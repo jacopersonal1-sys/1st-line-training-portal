@@ -502,6 +502,8 @@ Presence is handled by the Realtime presence channel rather than frequent DB wri
 
 ## 5. Recent Architectural Notes
 
+- **v2.7.52 (Assessment Studio Question Pictures, 2026-06-17):** Assessment Studio question normalization now preserves `imageLink` through bucket questions and generated snapshots. The admin question editor supports an optional uploaded/pasted question picture, the trainee runtime renders that picture below the question text, and the grading view renders the same picture for marking parity. The embedded Assessment Studio webview now cache-busts its local module entry/assets so released UI changes load reliably after refresh. Regression verification: full Jest suite.
+
 - **v2.7.49 (Attendance Missing-Day Review + Studio Queue Defaults, 2026-06-15):** Attendance Register now calculates missing weekday clock-ins for selected trainees, surfaces Missing Reviews in the admin register, and saves reviewed missing days as synced attendance rows with absence reason, validity, reviewer, and timestamp. Assessment Studio Grading Queue now defaults to pending-review submissions only, while question entry keeps Assessment, Grouping, Tag, and Type pinned at the top and carries the previous grouping/tag into the next new question. Regression verification: full Jest suite.
 
 - **v2.7.25 (Expanded Studio/Q&A Recovery, 2026-06-11):** Extends the one-time 20-hour local recovery probe to `content_studio_data` and `qa_data` in addition to `schedules` and `assessment_studio_data`, and bumps the recovery marker so clients that already ran the prior probe re-check the expanded affected document set once.

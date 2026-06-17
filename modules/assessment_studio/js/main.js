@@ -432,6 +432,7 @@ const App = {
         const optionTexts = Array.isArray(q.options) ? q.options.map(value => String(value || '').trim()).filter(Boolean) : [];
         const duplicateOption = optionTexts.find((value, idx) => optionTexts.findIndex(other => this.normalize(other) === this.normalize(value)) !== idx);
         const normalizeCorrectIndex = (value) => this.choiceIndex(q, value);
+        if (String(q.imageLink || '').trim() && !this.safeQuestionImageSrc(q.imageLink)) errors.push('Question picture must be an http/https image URL or an uploaded picture.');
         if (!String(q.assessment || '').trim()) errors.push('Choose the Standard Assessment before saving the question.');
         if (!String(q.text || '').trim()) errors.push('Enter the trainee-facing question text.');
         if (!QUESTION_TYPES.some(item => item.key === type)) errors.push('Choose a supported question type.');
@@ -652,6 +653,7 @@ const App = {
                             <button class="ast-btn ghost" type="button" onclick="App.cancelNewQuestionTag()"><i class="fas fa-xmark"></i> Cancel</button>
                         </div>
                         <label>Question Text<textarea id="questionText" rows="7" placeholder="Question shown to trainee. Bullets, spacing, and line breaks are preserved.">${this.esc(item.text || '')}</textarea></label>
+                        ${this.renderQuestionImageControls(item)}
                         <div id="typeHelp">${this.renderTypeHelpHtml(item)}</div>
                         <div class="ast-actions ast-modal-actions">
                             <button class="ast-btn primary" type="submit"><i class="fas fa-save"></i> Save Question</button>
@@ -661,6 +663,100 @@ const App = {
                 </div>
             </div>
         `;
+    },
+
+    renderQuestionImageControls(item = {}) {
+        const imageLink = String(item.imageLink || item.imageUrl || item.image || item.referenceUrl || '').trim();
+        return `
+            <section class="ast-question-builder ast-question-image-box">
+                <div class="ast-builder-head">
+                    <h3>Question Picture</h3>
+                    <span>Optional image shown under the question</span>
+                </div>
+                <div class="ast-question-image-row">
+                    <input id="questionImageLink" type="text" value="${this.esc(imageLink)}" placeholder="Paste an image URL or upload a picture" oninput="App.previewQuestionImage(this.value)">
+                    <label class="ast-btn small" title="Upload picture">
+                        <i class="fas fa-upload"></i> Upload Picture
+                        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" onchange="App.uploadQuestionImage(this)">
+                    </label>
+                    <button class="ast-btn small ghost" type="button" onclick="App.clearQuestionImage()"><i class="fas fa-trash"></i> Remove</button>
+                </div>
+                <div id="questionImagePreview">${this.renderQuestionImage(imageLink, 'Question image preview')}</div>
+            </section>
+        `;
+    },
+
+    safeQuestionImageSrc(value) {
+        const src = String(value || '').trim();
+        if (!src) return '';
+        if (/^https?:\/\//i.test(src)) return src;
+        if (/^data:image\/(?:png|jpe?g|webp|gif|bmp);base64,/i.test(src)) return src;
+        return '';
+    },
+
+    renderQuestionImage(value, altText = 'Question reference image') {
+        const src = this.safeQuestionImageSrc(value);
+        if (!src) return '';
+        return `
+            <figure class="ast-question-media">
+                <img src="${this.esc(src)}" alt="${this.esc(altText)}" loading="lazy">
+            </figure>
+        `;
+    },
+
+    previewQuestionImage(value) {
+        const host = document.getElementById('questionImagePreview');
+        if (host) host.innerHTML = this.renderQuestionImage(value, 'Question image preview');
+    },
+
+    clearQuestionImage() {
+        const input = document.getElementById('questionImageLink');
+        if (input) input.value = '';
+        this.previewQuestionImage('');
+    },
+
+    uploadQuestionImage(input) {
+        const file = input?.files?.[0];
+        if (!file) return;
+        if (!/^image\/(?:png|jpe?g|webp|gif|bmp)$/i.test(file.type || '')) {
+            input.value = '';
+            return this.toast('Upload a PNG, JPG, WEBP, GIF, or BMP picture.', 'warn');
+        }
+
+        const reader = new FileReader();
+        reader.onerror = () => this.toast('Could not read the selected picture.', 'warn');
+        reader.onload = (event) => {
+            const dataUrl = String(event.target?.result || '');
+            const image = new Image();
+            image.onerror = () => this.toast('Could not prepare the selected picture.', 'warn');
+            image.onload = () => {
+                const canvas = document.createElement('canvas');
+                const maxSize = 1200;
+                let width = image.width;
+                let height = image.height;
+                if (width > height && width > maxSize) {
+                    height *= maxSize / width;
+                    width = maxSize;
+                } else if (height > maxSize) {
+                    width *= maxSize / height;
+                    height = maxSize;
+                }
+                canvas.width = Math.max(1, Math.round(width));
+                canvas.height = Math.max(1, Math.round(height));
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+                const compressed = canvas.toDataURL('image/jpeg', 0.7);
+                if (compressed.length > 2200000) {
+                    return this.toast('Picture is still too large after compression. Please use a smaller image.', 'warn');
+                }
+                const linkInput = document.getElementById('questionImageLink');
+                if (linkInput) linkInput.value = compressed;
+                this.previewQuestionImage(compressed);
+                this.toast('Question picture attached.', 'ok');
+            };
+            image.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
     },
 
     renderTypeHelpHtml(item = {}) {
@@ -1109,6 +1205,7 @@ const App = {
             assessment: document.getElementById('questionAssessment').value.trim(),
             type,
             text: AssessmentStudioData.normalizeFormattedText(document.getElementById('questionText')?.value || ''),
+            imageLink: String(document.getElementById('questionImageLink')?.value || '').trim(),
             points: Number(document.getElementById('questionPoints').value || 1),
             grouping,
             tags: tag ? [tag] : [],
@@ -2006,6 +2103,7 @@ const App = {
                     <span>${this.esc(this.typeLabel(q.type))} | ${auto.manual ? 'Manual' : `Auto ${this.esc(auto.score)}/${this.esc(auto.max)}`} | Max ${this.esc(q.points)}</span>
                 </div>
                 ${q.type === 'text' && q.suggestedAnswer ? `<div class="ast-suggested-answer"><strong>Suggested Answer</strong><p>${this.esc(q.suggestedAnswer)}</p></div>` : ''}
+                ${this.renderQuestionImage(q.imageLink)}
                 <div class="ast-answer">${this.renderAnswer(q, answer)}</div>
                 <label>Score</label>
                 <input class="grade-score" data-qidx="${idx}" type="number" min="0" max="${this.esc(q.points)}" step="0.5" value="${this.esc(score)}">

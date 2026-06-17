@@ -69,6 +69,7 @@ const AssessmentStudioData = {
             phase: String(q.phase || 'Assessment').trim(),
             type,
             text: this.normalizeFormattedText(q.text || q.question || ''),
+            imageLink: String(q.imageLink || q.imageUrl || q.image || q.referenceUrl || '').trim(),
             points: Number.isFinite(points) && points > 0 ? Math.round(points * 10) / 10 : 1,
             suggestedAnswer: this.normalizeFormattedText(q.suggestedAnswer || q.suggested_answer || ''),
             grouping: String(q.grouping || q.group || '').trim(),

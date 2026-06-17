@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.7.52 - 2026-06-17
+
+- **Assessment Studio:** Question Bucket questions can now include an optional picture, either pasted as an image URL or uploaded directly in the question editor.
+- **Trainee View:** Assessment Studio question pictures render under the question text during the trainee test.
+- **Grading View:** Admin grading now shows the same question picture while marking, keeping the trainee and admin views aligned.
+- **Cache Guard:** The embedded Assessment Studio webview now cache-busts its local module files so refreshed/released UI changes appear reliably.
+- **Verification:** Full Jest suite passed before release.
+
+> Release target: stable main channel.
+
 ## 2.7.49 - 2026-06-15
 
 - **Attendance Review:** Attendance Register now flags trainee weekdays with no clock-in as **Missing Reviews**, so admins can review the day and record whether the reason is valid.

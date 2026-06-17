@@ -137,6 +137,7 @@ function astTraineeNormalizeQuestion(raw) {
         phase: String(q.phase || 'Assessment').trim(),
         type: String(q.type || 'multiple_choice').trim(),
         text: astTraineeNormalizeFormattedText(q.text || q.question || ''),
+        imageLink: String(q.imageLink || q.imageUrl || q.image || q.referenceUrl || '').trim(),
         points: Number.isFinite(points) && points > 0 ? Math.round(points * 10) / 10 : 1,
         suggestedAnswer: astTraineeNormalizeFormattedText(q.suggestedAnswer || q.suggested_answer || ''),
         grouping: String(q.grouping || q.group || '').trim(),
@@ -1124,8 +1125,27 @@ function renderAssessmentStudioTraineeQuestion(sub, q, idx, locked) {
                 </div>
                 <div class="ast-trainee-question-meta">${astTraineeEsc(astTraineeTypeLabel(q.type))} | ${astTraineeEsc(q.points)} pts</div>
             </div>
+            ${renderAssessmentStudioQuestionImage(q.imageLink)}
             ${renderAssessmentStudioTraineeInput(sub, q, idx, locked)}
         </article>
+    `;
+}
+
+function astTraineeSafeImageSrc(value) {
+    const src = String(value || '').trim();
+    if (!src) return '';
+    if (/^https?:\/\//i.test(src)) return src;
+    if (/^data:image\/(?:png|jpe?g|webp|gif|bmp);base64,/i.test(src)) return src;
+    return '';
+}
+
+function renderAssessmentStudioQuestionImage(value) {
+    const src = astTraineeSafeImageSrc(value);
+    if (!src) return '';
+    return `
+        <figure class="ast-trainee-question-media">
+            <img src="${astTraineeEsc(src)}" alt="Question reference image" loading="lazy">
+        </figure>
     `;
 }
 

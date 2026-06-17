@@ -143,6 +143,34 @@ describe('Assessment Studio trainee runtime', () => {
         expect(runtimeRoot.innerHTML).toContain('Explain the checks:\n\n  - Verify account\n  - Confirm contact');
     });
 
+    test('renders Assessment Studio question picture under the question text', () => {
+        const imageLink = 'data:image/png;base64,abc123';
+        const submission = makeSubmission({
+            testSnapshot: {
+                title: 'Q Contact Assessment',
+                questions: [{
+                    id: 'q_picture',
+                    assessment: 'Q Contact Assessment',
+                    type: 'multiple_choice',
+                    text: 'Answer using the picture.',
+                    imageLink,
+                    options: ['A', 'B'],
+                    correct: 0,
+                    points: 2
+                }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+
+        window.openAssessmentStudioTraineeRuntime('ast_1');
+
+        expect(runtimeRoot.innerHTML).toContain('Answer using the picture.');
+        expect(runtimeRoot.innerHTML).toContain('ast-trainee-question-media');
+        expect(runtimeRoot.innerHTML).toContain(`<img src="${imageLink}"`);
+    });
+
     test('does not rerender and steal focus while trainee is typing', () => {
         const submission = makeSubmission({
             status: 'in_progress',

@@ -5582,6 +5582,13 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.52": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Question Bucket questions can now include an optional picture from an uploaded image or image URL.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee View:</strong> Question pictures display under the question text while the trainee takes the Studio assessment.</li>
+                <li style="margin-bottom: 8px;"><strong>Grading View:</strong> Admin grading shows the same question picture, keeping the marking view aligned with the trainee paper.</li>
+                <li style="margin-bottom: 8px;"><strong>Refresh Reliability:</strong> The embedded Assessment Studio module now cache-busts its local files so released UI changes load after refresh.</li>
+            </ul>`,
         "2.7.51": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Assessment Studio Hotfix:</strong> My Assessments now shows scheduled Assessment Studio tests even before a trainee submission row has been generated locally.</li>

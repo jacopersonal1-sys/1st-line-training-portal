@@ -189,7 +189,8 @@ const AssessmentStudioLoader = {
         const userParam = encodeURIComponent(JSON.stringify(CURRENT_USER || {}));
         const credsParam = encodeURIComponent(JSON.stringify(window.CLOUD_CREDENTIALS || {}));
         const basePath = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
-        const modulePath = `${basePath}/modules/assessment_studio/index.html`;
+        const moduleVersion = encodeURIComponent(window.APP_VERSION || window.BUILD_VERSION || 'assessment-picture-20260617');
+        const modulePath = `${basePath}/modules/assessment_studio/index.html?v=${moduleVersion}`;
 
         container.innerHTML = `
             <div class="embedded-program-shell">
@@ -206,7 +207,7 @@ const AssessmentStudioLoader = {
                 <webview
                     id="assessment-studio-webview"
                     class="embedded-program-frame"
-                    src="${modulePath}?user=${userParam}&creds=${credsParam}"
+                    src="${modulePath}&user=${userParam}&creds=${credsParam}"
                     style="height:calc(100vh - 230px);"
                     nodeintegration
                     webpreferences="nodeIntegration=yes, contextIsolation=no"
