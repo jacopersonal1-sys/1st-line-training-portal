@@ -5,7 +5,9 @@ describe('Assessment Studio trainee runtime', () => {
     let runtimeRoot;
 
     function loadRuntime() {
+        const manualSrc = fs.readFileSync(path.resolve(__dirname, '../js/manual_assessment_assignments.js'), 'utf8');
         const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_studio_trainee.js'), 'utf8');
+        eval(manualSrc);
         eval(src);
     }
 
@@ -300,6 +302,55 @@ describe('Assessment Studio trainee runtime', () => {
         expect(html).toContain('Scheduled Studio Assessment');
         expect(html).toContain('Ready to generate');
         expect(html).toContain("openAssessmentStudioFromSchedule('gen_scheduled')");
+    });
+
+    test('creates one sealed Assessment Studio snapshot from a manual catch-up assignment', async () => {
+        const store = makeStore(null);
+        store.generators = [{
+            id: 'gen_manual',
+            assessment: 'Manual Studio Assessment',
+            phase: 'Assessment',
+            totalPoints: 2,
+            pointLeeway: 0,
+            allowedTypes: ['multiple_choice'],
+            status: 'active'
+        }];
+        store.questionBucket = [{
+            id: 'q_manual',
+            assessment: 'Manual Studio Assessment',
+            type: 'multiple_choice',
+            text: 'Manual catch-up question.',
+            options: ['A', 'B'],
+            correct: 0,
+            points: 2,
+            status: 'active'
+        }];
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        localStorage.setItem('manual_assessment_assignments', JSON.stringify([{
+            id: 'manual_ast_1',
+            type: 'assessment_studio',
+            targetId: 'gen_manual',
+            title: 'Manual Studio Assessment',
+            targetTrainee: 'Alice',
+            status: 'active',
+            createdAt: '2026-06-12T10:00:00.000Z'
+        }]));
+
+        const html = window.renderAssessmentStudioAssignmentsHtml();
+        expect(html).toContain('Manual Studio Assessment');
+        expect(html).toContain('Manual Catch-up');
+        expect(html).toContain("openAssessmentStudioFromManualAssignment('manual_ast_1')");
+
+        const opened = await window.openAssessmentStudioFromManualAssignment('manual_ast_1');
+
+        expect(opened).toBe(true);
+        const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        const manualRows = saved.submissions.filter(item => item.manualAssignmentId === 'manual_ast_1');
+        expect(manualRows).toHaveLength(1);
+        expect(manualRows[0].testSnapshot.questions[0].text).toBe('Manual catch-up question.');
+        expect(JSON.parse(localStorage.getItem('manual_assessment_assignments'))[0].status).toBe('in_progress');
+        expect(saveToServer).toHaveBeenCalledWith(['manual_assessment_assignments'], true, true);
     });
 
     test('keeps local submitted snapshot when newer server data is missing it', async () => {

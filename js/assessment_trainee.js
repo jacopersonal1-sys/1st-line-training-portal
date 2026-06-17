@@ -586,6 +586,22 @@ function loadTraineeTests() {
     else visibleTests = tests.filter(t => allowedTestIds.has(t.id.toString()));
 
     if (CURRENT_USER.role === 'trainee') {
+        const manualLegacyAssignments = typeof getManualAssignmentsForTrainee === 'function'
+            ? getManualAssignmentsForTrainee(CURRENT_USER.user, 'test_engine')
+            : [];
+        const existingVisible = new Set(visibleTests.map(t => String(t.id)));
+        manualLegacyAssignments.forEach((assignment) => {
+            const test = tests.find(t => String(t.id) === String(assignment.targetId));
+            if (!test) return;
+            const manualCard = {
+                ...test,
+                _manualAssignment: assignment,
+                _manualCardId: `manual_${assignment.id}_${test.id}`
+            };
+            visibleTests.push(manualCard);
+            existingVisible.add(String(manualCard._manualCardId));
+        });
+
         const liveBookings = assessmentReadArray('liveBookings');
         const todayIso = new Date().toISOString().split('T')[0];
         const myLiveBookings = liveBookings
@@ -598,7 +614,6 @@ function loadTraineeTests() {
             )
             .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''), undefined, { numeric: true }));
 
-        const existingVisible = new Set(visibleTests.map(t => String(t.id)));
         myLiveBookings.forEach((booking) => {
             const bookedTest = booking.assessmentId
                 ? tests.find(t => String(t.id) === String(booking.assessmentId))
@@ -672,10 +687,12 @@ function loadTraineeTests() {
     const legacyTestsHtml = visibleTests.map(t => {
         const liveBooking = t._liveBooking || null;
         const completedLiveSub = t._completedSubmission || null;
+        const manualAssignment = t._manualAssignment || null;
         const sub = completedLiveSub || submissions.find(s =>
             s.testId == t.id &&
             s.trainee &&
             s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
+            (!manualAssignment || String(s.manualAssignmentId || s.contentStudioContext?.manualAssignmentId || '') === String(manualAssignment.id)) &&
             !isLegacySubmissionForCurrentAttempt(s, myGroupId, latestMoveTs, records)
         );
         let statusHtml = '<span class="status-badge status-improve">Not Started</span>';
@@ -683,7 +700,7 @@ function loadTraineeTests() {
         let isLocked = false;
         let lockReason = "Locked";
         
-        if (myGroupId && CURRENT_USER.role !== 'admin') { 
+        if (!manualAssignment && myGroupId && CURRENT_USER.role !== 'admin') { 
             const schedKey = Object.keys(schedules).find(k => schedules[k].assigned === myGroupId);
             if (schedKey) {
                 const item = schedules[schedKey].items.find(i => i.linkedTestId == t.id);
@@ -699,7 +716,9 @@ function loadTraineeTests() {
 
         let actionBtn = isLocked 
             ? `<button class="btn-secondary btn-sm" disabled style="opacity:0.6; cursor:not-allowed;"><i class="fas fa-lock"></i> ${lockReason}</button>`
-            : `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}')">Start Assessment</button>`;
+            : manualAssignment
+                ? `<button class="btn-primary btn-sm" onclick="openManualAssessmentAssignment('${String(manualAssignment.id || '').replace(/'/g, "\\'")}')">Start Catch-up</button>`
+                : `<button class="btn-primary btn-sm" onclick="openTestTaker('${t.id}')">Start Assessment</button>`;
 
         if (liveBooking) {
             statusHtml = `<span class="status-badge status-semi">Booked ${liveBooking.date || ''} ${liveBooking.time || ''}</span>`;
@@ -760,6 +779,7 @@ function loadTraineeTests() {
                 <div class="test-card-meta">
                     <span><i class="fas fa-list-ol"></i> ${t.questions ? t.questions.length : 0} Questions</span>
                     ${typeLabel}
+                    ${manualAssignment ? '<span><i class="fas fa-paper-plane"></i> Manual Catch-up</span>' : ''}
                 </div>
             </div>
             <div class="test-card-actions" style="display:flex; align-items:center; gap:15px;">
@@ -779,6 +799,9 @@ function loadTraineeTests() {
 function openTestTaker(testId, isArenaMode = false, options = {}) {
     const launchOptions = (options && typeof options === 'object') ? options : {};
     const popupMode = !!launchOptions.popupMode;
+    const manualAssignment = launchOptions.manualAssignment && typeof launchOptions.manualAssignment === 'object' ? launchOptions.manualAssignment : null;
+    const manualAssignmentId = String(manualAssignment && manualAssignment.id || '').trim();
+    const bypassSchedule = !!launchOptions.bypassSchedule || !!manualAssignmentId;
     const popupContainerId = String(launchOptions.containerId || ASSESSMENT_POPUP_CONTAINER_ID);
     const activeSectionId = document.querySelector('section.active')?.id || '';
     const returnTab = String(launchOptions.returnTab || activeSectionId || '').trim();
@@ -786,7 +809,17 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     const tests = assessmentReadArray('tests');
     const test = tests.find(t => t.id == testId);
     if (!test) return;
-    const contentStudioContext = normalizeContentStudioContext(launchOptions.contentStudioContext, test);
+    const contentStudioContext = normalizeContentStudioContext(launchOptions.contentStudioContext, test) || null;
+    const launchContext = manualAssignmentId
+        ? {
+            ...(contentStudioContext || {}),
+            manualAssignmentId,
+            manualAssignmentType: 'test_engine',
+            manualAssignmentTitle: manualAssignment.title || test.title || '',
+            manualAssignmentNote: manualAssignment.note || '',
+            manualAssignmentCreatedAt: manualAssignment.createdAt || ''
+        }
+        : contentStudioContext;
     const isRepeatableQuiz = String(test.type || '').trim().toLowerCase() === 'quiz';
 
     if (test.type === 'vetting' && !isArenaMode && CURRENT_USER.role === 'trainee') {
@@ -815,7 +848,7 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
 
                 window.CURRENT_TEST = draft.test;
                 window.USER_ANSWERS = draft.answers || {};
-                window.CURRENT_TEST_CONTEXT = normalizeContentStudioContext(draft.contentStudioContext, draft.test) || contentStudioContext;
+                window.CURRENT_TEST_CONTEXT = normalizeContentStudioContext(draft.contentStudioContext, draft.test) || launchContext;
                 window.IS_LIVE_ARENA = isArenaMode;
 
                 const targetContainer = popupMode ? popupContainerId : 'arenaTestContainer';
@@ -834,7 +867,7 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
     const records = assessmentReadArray('records');
 
-    if (typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee' && !isArenaMode) {
+    if (!bypassSchedule && typeof getScheduleStatus === 'function' && CURRENT_USER.role === 'trainee' && !isArenaMode) {
         const schedules = assessmentReadObject('schedules');
 
         let isScheduled = false;
@@ -877,6 +910,7 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
         s.testId && testId && 
         s.testId.toString() === testId.toString() && 
         s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
+        (!manualAssignmentId || String(s.manualAssignmentId || s.contentStudioContext?.manualAssignmentId || '') === manualAssignmentId) &&
         !s.archived
     );
     
@@ -915,7 +949,11 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     }
 
     window.CURRENT_TEST = JSON.parse(JSON.stringify(test)); 
-    window.CURRENT_TEST_CONTEXT = contentStudioContext;
+    window.CURRENT_TEST_CONTEXT = launchContext;
+    if (manualAssignmentId && typeof markManualAssessmentAssignmentStarted === 'function') {
+        markManualAssessmentAssignmentStarted(manualAssignmentId);
+        if (typeof saveToServer === 'function') Promise.resolve(saveToServer(['manual_assessment_assignments'], true, true)).catch(() => {});
+    }
     
     window.CURRENT_TEST.questions.forEach((q, i) => q._originalIndex = i);
     window.CURRENT_TEST.quizRuntimeState = null;
@@ -1116,6 +1154,7 @@ async function submitTest(forceSubmit = false, options = {}) {
     const records = assessmentReadArray('records');
     const myGroupId = getCurrentTraineeGroupId();
     const latestMoveTs = getLatestRetrainMoveDateForUser(CURRENT_USER.user);
+    const activeManualAssignmentId = String(window.CURRENT_TEST_CONTEXT?.manualAssignmentId || '').trim();
     let localSubmissionSaved = false;
     let localSubmissionWasVettingArena = false;
     let savedSubmissionForVerification = null;
@@ -1127,12 +1166,14 @@ async function submitTest(forceSubmit = false, options = {}) {
         s.testId && window.CURRENT_TEST.id && 
         s.testId.toString() === window.CURRENT_TEST.id.toString() && 
         s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() && 
+        (!activeManualAssignmentId || String(s.manualAssignmentId || s.contentStudioContext?.manualAssignmentId || '') === activeManualAssignmentId) &&
         !isLegacySubmissionForCurrentAttempt(s, myGroupId, latestMoveTs, records)
     );
     const legacyExisting = subs.find(s =>
         s.testId && window.CURRENT_TEST.id &&
         s.testId.toString() === window.CURRENT_TEST.id.toString() &&
         s.trainee && s.trainee.trim().toLowerCase() === CURRENT_USER.user.trim().toLowerCase() &&
+        (!activeManualAssignmentId || String(s.manualAssignmentId || s.contentStudioContext?.manualAssignmentId || '') === activeManualAssignmentId) &&
         isLegacySubmissionForCurrentAttempt(s, myGroupId, latestMoveTs, records)
     );
     if (legacyExisting && !legacyExisting.archived) {
@@ -1230,6 +1271,7 @@ async function submitTest(forceSubmit = false, options = {}) {
         testSnapshot: submittedSnapshot || originalTestDef || window.CURRENT_TEST,
         quizMeta: quizMeta,
         contentStudioContext: window.CURRENT_TEST_CONTEXT || null,
+        manualAssignmentId: String(window.CURRENT_TEST_CONTEXT?.manualAssignmentId || '').trim(),
         feedbackStatus: 'given',
         feedbackRequestLocked: false,
         createdAt: submissionTime,
@@ -1276,6 +1318,7 @@ async function submitTest(forceSubmit = false, options = {}) {
             link: 'Digital-Assessment',
             docSaved: true,
             submissionId: submission.id, // Link to submission
+            manualAssignmentId: submission.manualAssignmentId || '',
             feedbackStatus: submission.feedbackStatus,
             feedbackRequestLocked: submission.feedbackRequestLocked,
             createdAt: submissionTime,
@@ -1299,9 +1342,16 @@ async function submitTest(forceSubmit = false, options = {}) {
         localStorage.setItem('records', JSON.stringify(records));
     }
 
+    if (submission.manualAssignmentId && typeof markManualAssessmentAssignmentSubmitted === 'function') {
+        markManualAssessmentAssignmentSubmitted(submission.manualAssignmentId, submission.id);
+    }
+
     if (typeof saveToServer === 'function') {
         // Final submissions are business-critical, so do not leave them on the debounced queue.
-        const synced = await saveToServer(['submissions', 'records'], true);
+        const saveKeys = submission.manualAssignmentId
+            ? ['submissions', 'records', 'manual_assessment_assignments']
+            : ['submissions', 'records'];
+        const synced = await saveToServer(saveKeys, true);
         if (synced === false) throw new Error('Critical submission sync failed.');
     }
     await ensureSubmissionRowsOnServer(savedSubmissionForVerification, savedRecordForVerification);

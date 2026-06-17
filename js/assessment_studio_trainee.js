@@ -711,6 +711,43 @@ function astTraineeScheduledGeneratorAssignments(store) {
     return rows;
 }
 
+function astTraineeManualGeneratorAssignments(store) {
+    const trainee = astTraineeCurrentUserName();
+    if (!trainee || typeof getManualAssignmentsForTrainee !== 'function') return [];
+    const generators = Array.isArray(store && store.generators) ? store.generators : [];
+    return getManualAssignmentsForTrainee(trainee, 'assessment_studio')
+        .map(assignment => {
+            const generatorId = String(assignment && assignment.targetId || '').trim();
+            if (!generatorId) return null;
+            const generator = generators.find(g => String(g.id) === generatorId && g.status !== 'archived');
+            const label = (generator && generator.assessment) || assignment.title || 'Assessment Studio Test';
+            const row = astTraineeNormalizeSubmission({
+                id: `ast_manual_${assignment.id}`,
+                generatorId,
+                manualAssignmentId: assignment.id,
+                trainee,
+                groupID: astTraineeFindGroup(trainee),
+                assessment: label,
+                phase: (generator && generator.phase) || 'Assessment',
+                status: 'assigned',
+                feedbackStatus: 'none',
+                testSnapshot: {
+                    title: label,
+                    generatorId,
+                    signature: 'manual',
+                    questions: []
+                },
+                maxPoints: Number(generator && generator.totalPoints || 0),
+                generatedAt: assignment.createdAt || new Date().toISOString(),
+                updatedAt: assignment.updatedAt || assignment.createdAt || new Date().toISOString()
+            });
+            row._manualOnly = true;
+            row._manualAssignment = assignment;
+            return row;
+        })
+        .filter(Boolean);
+}
+
 function astTraineeShuffle(items, seedText) {
     const arr = [...items];
     let seed = 0;
@@ -836,6 +873,73 @@ async function ensureAssessmentStudioAssignmentForCurrentUser(generatorId, sched
     return submission;
 }
 
+async function ensureAssessmentStudioManualAssignmentForCurrentUser(assignmentId) {
+    const cleanAssignmentId = String(assignmentId || '').trim();
+    const trainee = astTraineeCurrentUserName();
+    if (!cleanAssignmentId) throw new Error('This manual Assessment Studio assignment is missing its assignment link.');
+    if (!trainee) throw new Error('Assessment Studio could not identify the current trainee.');
+    if (typeof getManualAssignmentById !== 'function') throw new Error('Manual assessment assignments are not available in this app version.');
+
+    const assignment = getManualAssignmentById(cleanAssignmentId);
+    if (!assignment || String(assignment.type || '') !== 'assessment_studio') {
+        throw new Error('This manual Assessment Studio assignment could not be found.');
+    }
+    if (astTraineeIdentity(assignment.targetTrainee) !== astTraineeIdentity(trainee)) {
+        throw new Error('This manual Assessment Studio assignment is for another trainee.');
+    }
+
+    const store = astTraineeGetStore();
+    const existing = store.submissions
+        .filter(s =>
+            String(s.manualAssignmentId || '') === cleanAssignmentId &&
+            astTraineeIdentity(s.trainee) === astTraineeIdentity(trainee) &&
+            String(s.status || '') !== 'archived'
+        )
+        .sort(astTraineeCompareAssignmentPriority)[0];
+    if (existing) {
+        const existingErrors = astTraineeSubmissionSafetyErrors(existing);
+        if (existingErrors.length) throw new Error(existingErrors[0]);
+        return existing;
+    }
+
+    const generatorId = String(assignment.targetId || '').trim();
+    const generator = store.generators.find(g => String(g.id) === generatorId && g.status !== 'archived');
+    if (!generator) throw new Error('The manual Assessment Studio generator could not be found.');
+    const generatorSafety = astTraineeValidateGenerator(store, generator);
+    if (generatorSafety.errors.length) throw new Error(generatorSafety.errors[0]);
+
+    const snapshot = astTraineeGenerateSnapshot(store, generator, trainee, {
+        manualAssignmentId: cleanAssignmentId,
+        courseName: assignment.title || generator.assessment || '',
+        dateRange: assignment.createdAt || ''
+    });
+    const now = new Date().toISOString();
+    const submission = astTraineeNormalizeSubmission({
+        id: astTraineeMakeId('ast_sub'),
+        generatorId: generator.id,
+        manualAssignmentId: cleanAssignmentId,
+        trainee,
+        groupID: astTraineeFindGroup(trainee),
+        assessment: generator.assessment,
+        phase: generator.phase || 'Assessment',
+        status: 'assigned',
+        feedbackStatus: 'none',
+        testSnapshot: snapshot,
+        maxPoints: snapshot.totalPoints,
+        generatedAt: now,
+        updatedAt: now
+    });
+    store.submissions.unshift(submission);
+    if (typeof markManualAssessmentAssignmentStarted === 'function') markManualAssessmentAssignmentStarted(cleanAssignmentId);
+    await astTraineeSaveStore(store, true);
+    if (typeof saveToServer === 'function') {
+        Promise.resolve(saveToServer(['manual_assessment_assignments'], true, true)).catch(error => {
+            console.warn('[Assessment Studio Trainee] manual assignment start sync failed:', error);
+        });
+    }
+    return submission;
+}
+
 function getAssessmentStudioAssignmentsForCurrentUser() {
     const trainee = astTraineeCurrentUserName();
     if (!trainee) return [];
@@ -845,13 +949,19 @@ function getAssessmentStudioAssignmentsForCurrentUser() {
     store.submissions
         .filter(s => astTraineeIdentity(s.trainee) === astTraineeIdentity(trainee) && String(s.status || '') !== 'archived')
         .forEach(sub => {
+            const manualAssignmentId = String(sub.manualAssignmentId || '').trim();
             const generatorKey = String(sub.generatorId || sub.id || '').trim();
-            const key = generatorKey || String(sub.id || '');
+            const key = manualAssignmentId ? `manual:${manualAssignmentId}` : (generatorKey || String(sub.id || ''));
             const current = byGenerator.get(key);
             if (!current || astTraineeCompareAssignmentPriority(sub, current) < 0) byGenerator.set(key, sub);
         });
     astTraineeScheduledGeneratorAssignments(store).forEach(sub => {
         const key = String(sub.generatorId || sub.id || '').trim();
+        if (key && !byGenerator.has(key)) byGenerator.set(key, sub);
+    });
+    astTraineeManualGeneratorAssignments(store).forEach(sub => {
+        const manualAssignmentId = String(sub.manualAssignmentId || '').trim();
+        const key = manualAssignmentId ? `manual:${manualAssignmentId}` : String(sub.id || '');
         if (key && !byGenerator.has(key)) byGenerator.set(key, sub);
     });
     return Array.from(byGenerator.values())
@@ -874,7 +984,9 @@ function renderAssessmentStudioAssignmentsHtml() {
         const statusClass = status === 'completed' ? 'status-pass' : status === 'pending_review' ? 'status-semi' : 'status-improve';
         const questions = Array.isArray(sub.testSnapshot?.questions) ? sub.testSnapshot.questions.length : 0;
         const questionLabel = sub._scheduleOnly ? 'Ready to generate' : `${questions} Questions`;
-        const actionHtml = sub._scheduleOnly
+        const actionHtml = sub._manualOnly
+            ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioFromManualAssignment('${astTraineeEsc(sub.manualAssignmentId)}')">Start Catch-up</button>`
+            : sub._scheduleOnly
             ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioFromSchedule('${astTraineeEsc(sub.generatorId)}')">Start Studio Test</button>`
             : isOpen
                 ? `<button class="btn-primary btn-sm" onclick="openAssessmentStudioTraineeRuntime('${astTraineeEsc(sub.id)}')">${status === 'in_progress' ? 'Resume' : 'Start'} Studio Test</button>`
@@ -896,6 +1008,7 @@ function renderAssessmentStudioAssignmentsHtml() {
                     <div class="test-card-meta">
                         <span><i class="fas fa-clipboard-list"></i> Assessment Studio</span>
                         <span><i class="fas fa-list-ol"></i> ${astTraineeEsc(questionLabel)}</span>
+                        ${sub.manualAssignmentId ? '<span><i class="fas fa-paper-plane"></i> Manual Catch-up</span>' : ''}
                         <span><i class="fas fa-shield-halved"></i> Snapshot ${astTraineeEsc(sub.testSnapshot?.signature || sub.id).slice(0, 12)}</span>
                     </div>
                 </div>
@@ -952,6 +1065,27 @@ async function openAssessmentStudioFromSchedule(generatorId, scheduleItem = {}) 
         console.error('[Assessment Studio Trainee] open from schedule failed:', error);
         if (typeof showToast === 'function') showToast(error.message || 'Assessment Studio assignment could not be opened.', 'error');
         else alert(error.message || 'Assessment Studio assignment could not be opened.');
+        return false;
+    }
+}
+
+async function openAssessmentStudioFromManualAssignment(assignmentId) {
+    try {
+        const sub = await ensureAssessmentStudioManualAssignmentForCurrentUser(assignmentId);
+        if (!sub) {
+            if (typeof showToast === 'function') showToast('Assessment Studio catch-up assignment could not be opened.', 'error');
+            return false;
+        }
+        if (!['assigned', 'in_progress'].includes(String(sub.status || ''))) {
+            if (typeof showToast === 'function') showToast('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
+            return false;
+        }
+        openAssessmentStudioTraineeRuntime(sub.id);
+        return true;
+    } catch (error) {
+        console.error('[Assessment Studio Trainee] open manual assignment failed:', error);
+        if (typeof showToast === 'function') showToast(error.message || 'Assessment Studio catch-up assignment could not be opened.', 'error');
+        else alert(error.message || 'Assessment Studio catch-up assignment could not be opened.');
         return false;
     }
 }
@@ -1354,9 +1488,16 @@ async function submitAssessmentStudioTest() {
     sub.submittedAt = new Date().toISOString();
     sub.updatedAt = sub.submittedAt;
     sub.feedbackStatus = sub.feedbackStatus || 'none';
+    if (sub.manualAssignmentId && typeof markManualAssessmentAssignmentSubmitted === 'function') {
+        markManualAssessmentAssignmentSubmitted(sub.manualAssignmentId, sub.id);
+    }
     astTraineeRememberActiveSubmission(sub);
     try {
         await astTraineeSaveStore(store, true);
+        if (sub.manualAssignmentId && typeof saveToServer === 'function') {
+            const assignmentOk = await saveToServer(['manual_assessment_assignments'], true, true);
+            if (assignmentOk === false) throw new Error('Manual assignment status sync did not confirm.');
+        }
         await recoverLocalAssessmentStudioSubmissionsToServer({ silent: true });
     } catch (error) {
         console.warn('[Assessment Studio Trainee] submit failed:', error);
@@ -1413,7 +1554,9 @@ async function requestAssessmentStudioFeedback(submissionId) {
 }
 
 window.ensureAssessmentStudioAssignmentForCurrentUser = ensureAssessmentStudioAssignmentForCurrentUser;
+window.ensureAssessmentStudioManualAssignmentForCurrentUser = ensureAssessmentStudioManualAssignmentForCurrentUser;
 window.openAssessmentStudioFromSchedule = openAssessmentStudioFromSchedule;
+window.openAssessmentStudioFromManualAssignment = openAssessmentStudioFromManualAssignment;
 window.openAssessmentStudioTraineeRuntime = openAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioTraineeRuntime = renderAssessmentStudioTraineeRuntime;
 window.renderAssessmentStudioAssignmentsHtml = renderAssessmentStudioAssignmentsHtml;

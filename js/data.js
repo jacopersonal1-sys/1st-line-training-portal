@@ -20,6 +20,7 @@ const DB_SCHEMA = {
     training_rules_config: { rules: [], rulesHtml: '', showOnFirstLogin: true, showOnLogin: false, targetMode: 'all', targetUsers: [], targetGroups: [], officeOptions: [], updatedAt: null, updatedBy: null },
     course_progress_request_config: { recipients: [], requestMessage: '', emailBodyTemplate: '', acknowledgementMessage: '', smtp: { host: '', port: 587, secure: false, user: '', pass: '', from: '' }, updatedAt: null, updatedBy: null },
     admin_notifications: [],
+    manual_assessment_assignments: [],
     test_integrity_overrides: { entries: {}, updatedAt: null, updatedBy: null },
     sso_login_config: { enabled: false, provider: 'azure', allowedDomains: [], allowEmailFallback: true, updatedAt: null, updatedBy: null },
     qa_data: { questions: [], submissions: [], updatedAt: null, updatedBy: null },
@@ -159,6 +160,7 @@ const STRICT_SERVER_BLOB_KEYS = new Set([
     'liveSchedules',
     'assessments',
     'qa_data',
+    'manual_assessment_assignments',
     'assessment_studio_data',
     'content_studio_data'
 ]);
@@ -195,6 +197,7 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'training_rules_config',
     'course_progress_request_config',
     'admin_notifications',
+    'manual_assessment_assignments',
     'test_integrity_overrides',
     'qa_data',
     'assessment_studio_data',
@@ -238,6 +241,7 @@ const TRAINEE_ALLOWED_BLOB_KEYS = new Set([
     'training_rules_config',
     'course_progress_request_config',
     'admin_notifications',
+    'manual_assessment_assignments',
     'qa_data',
     'assessment_studio_data',
     'content_studio_data',
@@ -267,6 +271,7 @@ const APP_DOCUMENT_FETCH_PRIORITY = [
     'system_tombstones',
     'violation_reports',
     'qa_data',
+    'manual_assessment_assignments',
     'assessment_studio_data',
     'content_studio_data'
 ];
@@ -445,6 +450,7 @@ function safeParse(raw, fallback = null) {
 const SERVER_AUTHORITY_GUARDED_BLOB_KEYS = new Set([
     'schedules',
     'qa_data',
+    'manual_assessment_assignments',
     'assessment_studio_data',
     'content_studio_data'
 ]);
@@ -457,6 +463,10 @@ const SERVER_AUTHORITY_LOCAL_MIRRORS = {
 
 function validateServerAuthorityBlob(key, content) {
     if (!SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) return { ok: true };
+    if (key === 'manual_assessment_assignments') {
+        if (!Array.isArray(content)) return { ok: false, message: 'manual_assessment_assignments must be an array.' };
+        return { ok: true };
+    }
     if (!content || typeof content !== 'object' || Array.isArray(content)) {
         return { ok: false, message: `${key} must be a JSON object.` };
     }

@@ -8512,6 +8512,72 @@ body.theme-one-ui .ast-matrix-cell {
     background: var(--bg-card);
 }
 
+.manual-assignment-card {
+    margin: 0 0 16px;
+    padding: 16px;
+}
+
+.manual-assignment-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.manual-assignment-head h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.manual-assignment-head p {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.manual-assignment-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr) minmax(180px, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+}
+
+.manual-assignment-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.manual-assignment-grid select,
+.manual-assignment-grid input {
+    min-height: 36px;
+}
+
+.manual-assignment-recent {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.manual-assignment-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-input);
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
 @media (max-width: 860px) {
     .ast-trainee-topbar {
         grid-template-columns: 1fr;
@@ -8551,5 +8617,11 @@ body.theme-one-ui .ast-matrix-cell {
     .ast-match-list select,
     .ast-rank-row select {
         min-width: 100%;
+    }
+
+    .manual-assignment-head,
+    .manual-assignment-grid {
+        grid-template-columns: 1fr;
+        align-items: stretch;
     }
 }

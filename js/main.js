@@ -4575,6 +4575,7 @@ function renderViewById(id, options = {}) {
     }
 
     if (id === 'test-manage') {
+        if (typeof mountManualAssessmentPushPanel === 'function') mountManualAssessmentPushPanel();
         if (typeof loadManageTests === 'function') loadManageTests();
         if (typeof loadAssessmentDashboard === 'function') loadAssessmentDashboard();
         if (typeof loadMarkingQueue === 'function') loadMarkingQueue();
@@ -5246,6 +5247,19 @@ function updateNotifications() {
             }
         });
 
+        const manualAssignments = (typeof getCurrentUserManualAssessmentNotifications === 'function')
+            ? getCurrentUserManualAssessmentNotifications()
+            : [];
+        manualAssignments.forEach(assignment => {
+            count++;
+            notifList.innerHTML += `
+                <div class="notif-item" onclick="openManualAssessmentAssignment('${safeNotificationText(assignment.id)}')" style="border-left:3px solid var(--primary);" aria-label="Manual assessment assignment">
+                    <i class="fas fa-paper-plane" style="color:var(--primary);"></i>
+                    <strong>Assessment Assigned</strong>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">${safeNotificationText(assignment.title || 'Catch-up assessment')}</div>
+                </div>`;
+        });
+
         // Trigger Invasive Popup Check
         if (typeof checkUrgentNoticesPopup === 'function') {
             checkUrgentNoticesPopup();
@@ -5582,6 +5596,12 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.53": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Manual Catch-up:</strong> Admins can now push a selected Test Engine or Assessment Studio assessment directly to one trainee without adding a Schedule Studio timeline item.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Notifications:</strong> Manually assigned assessments appear as catch-up notifications and in My Assessments until submitted.</li>
+                <li style="margin-bottom: 8px;"><strong>Assessment Safety:</strong> Catch-up submissions are tracked separately from scheduled attempts and stop reopening once submitted.</li>
+            </ul>`,
         "2.7.52": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Assessment Studio:</strong> Question Bucket questions can now include an optional picture from an uploaded image or image URL.</li>
