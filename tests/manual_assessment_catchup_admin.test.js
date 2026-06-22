@@ -99,6 +99,6 @@ describe('Assessment Studio manual catch-up admin view', () => {
         expect(assignments[0].type).toBe('assessment_studio');
         expect(assignments[0].targetId).toBe('gen_1');
         expect(assignments[0].targetTrainee).toBe('Alice');
-        expect(global.saveToServer).toHaveBeenCalledWith(['manual_assessment_assignments', 'admin_notifications'], true, true);
+        expect(global.saveToServer).toHaveBeenCalledWith(['admin_notifications', 'manual_assessment_assignments'], false, true);
     });
 });

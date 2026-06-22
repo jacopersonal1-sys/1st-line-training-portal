@@ -8,13 +8,16 @@ const QUESTION_TYPES = [
     { key: 'matrix', label: 'Matrix / Grid' }
 ];
 
-const AST_GRADING_LEASE_MS = 30 * 60 * 1000;
+const AST_GRADING_LEASE_MS = 5 * 60 * 1000;
+const AST_GRADING_HEARTBEAT_MS = 2 * 60 * 1000;
 const AST_GRADING_UPLOAD_STATUS_KEY = 'assessment_studio_grading_upload_status';
+const AST_QUESTION_UPLOAD_STATUS_KEY = 'assessment_studio_question_upload_status';
 
 const App = {
     view: 'bucket',
     selectedSubmissionId: null,
     markerSessionId: `ast_marker_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    gradingHeartbeatTimer: null,
 
     async init() {
         const root = document.getElementById('assessment-studio-app');
@@ -44,6 +47,16 @@ const App = {
         return AssessmentStudioData.normalizeText(value);
     },
 
+    feedbackStatus(value) {
+        if (AssessmentStudioData && typeof AssessmentStudioData.normalizeFeedbackStatus === 'function') {
+            return AssessmentStudioData.normalizeFeedbackStatus(value);
+        }
+        const status = String(value || '').trim().toLowerCase();
+        if (status === 'requested') return 'requested';
+        if (status === 'received' || status === 'recieved' || status === 'given') return 'received';
+        return 'none';
+    },
+
     typeLabel(type) {
         return (QUESTION_TYPES.find(item => item.key === type) || {}).label || type || 'Question';
     },
@@ -68,7 +81,10 @@ const App = {
     async setView(view) {
         if (this.view === 'grading' && this.selectedSubmissionId) {
             await this.releaseSubmissionLock(this.selectedSubmissionId);
+        } else if (this.view === 'grading' && view !== 'grading') {
+            await this.repairOwnAbandonedGradingLocks();
         }
+        this.stopGradingLockHeartbeat();
         this.view = view;
         this.selectedSubmissionId = null;
         this.render();
@@ -78,7 +94,10 @@ const App = {
         if (this.view === 'grading' && this.selectedSubmissionId) {
             await this.releaseSubmissionLock(this.selectedSubmissionId);
             this.selectedSubmissionId = null;
+        } else if (this.view === 'grading') {
+            await this.repairOwnAbandonedGradingLocks();
         }
+        this.stopGradingLockHeartbeat();
         await AssessmentStudioData.load();
         await this.repairCompletedSubmissionLocks();
         await this.repairOwnAbandonedGradingLocks();
@@ -120,6 +139,36 @@ const App = {
         localStorage.setItem(AST_GRADING_UPLOAD_STATUS_KEY, JSON.stringify(map));
     },
 
+    questionUploadStatusMap() {
+        try {
+            const raw = localStorage.getItem(AST_QUESTION_UPLOAD_STATUS_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    },
+
+    setQuestionUploadStatus(id, status) {
+        const key = String(id || '').trim();
+        if (!key) return;
+        const map = this.questionUploadStatusMap();
+        map[key] = {
+            ...(status || {}),
+            updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(AST_QUESTION_UPLOAD_STATUS_KEY, JSON.stringify(map));
+    },
+
+    clearQuestionUploadStatus(id) {
+        const key = String(id || '').trim();
+        if (!key) return;
+        const map = this.questionUploadStatusMap();
+        if (!map[key]) return;
+        delete map[key];
+        localStorage.setItem(AST_QUESTION_UPLOAD_STATUS_KEY, JSON.stringify(map));
+    },
+
     shouldRecoverCompletedGrade(localSub, remoteSub) {
         if (!localSub || typeof localSub !== 'object') return false;
         const localCompleted = String(localSub.status || '').toLowerCase() === 'completed' || !!localSub.gradedAt || !!localSub.gradedBy;
@@ -141,6 +190,25 @@ const App = {
         return data || null;
     },
 
+    async fetchSubmissionRow(id) {
+        const key = String(id || '').trim();
+        if (!key || !AppContext.supabase || typeof AppContext.supabase.from !== 'function') return null;
+        try {
+            const { data, error } = await AppContext.supabase
+                .from('assessment_studio_submissions')
+                .select('data, updated_at')
+                .eq('id', key)
+                .maybeSingle();
+            if (error) throw error;
+            return data && data.data && typeof data.data === 'object'
+                ? AssessmentStudioData.normalizeSubmission(data.data)
+                : null;
+        } catch (error) {
+            console.warn('[Assessment Studio] row submission check skipped:', error.message || error);
+            return null;
+        }
+    },
+
     async verifyCompletedGradeUploads({ silent = true } = {}) {
         try {
             const local = AssessmentStudioData.normalizeStudio(this.state().studio);
@@ -150,8 +218,12 @@ const App = {
             const remote = AssessmentStudioData.normalizeStudio(remoteDoc && remoteDoc.content && typeof remoteDoc.content === 'object' ? remoteDoc.content : null);
             const remoteById = new Map(remote.submissions.map(sub => [String(sub.id), sub]));
             let changed = false;
-            candidates.forEach(sub => {
-                if (this.shouldRecoverCompletedGrade(sub, remoteById.get(String(sub.id)))) {
+            for (const sub of candidates) {
+                const rowSub = await this.fetchSubmissionRow(sub.id);
+                const remoteSub = rowSub
+                    ? AssessmentStudioData.normalizeSubmission(rowSub)
+                    : remoteById.get(String(sub.id));
+                if (this.shouldRecoverCompletedGrade(sub, remoteSub)) {
                     this.setGradingUploadStatus(sub.id, {
                         state: 'missing',
                         message: 'Completed grade is saved locally but not confirmed on Supabase.',
@@ -161,7 +233,7 @@ const App = {
                 } else {
                     this.clearGradingUploadStatus(sub.id);
                 }
-            });
+            }
             if (changed && !silent) this.toast('Some completed grades still need upload recovery.', 'warn');
             return changed;
         } catch (error) {
@@ -182,11 +254,20 @@ const App = {
         this.setGradingUploadStatus(key, { state: 'uploading', message: 'Re-uploading completed grade to Supabase.' });
         this.render();
         try {
+            const normalizedLocal = AssessmentStudioData.normalizeSubmission(localSub);
+            let rowSynced = false;
+            try {
+                rowSynced = typeof AssessmentStudioData.syncSubmissionRowOnServer === 'function'
+                    ? await AssessmentStudioData.syncSubmissionRowOnServer(normalizedLocal)
+                    : false;
+            } catch (rowError) {
+                console.warn('[Assessment Studio] completed grade row recovery failed:', rowError);
+            }
             const remoteDoc = await this.fetchRemoteStudioDocument();
             const remote = AssessmentStudioData.normalizeStudio(remoteDoc && remoteDoc.content && typeof remoteDoc.content === 'object' ? remoteDoc.content : null);
             const remoteIdx = remote.submissions.findIndex(sub => String(sub.id) === key);
-            if (remoteIdx >= 0) remote.submissions[remoteIdx] = AssessmentStudioData.normalizeSubmission(localSub);
-            else remote.submissions.unshift(AssessmentStudioData.normalizeSubmission(localSub));
+            if (remoteIdx >= 0) remote.submissions[remoteIdx] = normalizedLocal;
+            else remote.submissions.unshift(normalizedLocal);
             remote.updatedAt = new Date().toISOString();
             remote.updatedBy = AssessmentStudioData.editor();
             const { data, error } = await AppContext.supabase.from('app_documents').upsert({
@@ -194,7 +275,8 @@ const App = {
                 content: remote,
                 updated_at: remote.updatedAt
             }).select('updated_at');
-            if (error) throw error;
+            if (error && !rowSynced) throw error;
+            if (error) console.warn('[Assessment Studio] completed grade document recovery failed after row sync:', error);
             this.state().studio = AssessmentStudioData.mergeStudio(remote, this.state().studio);
             localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
             localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
@@ -218,6 +300,96 @@ const App = {
 
     retryCompletedGradeUpload(id) {
         return this.recoverCompletedGradeToServer(id, { silent: false });
+    },
+
+    async verifyQuestionUpload(id, { silent = true } = {}) {
+        const key = String(id || '').trim();
+        if (!key || !AppContext.supabase) return false;
+        try {
+            const localQuestion = this.state().studio.questionBucket.find(q => String(q.id) === key);
+            if (!localQuestion) {
+                this.clearQuestionUploadStatus(key);
+                return false;
+            }
+            const remoteDoc = await this.fetchRemoteStudioDocument();
+            const remote = AssessmentStudioData.normalizeStudio(remoteDoc && remoteDoc.content && typeof remoteDoc.content === 'object' ? remoteDoc.content : null);
+            const remoteQuestion = remote.questionBucket.find(q => String(q.id) === key);
+            const localTime = Date.parse(localQuestion.updatedAt || localQuestion.createdAt || 0) || 0;
+            const remoteTime = Date.parse(remoteQuestion && (remoteQuestion.updatedAt || remoteQuestion.createdAt) || 0) || 0;
+            if (remoteQuestion && remoteTime >= localTime) {
+                this.clearQuestionUploadStatus(key);
+                return false;
+            }
+            this.setQuestionUploadStatus(key, {
+                state: remoteQuestion ? 'stale' : 'missing',
+                message: remoteQuestion
+                    ? 'Bucket question has newer local edits than Supabase.'
+                    : 'Bucket question is saved locally but not confirmed on Supabase.',
+                checkedAt: new Date().toISOString()
+            });
+            if (!silent) this.toast('This bucket question still needs upload recovery.', 'warn');
+            return true;
+        } catch (error) {
+            console.warn('[Assessment Studio] question upload verification failed:', error);
+            this.setQuestionUploadStatus(key, {
+                state: 'failed',
+                message: error.message || 'Question upload verification failed.'
+            });
+            return true;
+        }
+    },
+
+    async recoverQuestionToServer(id, { silent = false } = {}) {
+        const key = String(id || '').trim();
+        if (!key) return false;
+        const localQuestion = this.state().studio.questionBucket.find(q => String(q.id) === key);
+        if (!localQuestion) return false;
+        if (!AppContext.supabase) {
+            this.setQuestionUploadStatus(key, { state: 'failed', message: 'Supabase connection is not available.' });
+            return false;
+        }
+        this.setQuestionUploadStatus(key, { state: 'uploading', message: 'Re-uploading bucket question to Supabase.' });
+        this.render();
+        try {
+            const remoteDoc = await this.fetchRemoteStudioDocument();
+            const remote = AssessmentStudioData.normalizeStudio(remoteDoc && remoteDoc.content && typeof remoteDoc.content === 'object' ? remoteDoc.content : null);
+            const remoteIdx = remote.questionBucket.findIndex(q => String(q.id) === key);
+            const normalizedQuestion = AssessmentStudioData.normalizeQuestion(localQuestion);
+            if (remoteIdx >= 0) remote.questionBucket[remoteIdx] = normalizedQuestion;
+            else remote.questionBucket.unshift(normalizedQuestion);
+            remote.groupings = AssessmentStudioData.mergeStudioItems(remote.groupings, this.state().studio.groupings || []);
+            remote.tags = AssessmentStudioData.mergeStudioItems(remote.tags, this.state().studio.tags || []);
+            remote.updatedAt = new Date().toISOString();
+            remote.updatedBy = AssessmentStudioData.editor();
+            const { data, error } = await AppContext.supabase.from('app_documents').upsert({
+                key: 'assessment_studio_data',
+                content: remote,
+                updated_at: remote.updatedAt
+            }).select('updated_at');
+            if (error) throw error;
+            this.state().studio = AssessmentStudioData.mergeStudio(remote, this.state().studio);
+            localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
+            localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
+            const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : remote.updatedAt;
+            if (confirmedAt) localStorage.setItem('sync_ts_assessment_studio_data', confirmedAt);
+            this.clearQuestionUploadStatus(key);
+            if (!silent) this.toast('Bucket question re-uploaded to Supabase.', 'ok');
+            this.render();
+            return true;
+        } catch (error) {
+            console.warn('[Assessment Studio] question recovery failed:', error);
+            this.setQuestionUploadStatus(key, {
+                state: 'failed',
+                message: error.message || 'Bucket question re-upload failed.'
+            });
+            if (!silent) this.toast(error.message || 'Bucket question re-upload failed.', 'error');
+            this.render();
+            return false;
+        }
+    },
+
+    retryQuestionUpload(id) {
+        return this.recoverQuestionToServer(id, { silent: false });
     },
 
     async repairCompletedSubmissionLocks() {
@@ -532,7 +704,6 @@ const App = {
         const groupings = this.groupingOptions();
         const tags = this.tagOptions();
         const questions = this.state().studio.questionBucket.filter(q => q.status !== 'archived');
-        const stats = this.bucketStatsByAssessment();
         return `
             <main class="ast-single-layout">
                 <section class="ast-card">
@@ -565,7 +736,7 @@ const App = {
                     <div class="ast-table-wrap ast-compact-table">
                         <table class="ast-table">
                             <thead><tr><th>Assessment</th><th>Questions</th><th>Total Points</th></tr></thead>
-                            <tbody>${stats.length ? stats.map(row => `<tr><td>${this.esc(row.assessment)}</td><td>${this.esc(row.count)}</td><td>${this.esc(Math.round(row.points * 10) / 10)}</td></tr>`).join('') : '<tr><td colspan="3" class="ast-empty">No assessment point totals yet.</td></tr>'}</tbody>
+                            <tbody id="bucketStatsRows">${this.renderBucketStatsRows()}</tbody>
                         </table>
                     </div>
                 </section>
@@ -574,19 +745,50 @@ const App = {
         `;
     },
 
+    renderBucketStatsRows() {
+        const stats = this.bucketStatsByAssessment();
+        return stats.length
+            ? stats.map(row => `<tr><td>${this.esc(row.assessment)}</td><td>${this.esc(row.count)}</td><td>${this.esc(Math.round(row.points * 10) / 10)}</td></tr>`).join('')
+            : '<tr><td colspan="3" class="ast-empty">No assessment point totals yet.</td></tr>';
+    },
+
+    refreshBucketDisplay() {
+        const questions = this.state().studio.questionBucket.filter(q => q.status !== 'archived');
+        const bucketRows = document.getElementById('bucketRows');
+        if (bucketRows) {
+            bucketRows.innerHTML = questions.length
+                ? questions.map(q => this.renderBucketRow(q)).join('')
+                : '<tr><td colspan="7" class="ast-empty">No bucket questions yet.</td></tr>';
+        }
+        const statsRows = document.getElementById('bucketStatsRows');
+        if (statsRows) statsRows.innerHTML = this.renderBucketStatsRows();
+        if (typeof this.filterBucket === 'function') this.filterBucket();
+    },
+
     renderBucketRow(q) {
         const tags = Array.isArray(q.tags) ? q.tags : [];
+        const uploadStatus = this.questionUploadStatusMap()[String(q.id || '')] || null;
+        const uploadState = String(uploadStatus && uploadStatus.state || '').toLowerCase();
+        const uploadBadge = uploadState === 'uploading'
+            ? '<span class="ast-lock-badge mine"><i class="fas fa-circle-notch fa-spin"></i> Re-uploading</span>'
+            : (uploadState === 'missing' || uploadState === 'stale' || uploadState === 'failed')
+                ? '<span class="ast-lock-badge stale"><i class="fas fa-cloud-exclamation"></i> Upload Failed</span>'
+                : '';
+        const retryButton = (uploadState === 'missing' || uploadState === 'stale' || uploadState === 'failed')
+            ? ` <button class="ast-btn small warn" onclick="App.retryQuestionUpload('${this.esc(q.id)}')"><i class="fas fa-cloud-arrow-up"></i> Re-upload Question</button>`
+            : '';
         return `
             <tr data-bucket-row data-search="${this.esc(`${q.assessment} ${q.grouping || ''} ${q.type} ${q.text} ${tags.join(' ')}`.toLowerCase())}" data-assessment="${this.esc(q.assessment)}" data-type="${this.esc(q.type)}" data-grouping="${this.esc(q.grouping || '')}" data-tags="${this.esc(tags.join('|'))}">
                 <td>${this.esc(q.assessment)}</td>
                 <td><span class="ast-chip">${this.esc(q.grouping || 'Ungrouped')}</span></td>
                 <td>${tags.length ? tags.map(tag => `<span class="ast-chip">${this.esc(tag)}</span>`).join(' ') : '<span class="ast-muted">-</span>'}</td>
                 <td><span class="ast-chip">${this.esc(this.typeLabel(q.type))}</span></td>
-                <td>${this.esc(q.text)}</td>
+                <td>${this.esc(q.text)} ${uploadBadge}</td>
                 <td>${this.esc(q.points)}</td>
                 <td>
                     <button class="ast-btn small" onclick="App.openQuestionModal('${this.esc(q.id)}')"><i class="fas fa-pen"></i></button>
                     <button class="ast-btn small danger" onclick="App.archiveQuestion('${this.esc(q.id)}')"><i class="fas fa-trash"></i></button>
+                    ${retryButton}
                 </td>
             </tr>
         `;
@@ -1039,9 +1241,10 @@ const App = {
         }
     },
 
-    async saveTagName(name) {
+    async saveTagName(name, options = {}) {
         const clean = String(name || '').trim();
         if (!clean) return false;
+        const persist = options.persist !== false;
         const studio = this.state().studio;
         studio.tags = Array.isArray(studio.tags) ? studio.tags : [];
         const existing = studio.tags.find(item => this.normalize(item.name) === this.normalize(clean));
@@ -1058,13 +1261,14 @@ const App = {
                 updatedBy: AssessmentStudioData.editor()
             });
         }
-        await AssessmentStudioData.saveStudio();
+        if (persist) await AssessmentStudioData.saveStudio();
         return true;
     },
 
-    async saveGroupingName(name) {
+    async saveGroupingName(name, options = {}) {
         const clean = String(name || '').trim();
         if (!clean) return false;
+        const persist = options.persist !== false;
         const studio = this.state().studio;
         studio.groupings = Array.isArray(studio.groupings) ? studio.groupings : [];
         const existing = studio.groupings.find(item => this.normalize(item.name) === this.normalize(clean));
@@ -1081,7 +1285,7 @@ const App = {
                 updatedBy: AssessmentStudioData.editor()
             });
         }
-        await AssessmentStudioData.saveStudio();
+        if (persist) await AssessmentStudioData.saveStudio();
         return true;
     },
 
@@ -1194,6 +1398,14 @@ const App = {
     },
 
     async saveQuestion() {
+        const form = document.getElementById('questionForm');
+        const submitButton = form?.querySelector('button[type="submit"]');
+        if (submitButton && submitButton.disabled) return;
+        if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Saving...';
+        }
+
         const type = document.getElementById('questionType').value;
         const existingId = document.getElementById('questionId').value;
         const isNewQuestion = !existingId;
@@ -1242,21 +1454,46 @@ const App = {
         }
 
         const questionErrors = this.questionSafetyErrors(question);
-        if (questionErrors.length) return this.toast(questionErrors[0], 'warn');
+        if (questionErrors.length) {
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.innerHTML = '<i class="fas fa-save"></i> Save Question';
+            }
+            return this.toast(questionErrors[0], 'warn');
+        }
 
-        if (grouping) await this.saveGroupingName(grouping);
-        if (tag) await this.saveTagName(tag);
+        if (grouping) await this.saveGroupingName(grouping, { persist: false });
+        if (tag) await this.saveTagName(tag, { persist: false });
         const studio = this.state().studio;
         const idx = studio.questionBucket.findIndex(q => q.id === id);
         if (idx >= 0) studio.questionBucket[idx] = AssessmentStudioData.normalizeQuestion({ ...studio.questionBucket[idx], ...question });
         else studio.questionBucket.unshift(AssessmentStudioData.normalizeQuestion({ ...question, createdAt: new Date().toISOString() }));
-        await AssessmentStudioData.saveStudio();
-        this.toast('Question saved.', 'ok');
+        const savePromise = AssessmentStudioData.saveStudio();
+        this.toast('Question saved locally. Syncing to Supabase...', 'ok');
+        this.refreshBucketDisplay();
         if (isNewQuestion) {
             this.resetQuestionModalForNext(question);
-            return;
+        } else {
+            this.render();
         }
-        this.render();
+        try {
+            await savePromise;
+            const needsRetry = await this.verifyQuestionUpload(id, { silent: true });
+            if (needsRetry) {
+                this.toast('Question saved locally, but Supabase did not confirm it. Use Re-upload Question from the bucket row.', 'warn');
+                this.render();
+                return;
+            }
+            this.toast('Question synced.', 'ok');
+        } catch (error) {
+            console.error('[Assessment Studio] Question save could not confirm Supabase upload:', error);
+            this.setQuestionUploadStatus(id, {
+                state: 'failed',
+                message: error.message || 'Question save could not confirm Supabase upload.'
+            });
+            this.toast('Question saved locally, but Supabase sync did not confirm yet.', 'warn');
+            this.render();
+        }
     },
 
     resetQuestionModalForNext(previousQuestion = {}) {
@@ -1745,6 +1982,10 @@ const App = {
         return AssessmentStudioData.editor();
     },
 
+    normalizeMarkerName(value) {
+        return this.normalize(value || '');
+    },
+
     markerSessionKey() {
         return `${this.markerName()}::${this.markerSessionId}`;
     },
@@ -1753,17 +1994,30 @@ const App = {
         if (!submission || String(submission.status || '') !== 'pending_review') return null;
         const lock = submission && submission.gradingLock;
         if (!lock || !lock.expiresAt) return null;
-        return new Date(lock.expiresAt).getTime() > Date.now() ? lock : null;
+        const now = Date.now();
+        const heartbeatAt = lock.heartbeatAt ? new Date(lock.heartbeatAt).getTime() : 0;
+        const claimedAt = lock.claimedAt ? new Date(lock.claimedAt).getTime() : 0;
+        const lastSeenAt = heartbeatAt || claimedAt;
+        if (lastSeenAt && now - lastSeenAt > AST_GRADING_LEASE_MS) return null;
+        return new Date(lock.expiresAt).getTime() > now ? lock : null;
     },
 
     isOwnGradingLock(lock) {
         return lock && lock.markerSession === this.markerSessionKey();
     },
 
+    isCurrentMarkerLock(lock) {
+        if (!lock) return false;
+        if (this.isOwnGradingLock(lock)) return true;
+        const lockMarker = this.normalizeMarkerName(lock.marker || '');
+        const currentMarker = this.normalizeMarkerName(this.markerName());
+        return !!lockMarker && !!currentMarker && lockMarker === currentMarker;
+    },
+
     gradingLockBadge(submission) {
         const lock = this.getActiveGradingLock(submission);
         if (!lock) return '<span class="ast-lock-badge available"><i class="fas fa-unlock"></i> Available</span>';
-        if (this.isOwnGradingLock(lock)) return '<span class="ast-lock-badge mine"><i class="fas fa-pen"></i> You are grading</span>';
+        if (this.isCurrentMarkerLock(lock)) return '<span class="ast-lock-badge mine"><i class="fas fa-pen"></i> You are grading</span>';
         return `<span class="ast-lock-badge locked"><i class="fas fa-lock"></i> ${this.esc(lock.marker || 'Another admin')} is grading</span>`;
     },
 
@@ -1773,7 +2027,7 @@ const App = {
         if (!sub) return false;
         if (String(sub.status || '') !== 'pending_review') return true;
         const activeLock = this.getActiveGradingLock(sub);
-        if (activeLock && !this.isOwnGradingLock(activeLock)) {
+        if (activeLock && !this.isCurrentMarkerLock(activeLock)) {
             this.toast(`${activeLock.marker || 'Another admin'} is already grading this test.`, 'warn');
             return false;
         }
@@ -1791,6 +2045,15 @@ const App = {
             await AssessmentStudioData.saveStudio();
             return true;
         } catch (error) {
+            if (activeLock && this.isCurrentMarkerLock(activeLock)) {
+                try {
+                    localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
+                    localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
+                } catch (storageError) {}
+                this.toast('Supabase is slow, but your existing grading session was reopened locally. Save will retry through the normal recovery path.', 'warn');
+                console.warn('[Assessment Studio] Reopened same-marker grading lock locally after Supabase timeout:', error);
+                return true;
+            }
             sub.gradingLock = null;
             sub.updatedAt = new Date().toISOString();
             sub.updatedBy = this.markerName();
@@ -1807,7 +2070,8 @@ const App = {
         const sub = this.state().studio.submissions.find(s => s.id === id);
         if (!sub) return;
         const activeLock = this.getActiveGradingLock(sub);
-        if (!activeLock || !this.isOwnGradingLock(activeLock)) return;
+        if (!activeLock || !this.isCurrentMarkerLock(activeLock)) return;
+        if (this.selectedSubmissionId === id) this.stopGradingLockHeartbeat();
         sub.gradingLock = null;
         sub.updatedAt = new Date().toISOString();
         sub.updatedBy = this.markerName();
@@ -1819,6 +2083,51 @@ const App = {
                 localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
                 localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
             } catch (storageError) {}
+        }
+    },
+
+    stopGradingLockHeartbeat() {
+        if (this.gradingHeartbeatTimer) {
+            clearInterval(this.gradingHeartbeatTimer);
+            this.gradingHeartbeatTimer = null;
+        }
+    },
+
+    startGradingLockHeartbeat(id) {
+        this.stopGradingLockHeartbeat();
+        const submissionId = String(id || '');
+        if (!submissionId) return;
+        this.gradingHeartbeatTimer = setInterval(() => {
+            this.heartbeatSubmissionLock(submissionId);
+        }, AST_GRADING_HEARTBEAT_MS);
+    },
+
+    async heartbeatSubmissionLock(id) {
+        if (this.selectedSubmissionId !== id || this.view !== 'grading' || !this.isSelectedGraderMounted(id)) {
+            this.stopGradingLockHeartbeat();
+            await this.releaseSubmissionLock(id);
+            return false;
+        }
+        const sub = this.state().studio.submissions.find(s => s.id === id);
+        if (!sub) return false;
+        const activeLock = this.getActiveGradingLock(sub);
+        if (!activeLock || !this.isCurrentMarkerLock(activeLock)) return false;
+        const now = new Date();
+        sub.gradingLock = {
+            ...activeLock,
+            marker: this.markerName(),
+            markerSession: this.markerSessionKey(),
+            heartbeatAt: now.toISOString(),
+            expiresAt: new Date(now.getTime() + AST_GRADING_LEASE_MS).toISOString()
+        };
+        sub.updatedAt = now.toISOString();
+        sub.updatedBy = this.markerName();
+        try {
+            await AssessmentStudioData.saveStudio();
+            return true;
+        } catch (error) {
+            console.warn('[Assessment Studio] Grading lock heartbeat could not sync immediately:', error);
+            return false;
         }
     },
 
@@ -1834,7 +2143,7 @@ const App = {
         const date = s.submittedAt || s.generatedAt || '';
         const score = s.status === 'completed' ? `${Math.round(Number(s.percent || 0))}%` : '-';
         const activeLock = s.source === 'studio' ? this.getActiveGradingLock(s) : null;
-        const lockedByOther = activeLock && !this.isOwnGradingLock(activeLock);
+        const lockedByOther = activeLock && !this.isCurrentMarkerLock(activeLock);
         const lockBadge = s.source === 'studio' && String(s.status || '') === 'pending_review' ? this.gradingLockBadge(s) : '';
         const uploadStatus = s.source === 'studio' ? this.gradingUploadStatusMap()[String(s.id)] : null;
         const uploadState = String(uploadStatus && uploadStatus.state || '').trim();
@@ -1897,15 +2206,26 @@ const App = {
             this.toast(safetyErrors[0], 'error');
             return;
         }
-        const claimed = await this.claimSubmissionLock(id);
-        if (!claimed) {
-            this.render();
-            return;
-        }
         try {
             this.selectedSubmissionId = id;
             this.view = 'grading';
             this.render();
+            if (!this.isSelectedGraderMounted(id)) {
+                this.selectedSubmissionId = null;
+                this.view = 'grading';
+                this.handleError(new Error('The grading workspace did not open. No grading lock was taken, so you can retry.'), 'Could not open the grading workspace.');
+                this.render();
+            } else {
+                const claimed = await this.claimSubmissionLock(id);
+                if (!claimed) {
+                    this.selectedSubmissionId = null;
+                    this.view = 'grading';
+                    this.render();
+                    return;
+                }
+                await this.heartbeatSubmissionLock(id);
+                this.startGradingLockHeartbeat(id);
+            }
         } catch (error) {
             await this.releaseSubmissionLock(id);
             this.selectedSubmissionId = null;
@@ -1913,6 +2233,16 @@ const App = {
             this.handleError(error, 'Could not open the grading workspace.');
             this.render();
         }
+    },
+
+    isSelectedGraderMounted(id) {
+        if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return true;
+        const root = document.getElementById('assessment-studio-app');
+        if (!root) return false;
+        const selectorId = typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function'
+            ? CSS.escape(String(id || ''))
+            : String(id || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        return !!root.querySelector(`[data-grader-submission-id="${selectorId}"]`);
     },
 
     async deleteSubmission(id) {
@@ -1947,6 +2277,13 @@ const App = {
         return auto.score;
     },
 
+    commentAt(sub, idx) {
+        const comments = sub && sub.questionComments && typeof sub.questionComments === 'object' ? sub.questionComments : {};
+        if (Object.prototype.hasOwnProperty.call(comments, idx)) return comments[idx];
+        if (Object.prototype.hasOwnProperty.call(comments, String(idx))) return comments[String(idx)];
+        return '';
+    },
+
     collectGradeScores(scoreInputs, questions) {
         const inputs = Array.from(scoreInputs || []);
         const questionList = Array.isArray(questions) ? questions : [];
@@ -1978,6 +2315,21 @@ const App = {
             }
         }
         return { ok: true, message: '', scores };
+    },
+
+    collectGradeComments(commentInputs, questions) {
+        const comments = {};
+        const questionList = Array.isArray(questions) ? questions : [];
+        Array.from(commentInputs || []).forEach(input => {
+            const qidx = String(input.dataset?.qidx ?? '').trim();
+            const index = Number(qidx);
+            if (!Number.isInteger(index) || index < 0 || index >= questionList.length) return;
+            comments[qidx] = String(input.value || '').trim();
+        });
+        for (let idx = 0; idx < questionList.length; idx += 1) {
+            if (!Object.prototype.hasOwnProperty.call(comments, String(idx))) comments[String(idx)] = '';
+        }
+        return comments;
     },
 
     valueAt(answer, key) {
@@ -2023,9 +2375,9 @@ const App = {
             const got = this.choiceIndexSet(q, Array.isArray(answer) ? answer : []);
             if (!correct.size) return { score: 0, max, manual: false };
             const correctSelected = Array.from(got).filter(v => correct.has(v)).length;
-            const wrongSelected = Array.from(got).filter(v => !correct.has(v)).length;
+            const overSelected = Math.max(0, got.size - correct.size);
             const unit = max / correct.size;
-            const score = Math.max(0, Math.min(max, (correctSelected - wrongSelected) * unit));
+            const score = Math.max(0, Math.min(max, (correctSelected - overSelected) * unit));
             return { score: this.roundScore(score), max, manual: false };
         }
         if (q.type === 'matching') {
@@ -2064,7 +2416,7 @@ const App = {
         }, 0);
         const max = questions.reduce((sum, q) => sum + Number(q.points || 1), 0);
         return `
-            <section class="ast-card ast-grader">
+            <section class="ast-card ast-grader" data-grader-submission-id="${this.esc(sub.id)}">
             <div class="ast-grader-head">
                 <button class="ast-btn" onclick="App.closeGrader()"><i class="fas fa-arrow-left"></i> Queue</button>
                 <div class="ast-grader-title">
@@ -2096,6 +2448,7 @@ const App = {
         const answer = this.answerAt(sub, idx);
         const auto = this.autoScoreQuestion(q, answer);
         const score = this.scoreAt(sub, q, idx);
+        const comment = this.commentAt(sub, idx);
         return `
             <article class="ast-grade-question">
                 <div class="ast-grade-top">
@@ -2107,6 +2460,8 @@ const App = {
                 <div class="ast-answer">${this.renderAnswer(q, answer)}</div>
                 <label>Score</label>
                 <input class="grade-score" data-qidx="${idx}" type="number" min="0" max="${this.esc(q.points)}" step="0.5" value="${this.esc(score)}">
+                <label>Question Comment</label>
+                <textarea class="grade-comment" data-qidx="${idx}" rows="3" placeholder="Add marker comment for this question...">${this.esc(comment)}</textarea>
             </article>
         `;
     },
@@ -2253,10 +2608,12 @@ const App = {
         const scoreResult = this.collectGradeScores(scoreInputs, questions);
         if (!scoreResult.ok) return this.toast(scoreResult.message, 'warn');
         Object.assign(scores, scoreResult.scores);
+        const questionComments = this.collectGradeComments(document.querySelectorAll('.grade-comment'), questions);
         const earned = Object.values(scores).reduce((sum, value) => sum + Number(value || 0), 0);
         const max = (sub.testSnapshot.questions || []).reduce((sum, q) => sum + Number(q.points || 1), 0);
         if (!(max > 0)) return this.toast('Cannot complete grading because this test has no valid maximum score.', 'error');
         sub.questionScores = scores;
+        sub.questionComments = questionComments;
         sub.earnedPoints = Math.round(earned * 10) / 10;
         sub.maxPoints = Math.round(max * 10) / 10;
         sub.percent = max ? Math.round((earned / max) * 100) : 0;
@@ -2270,7 +2627,20 @@ const App = {
         if (!Array.isArray(sub.gradingAudit)) sub.gradingAudit = [];
         sub.gradingAudit.push({ at: sub.gradedAt, by: sub.gradedBy, earned: sub.earnedPoints, max: sub.maxPoints, percent: sub.percent });
         try {
-            await AssessmentStudioData.saveStudio();
+            let rowSynced = false;
+            try {
+                rowSynced = typeof AssessmentStudioData.syncSubmissionRowOnServer === 'function'
+                    ? await AssessmentStudioData.syncSubmissionRowOnServer(sub)
+                    : false;
+            } catch (rowError) {
+                console.warn('[Assessment Studio] grade row sync failed, falling back to document save:', rowError);
+            }
+            if (rowSynced) {
+                Promise.resolve(AssessmentStudioData.saveStudio())
+                    .catch(error => console.warn('[Assessment Studio] background document save after grade failed:', error));
+            } else {
+                await AssessmentStudioData.saveStudio();
+            }
             this.clearGradingUploadStatus(sub.id);
             this.toast('Grade saved. Scores remain editable from this queue.', 'ok');
         } catch (error) {
@@ -2293,29 +2663,58 @@ const App = {
         const rows = this.state().studio.submissions.filter(s => s.status === 'completed' || s.status === 'pending_review');
         const assessments = Array.from(new Set(rows.map(s => s.assessment).filter(Boolean))).sort();
         const groups = Array.from(new Set(rows.map(s => s.groupID).filter(Boolean))).sort((a, b) => String(b).localeCompare(String(a), undefined, { numeric: true }));
+        const filters = this.getFeedbackFilters();
+        const selected = (value, expected) => String(value || '') === String(expected || '') ? 'selected' : '';
         return `
             <section class="ast-card">
                 <div class="ast-card-head"><div><h2>Feedback Sessions</h2><p>Default feedback status is none. Update only when feedback is requested or received.</p></div></div>
                 <div class="ast-filters">
-                    <input id="feedbackSearch" type="search" placeholder="Search trainee or assessment..." oninput="App.filterFeedback()">
-                    <select id="feedbackAssessmentFilter" onchange="App.filterFeedback()"><option value="">All assessments</option>${assessments.map(name => `<option>${this.esc(name)}</option>`).join('')}</select>
-                    <select id="feedbackGroupFilter" onchange="App.filterFeedback()"><option value="">All groups</option><option value="__none__">No group</option>${groups.map(group => `<option value="${this.esc(group)}">${this.esc(group)}</option>`).join('')}</select>
-                    <select id="feedbackReviewStatusFilter" onchange="App.filterFeedback()"><option value="">All review states</option><option value="pending_review">Pending Review</option><option value="completed">Completed</option></select>
-                    <select id="feedbackStatusFilter" onchange="App.filterFeedback()"><option value="">All feedback states</option><option value="none">None</option><option value="requested">Requested</option><option value="received">Feedback Received</option></select>
-                    <input id="feedbackDateFromFilter" type="date" title="From date" onchange="App.filterFeedback()">
-                    <input id="feedbackDateToFilter" type="date" title="To date" onchange="App.filterFeedback()">
+                    <input id="feedbackSearch" type="search" placeholder="Search trainee or assessment..." value="${this.esc(filters.term)}" oninput="App.filterFeedback()">
+                    <select id="feedbackAssessmentFilter" onchange="App.filterFeedback()"><option value="">All assessments</option>${assessments.map(name => `<option ${selected(filters.assessment, name)}>${this.esc(name)}</option>`).join('')}</select>
+                    <select id="feedbackGroupFilter" onchange="App.filterFeedback()"><option value="">All groups</option><option value="__none__" ${selected(filters.group, '__none__')}>No group</option>${groups.map(group => `<option value="${this.esc(group)}" ${selected(filters.group, group)}>${this.esc(group)}</option>`).join('')}</select>
+                    <select id="feedbackReviewStatusFilter" onchange="App.filterFeedback()"><option value="">All review states</option><option value="pending_review" ${selected(filters.reviewStatus, 'pending_review')}>Pending Review</option><option value="completed" ${selected(filters.reviewStatus, 'completed')}>Completed</option></select>
+                    <select id="feedbackStatusFilter" onchange="App.filterFeedback()"><option value="">All feedback states</option><option value="none" ${selected(filters.status, 'none')}>None</option><option value="requested" ${selected(filters.status, 'requested')}>Requested</option><option value="received" ${selected(filters.status, 'received')}>Feedback Received</option></select>
+                    <input id="feedbackDateFromFilter" type="date" title="From date" value="${this.esc(filters.dateFrom)}" onchange="App.filterFeedback()">
+                    <input id="feedbackDateToFilter" type="date" title="To date" value="${this.esc(filters.dateTo)}" onchange="App.filterFeedback()">
                 </div>
                 <div class="ast-table-wrap"><table class="ast-table"><thead><tr><th>Date</th><th>Group</th><th>Trainee</th><th>Assessment</th><th>Review</th><th>Score</th><th>Feedback</th><th>Action</th></tr></thead><tbody>${rows.length ? rows.map(s => this.renderFeedbackRow(s)).join('') : '<tr><td colspan="8" class="ast-empty">No feedback sessions found.</td></tr>'}</tbody></table></div>
             </section>
         `;
     },
 
+    getFeedbackFilters() {
+        return this.feedbackFilters || {
+            term: '',
+            assessment: '',
+            group: '',
+            reviewStatus: '',
+            status: '',
+            dateFrom: '',
+            dateTo: ''
+        };
+    },
+
+    captureFeedbackFilters() {
+        this.feedbackFilters = {
+            term: document.getElementById('feedbackSearch')?.value || '',
+            assessment: document.getElementById('feedbackAssessmentFilter')?.value || '',
+            group: document.getElementById('feedbackGroupFilter')?.value || '',
+            reviewStatus: document.getElementById('feedbackReviewStatusFilter')?.value || '',
+            status: document.getElementById('feedbackStatusFilter')?.value || '',
+            dateFrom: document.getElementById('feedbackDateFromFilter')?.value || '',
+            dateTo: document.getElementById('feedbackDateToFilter')?.value || ''
+        };
+        return this.feedbackFilters;
+    },
+
     renderFeedbackRow(s) {
         const date = String(s.submittedAt || s.generatedAt || '').slice(0, 10);
+        const feedbackStatus = this.feedbackStatus(s.feedbackStatus);
+        const feedbackLabel = feedbackStatus === 'received' ? 'Received' : feedbackStatus === 'requested' ? 'Requested' : 'None';
         return `
-            <tr data-feedback-row data-search="${this.esc(`${s.trainee} ${s.assessment} ${s.groupID || ''} ${s.status}`.toLowerCase())}" data-assessment="${this.esc(s.assessment)}" data-group="${this.esc(s.groupID || '')}" data-review-status="${this.esc(s.status)}" data-status="${this.esc(s.feedbackStatus || 'none')}" data-date="${this.esc(date)}">
+            <tr data-feedback-row data-search="${this.esc(`${s.trainee} ${s.assessment} ${s.groupID || ''} ${s.status}`.toLowerCase())}" data-assessment="${this.esc(s.assessment)}" data-group="${this.esc(s.groupID || '')}" data-review-status="${this.esc(s.status)}" data-status="${this.esc(feedbackStatus)}" data-date="${this.esc(date)}">
                 <td>${this.esc(date || '-')}</td><td>${this.esc(s.groupID || '-')}</td><td>${this.esc(s.trainee)}</td><td>${this.esc(s.assessment)}</td><td><span class="ast-status ${this.esc(s.status)}">${this.esc(s.status)}</span></td><td>${this.esc(s.status === 'completed' ? `${s.percent}%` : 'Pending review')}</td>
-                <td><span class="ast-status">${this.esc(s.feedbackStatus || 'none')}</span></td>
+                <td><span class="ast-status">${this.esc(feedbackLabel)}</span></td>
                 <td>
                     <button class="ast-btn small" onclick="App.setFeedback('${this.esc(s.id)}', 'requested')">Requested</button>
                     <button class="ast-btn small primary" onclick="App.setFeedback('${this.esc(s.id)}', 'received')">Received</button>
@@ -2326,13 +2725,14 @@ const App = {
     },
 
     filterFeedback() {
-        const term = this.normalize(document.getElementById('feedbackSearch')?.value || '');
-        const assessment = document.getElementById('feedbackAssessmentFilter')?.value || '';
-        const group = document.getElementById('feedbackGroupFilter')?.value || '';
-        const reviewStatus = document.getElementById('feedbackReviewStatusFilter')?.value || '';
-        const status = document.getElementById('feedbackStatusFilter')?.value || '';
-        const dateFrom = document.getElementById('feedbackDateFromFilter')?.value || '';
-        const dateTo = document.getElementById('feedbackDateToFilter')?.value || '';
+        const filters = this.captureFeedbackFilters();
+        const term = this.normalize(filters.term);
+        const assessment = filters.assessment;
+        const group = filters.group;
+        const reviewStatus = filters.reviewStatus;
+        const status = filters.status;
+        const dateFrom = filters.dateFrom;
+        const dateTo = filters.dateTo;
         document.querySelectorAll('[data-feedback-row]').forEach(row => {
             const rowDate = row.dataset.date || '';
             const ok = (!term || String(row.dataset.search || '').includes(term)) &&
@@ -2347,15 +2747,28 @@ const App = {
     },
 
     async setFeedback(id, status) {
+        this.captureFeedbackFilters();
         const sub = this.state().studio.submissions.find(s => s.id === id);
         if (!sub) return;
-        sub.feedbackStatus = status || 'none';
-        sub.updatedAt = new Date().toISOString();
+        const nextStatus = this.feedbackStatus(status);
+        const now = new Date().toISOString();
+        sub.feedbackStatus = nextStatus;
+        sub.updatedAt = now;
         sub.updatedBy = AssessmentStudioData.editor();
-        await AssessmentStudioData.saveStudio();
         this.notifyFeedbackStatus(sub);
-        this.toast('Feedback status updated.', 'ok');
-        this.render();
+        try {
+            await AssessmentStudioData.saveStudio();
+            this.toast('Feedback status updated.', 'ok');
+        } catch (error) {
+            console.warn('[Assessment Studio] feedback status save could not confirm Supabase upload:', error);
+            try {
+                localStorage.setItem('assessment_studio_data', JSON.stringify(this.state().studio));
+                localStorage.setItem('assessment_studio_data_local', JSON.stringify(this.state().studio));
+            } catch (storageError) {}
+            this.toast('Feedback status saved locally, but cloud sync did not confirm. Refresh after sync completes.', 'warn');
+        } finally {
+            this.render();
+        }
     },
 
     notifyFeedbackStatus(submission) {

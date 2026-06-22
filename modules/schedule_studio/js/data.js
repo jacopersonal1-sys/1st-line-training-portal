@@ -72,7 +72,7 @@ const ScheduleData = {
         return 0;
     },
 
-    mergeObjectsByStableKey(leftItems, rightItems, keySelector, leftDocTime = 0, rightDocTime = 0) {
+    mergeObjectsByStableKey(leftItems, rightItems, keySelector, leftDocTime = 0, rightDocTime = 0, options = {}) {
         const map = new Map();
         const leftMap = new Map();
         const rightMap = new Map();
@@ -87,6 +87,9 @@ const ScheduleData = {
         };
         indexItems(leftItems, leftMap);
         indexItems(rightItems, rightMap);
+
+        if (options.preserveRightWhenLeftEmpty && leftMap.size === 0 && rightMap.size > 0) return Array.from(rightMap.values());
+        if (rightMap.size === 0 && leftMap.size > 0) return Array.from(leftMap.values());
 
         new Set([...leftMap.keys(), ...rightMap.keys()]).forEach(key => {
             const left = leftMap.get(key);
@@ -159,15 +162,17 @@ const ScheduleData = {
 
         const canonicalTime = Date.parse(canonical?.updatedAt || 0) || 0;
         const localTime = Date.parse(local?.updatedAt || 0) || 0;
+        const canonicalAuthoringEmpty = ['questionBucket', 'generators', 'groupings', 'tags']
+            .every(field => !Array.isArray(canonical?.[field]) || canonical[field].length === 0);
         const parsed = canonical && local
             ? {
                 ...(canonicalTime >= localTime ? local : canonical),
                 ...(canonicalTime >= localTime ? canonical : local),
-                questionBucket: this.mergeObjectsByStableKey(canonical.questionBucket, local.questionBucket, item => item.id, canonicalTime, localTime),
-                generators: this.mergeObjectsByStableKey(canonical.generators, local.generators, item => item.id, canonicalTime, localTime),
+                questionBucket: this.mergeObjectsByStableKey(canonical.questionBucket, local.questionBucket, item => item.id, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty }),
+                generators: this.mergeObjectsByStableKey(canonical.generators, local.generators, item => item.id, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty }),
                 submissions: this.mergeObjectsByStableKey(canonical.submissions, local.submissions, item => item.id, canonicalTime, localTime),
-                groupings: this.mergeObjectsByStableKey(canonical.groupings, local.groupings, item => item.id, canonicalTime, localTime),
-                tags: this.mergeObjectsByStableKey(canonical.tags, local.tags, item => item.id, canonicalTime, localTime)
+                groupings: this.mergeObjectsByStableKey(canonical.groupings, local.groupings, item => item.id, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty }),
+                tags: this.mergeObjectsByStableKey(canonical.tags, local.tags, item => item.id, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty })
             }
             : (canonicalTime || localTime
                 ? (localTime > canonicalTime ? local : canonical)

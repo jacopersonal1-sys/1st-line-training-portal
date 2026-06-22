@@ -167,6 +167,28 @@ function buildLiveRecordId(submissionId) {
     return `record_${submissionId}`;
 }
 
+async function ensureLiveCompletionRowsOnServer(submission, record, booking = null) {
+    if (!window.supabaseClient || !submission?.id || !record?.id) return false;
+
+    const nowIso = new Date().toISOString();
+    const upsertExactRow = async (table, item) => {
+        if (!item?.id) return;
+        const row = {
+            id: item.id,
+            data: item,
+            trainee: item.trainee || item.user || null,
+            updated_at: nowIso
+        };
+        const { error } = await window.supabaseClient.from(table).upsert(row);
+        if (error) throw error;
+    };
+
+    await upsertExactRow('submissions', submission);
+    await upsertExactRow('records', record);
+    if (booking?.id) await upsertExactRow('live_bookings', booking);
+    return true;
+}
+
 function getLiveSessionUpdateStamp(session) {
     if (!session || typeof session !== 'object') return 'none';
     const timer = session.timer || {};
@@ -2215,7 +2237,22 @@ async function confirmAndSaveLiveSession() {
 
     // 4/5. Close session authoritatively + sync assessment artifacts
     await closeLiveSessionAuthoritatively(session);
-    if (typeof saveToServer === 'function') await saveToServer(['liveBookings', 'records', 'submissions'], true);
+    let directSynced = false;
+    try {
+        directSynced = await ensureLiveCompletionRowsOnServer(newSub, newRecord, booking && booking.id ? booking : null);
+    } catch (error) {
+        console.warn('Live completion direct row sync failed:', error);
+    }
+
+    if (typeof saveToServer === 'function') {
+        if (directSynced) {
+            Promise.resolve(saveToServer(['liveBookings', 'records', 'submissions'], false, true))
+                .catch(error => console.warn('Live completion background sync failed:', error));
+        } else {
+            const synced = await saveToServer(['liveBookings', 'records', 'submissions'], true);
+            if (synced === false) throw new Error('Critical live completion sync failed.');
+        }
+    }
 
     if(typeof showToast === 'function') showToast(`Session Completed. Score: ${percentage}%`, "success");
     showTab('live-assessment');

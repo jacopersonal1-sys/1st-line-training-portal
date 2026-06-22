@@ -173,6 +173,63 @@ describe('Assessment Studio trainee runtime', () => {
         expect(runtimeRoot.innerHTML).toContain(`<img src="${imageLink}"`);
     });
 
+    test('renders wide matrix questions with responsive column sizing hooks', () => {
+        const submission = makeSubmission({
+            id: 'ast_matrix_wide',
+            testSnapshot: {
+                title: 'Radius Server',
+                questions: [{
+                    id: 'q_matrix',
+                    assessment: 'Radius Server',
+                    type: 'matrix',
+                    text: 'Match the Radius result.',
+                    rows: ['PPPoE credentials successfully authenticated', 'No subscriber object found for this PPPoE username'],
+                    cols: ['Router', 'Radius', 'CRM', 'Package', 'Subscriber', 'Session'],
+                    matrixCorrect: { 0: 1, 1: 4 },
+                    points: 2
+                }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+
+        window.openAssessmentStudioTraineeRuntime('ast_matrix_wide');
+
+        expect(runtimeRoot.innerHTML).toContain('class="ast-matrix-scroll"');
+        expect(runtimeRoot.innerHTML).toContain('--ast-matrix-cols:6');
+        expect(runtimeRoot.innerHTML).toContain('--ast-matrix-col-min:108px');
+        expect(runtimeRoot.innerHTML).toContain('--ast-matrix-row-min:170px');
+    });
+
+    test('progress sidebar does not mark partial matrix answers as done', () => {
+        const submission = makeSubmission({
+            id: 'ast_matrix_partial',
+            answers: { 0: { 0: 1 } },
+            testSnapshot: {
+                title: 'Radius Server',
+                questions: [{
+                    id: 'q_matrix',
+                    assessment: 'Radius Server',
+                    type: 'matrix',
+                    text: 'Match the Radius result.',
+                    rows: ['Authenticated', 'No subscriber found'],
+                    cols: ['Radius', 'CRM'],
+                    matrixCorrect: { 0: 0, 1: 1 },
+                    points: 2
+                }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+
+        window.openAssessmentStudioTraineeRuntime('ast_matrix_partial');
+
+        expect(runtimeRoot.innerHTML).toContain('Q1<span>Matrix / Grid</span>');
+        expect(runtimeRoot.innerHTML).not.toContain('class="done">Q1<span>Matrix / Grid</span>');
+    });
+
     test('does not rerender and steal focus while trainee is typing', () => {
         const submission = makeSubmission({
             status: 'in_progress',
@@ -233,6 +290,41 @@ describe('Assessment Studio trainee runtime', () => {
         expect(draft.status).toBe('in_progress');
     });
 
+    test('save draft clears visible multiple answer selections when trainee unchecks all options', async () => {
+        const submission = makeSubmission({
+            id: 'ast_clear_multi',
+            status: 'in_progress',
+            answers: { 0: [0, 1] },
+            testSnapshot: {
+                title: 'Clear Multi Assessment',
+                questions: [{
+                    id: 'q_multi',
+                    assessment: 'Clear Multi Assessment',
+                    type: 'multi_select',
+                    text: 'Choose any visible options.',
+                    options: ['A', 'B'],
+                    correct: [0],
+                    points: 2
+                }]
+            }
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        window.openAssessmentStudioTraineeRuntime('ast_clear_multi');
+        document.querySelectorAll = jest.fn(selector => {
+            if (selector === '#astq0 input[type="checkbox"]:checked') return [];
+            if (selector === '#astq0 input[type="checkbox"]') return [{ value: '0' }, { value: '1' }];
+            return [];
+        });
+
+        await window.saveAssessmentStudioDraft();
+
+        const saved = JSON.parse(localStorage.getItem('assessment_studio_data_local'));
+        const draft = saved.submissions.find(item => item.id === 'ast_clear_multi');
+        expect(draft.answers['0']).toEqual([]);
+    });
+
     test('recovers local submitted Studio submissions missing from the server document', async () => {
         const localSubmission = makeSubmission({
             id: 'ast_sydney',
@@ -290,9 +382,83 @@ describe('Assessment Studio trainee runtime', () => {
 
         const html = window.renderAssessmentStudioAssignmentsHtml();
 
-        expect(html).toContain('Upload Failed');
+        expect(html).toContain('Upload Needed');
         expect(html).toContain('retryAssessmentStudioSubmissionUpload');
-        expect(html).toContain('Re-upload');
+        expect(html).toContain('Upload Assessment');
+    });
+
+    test('does not flag submitted Studio assessment missing when row storage confirms it', async () => {
+        const localSubmission = makeSubmission({
+            id: 'ast_row_confirmed',
+            trainee: 'Alice',
+            status: 'pending_review',
+            answers: { 0: 0 },
+            submittedAt: '2026-06-12T12:00:00.000Z',
+            updatedAt: '2026-06-12T12:00:00.000Z'
+        });
+        const localStore = makeStore(localSubmission);
+        const remoteStore = makeStore(null);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(remoteStore));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(localStore));
+        localStorage.setItem('assessment_studio_upload_status', JSON.stringify({
+            ast_row_confirmed: { state: 'missing', message: 'Submitted locally but not found on Supabase.' }
+        }));
+
+        window.supabaseClient = {
+            from: jest.fn(table => {
+                if (table === 'app_documents') {
+                    return {
+                        select: jest.fn(() => ({
+                            eq: jest.fn(() => ({
+                                maybeSingle: jest.fn().mockResolvedValue({
+                                    data: { content: remoteStore, updated_at: '2026-06-12T11:00:00.000Z' },
+                                    error: null
+                                })
+                            }))
+                        }))
+                    };
+                }
+                if (table === 'assessment_studio_submissions') {
+                    return {
+                        select: jest.fn(() => ({
+                            eq: jest.fn(() => ({
+                                limit: jest.fn().mockResolvedValue({
+                                    data: [{ data: localSubmission, updated_at: '2026-06-12T12:01:00.000Z' }],
+                                    error: null
+                                })
+                            }))
+                        }))
+                    };
+                }
+                throw new Error(`Unexpected table ${table}`);
+            })
+        };
+
+        const changed = await window.verifyLocalAssessmentStudioSubmittedUploads({ silent: true });
+
+        expect(changed).toBe(false);
+        expect(JSON.parse(localStorage.getItem('assessment_studio_upload_status') || '{}').ast_row_confirmed).toBeUndefined();
+    });
+
+    test('shows queued upload retry without another active re-upload button', () => {
+        const localSubmission = makeSubmission({
+            id: 'ast_upload_queued',
+            status: 'pending_review',
+            submittedAt: '2026-06-12T12:00:00.000Z',
+            updatedAt: '2026-06-12T12:00:00.000Z'
+        });
+        const localStore = makeStore(localSubmission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(localStore));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(localStore));
+        localStorage.setItem('assessment_studio_upload_status', JSON.stringify({
+            ast_upload_queued: { state: 'queued', nextRetryAt: Date.now() + 30000, message: 'Upload queued.' }
+        }));
+
+        const html = window.renderAssessmentStudioAssignmentsHtml();
+
+        expect(html).toContain('Upload Queued');
+        expect(html).toContain('Retry Scheduled');
+        expect(html).not.toContain('retryAssessmentStudioSubmissionUpload');
     });
 
     test('shows scheduled Assessment Studio generator in My Assessments before local submission exists', () => {
@@ -610,7 +776,7 @@ describe('Assessment Studio trainee runtime', () => {
         expect(showToast).toHaveBeenCalledWith('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
     });
 
-    test('failed submit leaves submitted local snapshot with upload retry instead of reopening questions', async () => {
+    test('submit seals local snapshot and waits for explicit upload from My Assessments', async () => {
         const submission = makeSubmission({
             id: 'ast_submit_fails',
             status: 'in_progress',
@@ -630,9 +796,34 @@ describe('Assessment Studio trainee runtime', () => {
         expect(submitted.status).toBe('pending_review');
         expect(submitted.answers['0']).toBe(0);
         expect(submitted.testSnapshot.questions[0].text).toBe('Choose the correct Q Contact action.');
-        expect(JSON.parse(localStorage.getItem('assessment_studio_upload_status')).ast_submit_fails.state).toBe('failed');
+        expect(JSON.parse(localStorage.getItem('assessment_studio_upload_status')).ast_submit_fails.state).toBe('missing');
+        expect(saveToServer).not.toHaveBeenCalled();
         expect(showTab).toHaveBeenCalledWith('my-tests');
         expect(loadTraineeTests).toHaveBeenCalled();
+    });
+
+    test('manual re-upload queues a background retry instead of calling Supabase immediately', async () => {
+        jest.useFakeTimers();
+        const submission = makeSubmission({
+            id: 'ast_manual_queue',
+            status: 'pending_review'
+        });
+        const store = makeStore(submission);
+        localStorage.setItem('assessment_studio_data', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_data_local', JSON.stringify(store));
+        localStorage.setItem('assessment_studio_upload_status', JSON.stringify({
+            ast_manual_queue: { state: 'failed', message: 'Previous upload failed.' }
+        }));
+        const from = jest.fn();
+        window.supabaseClient = { from };
+
+        await window.retryAssessmentStudioSubmissionUpload('ast_manual_queue');
+
+        const status = JSON.parse(localStorage.getItem('assessment_studio_upload_status')).ast_manual_queue;
+        expect(status.state).toBe('queued');
+        expect(status.nextRetryAt).toBeTruthy();
+        expect(from).not.toHaveBeenCalled();
+        jest.useRealTimers();
     });
 
     test('submit stores partial auto scores for multiple answer and ranking questions', async () => {
@@ -679,6 +870,7 @@ describe('Assessment Studio trainee runtime', () => {
         expect(submitted.questionScores['0']).toBe(4);
         expect(submitted.questionScores['1']).toBe(3);
         expect(submitted.earnedPoints).toBe(7);
+        expect(JSON.parse(localStorage.getItem('assessment_studio_upload_status')).ast_partial_scores.state).toBe('missing');
     });
 
     test('submit blocks invalid complete-looking ranking answers before grading', async () => {

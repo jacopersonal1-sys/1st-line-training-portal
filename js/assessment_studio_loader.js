@@ -5,16 +5,24 @@ const AssessmentStudioLoader = {
     _windowMessageBound: false,
     _saveTimer: null,
 
+    hasAuthoring: function(studio) {
+        const source = studio && typeof studio === 'object' ? studio : {};
+        return ['questionBucket', 'generators', 'groupings', 'tags']
+            .some(field => Array.isArray(source[field]) && source[field].length > 0);
+    },
+
     handleStudioSave: function(payload) {
         const data = payload && typeof payload === 'object' ? payload : {};
         const content = data.content && typeof data.content === 'object'
             ? data.content
             : null;
         if (!content) return false;
+        const cloudConfirmedAt = String(data.cloudConfirmedAt || '').trim();
 
         try {
             localStorage.setItem('assessment_studio_data', JSON.stringify(content));
             localStorage.setItem('assessment_studio_data_local', JSON.stringify(content));
+            if (cloudConfirmedAt) localStorage.setItem('sync_ts_assessment_studio_data', cloudConfirmedAt);
             window.dispatchEvent(new CustomEvent('buildzone:data-changed', {
                 detail: { key: 'assessment_studio_data', source: 'assessment_studio_webview' }
             }));
@@ -23,6 +31,8 @@ const AssessmentStudioLoader = {
             if (typeof showToast === 'function') showToast('Assessment Studio could not update host cache.', 'error');
             return false;
         }
+
+        if (cloudConfirmedAt) return true;
 
         const runCloudSave = () => {
             if (typeof saveToServer !== 'function') return false;
@@ -44,11 +54,21 @@ const AssessmentStudioLoader = {
             this._saveTimer = null;
             runCloudSave();
         } else if (window.supabaseClient && typeof window.supabaseClient.from === 'function') {
-            window.supabaseClient.from('app_documents').upsert({
-                key: 'assessment_studio_data',
-                content,
-                updated_at: new Date().toISOString()
-            }).select().then(({ data: savedData, error }) => {
+            window.supabaseClient.from('app_documents')
+                .select('content')
+                .eq('key', 'assessment_studio_data')
+                .maybeSingle()
+                .then(({ data: remoteRow, error: loadError }) => {
+                    if (loadError) throw loadError;
+                    if (this.hasAuthoring(remoteRow && remoteRow.content) && !this.hasAuthoring(content)) {
+                        throw new Error('Refusing direct Assessment Studio cloud save because local authoring data is empty while server authoring exists.');
+                    }
+                    return window.supabaseClient.from('app_documents').upsert({
+                        key: 'assessment_studio_data',
+                        content,
+                        updated_at: new Date().toISOString()
+                    }).select();
+                }).then(({ data: savedData, error }) => {
                 if (error) throw error;
                 if (savedData && savedData[0] && savedData[0].updated_at) {
                     localStorage.setItem('sync_ts_assessment_studio_data', savedData[0].updated_at);
@@ -65,13 +85,43 @@ const AssessmentStudioLoader = {
         const data = payload && typeof payload === 'object' ? payload : {};
         const submissionId = String(data.submissionId || '').trim();
         if (!submissionId) return false;
+        const feedbackStatus = (() => {
+            const status = String(data.feedbackStatus || '').trim().toLowerCase();
+            if (status === 'requested') return 'requested';
+            if (status === 'received' || status === 'recieved' || status === 'given') return 'received';
+            return 'none';
+        })();
         try {
+            const updateStudioCache = (key) => {
+                const raw = localStorage.getItem(key);
+                const studio = raw ? JSON.parse(raw) : null;
+                if (!studio || typeof studio !== 'object' || !Array.isArray(studio.submissions)) return false;
+                const idx = studio.submissions.findIndex(item => item && String(item.id || '') === submissionId);
+                if (idx < 0) return false;
+                studio.submissions[idx] = {
+                    ...studio.submissions[idx],
+                    feedbackStatus,
+                    updatedAt: new Date().toISOString()
+                };
+                studio.updatedAt = new Date().toISOString();
+                studio.updatedBy = (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.user) ? CURRENT_USER.user : (studio.updatedBy || 'Admin');
+                localStorage.setItem(key, JSON.stringify(studio));
+                return true;
+            };
+            const changedCanonical = updateStudioCache('assessment_studio_data');
+            const changedLocal = updateStudioCache('assessment_studio_data_local');
+            if (changedCanonical || changedLocal) {
+                window.dispatchEvent(new CustomEvent('buildzone:data-changed', {
+                    detail: { key: 'assessment_studio_data', source: 'assessment_studio_feedback_status' }
+                }));
+            }
+
             const notifications = JSON.parse(localStorage.getItem('admin_notifications') || '[]');
             const list = Array.isArray(notifications) ? notifications : [];
             const id = `assessment_studio_feedback_${submissionId}`;
             const idx = list.findIndex(item => item && String(item.id || '') === id);
             if (idx >= 0) {
-                list[idx].status = data.feedbackStatus === 'requested' ? 'open' : 'closed';
+                list[idx].status = feedbackStatus === 'requested' ? 'open' : 'closed';
                 list[idx].updatedAt = new Date().toISOString();
                 localStorage.setItem('admin_notifications', JSON.stringify(list));
                 if (typeof saveToServer === 'function') saveToServer(['admin_notifications'], false, true).catch(() => {});
@@ -102,7 +152,7 @@ const AssessmentStudioLoader = {
             const canonical = JSON.parse(localStorage.getItem('assessment_studio_data') || 'null');
             const local = JSON.parse(localStorage.getItem('assessment_studio_data_local') || 'null');
             const itemTime = (item) => Date.parse(item && (item.updatedAt || item.gradedAt || item.submittedAt || item.createdAt) || 0) || 0;
-            const mergeById = (leftItems, rightItems, leftDocTime = 0, rightDocTime = 0) => {
+            const mergeById = (leftItems, rightItems, leftDocTime = 0, rightDocTime = 0, options = {}) => {
                 const map = new Map();
                 const leftMap = new Map();
                 const rightMap = new Map();
@@ -115,6 +165,8 @@ const AssessmentStudioLoader = {
                 });
                 indexItems(leftItems, leftMap);
                 indexItems(rightItems, rightMap);
+                if (options.preserveRightWhenLeftEmpty && leftMap.size === 0 && rightMap.size > 0) return Array.from(rightMap.values());
+                if (rightMap.size === 0 && leftMap.size > 0) return Array.from(leftMap.values());
                 new Set([...leftMap.keys(), ...rightMap.keys()]).forEach(id => {
                     const left = leftMap.get(id);
                     const right = rightMap.get(id);
@@ -131,14 +183,16 @@ const AssessmentStudioLoader = {
             if (canonical && local && typeof canonical === 'object' && typeof local === 'object') {
                 const canonicalTime = itemTime(canonical);
                 const localTime = itemTime(local);
+                const canonicalAuthoringEmpty = ['questionBucket', 'generators', 'groupings', 'tags']
+                    .every(field => !Array.isArray(canonical[field]) || canonical[field].length === 0);
                 content = {
                     ...(canonicalTime >= localTime ? local : canonical),
                     ...(canonicalTime >= localTime ? canonical : local),
-                    questionBucket: mergeById(canonical.questionBucket, local.questionBucket, canonicalTime, localTime),
-                    generators: mergeById(canonical.generators, local.generators, canonicalTime, localTime),
+                    questionBucket: mergeById(canonical.questionBucket, local.questionBucket, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty }),
+                    generators: mergeById(canonical.generators, local.generators, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty }),
                     submissions: mergeById(canonical.submissions, local.submissions, canonicalTime, localTime),
-                    groupings: mergeById(canonical.groupings, local.groupings, canonicalTime, localTime),
-                    tags: mergeById(canonical.tags, local.tags, canonicalTime, localTime)
+                    groupings: mergeById(canonical.groupings, local.groupings, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty }),
+                    tags: mergeById(canonical.tags, local.tags, canonicalTime, localTime, { preserveRightWhenLeftEmpty: canonicalAuthoringEmpty })
                 };
             } else {
                 content = canonical || local;

@@ -56,6 +56,37 @@ describe('Data Sync Module', () => {
         expect(merged.tags.map(item => item.id)).toEqual(['tag1']);
     });
 
+    test('performSmartMerge preserves local Assessment Studio authoring data when newer server document only has submissions', () => {
+        const server = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-22T10:00:00.000Z',
+                questionBucket: [],
+                generators: [],
+                submissions: [{ id: 's1', trainee: 'Alice', assessment: 'Course 1', status: 'completed', updatedAt: '2026-06-22T10:00:00.000Z' }],
+                groupings: [],
+                tags: []
+            }
+        };
+        const local = {
+            assessment_studio_data: {
+                updatedAt: '2026-06-21T10:00:00.000Z',
+                questionBucket: [{ id: 'q1', assessment: 'Course 1', text: 'Saved bucket question', updatedAt: '2026-06-20T10:00:00.000Z' }],
+                generators: [{ id: 'g1', assessment: 'Course 1', updatedAt: '2026-06-20T10:00:00.000Z' }],
+                submissions: [],
+                groupings: [{ id: 'grp1', name: 'Networking', updatedAt: '2026-06-20T10:00:00.000Z' }],
+                tags: [{ id: 'tag1', name: 'Router', updatedAt: '2026-06-20T10:00:00.000Z' }]
+            }
+        };
+
+        const merged = DataModule.performSmartMerge(server, local, 'server_wins').assessment_studio_data;
+
+        expect(merged.questionBucket.map(item => item.id)).toEqual(['q1']);
+        expect(merged.generators.map(item => item.id)).toEqual(['g1']);
+        expect(merged.groupings.map(item => item.id)).toEqual(['grp1']);
+        expect(merged.tags.map(item => item.id)).toEqual(['tag1']);
+        expect(merged.submissions.map(item => item.id)).toEqual(['s1']);
+    });
+
     test('performSmartMerge keeps Assessment Studio server deletes during pull', () => {
         const server = {
             assessment_studio_data: {
@@ -430,6 +461,103 @@ describe('Data Sync Module', () => {
         })).toBe(true);
     });
 
+    test('realtime subscriptions keep operational tables and skip heavy diagnostics', () => {
+        const tables = DataModule.getRealtimeTableList();
+
+        expect(tables).toEqual(expect.arrayContaining([
+            'app_documents',
+            'monitor_state',
+            'sessions',
+            'records',
+            'submissions',
+            'live_sessions',
+            'vetting_sessions'
+        ]));
+        expect(tables).not.toEqual(expect.arrayContaining([
+            'audit_logs',
+            'access_logs',
+            'error_reports',
+            'monitor_history',
+            'network_diagnostics',
+            'saved_reports',
+            'insight_reviews',
+            'archived_users',
+            'tl_task_submissions',
+            'nps_responses'
+        ]));
+    });
+
+    test('realtime fallback poll stops early during server outage errors', async () => {
+        global.navigator = { onLine: true };
+        window.REALTIME_FALLBACK_POLL_IN_FLIGHT = false;
+        window.REALTIME_MAX_RETRY_DELAY = 5000;
+        window.REALTIME_FAILURE_RATE = 5000;
+        window.CURRENT_FALLBACK_RATE = 5000;
+        const queriedTables = [];
+        const outageError = { status: 503, message: 'Service Unavailable' };
+
+        global.window.supabaseClient.from = jest.fn((table) => {
+            queriedTables.push(table);
+            return {
+                select: jest.fn(() => ({
+                    limit: jest.fn().mockResolvedValue({ data: null, error: outageError })
+                }))
+            };
+        });
+
+        await DataModule.runRealtimeFallbackPoll();
+
+        expect(queriedTables).toEqual(['sessions', 'live_sessions']);
+        expect(queriedTables).not.toContain('vetting_sessions');
+        expect(window.REALTIME_FALLBACK_POLL_IN_FLIGHT).toBe(false);
+    });
+
+    test('loadFromServer skips heavy diagnostic row tables in the general pull', async () => {
+        const queriedTables = [];
+        const buildRowQuery = () => {
+            const chain = {
+                gt: jest.fn(() => chain),
+                order: jest.fn(() => chain),
+                eq: jest.fn(() => chain),
+                ilike: jest.fn(() => chain),
+                limit: jest.fn().mockResolvedValue({ data: [], error: null })
+            };
+            return chain;
+        };
+
+        global.window.supabaseClient.from = jest.fn((table) => {
+            queriedTables.push(table);
+            if (table === 'app_documents') {
+                return {
+                    select: jest.fn(() => ({
+                        not: jest.fn().mockResolvedValue({ data: [], error: null }),
+                        like: jest.fn().mockResolvedValue({ data: [], error: null })
+                    }))
+                };
+            }
+
+            return {
+                select: jest.fn(() => buildRowQuery())
+            };
+        });
+
+        await DataModule.loadFromServer(true);
+
+        expect(queriedTables).toEqual(expect.arrayContaining([
+            'app_documents',
+            'records',
+            'submissions',
+            'live_bookings'
+        ]));
+        expect(queriedTables).not.toEqual(expect.arrayContaining([
+            'error_reports',
+            'access_logs',
+            'audit_logs',
+            'monitor_history',
+            'network_diagnostics'
+        ]));
+    });
+
     test('performSmartMerge respects revokedUsers blacklist', () => {
         const server = { 
             users: [{ user: 'DeletedUser', role: 'trainee' }, { user: 'ActiveUser', role: 'trainee' }] 
@@ -542,6 +670,47 @@ describe('Data Sync Module', () => {
         expect(localStorage.getItem('hash_map_records')).toBeNull();
     });
 
+    test('forced row saves upload only changed submissions after a hash baseline', async () => {
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        localStorage.setItem('submissions', JSON.stringify([
+            { id: 'sub_1', trainee: 'Alice', status: 'pending', createdAt: '2026-06-19T08:00:00.000Z', lastModified: '2026-06-19T08:00:00.000Z', modifiedBy: 'admin' },
+            { id: 'sub_2', trainee: 'Bob', status: 'pending', createdAt: '2026-06-19T08:00:00.000Z', lastModified: '2026-06-19T08:00:00.000Z', modifiedBy: 'admin' },
+            { id: 'sub_3', trainee: 'Cara', status: 'pending', createdAt: '2026-06-19T08:00:00.000Z', lastModified: '2026-06-19T08:00:00.000Z', modifiedBy: 'admin' }
+        ]));
+
+        const upsertMock = jest.fn().mockResolvedValue({ error: null });
+        global.window.supabaseClient.from = jest.fn((table) => {
+            if (table === 'submissions') {
+                return { upsert: upsertMock };
+            }
+            return {
+                select: jest.fn(() => ({
+                    eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }) })),
+                    not: jest.fn().mockResolvedValue({ data: [], error: null }),
+                    in: jest.fn().mockResolvedValue({ data: [], error: null })
+                })),
+                upsert: jest.fn().mockResolvedValue({ error: null }),
+                delete: jest.fn(() => ({ neq: jest.fn().mockResolvedValue({ error: null }) }))
+            };
+        });
+
+        await DataModule.saveToServer(['submissions'], true, true);
+        expect(upsertMock).toHaveBeenCalledTimes(1);
+        expect(upsertMock.mock.calls[0][0]).toHaveLength(3);
+
+        const submissions = JSON.parse(localStorage.getItem('submissions'));
+        submissions[1].status = 'completed';
+        submissions[1].score = 88;
+        localStorage.setItem('submissions', JSON.stringify(submissions));
+
+        await DataModule.saveToServer(['submissions'], true, true);
+
+        expect(upsertMock).toHaveBeenCalledTimes(2);
+        expect(upsertMock.mock.calls[1][0]).toHaveLength(1);
+        expect(upsertMock.mock.calls[1][0][0].id).toBe('sub_2');
+    });
+
     test('saveToServer does not mark row hashes synced when a row table upload is not confirmed', async () => {
         jest.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -605,6 +774,35 @@ describe('Data Sync Module', () => {
 
         expect(result).toBe(false);
         expect(blobUpsertMock).toHaveBeenCalled();
+    });
+
+    test('saveToServer defers non-forced error report uploads so diagnostics do not block sync', async () => {
+        localStorage.setItem('error_reports', JSON.stringify([
+            { id: 'err_1', error: 'timeout', timestamp: '2026-06-18T20:00:00.000Z' }
+        ]));
+
+        const upsertMock = jest.fn().mockResolvedValue({ error: null });
+        global.window.supabaseClient.from = jest.fn(() => ({
+            upsert: upsertMock,
+            delete: jest.fn(() => ({ neq: jest.fn().mockResolvedValue({ error: null }) }))
+        }));
+
+        await DataModule.saveToServer(['error_reports'], false, true);
+        const result = await DataModule.saveToServer('FLUSH', false, true);
+
+        expect(typeof result).toBe('boolean');
+        expect(global.window.supabaseClient.from).not.toHaveBeenCalledWith('error_reports');
+    });
+
+    test('reportSystemError is disabled so runtime errors do not create sync load', async () => {
+        const result = await DataModule.reportSystemError('timeout', 'error');
+
+        expect(result).toEqual(expect.objectContaining({
+            saved: false,
+            synced: false,
+            disabled: true
+        }));
+        expect(localStorage.getItem('error_reports')).toBeNull();
     });
 
     test('saveToServer refuses invalid server-authority blob payloads before upload', async () => {
@@ -732,7 +930,7 @@ describe('Data Sync Module', () => {
         expect(JSON.parse(localStorage.getItem('system_tombstones') || '[]')).toEqual(['violation_report:vio_deleted']);
     });
 
-    test('loadFromServer batches stale app document fetches for smoother startup', async () => {
+    test('loadFromServer fetches stale app document keys individually for smoother startup', async () => {
         const mockContent = [
             { key: 'system_config', updated_at: '2026-06-15T08:00:00.000Z', content: { security: {} } },
             { key: 'revokedUsers', updated_at: '2026-06-15T08:00:00.000Z', content: [] },
@@ -798,9 +996,73 @@ describe('Data Sync Module', () => {
         await DataModule.loadFromServer(true);
 
         expect(batchRequests.length).toBeGreaterThan(1);
-        expect(batchRequests.every(keys => keys.length <= 4)).toBe(true);
-        expect(batchRequests[0]).toEqual(['system_config', 'revokedUsers', 'accessControl', 'sso_login_config']);
+        expect(batchRequests.every(keys => keys.length <= 1)).toBe(true);
+        expect(batchRequests.slice(0, 4).map(keys => keys[0])).toEqual(['system_config', 'revokedUsers', 'accessControl', 'sso_login_config']);
         expect(JSON.parse(localStorage.getItem('qa_data') || '{}')).toEqual({ questions: [], submissions: [] });
+    });
+
+    test('loadFromServer continues when one app document key times out', async () => {
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const mockMeta = [
+            { key: 'rosters', updated_at: '2026-06-15T08:00:00.000Z' },
+            { key: 'schedules', updated_at: '2026-06-15T08:00:00.000Z' },
+            { key: 'qa_data', updated_at: '2026-06-15T08:00:00.000Z' }
+        ];
+        const mockContent = [
+            { key: 'rosters', updated_at: '2026-06-15T08:00:00.000Z', content: { G1: ['Alice'] } },
+            { key: 'qa_data', updated_at: '2026-06-15T08:00:00.000Z', content: { questions: [], submissions: [] } }
+        ];
+
+        const buildRowQuery = () => {
+            const chain = {
+                gt: jest.fn(() => chain),
+                order: jest.fn(() => chain),
+                eq: jest.fn(() => chain),
+                ilike: jest.fn(() => chain),
+                limit: jest.fn().mockResolvedValue({ data: [], error: null })
+            };
+            return chain;
+        };
+
+        const appDocumentsSelect = jest.fn((columns) => {
+            if (columns === 'key, updated_at') {
+                return {
+                    not: jest.fn().mockResolvedValue({ data: mockMeta, error: null }),
+                    like: jest.fn().mockResolvedValue({ data: mockMeta, error: null })
+                };
+            }
+
+            if (columns === 'key, content, updated_at') {
+                return {
+                    in: jest.fn((column, keys) => {
+                        if (keys.includes('schedules')) {
+                            return Promise.resolve({
+                                data: null,
+                                error: { code: '57014', message: 'canceling statement due to statement timeout' }
+                            });
+                        }
+                        return Promise.resolve({
+                            data: mockContent.filter(row => keys.includes(row.key)),
+                            error: null
+                        });
+                    })
+                };
+            }
+
+            throw new Error(`Unexpected app_documents select: ${columns}`);
+        });
+
+        global.window.supabaseClient.from = jest.fn((table) => {
+            if (table === 'app_documents') return { select: appDocumentsSelect };
+            return { select: jest.fn(() => buildRowQuery()) };
+        });
+
+        const result = await DataModule.loadFromServer(true);
+
+        expect(result).toBe(true);
+        expect(JSON.parse(localStorage.getItem('rosters') || '{}')).toEqual({ G1: ['Alice'] });
+        expect(JSON.parse(localStorage.getItem('qa_data') || '{}')).toEqual({ questions: [], submissions: [] });
+        expect(localStorage.getItem('schedules')).toBeNull();
     });
 
     test('trainee violation report cache hides evidence pointers', () => {

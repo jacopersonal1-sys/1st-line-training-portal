@@ -3,6 +3,10 @@
 // Global State
 window.LOGIN_MODE = window.LOGIN_MODE || 'admin';
 window.PERSISTENT_SESSION_KEY = window.PERSISTENT_SESSION_KEY || 'persistent_app_session';
+window.TRAINEE_DAY_END_LOGOUT_TIME = window.TRAINEE_DAY_END_LOGOUT_TIME || '17:30';
+window.TRAINEE_DAY_END_LOGOUT_KEY = window.TRAINEE_DAY_END_LOGOUT_KEY || 'trainee_day_end_logout_date';
+
+let TRAINEE_DAY_END_LOGOUT_TIMER = null;
 
 function authReadJson(key, fallback) {
     if (typeof safeLocalParse === 'function') return safeLocalParse(key, fallback);
@@ -40,6 +44,109 @@ function recordLogoutReason(reason = 'user', detail = null) {
     } catch (error) {
         console.warn('Could not record logout reason:', error);
     }
+}
+
+function traineeDayEndMinutes() {
+    const raw = String(window.TRAINEE_DAY_END_LOGOUT_TIME || '17:30').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return (17 * 60) + 30;
+    const hours = Math.min(Math.max(parseInt(match[1], 10) || 0, 0), 23);
+    const minutes = Math.min(Math.max(parseInt(match[2], 10) || 0, 0), 59);
+    return (hours * 60) + minutes;
+}
+
+function traineeDayEndDateKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function traineeDayEndCutoffFor(date = new Date()) {
+    const cutoff = new Date(date);
+    const cutoffMinutes = traineeDayEndMinutes();
+    cutoff.setHours(Math.floor(cutoffMinutes / 60), cutoffMinutes % 60, 0, 0);
+    return cutoff;
+}
+
+function hasTraineeDayEndLogoutRun(date = new Date()) {
+    try {
+        return localStorage.getItem(window.TRAINEE_DAY_END_LOGOUT_KEY) === traineeDayEndDateKey(date);
+    } catch (e) {
+        return false;
+    }
+}
+
+function markTraineeDayEndLogoutRun(date = new Date()) {
+    try {
+        localStorage.setItem(window.TRAINEE_DAY_END_LOGOUT_KEY, traineeDayEndDateKey(date));
+    } catch (e) {}
+}
+
+async function markCurrentSessionSignedOut(reason = 'logout') {
+    if (!window.supabaseClient || !CURRENT_USER || !CURRENT_USER.user) return false;
+    const signedOutAt = new Date();
+    const inactiveSeenAt = new Date(signedOutAt.getTime() - 10 * 60 * 1000).toISOString();
+    const base = {
+        username: CURRENT_USER.user,
+        role: CURRENT_USER.role || 'unknown',
+        lastSeen: inactiveSeenAt
+    };
+    try {
+        const result = await window.supabaseClient.from('sessions').upsert({
+            ...base,
+            idleTime: 10 * 60 * 1000,
+            isIdle: true,
+            version: window.APP_VERSION || 'Unknown',
+            clientId: localStorage.getItem('client_id') || 'unknown',
+            activity: `Signed out: ${String(reason || 'logout').slice(0, 80)}`
+        });
+        if (result && result.error) throw result.error;
+        return true;
+    } catch (error) {
+        try {
+            const fallback = await window.supabaseClient.from('sessions').upsert(base);
+            if (fallback && fallback.error) throw fallback.error;
+            return true;
+        } catch (fallbackError) {
+            console.warn('Could not mark session signed out:', fallbackError);
+            return false;
+        }
+    }
+}
+
+function stopTraineeDayEndLogoutGuard() {
+    if (TRAINEE_DAY_END_LOGOUT_TIMER) {
+        clearTimeout(TRAINEE_DAY_END_LOGOUT_TIMER);
+        TRAINEE_DAY_END_LOGOUT_TIMER = null;
+    }
+}
+
+function startTraineeDayEndLogoutGuard() {
+    stopTraineeDayEndLogoutGuard();
+    if (window.APP_PASSIVE_TAB_WINDOW) return false;
+    if (!CURRENT_USER || String(CURRENT_USER.role || '').toLowerCase() !== 'trainee') return false;
+
+    const now = new Date();
+    const cutoff = traineeDayEndCutoffFor(now);
+    const runLogout = () => {
+        if (!CURRENT_USER || String(CURRENT_USER.role || '').toLowerCase() !== 'trainee') return;
+        const runDate = new Date();
+        if (hasTraineeDayEndLogoutRun(runDate)) return;
+        markTraineeDayEndLogoutRun(runDate);
+        alert('Training day ended at 17:30. You have been signed out. You may sign back in if you still need the app.');
+        if (typeof logout === 'function') logout('trainee_day_end_1730', { source: 'trainee_day_end_logout' });
+    };
+
+    if (now >= cutoff) {
+        if (!hasTraineeDayEndLogoutRun(now)) {
+            TRAINEE_DAY_END_LOGOUT_TIMER = setTimeout(runLogout, 500);
+        }
+        return true;
+    }
+
+    TRAINEE_DAY_END_LOGOUT_TIMER = setTimeout(runLogout, Math.max(cutoff.getTime() - now.getTime(), 1000));
+    return true;
 }
 
 function persistAppSession(user) {
@@ -1209,6 +1316,7 @@ async function autoLogin() {
   else showTab('monthly'); // Team Leader
 
   if (!isPassiveTabWindow && CURRENT_USER.role === 'trainee') {
+      startTraineeDayEndLogoutGuard();
       runTraineePostLoginSync();
   }
 }
@@ -1516,6 +1624,7 @@ function applyRolePermissions() {
 
 async function logout(reason = 'user', detail = null) { 
   recordLogoutReason(reason, detail);
+  stopTraineeDayEndLogoutGuard();
   if (window.APP_CHILD_WINDOW_MODE && window.electronAPI?.windowControls?.close) {
       window.electronAPI.windowControls.close();
       return;
@@ -1549,6 +1658,9 @@ async function logout(reason = 'user', detail = null) {
 
   if (CURRENT_USER && typeof logAccessEvent === 'function') {
       await logAccessEvent(CURRENT_USER.user, 'Logout');
+  }
+  if (CURRENT_USER && !window.APP_PASSIVE_TAB_WINDOW) {
+      await markCurrentSessionSignedOut(reason);
   }
 
   CURRENT_USER = null;

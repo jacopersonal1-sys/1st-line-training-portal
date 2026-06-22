@@ -1096,6 +1096,7 @@
                 <div class="admin-settings-rail-title">Configuration</div>
                 <button class="sub-tab-btn active" id="btn-sub-users" onclick="showAdminSub('users', this)"><i class="fas fa-users-cog"></i><span>Manage Users</span></button>
                 <button class="sub-tab-btn" id="btn-sub-assessments" onclick="showAdminSub('assessments', this)"><i class="fas fa-layer-group"></i><span>Training Topics</span></button>
+                <button class="sub-tab-btn" id="btn-sub-device-sessions" onclick="showAdminSub('device-sessions', this)"><i class="fas fa-network-wired"></i><span>Device Sessions</span></button>
                 <button class="sub-tab-btn" id="btn-sub-insight-rules" onclick="showAdminSub('insight-rules', this)"><i class="fas fa-sliders-h"></i><span>System Config</span></button>
                 <button class="sub-tab-btn" id="btn-sub-data" onclick="showAdminSub('data', this)"><i class="fas fa-database"></i><span>Database</span></button>
                 <button class="sub-tab-btn" id="btn-sub-tool-hosting" onclick="showAdminSub('tool-hosting', this)"><i class="fas fa-file-code"></i><span>Tool Hosting</span></button>
@@ -1179,6 +1180,10 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <div id="admin-view-device-sessions" class="admin-view">
+            <div id="deviceSessionsAdminRoot"></div>
         </div>
 
         <div id="admin-view-insight-rules" class="admin-view">
@@ -1888,6 +1893,7 @@
 <script src="js/qa_hub.js"></script>
 <script src="js/admin_updates.js"></script>
 <script src="js/manual_assessment_assignments.js"></script>
+<script src="js/device_assessment_sessions.js"></script>
 
 <script src="js/admin_sys.js"></script>
 <script src="js/html_tool_hosting.js"></script>

@@ -41,6 +41,9 @@ describe('Live assessment record finalization', () => {
         window.saveToServer = saveStub;
         saveToServer = saveStub;
         closeLiveSessionAuthoritatively = jest.fn(async () => {});
+        const upsertMock = jest.fn(async () => ({ error: null }));
+        const fromMock = jest.fn(() => ({ upsert: upsertMock }));
+        window.supabaseClient = { from: fromMock };
 
         localStorage.setItem('tests', JSON.stringify([
             { id: 'live_test_1', title: 'Live Fibre Install', type: 'live', questions: [{ text: 'Practical', type: 'live_practical', points: 10 }] }
@@ -109,7 +112,12 @@ describe('Live assessment record finalization', () => {
 
         expect(bookings.find(b => b.id === 'booking_new').status).toBe('Completed');
         expect(bookings.find(b => b.id === 'booking_new').score).toBe(100);
-        expect(saveCalls.some(call => call.force === true && call.keys.includes('records') && call.keys.includes('submissions'))).toBe(true);
+        expect(fromMock).toHaveBeenCalledWith('submissions');
+        expect(fromMock).toHaveBeenCalledWith('records');
+        expect(fromMock).toHaveBeenCalledWith('live_bookings');
+        expect(upsertMock).toHaveBeenCalledTimes(3);
+        expect(saveCalls.some(call => call.force === true && call.keys.includes('records') && call.keys.includes('submissions'))).toBe(false);
+        expect(saveCalls.some(call => call.force === false && call.keys.includes('records') && call.keys.includes('submissions'))).toBe(true);
     });
 
     test('missing live test definition does not crash final save', async () => {

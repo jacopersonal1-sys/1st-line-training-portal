@@ -1489,17 +1489,17 @@ function openSuperAdminConfig() {
                             <div id="sa_storage_viz" style="margin-top:10px;"></div>
                         </div>
                         <div class="card" style="margin-top:15px; border-left: 4px solid #2ecc71;">
-                            <h4><i class="fas fa-database"></i> Row-Level Sync Status</h4>
-                            <div id="sa_migration_status" style="margin-top:10px; font-size:0.9rem; color:var(--text-muted);">Click check to compare Local vs Cloud Row Counts.</div>
+                            <h4><i class="fas fa-database"></i> Assessment & Violation Row Backfill</h4>
+                            <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:10px;">
+                                Copy-only backfill for the new exact row tables. This does not delete old document data and can be run more than once.
+                            </div>
+                            <div id="sa_backfill_status" style="margin-top:10px; font-size:0.9rem; color:var(--text-muted);">Click Check Status before running a backfill.</div>
                             <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-                                <button class="btn-secondary btn-sm" onclick="checkRowSyncStatus()"><i class="fas fa-sync"></i> Check Status</button>
-                                <button class="btn-warning btn-sm" onclick="performBlobToRowMigration()"><i class="fas fa-upload"></i> Migrate Blobs to Rows</button>
-                                <button class="btn-primary btn-sm" onclick="forceResyncRows()"><i class="fas fa-cloud-download-alt"></i> Force Pull Rows</button>
-                                <button class="btn-danger btn-sm" onclick="cleanupCloudDuplicates()"><i class="fas fa-broom"></i> Cleanup Cloud Duplicates</button>
-                                <button class="btn-danger btn-sm" onclick="cleanupLocalDuplicates()"><i class="fas fa-laptop-medical"></i> Cleanup Local Duplicates</button>
-                                <button class="btn-warning btn-sm" onclick="performOrphanCleanup()"><i class="fas fa-link"></i> Sync Check (Orphans)</button>
-                                <button class="btn-danger btn-sm" onclick="emergencyDataRepair()"><i class="fas fa-toolbox"></i> Emergency Repair</button>
-                                <button class="btn-secondary btn-sm" onclick="verifyServerSchema()"><i class="fas fa-stethoscope"></i> Verify Schema</button>
+                                <button class="btn-secondary btn-sm" onclick="checkAssessmentViolationBackfillStatus()"><i class="fas fa-list-check"></i> Check Status</button>
+                                <button class="btn-warning btn-sm" onclick="startAssessmentViolationBackfillWizard()"><i class="fas fa-cloud-arrow-up"></i> Start Guided Backfill</button>
+                            </div>
+                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">
+                                Recommended: run this after the app update is deployed, during a quieter period. New submissions already use the exact row path.
                             </div>
                         </div>
                     </div>
@@ -1618,6 +1618,351 @@ window.saveRawDataKey = async function() {
         alert("Data saved and synced.");
     } catch(e) {
         alert("Invalid JSON: " + e.message);
+    }
+};
+
+function saBackfillSetStatus(html) {
+    const container = document.getElementById('sa_backfill_status');
+    if (container) container.innerHTML = html;
+}
+
+function saBackfillEscape(value) {
+    return String(value === undefined || value === null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function saBackfillReadStatus() {
+    try {
+        return JSON.parse(localStorage.getItem('assessment_violation_row_backfill_status') || '{}') || {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function saBackfillWriteStatus(status) {
+    const next = {
+        ...saBackfillReadStatus(),
+        ...(status || {}),
+        updatedAt: new Date().toISOString()
+    };
+    localStorage.setItem('assessment_violation_row_backfill_status', JSON.stringify(next));
+    return next;
+}
+
+async function saFetchAppDocumentContent(key, fallback) {
+    if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') return fallback;
+    const { data, error } = await window.supabaseClient
+        .from('app_documents')
+        .select('content, updated_at')
+        .eq('key', key)
+        .maybeSingle();
+    if (error) throw error;
+    return data && data.content !== undefined ? data.content : fallback;
+}
+
+function saBackfillNormalizeAssessmentSubmission(item) {
+    if (!item || typeof item !== 'object' || !item.id) return null;
+    const normalized = { ...item };
+    if (!normalized.status && normalized.gradedAt) normalized.status = 'completed';
+    if (!normalized.updatedAt) normalized.updatedAt = normalized.gradedAt || normalized.submittedAt || normalized.generatedAt || new Date().toISOString();
+    return normalized;
+}
+
+function saBackfillNormalizeViolationReport(item) {
+    if (!item || typeof item !== 'object' || !item.id || !item.user) return null;
+    const report = (typeof sanitizeViolationReportEvidence === 'function')
+        ? sanitizeViolationReportEvidence(item, { hideEvidencePointers: false })
+        : { ...item };
+    if (!report.status) report.status = report.reviewed ? 'reviewed' : 'pending_review';
+    if (!report.updatedAt) report.updatedAt = report.reviewedAt || report.reportedAt || report.detectedAt || new Date().toISOString();
+    return report;
+}
+
+async function saBackfillGetPayload() {
+    const studioDoc = await saFetchAppDocumentContent('assessment_studio_data', adminSysReadObject('assessment_studio_data', {}));
+    const violationDoc = await saFetchAppDocumentContent('violation_reports', adminSysReadArray('violation_reports'));
+    const studioSubmissions = Array.isArray(studioDoc && studioDoc.submissions) ? studioDoc.submissions : [];
+    const violationReports = Array.isArray(violationDoc) ? violationDoc : [];
+    const now = new Date().toISOString();
+    const assessmentRows = studioSubmissions
+        .map(saBackfillNormalizeAssessmentSubmission)
+        .filter(Boolean)
+        .map(sub => ({
+            id: sub.id,
+            trainee: sub.trainee || null,
+            assessment: sub.assessment || null,
+            status: sub.status || null,
+            data: sub,
+            updated_at: now
+        }));
+    const violationRows = violationReports
+        .map(saBackfillNormalizeViolationReport)
+        .filter(Boolean)
+        .map(report => ({
+            id: report.id,
+            trainee: report.user || null,
+            status: report.status || null,
+            data: report,
+            updated_at: now
+        }));
+    return { assessmentRows, violationRows };
+}
+
+function saBackfillParseTime(value) {
+    const parsed = Date.parse(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function saBackfillRowDataTime(table, data, fallbackUpdatedAt) {
+    const item = data && typeof data === 'object' ? data : {};
+    if (table === 'assessment_studio_submissions') {
+        return saBackfillParseTime(item.updatedAt || item.gradedAt || item.submittedAt || item.generatedAt || fallbackUpdatedAt);
+    }
+    if (table === 'violation_reports') {
+        return saBackfillParseTime(item.updatedAt || item.reviewedAt || item.reportedAt || item.detectedAt || item.date || fallbackUpdatedAt);
+    }
+    return saBackfillParseTime(item.updatedAt || fallbackUpdatedAt);
+}
+
+function saBackfillStatusRank(table, data) {
+    const item = data && typeof data === 'object' ? data : {};
+    const status = String(item.status || '').toLowerCase();
+    if (table === 'assessment_studio_submissions') {
+        if (status === 'completed' || status === 'graded' || item.gradedAt) return 4;
+        if (status === 'pending_review' || status === 'submitted' || item.submittedAt) return 3;
+        if (status === 'in_progress') return 2;
+        return status ? 1 : 0;
+    }
+    if (table === 'violation_reports') {
+        if (status === 'reviewed' || status === 'approved' || status === 'not_approved' || item.reviewedAt) return 4;
+        if (status === 'pending_review') return 3;
+        return status ? 1 : 0;
+    }
+    return status ? 1 : 0;
+}
+
+async function saBackfillFetchExistingRows(table) {
+    const { data, error } = await window.supabaseClient
+        .from(table)
+        .select('id,data,updated_at')
+        .limit(10000);
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+}
+
+async function saBackfillPlanTable(table, incomingRows) {
+    const existingRows = await saBackfillFetchExistingRows(table);
+    const existingById = new Map(existingRows.map(row => [String(row && row.id || ''), row]));
+    const rows = [];
+    const skippedExistingNewer = [];
+    const skippedExistingStronger = [];
+    (Array.isArray(incomingRows) ? incomingRows : []).forEach(row => {
+        const id = String(row && row.id || '');
+        if (!id) return;
+        const existing = existingById.get(id);
+        if (!existing) {
+            rows.push(row);
+            return;
+        }
+        const incomingRank = saBackfillStatusRank(table, row.data);
+        const existingRank = saBackfillStatusRank(table, existing.data);
+        if (existingRank > incomingRank) {
+            skippedExistingStronger.push(id);
+            return;
+        }
+        if (incomingRank === existingRank) {
+            const incomingTime = saBackfillRowDataTime(table, row.data, row.updated_at);
+            const existingTime = saBackfillRowDataTime(table, existing.data, existing.updated_at);
+            if (existingTime > incomingTime) {
+                skippedExistingNewer.push(id);
+                return;
+            }
+        }
+        rows.push(row);
+    });
+    return {
+        rows,
+        existingCount: existingRows.length,
+        skippedExistingNewer,
+        skippedExistingStronger
+    };
+}
+
+async function saBackfillBuildPlan(payload) {
+    const [assessmentPlan, violationPlan] = await Promise.all([
+        saBackfillPlanTable('assessment_studio_submissions', payload.assessmentRows),
+        saBackfillPlanTable('violation_reports', payload.violationRows)
+    ]);
+    return {
+        assessmentRows: assessmentPlan.rows,
+        violationRows: violationPlan.rows,
+        assessmentExistingCount: assessmentPlan.existingCount,
+        violationExistingCount: violationPlan.existingCount,
+        assessmentSkippedNewer: assessmentPlan.skippedExistingNewer.length,
+        assessmentSkippedStronger: assessmentPlan.skippedExistingStronger.length,
+        violationSkippedNewer: violationPlan.skippedExistingNewer.length,
+        violationSkippedStronger: violationPlan.skippedExistingStronger.length
+    };
+}
+
+async function saBackfillCountRows(table) {
+    const { count, error } = await window.supabaseClient
+        .from(table)
+        .select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    return Number(count || 0);
+}
+
+async function saBackfillUpsertRows(table, rows, batchSize = 50) {
+    let written = 0;
+    for (let i = 0; i < rows.length; i += batchSize) {
+        const chunk = rows.slice(i, i + batchSize);
+        const { error } = await window.supabaseClient.from(table).upsert(chunk);
+        if (error) throw error;
+        written += chunk.length;
+        saBackfillSetStatus(`<i class="fas fa-circle-notch fa-spin"></i> Backfilling ${saBackfillEscape(table)}... ${written}/${rows.length}`);
+        await new Promise(resolve => setTimeout(resolve, 80));
+    }
+    return written;
+}
+
+function saBackfillRenderSummary(payload) {
+    const status = saBackfillReadStatus();
+    const lastRun = status.updatedAt ? new Date(status.updatedAt).toLocaleString() : 'Never';
+    const mode = status.mode ? saBackfillEscape(status.mode) : 'none';
+    const result = status.result ? saBackfillEscape(status.result) : 'No run yet';
+    return `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px; margin-top:8px;">
+            <div><strong>Document submissions:</strong> ${payload.assessmentDocumentCount}</div>
+            <div><strong>Submission rows:</strong> ${payload.assessmentRowCount}</div>
+            <div><strong>Document violations:</strong> ${payload.violationDocumentCount}</div>
+            <div><strong>Violation rows:</strong> ${payload.violationRowCount}</div>
+        </div>
+        ${payload.plan ? `
+            <div style="margin-top:8px;">
+                <strong>Write plan:</strong>
+                ${payload.plan.assessmentRows.length} submissions and ${payload.plan.violationRows.length} violations will be copied.
+                ${payload.plan.assessmentSkippedNewer + payload.plan.assessmentSkippedStronger + payload.plan.violationSkippedNewer + payload.plan.violationSkippedStronger} existing newer/completed rows will be skipped.
+            </div>
+        ` : ''}
+        <div style="margin-top:8px; color:var(--text-muted);">Last action: ${mode} - ${result} (${saBackfillEscape(lastRun)})</div>
+    `;
+}
+
+window.checkAssessmentViolationBackfillStatus = async function() {
+    saBackfillSetStatus('<i class="fas fa-circle-notch fa-spin"></i> Checking row backfill status...');
+    try {
+        if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') throw new Error('Not connected to Supabase.');
+        const payload = await saBackfillGetPayload();
+        const summary = {
+            assessmentDocumentCount: payload.assessmentRows.length,
+            violationDocumentCount: payload.violationRows.length,
+            assessmentRowCount: await saBackfillCountRows('assessment_studio_submissions'),
+            violationRowCount: await saBackfillCountRows('violation_reports'),
+            plan: await saBackfillBuildPlan(payload)
+        };
+        saBackfillSetStatus(saBackfillRenderSummary(summary));
+        return summary;
+    } catch (error) {
+        saBackfillSetStatus(`<div style="color:#ff5252;">Status check failed: ${saBackfillEscape(error.message || error)}</div>`);
+        return null;
+    }
+};
+
+window.runAssessmentViolationBackfill = async function({ dryRun = true, skipConfirm = false } = {}) {
+    const mode = dryRun ? 'dry-run' : 'copy-only backfill';
+    if (!dryRun && !skipConfirm && !confirm('Run copy-only backfill now?\n\nThis upserts Assessment Studio submissions and active violation reports into the new row tables. It does not delete old document data.')) return false;
+    saBackfillSetStatus(`<i class="fas fa-circle-notch fa-spin"></i> Preparing ${mode}...`);
+    try {
+        if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') throw new Error('Not connected to Supabase.');
+        const payload = await saBackfillGetPayload();
+        const plan = await saBackfillBuildPlan(payload);
+        const started = new Date().toISOString();
+        if (dryRun) {
+            saBackfillWriteStatus({
+                mode,
+                result: `Would copy ${plan.assessmentRows.length} submissions and ${plan.violationRows.length} violations; skip ${plan.assessmentSkippedNewer + plan.assessmentSkippedStronger + plan.violationSkippedNewer + plan.violationSkippedStronger} existing newer/completed rows.`,
+                startedAt: started
+            });
+            await window.checkAssessmentViolationBackfillStatus();
+            return true;
+        }
+        const assessmentWritten = await saBackfillUpsertRows('assessment_studio_submissions', plan.assessmentRows);
+        const violationWritten = await saBackfillUpsertRows('violation_reports', plan.violationRows);
+        const skippedRows = plan.assessmentSkippedNewer + plan.assessmentSkippedStronger + plan.violationSkippedNewer + plan.violationSkippedStronger;
+        saBackfillWriteStatus({
+            mode,
+            result: `Copied ${assessmentWritten} submissions and ${violationWritten} violations. Skipped ${skippedRows} existing newer/completed rows.`,
+            startedAt: started,
+            completedAt: new Date().toISOString(),
+            assessmentWritten,
+            violationWritten,
+            skippedRows
+        });
+        await window.checkAssessmentViolationBackfillStatus();
+        alert(`Copy-only backfill complete. Old document data was not deleted.\n\nCopied: ${assessmentWritten} submissions, ${violationWritten} violations.\nSkipped existing newer/completed rows: ${skippedRows}.`);
+        return true;
+    } catch (error) {
+        saBackfillWriteStatus({ mode, result: `Failed: ${error.message || error}` });
+        saBackfillSetStatus(`<div style="color:#ff5252;">Backfill failed: ${saBackfillEscape(error.message || error)}</div>`);
+        return false;
+    }
+};
+
+window.startAssessmentViolationBackfillWizard = async function() {
+    saBackfillSetStatus('<i class="fas fa-circle-notch fa-spin"></i> Checking what needs to be backfilled...');
+    try {
+        if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') throw new Error('Not connected to Supabase.');
+        const payload = await saBackfillGetPayload();
+        const plan = await saBackfillBuildPlan(payload);
+        const current = {
+            assessmentRowCount: await saBackfillCountRows('assessment_studio_submissions'),
+            violationRowCount: await saBackfillCountRows('violation_reports')
+        };
+        const skippedRows = plan.assessmentSkippedNewer + plan.assessmentSkippedStronger + plan.violationSkippedNewer + plan.violationSkippedStronger;
+        const message = [
+            'Copy-only backfill preview:',
+            '',
+            `Assessment Studio submissions in document: ${payload.assessmentRows.length}`,
+            `Existing assessment row count: ${current.assessmentRowCount}`,
+            `Assessment rows to copy now: ${plan.assessmentRows.length}`,
+            `Assessment rows skipped because the row is newer/completed: ${plan.assessmentSkippedNewer + plan.assessmentSkippedStronger}`,
+            '',
+            `Violation reports in document: ${payload.violationRows.length}`,
+            `Existing violation row count: ${current.violationRowCount}`,
+            `Violation rows to copy now: ${plan.violationRows.length}`,
+            `Violation rows skipped because the row is newer/reviewed: ${plan.violationSkippedNewer + plan.violationSkippedStronger}`,
+            '',
+            'This will upsert by ID into the new row tables only for missing or older same-state rows.',
+            'It will NOT delete or modify the old document data.',
+            '',
+            'Continue?'
+        ].join('\n');
+        saBackfillWriteStatus({
+            mode: 'guided preview',
+            result: `Previewed ${plan.assessmentRows.length} submissions and ${plan.violationRows.length} violations to copy; ${skippedRows} existing newer/completed rows skipped.`
+        });
+        saBackfillSetStatus(saBackfillRenderSummary({
+            assessmentDocumentCount: payload.assessmentRows.length,
+            assessmentRowCount: current.assessmentRowCount,
+            violationDocumentCount: payload.violationRows.length,
+            violationRowCount: current.violationRowCount,
+            plan
+        }));
+        if (!confirm(message)) {
+            saBackfillWriteStatus({ mode: 'guided preview', result: 'Cancelled before writing.' });
+            await window.checkAssessmentViolationBackfillStatus();
+            return false;
+        }
+        return window.runAssessmentViolationBackfill({ dryRun: false, skipConfirm: true });
+    } catch (error) {
+        saBackfillWriteStatus({ mode: 'guided preview', result: `Failed: ${error.message || error}` });
+        saBackfillSetStatus(`<div style="color:#ff5252;">Backfill preview failed: ${saBackfillEscape(error.message || error)}</div>`);
+        return false;
     }
 };
 
@@ -3278,7 +3623,9 @@ window.performOrphanCleanup = async function(silent = false) {
 
             const allIds = new Set();
             let lookupFailed = false;
-            const pageSize = 100;
+            const highVolumeTables = new Set(['attendance', 'monitor_history', 'access_logs', 'audit_logs', 'error_reports', 'network_diagnostics']);
+            const pageSize = highVolumeTables.has(item.table) ? 20 : 50;
+            const chunkDelayMs = highVolumeTables.has(item.table) ? 120 : 40;
 
             for (let i = 0; i < localIds.length; i += pageSize) {
                 const chunk = localIds.slice(i, i + pageSize);
@@ -3295,6 +3642,10 @@ window.performOrphanCleanup = async function(silent = false) {
 
                 if (Array.isArray(data) && data.length > 0) {
                     data.forEach(row => allIds.add(row.id.toString()));
+                }
+
+                if (i + pageSize < localIds.length) {
+                    await new Promise(resolve => setTimeout(resolve, chunkDelayMs));
                 }
             }
 
@@ -3363,8 +3714,14 @@ window.verifyServerSchema = async function() {
 };
 
 window.openDevTools = function() {
+    if (window.electronAPI && window.electronAPI.ipcRenderer && typeof window.electronAPI.ipcRenderer.send === 'function') {
+        window.electronAPI.ipcRenderer.send('open-devtools');
+        return;
+    }
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
         ipcRenderer.send('open-devtools');
+        return;
     }
+    alert('DevTools bridge is unavailable in this app window.');
 };

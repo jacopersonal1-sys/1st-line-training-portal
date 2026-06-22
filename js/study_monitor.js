@@ -1007,6 +1007,78 @@ const StudyMonitor = {
         return clean;
     },
 
+    syncViolationReportRowOnServer: async function(report) {
+        const client = window.supabaseClient || (typeof window.initSupabaseClient === 'function' ? window.initSupabaseClient() : null);
+        if (!client?.from || !report?.id) return false;
+        const cleanReport = (typeof sanitizeViolationReportEvidence === 'function')
+            ? sanitizeViolationReportEvidence(report, { hideEvidencePointers: false })
+            : report;
+        const { error } = await client.from('violation_reports').upsert({
+            id: cleanReport.id,
+            trainee: cleanReport.user || null,
+            status: cleanReport.status || null,
+            data: cleanReport,
+            updated_at: new Date().toISOString()
+        });
+        if (error) throw error;
+        return true;
+    },
+
+    violationReportTime: function(report) {
+        return Date.parse(report?.updatedAt || report?.reviewedAt || report?.reportedAt || report?.detectedAt || report?.date || 0) || 0;
+    },
+
+    pickViolationReport: function(existing, incoming) {
+        if (!existing) return incoming;
+        if (!incoming) return existing;
+        const existingReviewed = ['reviewed', 'not_approved'].includes(String(existing.status || '').toLowerCase()) || !!existing.reviewedAt;
+        const incomingReviewed = ['reviewed', 'not_approved'].includes(String(incoming.status || '').toLowerCase()) || !!incoming.reviewedAt;
+        if (incomingReviewed !== existingReviewed) return incomingReviewed ? incoming : existing;
+        return this.violationReportTime(incoming) >= this.violationReportTime(existing) ? incoming : existing;
+    },
+
+    mergeViolationReports: function(existingReports, incomingReports) {
+        const byId = new Map();
+        (Array.isArray(existingReports) ? existingReports : []).forEach(report => {
+            const id = String(report?.id || '');
+            if (id) byId.set(id, report);
+        });
+        (Array.isArray(incomingReports) ? incomingReports : []).forEach(report => {
+            const id = String(report?.id || '');
+            if (id) byId.set(id, this.pickViolationReport(byId.get(id), report));
+        });
+        return Array.from(byId.values());
+    },
+
+    fetchViolationReportRowsFromServer: async function() {
+        const client = window.supabaseClient || (typeof window.initSupabaseClient === 'function' ? window.initSupabaseClient() : null);
+        if (!client?.from) return [];
+        try {
+            const result = await client
+                .from('violation_reports')
+                .select('data, updated_at')
+                .limit(1000);
+            if (result && result.error) throw result.error;
+            const rows = Array.isArray(result && result.data) ? result.data : [];
+            return rows
+                .map(row => row && row.data)
+                .filter(report => report && typeof report === 'object' && report.id && report.user);
+        } catch (error) {
+            console.warn('Violation report row refresh skipped:', error.message || error);
+            return [];
+        }
+    },
+
+    refreshViolationReportsFromRows: async function() {
+        const rows = await this.fetchViolationReportRowsFromServer();
+        if (!rows.length) return false;
+        const before = this.getRawViolationReports();
+        const merged = this.writeViolationReports(this.mergeViolationReports(before, rows));
+        const changed = JSON.stringify(before) !== JSON.stringify(merged);
+        if (changed && typeof this.updateNotifications === 'function') this.updateNotifications();
+        return changed;
+    },
+
     pruneDeletedViolationReports: function() {
         const before = this.getRawViolationReports();
         const after = this.writeViolationReports(before);
@@ -1032,6 +1104,15 @@ const StudyMonitor = {
             .eq('key', remoteKey)
             .maybeSingle();
         if (fetchErr) throw fetchErr;
+
+        for (const id of deletedSet) {
+            try {
+                const { error } = await client.from('violation_reports').delete().eq('id', id);
+                if (error && error.code !== 'PGRST205') console.warn('Violation report row delete failed:', error);
+            } catch (rowDeleteError) {
+                console.warn('Violation report row delete skipped:', rowDeleteError);
+            }
+        }
 
         const byId = new Map();
         localRemaining.forEach(report => {
@@ -1412,7 +1493,16 @@ const StudyMonitor = {
                 };
                 monitor.writeViolationReports(latest);
             }
-            if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
+            const reportForSync = monitor.getRawViolationReports().find(item => String(item.id || '') === String(record.id));
+            let rowSynced = false;
+            try {
+                rowSynced = await monitor.syncViolationReportRowOnServer(reportForSync || record);
+            } catch (rowError) {
+                console.warn('Violation report row sync failed; falling back to document sync:', rowError);
+            }
+            if (typeof saveToServer === 'function') {
+                await saveToServer(['violation_reports'], rowSynced ? false : true, true);
+            }
             const synced = monitor.getRawViolationReports();
             const syncedIdx = synced.findIndex(item => String(item.id || '') === String(record.id));
             if (syncedIdx >= 0) {
@@ -4075,6 +4165,16 @@ StudyMonitor.openViolationReviewModal = function(agent = '') {
     document.getElementById('violationReviewModal')?.remove();
     document.body.insertAdjacentHTML('beforeend', html);
     this.renderViolationReviewRows();
+    if (!this.__violationRowRefreshInFlight) {
+        this.__violationRowRefreshInFlight = true;
+        this.refreshViolationReportsFromRows()
+            .then(changed => {
+                if (changed && document.getElementById('violationReviewRows')) this.renderViolationReviewRows();
+            })
+            .finally(() => {
+                this.__violationRowRefreshInFlight = false;
+            });
+    }
 };
 
 StudyMonitor.renderViolationReviewRows = function() {
@@ -4226,25 +4326,31 @@ StudyMonitor.deleteViolationEvidenceFiles = async function(report, reason = 'del
 
     if (storage?.from) {
         for (const [bucket, paths] of Object.entries(bucketGroups)) {
-            const { error } = await storage.from(bucket).remove(paths);
-            if (error) console.warn('Violation evidence storage delete failed:', error);
+            for (const path of paths) {
+                const { error } = await storage.from(bucket).remove([path]);
+                if (error) console.warn('Violation evidence storage delete failed:', error);
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
         }
     }
 
     if (client?.from) {
         const ids = files.map(file => file.id).filter(Boolean);
         if (ids.length) {
-            const { error } = await client
-                .from('violation_evidence')
-                .update({
-                    status: 'deleted',
-                    deleted_at: new Date().toISOString(),
-                    reviewed_by: CURRENT_USER?.user || 'admin',
-                    reviewed_at: new Date().toISOString(),
-                    metadata: { deleted_reason: reason }
-                })
-                .in('id', ids);
-            if (error) console.warn('Violation evidence metadata delete failed:', error);
+            for (const id of ids) {
+                const { error } = await client
+                    .from('violation_evidence')
+                    .update({
+                        status: 'deleted',
+                        deleted_at: new Date().toISOString(),
+                        reviewed_by: CURRENT_USER?.user || 'admin',
+                        reviewed_at: new Date().toISOString(),
+                        metadata: { deleted_reason: reason }
+                    })
+                    .eq('id', id);
+                if (error) console.warn('Violation evidence metadata delete failed:', error);
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
         }
     }
 };
@@ -4337,16 +4443,45 @@ StudyMonitor.openViolationEvidence = async function(reportId) {
         if (files.length) {
             const client = window.supabaseClient;
             if (!client?.storage?.from) throw new Error('Evidence storage is unavailable in this client session.');
-            items = await Promise.all(files.map(async (file, index) => {
+            items = [];
+            for (let index = 0; index < files.length; index += 1) {
+                const file = files[index];
+                if (!file?.path) {
+                    items.push({
+                        src: '',
+                        name: file?.name || `Screen ${index + 1}`,
+                        index,
+                        error: 'Evidence path is missing.'
+                    });
+                    continue;
+                }
                 const bucket = file.bucket || evidence.bucket || this.getViolationEvidenceBucket();
-                const { data, error } = await client.storage.from(bucket).createSignedUrl(file.path, 300);
-                if (error) throw error;
-                return {
-                    src: data.signedUrl,
-                    name: file.name || `Screen ${index + 1}`,
-                    index
-                };
-            }));
+                let data = null;
+                let error = null;
+                for (let attempt = 0; attempt < 3; attempt += 1) {
+                    const result = await client.storage.from(bucket).createSignedUrl(file.path, 300);
+                    data = result.data;
+                    error = result.error;
+                    if (!error && data?.signedUrl) break;
+                    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
+                }
+                if (error || !data?.signedUrl) {
+                    console.warn('Violation evidence signed URL failed:', error || file.path);
+                    items.push({
+                        src: '',
+                        name: file.name || `Screen ${index + 1}`,
+                        index,
+                        error: error?.message || 'Evidence image is no longer available in Storage.'
+                    });
+                } else {
+                    items.push({
+                        src: data.signedUrl,
+                        name: file.name || `Screen ${index + 1}`,
+                        index
+                    });
+                }
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
         } else {
             items = screenshots.map((shot, index) => ({
                 src: `data:${shot.mime || 'image/jpeg'};base64,${String(shot.data || '')}`,
@@ -4357,7 +4492,9 @@ StudyMonitor.openViolationEvidence = async function(reportId) {
 
         body.innerHTML = items.map(item => `<figure class="violation-evidence-figure">
             <div class="violation-evidence-image-frame">
-                <img class="violation-evidence-image" alt="Violation evidence screen ${item.index + 1}" src="${this.escapeHtml(item.src)}">
+                ${item.error
+                    ? `<div class="violation-review-empty">${this.escapeHtml(item.error)}</div>`
+                    : `<img class="violation-evidence-image" alt="Violation evidence screen ${item.index + 1}" src="${this.escapeHtml(item.src)}">`}
             </div>
             <figcaption>${this.escapeHtml(item.name)}</figcaption>
         </figure>`).join('');
@@ -4472,7 +4609,13 @@ StudyMonitor.markViolationReviewed = async function(reportId, decision = 'approv
     const monitor = this;
     Promise.resolve().then(async () => {
         if (approved) await monitor.deleteViolationEvidenceFiles(originalReport, 'approved_by_admin');
-        if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], false, true);
+        let rowSynced = false;
+        try {
+            rowSynced = await monitor.syncViolationReportRowOnServer(reports[idx]);
+        } catch (rowError) {
+            console.warn('Violation review row sync failed; falling back to document sync:', rowError);
+        }
+        if (typeof saveToServer === 'function') await saveToServer(['violation_reports'], rowSynced ? false : true, true);
         const latest = monitor.getRawViolationReports();
         const latestIdx = latest.findIndex(r => String(r.id || '') === String(reportId || ''));
         if (latestIdx >= 0) {

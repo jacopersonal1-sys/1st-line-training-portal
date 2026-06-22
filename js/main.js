@@ -1293,7 +1293,10 @@ window.onload = async function() {
     // 1. Load Data from Supabase (CRITICAL: Wait for this)
     if (typeof loadFromServer === 'function') {
         try {
-            const success = await loadFromServer();
+            const success = await Promise.race([
+                loadFromServer(true),
+                new Promise(resolve => setTimeout(() => resolve(true), 1500))
+            ]);
             if (!success) throw new Error("Initial Sync Failed");
             
             // --- SERVER AUTHORITY CHECK ---
@@ -4117,6 +4120,8 @@ window.showAppBusyOverlay = function showAppBusyOverlay(options = {}) {
         overlay.className = 'app-busy-overlay hidden';
         document.body.appendChild(overlay);
     }
+    const maxVisibleMs = Math.max(Number(opts.maxVisibleMs) || 45000, 10000);
+    if (window.APP_BUSY_OVERLAY_TIMER) clearTimeout(window.APP_BUSY_OVERLAY_TIMER);
     overlay.innerHTML = window.getAppLoadingHtml({
         icon: opts.icon || 'fa-cloud-arrow-down',
         title: opts.title || 'Syncing workspace data',
@@ -4126,6 +4131,15 @@ window.showAppBusyOverlay = function showAppBusyOverlay(options = {}) {
         progressTotal: opts.progressTotal
     });
     overlay.classList.remove('hidden');
+    overlay.dataset.shownAt = String(Date.now());
+    window.APP_BUSY_OVERLAY_TIMER = setTimeout(() => {
+        const current = document.getElementById('app-busy-overlay');
+        if (!current || current.classList.contains('hidden')) return;
+        current.classList.add('hidden');
+        if (typeof showToast === 'function') {
+            showToast('Sync is still running in the background. You can keep using the app.', 'warning');
+        }
+    }, maxVisibleMs);
     return overlay;
 };
 
@@ -4136,6 +4150,10 @@ window.updateAppBusyOverlay = function updateAppBusyOverlay(options = {}) {
 };
 
 window.hideAppBusyOverlay = function hideAppBusyOverlay() {
+    if (window.APP_BUSY_OVERLAY_TIMER) {
+        clearTimeout(window.APP_BUSY_OVERLAY_TIMER);
+        window.APP_BUSY_OVERLAY_TIMER = null;
+    }
     const overlay = document.getElementById('app-busy-overlay');
     if (overlay) overlay.classList.add('hidden');
 };
@@ -4638,6 +4656,26 @@ function rerenderActiveViewAfterFreshPull(id) {
     renderViewById(id, { source: 'freshPull' });
 }
 
+function runBackgroundCloudSync(reason = 'background') {
+    if (typeof loadFromServer !== 'function') return;
+    if (window.__BACKGROUND_CLOUD_SYNC_RUNNING) return;
+    window.__BACKGROUND_CLOUD_SYNC_RUNNING = true;
+    Promise.resolve()
+        .then(async () => {
+            const success = await loadFromServer(true);
+            if (!success) throw new Error(`Cloud sync failed: ${reason}`);
+            window._lastSuccessfulServerSyncAt = Date.now();
+            localStorage.setItem('last_server_sync', String(window._lastSuccessfulServerSyncAt));
+        })
+        .catch(error => {
+            console.warn(`[Cloud Sync] Background sync failed (${reason}). Using cached data.`, error);
+            if (typeof AUTO_BACKUP !== 'undefined') AUTO_BACKUP = false;
+        })
+        .finally(() => {
+            window.__BACKGROUND_CLOUD_SYNC_RUNNING = false;
+        });
+}
+
 function scheduleNavigationDeferredWork(id, target) {
     if (NAV_DEFER_TIMER) clearTimeout(NAV_DEFER_TIMER);
     if (NAV_IDLE_CALLBACK && typeof cancelIdleCallback === 'function') {
@@ -4679,15 +4717,7 @@ async function syncFreshDataForView(id) {
     VIEW_SYNC_LAST_RUN[id] = now;
     VIEW_SYNC_IN_FLIGHT = true;
     try {
-        if (id !== 'insight-studio' && id !== 'trainee-portal') {
-            showRouteLoadingState(id, {
-                title: (HEAVY_VIEW_LOADING_META[id] && HEAVY_VIEW_LOADING_META[id].title) || 'Refreshing workspace',
-                detail: 'Pulling the latest server data before updating this view.'
-            });
-        }
-        await loadFromServer(true);
-        window._lastSuccessfulServerSyncAt = Date.now();
-        localStorage.setItem('last_server_sync', String(window._lastSuccessfulServerSyncAt));
+        runBackgroundCloudSync(`view:${id}`);
     } catch (error) {
         console.warn(`[View Sync] Fresh pull failed for ${id}:`, error);
     } finally {
@@ -4957,6 +4987,9 @@ function showAdminSub(viewName, btn) {
   // Trigger specific refresh for sub-tabs
   if(viewName === 'users' && typeof loadAdminUsers === 'function') loadAdminUsers();
   if(viewName === 'assessments' && typeof loadAdminAssessments === 'function') loadAdminAssessments();
+  if(viewName === 'device-sessions' && window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.renderAdminPanel === 'function') {
+      window.DeviceAssessmentSessions.renderAdminPanel();
+  }
   if(viewName === 'vetting' && typeof loadAdminVetting === 'function') loadAdminVetting();
   if(viewName === 'data' && typeof loadAdminDatabase === 'function') loadAdminDatabase();
   if(viewName === 'access' && typeof loadAdminAccess === 'function') loadAdminAccess();
@@ -5601,6 +5634,18 @@ function showReleaseNotes(version) {
 
 function getChangelog(version) {
     const logs = {
+        "2.7.78": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Realtime Recovery:</strong> Fallback polling now stops early during Supabase outage or schema-cache errors instead of hitting every recovery table in parallel.</li>
+                <li style="margin-bottom: 8px;"><strong>Violation Evidence:</strong> Evidence review stays open when an old screenshot file is missing, showing that image slot as unavailable while keeping any other screenshots visible.</li>
+            </ul>`,
+        "2.7.56": `
+            <ul style="padding-left: 20px; margin: 0;">
+                <li style="margin-bottom: 8px;"><strong>Assessment Studio Feedback:</strong> Feedback Sessions now save None, Requested, and Received onto the actual Studio submission and host cache.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Matrix View:</strong> Wide matrix questions now fit better, keep row labels visible while scrolling, and avoid being covered by the Save Draft / Submit bar.</li>
+                <li style="margin-bottom: 8px;"><strong>Trainee Runtime:</strong> The question navigator now marks matrix, matching, and multiple-answer questions complete only when they are actually complete.</li>
+                <li style="margin-bottom: 8px;"><strong>Draft Safety:</strong> Saving a draft now captures cleared multi-answer, matching, and matrix controls instead of preserving stale answers.</li>
+            </ul>`,
         "2.7.55": `
             <ul style="padding-left: 20px; margin: 0;">
                 <li style="margin-bottom: 8px;"><strong>Assessment Studio Drafts:</strong> Save Draft and Submit now capture the visible answer controls before saving, so recent selections do not disappear after a refresh.</li>

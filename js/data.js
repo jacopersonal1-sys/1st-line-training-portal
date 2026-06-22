@@ -209,7 +209,6 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'savedReports',
     'insightReviews',
     'auditLogs',
-    'error_reports',
     'monitor_history',
     'attendance_records',
     'accessLogs',
@@ -218,6 +217,20 @@ const CRITICAL_EXPLICIT_SAVE_KEYS = new Set([
     'calendarEvents',
     'tl_task_submissions'
 ]);
+
+// Runtime diagnostics are useful, but they must never hold up business sync.
+// They are uploaded only from explicit admin maintenance flows.
+const DEFERRED_DIAGNOSTIC_ROW_KEYS = new Set([
+    'error_reports'
+]);
+
+const DISABLED_SYNC_KEYS = new Set([
+    'error_reports'
+]);
+
+try {
+    DISABLED_SYNC_KEYS.forEach(key => localStorage.removeItem(key));
+} catch (error) {}
 
 // --- TRAINEE RUNTIME OPTIMIZATION ---
 // Keep trainee document pulls/saves scoped to only what the trainee surface needs.
@@ -276,7 +289,19 @@ const APP_DOCUMENT_FETCH_PRIORITY = [
     'content_studio_data'
 ];
 
-const APP_DOCUMENT_FETCH_BATCH_SIZE = 4;
+const APP_DOCUMENT_FETCH_BATCH_SIZE = 1;
+const ROW_SYNC_CONCURRENCY = 2;
+const ROW_SYNC_DEFAULT_LIMIT = 500;
+const ROW_SYNC_LARGE_TABLE_LIMIT = 250;
+const ROW_SYNC_TIMEOUT_BACKOFF_MS = 5 * 60 * 1000;
+const ROW_SYNC_BACKOFF_PREFIX = 'row_sync_backoff_until_';
+const ENABLE_FULL_ROW_RECONCILIATION_KEY = 'enable_full_row_reconcile';
+const ROW_SYNC_UPLOAD_BATCH_SIZES = {
+    submissions: 25,
+    records: 50,
+    monitor_history: 25,
+    error_reports: 20
+};
 
 const TRAINEE_SKIP_ROW_TABLES = new Set([
     'users',
@@ -289,6 +314,39 @@ const TRAINEE_SKIP_ROW_TABLES = new Set([
     'insight_reviews',
     'tl_task_submissions'
 ]);
+
+async function runSyncTasksWithLimit(tasks, limit = ROW_SYNC_CONCURRENCY) {
+    const queue = Array.isArray(tasks) ? tasks.filter(task => typeof task === 'function') : [];
+    const workers = Array.from({ length: Math.max(1, Math.min(limit, queue.length || 1)) }, async () => {
+        while (queue.length > 0) {
+            const task = queue.shift();
+            await task();
+        }
+    });
+    await Promise.all(workers);
+}
+
+function getRowSyncBackoffUntil(localKey) {
+    const raw = localStorage.getItem(`${ROW_SYNC_BACKOFF_PREFIX}${localKey}`);
+    const until = Number(raw || 0);
+    return Number.isFinite(until) ? until : 0;
+}
+
+function setRowSyncBackoff(localKey) {
+    localStorage.setItem(`${ROW_SYNC_BACKOFF_PREFIX}${localKey}`, String(Date.now() + ROW_SYNC_TIMEOUT_BACKOFF_MS));
+}
+
+function clearRowSyncBackoff(localKey) {
+    localStorage.removeItem(`${ROW_SYNC_BACKOFF_PREFIX}${localKey}`);
+}
+
+function isStatementTimeoutError(error) {
+    return !!(error && (error.code === '57014' || String(error.message || '').toLowerCase().includes('statement timeout')));
+}
+
+function getRowSyncUploadBatchSize(localKey, tableName) {
+    return ROW_SYNC_UPLOAD_BATCH_SIZES[localKey] || ROW_SYNC_UPLOAD_BATCH_SIZES[tableName] || 100;
+}
 
 function isTraineeRuntime() {
     return (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'trainee');
@@ -461,6 +519,13 @@ const SERVER_AUTHORITY_LOCAL_MIRRORS = {
     content_studio_data: 'content_studio_data_local'
 };
 
+const REALTIME_FALLBACK_TARGETS = [
+    { table: 'sessions', limit: 500, handler: handleSessionRealtime },
+    { table: 'live_sessions', limit: 250, handler: handleLiveSessionRealtime },
+    { table: 'vetting_sessions', limit: 150, handler: handleVettingRealtime },
+    { table: 'vetting_sessions_v2', limit: 150, handler: handleVettingRealtime }
+];
+
 function validateServerAuthorityBlob(key, content) {
     if (!SERVER_AUTHORITY_GUARDED_BLOB_KEYS.has(key)) return { ok: true };
     if (key === 'manual_assessment_assignments') {
@@ -496,6 +561,12 @@ function validateServerAuthorityBlob(key, content) {
     }
 
     return { ok: true };
+}
+
+function hasAssessmentStudioAuthoring(content) {
+    const source = content && typeof content === 'object' ? content : {};
+    return ['questionBucket', 'generators', 'groupings', 'tags']
+        .some(field => Array.isArray(source[field]) && source[field].length > 0);
 }
 
 function backupServerAuthorityLocalBlob(key, source, incomingContent) {
@@ -805,6 +876,7 @@ async function loadFromServer(silent = false) {
         const keysToFetch = [];
         meta.forEach(row => {
             const localKey = IS_DEMO_MODE ? row.key.replace('demo_', '') : row.key;
+            if (DISABLED_SYNC_KEYS.has(localKey)) return;
             if (isTrainee && !TRAINEE_ALLOWED_BLOB_KEYS.has(localKey)) return;
             // SECURITY & MINIMIZATION: Skip admin-only blobs for trainees
             if (isTrainee && ['agentNotes', 'tl_personal_lists'].includes(localKey)) return;
@@ -858,6 +930,7 @@ async function loadFromServer(silent = false) {
             if(!silent) console.log(`Syncing updates for: ${orderedKeysToFetch.join(', ')}`);
 
             const docs = [];
+            const failedDocKeys = [];
             for (let i = 0; i < orderedKeysToFetch.length; i += APP_DOCUMENT_FETCH_BATCH_SIZE) {
                 const keyBatch = orderedKeysToFetch.slice(i, i + APP_DOCUMENT_FETCH_BATCH_SIZE);
                 updateSyncDiagnostics({
@@ -869,13 +942,38 @@ async function loadFromServer(silent = false) {
                     bytesTotal: pullBytesTotal
                 });
 
-                const { data: batchDocs, error: fetchErr } = await window.supabaseClient
-                    .from('app_documents')
-                    .select('key, content, updated_at')
-                    .in('key', keyBatch);
+                try {
+                    const { data: batchDocs, error: fetchErr } = await window.supabaseClient
+                        .from('app_documents')
+                        .select('key, content, updated_at')
+                        .in('key', keyBatch);
 
-                if (fetchErr) throw fetchErr;
-                docs.push(...(Array.isArray(batchDocs) ? batchDocs : []));
+                    if (fetchErr) throw fetchErr;
+                    docs.push(...(Array.isArray(batchDocs) ? batchDocs : []));
+                } catch (fetchErr) {
+                    failedDocKeys.push(...keyBatch);
+                    console.warn(`[Sync] Skipped slow app document key(s): ${keyBatch.join(', ')}`, fetchErr);
+                } finally {
+                    pullProgressDone += keyBatch.length;
+                    updateSyncDiagnostics({
+                        phase: failedDocKeys.length > 0 ? 'Document download partially complete' : 'Document batch complete',
+                        item: keyBatch.join(', '),
+                        progressDone: pullProgressDone,
+                        progressTotal: pullProgressTotal,
+                        bytesDone: pullBytesDone,
+                        bytesTotal: pullBytesTotal
+                    });
+                }
+            }
+
+            if (failedDocKeys.length > 0) {
+                updateSyncDiagnostics({
+                    status: 'busy',
+                    statusText: 'Server pull continuing',
+                    direction: 'download',
+                    phase: 'Skipped slow documents',
+                    item: failedDocKeys.join(', ')
+                });
             }
 
             docs.sort((a, b) => {
@@ -935,7 +1033,6 @@ async function loadFromServer(silent = false) {
                 }
 
                 const docBytes = estimateSyncPayloadSize(doc.content);
-                pullProgressDone += 1;
                 pullBytesDone += docBytes;
                 pullBytesTotal += docBytes;
                 updateSyncDiagnostics({
@@ -991,6 +1088,7 @@ async function loadFromServer(silent = false) {
         // Only fetch rows newer than our last sync timestamp
         // OPTIMIZATION: Use accurate table names and isolate heavy JSON payloads to prevent V8 memory crashes
         const heavyTables = ['error_reports', 'access_logs', 'audit_logs', 'monitor_history', 'network_diagnostics'];
+        const backgroundOnlyRowTables = new Set(heavyTables);
 
         const fastTasks = [];
         const heavyTasks = [];
@@ -1004,8 +1102,10 @@ async function loadFromServer(silent = false) {
                 return;
             }
 
-            // Skip heavy tables unless it's a forced full sync (Optimization)
-            if (silent && heavyTables.includes(tableName)) {
+            // Keep heavy diagnostic/history tables out of the general sync loop.
+            // Dedicated admin screens fetch them directly when needed; pulling them
+            // on every boot/background refresh is what causes large updated_at scans.
+            if (backgroundOnlyRowTables.has(tableName)) {
                 return;
             }
 
@@ -1013,6 +1113,19 @@ async function loadFromServer(silent = false) {
             pullProgressTotal += 1;
 
             const syncTask = async () => {
+                const markRowTaskComplete = (phase = `Row sync ${completedRowTables + 1}/${plannedRowTables || 0}`) => {
+                    completedRowTables += 1;
+                    pullProgressDone += 1;
+                    updateSyncDiagnostics({
+                        phase,
+                        item: `${localKey} (${tableName})`,
+                        progressDone: pullProgressDone,
+                        progressTotal: pullProgressTotal,
+                        bytesDone: pullBytesDone,
+                        bytesTotal: pullBytesTotal
+                    });
+                };
+
                 updateSyncDiagnostics({
                     phase: 'Syncing row tables',
                     item: `${localKey} (${tableName})`,
@@ -1021,6 +1134,13 @@ async function loadFromServer(silent = false) {
                     bytesDone: pullBytesDone,
                     bytesTotal: pullBytesTotal
                 });
+
+                const backoffUntil = getRowSyncBackoffUntil(localKey);
+                if (silent && backoffUntil > Date.now()) {
+                    console.warn(`[Sync] Skipping ${tableName}; previous timeout is cooling down.`);
+                    markRowTaskComplete('Row sync backed off');
+                    return;
+                }
 
                 const lastSync = localStorage.getItem(`row_sync_ts_${localKey}`) || '1970-01-01T00:00:00.000Z';
             
@@ -1066,7 +1186,9 @@ async function loadFromServer(silent = false) {
                     ? 100
                     : (isTrainee && tableName === 'live_sessions')
                         ? 200
-                        : (heavyTables.includes(tableName) ? 500 : 2000);
+                        : (['users', 'submissions', 'exemptions', 'insight_reviews', 'archived_users', 'tl_task_submissions', 'link_requests', 'monitor_state'].includes(tableName)
+                            ? ROW_SYNC_LARGE_TABLE_LIMIT
+                            : (heavyTables.includes(tableName) ? ROW_SYNC_LARGE_TABLE_LIMIT : ROW_SYNC_DEFAULT_LIMIT));
                 const { data: newRows, error: rowErr } = await query.limit(fetchLimit);
                 const rowBytes = estimateSyncPayloadSize((newRows || []).map(r => r && r.data ? r.data : null));
                 if (rowBytes > 0) {
@@ -1075,6 +1197,9 @@ async function loadFromServer(silent = false) {
                 }
 
             if (rowErr) {
+                if (isStatementTimeoutError(rowErr)) {
+                    setRowSyncBackoff(localKey);
+                }
                 // ERROR HANDLING: Check if response was actually HTML (Cloudflare Error)
                 // PostgREST client might wrap this, but usually it throws a syntax error on JSON parse.
                 // If rowErr has no code but has a message, it might be a fetch failure.
@@ -1087,6 +1212,9 @@ async function loadFromServer(silent = false) {
                 } else {
                     console.warn(`Row sync failed for ${tableName}`, rowErr);
                 }
+            }
+            if (!rowErr) {
+                clearRowSyncBackoff(localKey);
             }
             
             if (newRows && newRows.length > 0) {
@@ -1205,12 +1333,12 @@ async function loadFromServer(silent = false) {
                     merged[localKey] = dedupeArrayByIdentity(localKey, merged[localKey], 'server_wins');
 
                     // Reconcile against current server IDs on full/interactive pulls so stale machine-local rows are purged.
-                    if (!silent) {
+                    if (!silent && localStorage.getItem(ENABLE_FULL_ROW_RECONCILIATION_KEY) === 'true') {
                         try {
                             const { data: serverIndexRows, error: serverIndexErr } = await window.supabaseClient
                                 .from(tableName)
                                 .select('id')
-                                .limit(10000);
+                                .limit(1000);
 
                             if (!serverIndexErr && serverIndexRows) {
                                 merged[localKey] = reconcileServerIndexedRows(
@@ -1293,27 +1421,18 @@ async function loadFromServer(silent = false) {
                 localStorage.setItem(localKey, '[]');
             }
 
-                completedRowTables += 1;
-                pullProgressDone += 1;
-                updateSyncDiagnostics({
-                    phase: `Row sync ${completedRowTables}/${plannedRowTables || 0}`,
-                    item: `${localKey} (${tableName})`,
-                    progressDone: pullProgressDone,
-                    progressTotal: pullProgressTotal,
-                    bytesDone: pullBytesDone,
-                    bytesTotal: pullBytesTotal
-                });
+                markRowTaskComplete();
             };
 
             if (heavyTables.includes(tableName)) {
                 heavyTasks.push(syncTask);
             } else {
-                fastTasks.push(syncTask());
+                fastTasks.push(syncTask);
             }
         });
 
-        // 1. Run lightweight tables in parallel for instant boot
-        await Promise.all(fastTasks);
+        // 1. Run row tables with controlled concurrency so a struggling DB is not dogpiled.
+        await runSyncTasksWithLimit(fastTasks, ROW_SYNC_CONCURRENCY);
 
         // 2. Run heavy JSON tables sequentially to prevent network timeout & UI freezing
         for (const task of heavyTasks) {
@@ -1325,10 +1444,22 @@ async function loadFromServer(silent = false) {
         if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin' || CURRENT_USER.role === 'teamleader')) {
             pullProgressTotal += 1;
             const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
-            const { data: monRows, error: monErr } = await window.supabaseClient
-                .from('monitor_state')
-                .select('user_id, data')
-                .gt('updated_at', oneDayAgo);
+            let monRows = [];
+            let monErr = null;
+            const monitorBackoffUntil = getRowSyncBackoffUntil('monitor_state');
+            if (silent && monitorBackoffUntil > Date.now()) {
+                console.warn('[Sync] Skipping monitor_state; previous timeout is cooling down.');
+            } else {
+                const monitorResult = await window.supabaseClient
+                    .from('monitor_state')
+                    .select('user_id, data')
+                    .gt('updated_at', oneDayAgo)
+                    .limit(ROW_SYNC_LARGE_TABLE_LIMIT);
+                monRows = monitorResult.data || [];
+                monErr = monitorResult.error || null;
+                if (isStatementTimeoutError(monErr)) setRowSyncBackoff('monitor_state');
+                else if (!monErr) clearRowSyncBackoff('monitor_state');
+            }
                 
             if (monRows) {
                 // Merge server state into local monitor_data
@@ -1596,6 +1727,10 @@ function applySystemConfig() {
 
 // --- ERROR REPORTING SYSTEM ---
 async function reportSystemError(msg, type, meta = null) {
+    if (DISABLED_SYNC_KEYS.has('error_reports')) {
+        return { saved: false, synced: false, disabled: true, report: null };
+    }
+
     // Attempt to resolve user identity if global CURRENT_USER is missing
     let user = 'Guest';
     let role = 'Unknown';
@@ -1659,21 +1794,15 @@ async function reportSystemError(msg, type, meta = null) {
         return { saved: false, synced: false, report };
     }
 
-    // Silent sync best-effort. Local save is still considered success if sync fails.
-    let synced = true;
-    if (typeof saveToServer === 'function') {
-        try {
-            await saveToServer(['error_reports'], false, true);
-        } catch (syncErr) {
-            synced = false;
-            console.warn("reportSystemError: sync deferred", syncErr);
-        }
-    }
+    // Keep runtime error capture local-only. Uploading error_reports while the
+    // server is already slow creates a feedback loop of timeout reports.
+    let synced = false;
 
     return { saved: true, synced, report };
 }
 
 function checkErrorAlerts() {
+    if (DISABLED_SYNC_KEYS.has('error_reports')) return;
     if (typeof CURRENT_USER === 'undefined' || !CURRENT_USER || CURRENT_USER.role !== 'super_admin') return;
     
     const reports = (safeLocalParse('error_reports', []) || []).filter(r => (r.type || '') !== 'user_report');
@@ -1744,7 +1873,8 @@ window.retrySync = async function() {
     try {
         if (window.supabaseClient) {
             // Ping DB (Lightweight query)
-            await window.supabaseClient.from('app_documents').select('key').limit(1);
+            const ping = await window.supabaseClient.from('app_health').select('id').limit(1);
+            if (ping && ping.error) await window.supabaseClient.from('app_documents').select('key').limit(1);
             success = true;
         }
     } catch(e) { console.error("Ping failed", e); }
@@ -1789,7 +1919,6 @@ window.republishLocalChangesToCloud = async function(options = {}) {
         'attendance_records',
         'accessLogs',
         'auditLogs',
-        'error_reports',
         'network_diagnostics',
         'nps_responses',
         'graduated_agents',
@@ -2473,6 +2602,7 @@ async function saveToServer(targetKeys = null, force = false, silent = false) {
     }
 
     let keysToQueue = targetKeys || Object.keys(DB_SCHEMA);
+    keysToQueue = (Array.isArray(keysToQueue) ? keysToQueue : []).filter(k => !DISABLED_SYNC_KEYS.has(k));
     if (!targetKeys && isTraineeRuntime()) {
         keysToQueue = keysToQueue.filter(k => TRAINEE_DEFAULT_SAVE_KEYS.has(k));
     }
@@ -2597,6 +2727,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             const hasExplicitSaveRequest = EXPLICIT_SAVE_KEYS.has(key);
             const isCriticalExplicitSave = hasExplicitSaveRequest && CRITICAL_EXPLICIT_SAVE_KEYS.has(key);
             const keyForce = force || (isStrictServerKey && hasExplicitSaveRequest);
+            const isDeferredDiagnosticKey = DEFERRED_DIAGNOSTIC_ROW_KEYS.has(key);
             let localContent = safeLocalParse(key, null) || DB_SCHEMA[key];
             if (key === 'violation_reports') {
                 localContent = sanitizeViolationReportsForSync(localContent, {
@@ -2623,6 +2754,32 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                 bytesDone: pushBytesDone,
                 bytesTotal: pushBytesTotal
             });
+
+            // Shared/global keys are server-authoritative.
+            // Ignore background/autosave uploads unless this key was explicitly targeted or force=true.
+            if (isDeferredDiagnosticKey && !keyForce) {
+                if (!silent) console.log(`[Sync] Deferred diagnostic upload for key: ${key}`);
+                pushProgressDone += 1;
+                pushBytesDone += keyBytes;
+                updateSyncDiagnostics({
+                    phase: 'Deferred diagnostic key',
+                    item: key,
+                    progressDone: pushProgressDone,
+                    progressTotal: pushProgressTotal,
+                    bytesDone: pushBytesDone,
+                    bytesTotal: pushBytesTotal
+                });
+                if (hasExplicitSaveRequest) EXPLICIT_SAVE_KEYS.delete(key);
+                continue;
+            }
+            // Cap diagnostic uploads even when explicitly forced so one noisy client
+            // cannot push hundreds of heavy JSON rows in one request.
+            if (key === 'error_reports' && Array.isArray(localContent)) {
+                localContent = localContent
+                    .slice()
+                    .sort((a, b) => new Date(b.timestamp || b.date || 0) - new Date(a.timestamp || a.date || 0))
+                    .slice(0, 100);
+            }
 
             // Shared/global keys are server-authoritative.
             // Ignore background/autosave uploads unless this key was explicitly targeted or force=true.
@@ -2690,13 +2847,24 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                             currentHash = generateChecksum(JSON.stringify(item));
                         }
 
-                        if (keyForce || currentHash !== persistedHash) {
+                        // `force` means "flush immediately"; for row tables it must not mean
+                        // "rewrite every cached row", or one marking/vetting save can upload
+                        // hundreds of historical submissions and starve the live workflow.
+                        if (currentHash !== persistedHash) {
                             itemsToUpload.push({ item, currentHash });
                         }
                     });
                 }
                 
                 // 2. Upload Deltas
+                if (itemsToUpload.length > 0 && !isCriticalExplicitSave) {
+                    const backoffUntil = getRowSyncBackoffUntil(key);
+                    if (backoffUntil > Date.now()) {
+                        console.warn(`[Sync] Deferring ${tableName} upload; previous timeout is cooling down.`);
+                        itemsToUpload.length = 0;
+                    }
+                }
+
                 if (itemsToUpload.length > 0) {
                     if(!silent) console.log(`Uploading ${itemsToUpload.length} changed rows to ${tableName}`);
                     // Attempt to align local items with existing server rows for small identity-driven tables
@@ -2772,7 +2940,7 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                     }
 
                     // BATCH UPLOAD: Prevent statement timeouts on large syncs
-                    const BATCH_SIZE = 100; 
+                    const BATCH_SIZE = getRowSyncUploadBatchSize(key, tableName);
                     let uploadConfirmed = true;
                     for (let i = 0; i < uploadRows.length; i += BATCH_SIZE) {
                         const chunk = uploadRows.slice(i, i + BATCH_SIZE);
@@ -2782,6 +2950,10 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                             const { error } = await window.supabaseClient.from(tableName).upsert(chunk);
                             if (error) throw error;
                         } catch (e) {
+                            if (isStatementTimeoutError(e)) {
+                                setRowSyncBackoff(key);
+                                console.warn(`Save deferred: ${tableName} timed out; background uploads will cool down before retrying.`);
+                            }
                             // NETWORK/SERVER ERROR: Pause sync if server is vomiting HTML or 5xx
                             if (e.message && (e.message.includes('<!DOCTYPE') || e.message.includes('521') || e.message.includes('503'))) {
                                 console.warn(`Save aborted: Server unavailable (${tableName}).`);
@@ -2831,9 +3003,10 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
             else {
                 let finalContent = localContent;
                 const remoteKey = IS_DEMO_MODE ? `demo_${key}` : key;
+                let remoteContentForGuard = null;
 
                 // Optimistic Merge (Fetch -> Merge -> Push)
-                if (!keyForce) {
+                if (!keyForce || key === 'assessment_studio_data') {
                     const { data: remoteRow } = await window.supabaseClient
                         .from('app_documents')
                         .select('content')
@@ -2841,11 +3014,25 @@ async function _processSaveQueue(force = false, silent = false, retryCount = 0) 
                         .maybeSingle();
                     
                     if (remoteRow && remoteRow.content) {
+                        remoteContentForGuard = remoteRow.content;
                         const serverObj = { [key]: remoteRow.content };
                         const localObj = { [key]: localContent };
-                        const mergedObj = performSmartMerge(serverObj, localObj, 'local_wins');
-                        finalContent = mergedObj[key];
+                        if (key === 'assessment_studio_data' && hasAssessmentStudioAuthoring(remoteRow.content) && !hasAssessmentStudioAuthoring(localContent)) {
+                            const mergedObj = performSmartMerge(serverObj, localObj, 'server_wins');
+                            finalContent = mergedObj[key];
+                            console.warn('[Sync Guard] Preserved Assessment Studio server authoring; local payload only carried submissions.');
+                        } else if (!keyForce) {
+                            const mergedObj = performSmartMerge(serverObj, localObj, 'local_wins');
+                            finalContent = mergedObj[key];
+                        }
                     }
+                }
+
+                if (key === 'assessment_studio_data' && remoteContentForGuard && hasAssessmentStudioAuthoring(remoteContentForGuard) && !hasAssessmentStudioAuthoring(finalContent)) {
+                    const guardError = new Error('Refusing to upload Assessment Studio data with empty authoring over non-empty server authoring.');
+                    guardError.nonRetryableSyncGuard = true;
+                    guardError.syncKey = key;
+                    throw guardError;
                 }
 
                 if (key === 'violation_reports') {
@@ -3344,10 +3531,13 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                     .find(Boolean);
                 return Date.parse(value || 0) || 0;
             };
-            const mergeAuthoritativeById = (serverItems, localItems, dateFields) => {
+            const mergeAuthoritativeById = (serverItems, localItems, dateFields, options = {}) => {
+                const serverList = Array.isArray(serverItems) ? serverItems : [];
+                const localList = Array.isArray(localItems) ? localItems : [];
+                if (options.preserveLocalWhenServerEmpty && serverList.length === 0 && localList.length > 0) return localList;
                 if (strategy === 'server_wins') {
                     const remoteMap = new Map();
-                    (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
+                    serverList.forEach(item => {
                         if (!item || typeof item !== 'object') return;
                         const id = String(item.id || '');
                         if (id) remoteMap.set(id, item);
@@ -3356,13 +3546,13 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
                 }
 
                 const localMap = new Map();
-                (Array.isArray(localItems) ? localItems : []).forEach(item => {
+                localList.forEach(item => {
                     if (!item || typeof item !== 'object') return;
                     const id = String(item.id || '');
                     if (id) localMap.set(id, item);
                 });
 
-                (Array.isArray(serverItems) ? serverItems : []).forEach(item => {
+                serverList.forEach(item => {
                     if (!item || typeof item !== 'object') return;
                     const id = String(item.id || '');
                     if (!id || localMap.has(id)) return;
@@ -3399,11 +3589,14 @@ function performSmartMerge(server, local, strategy = 'local_wins') {
             const byUpdated = (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
             const bySubmitted = (a, b) => String(b.submittedAt || b.generatedAt || b.updatedAt || '').localeCompare(String(a.submittedAt || a.generatedAt || a.updatedAt || ''));
             const base = strategy === 'server_wins' ? { ...lVal, ...sVal } : { ...sVal, ...lVal };
-            base.questionBucket = mergeAuthoritativeById(sVal.questionBucket, lVal.questionBucket, ['updatedAt', 'createdAt']).sort(byUpdated);
-            base.generators = mergeAuthoritativeById(sVal.generators, lVal.generators, ['updatedAt', 'createdAt']).sort(byUpdated);
+            const serverAuthoringEmpty = ['questionBucket', 'generators', 'groupings', 'tags']
+                .every(field => !Array.isArray(sVal[field]) || sVal[field].length === 0);
+            const preserveLocalWhenServerEmpty = strategy === 'server_wins' && serverAuthoringEmpty;
+            base.questionBucket = mergeAuthoritativeById(sVal.questionBucket, lVal.questionBucket, ['updatedAt', 'createdAt'], { preserveLocalWhenServerEmpty }).sort(byUpdated);
+            base.generators = mergeAuthoritativeById(sVal.generators, lVal.generators, ['updatedAt', 'createdAt'], { preserveLocalWhenServerEmpty }).sort(byUpdated);
             base.submissions = mergeSubmissions(sVal.submissions, lVal.submissions, ['__status_rank__', 'updatedAt', 'gradedAt', 'submittedAt', 'generatedAt']).sort(bySubmitted);
-            base.groupings = mergeAuthoritativeById(sVal.groupings, lVal.groupings, ['updatedAt', 'createdAt']).sort(byUpdated);
-            base.tags = mergeAuthoritativeById(sVal.tags, lVal.tags, ['updatedAt', 'createdAt']).sort(byUpdated);
+            base.groupings = mergeAuthoritativeById(sVal.groupings, lVal.groupings, ['updatedAt', 'createdAt'], { preserveLocalWhenServerEmpty }).sort(byUpdated);
+            base.tags = mergeAuthoritativeById(sVal.tags, lVal.tags, ['updatedAt', 'createdAt'], { preserveLocalWhenServerEmpty }).sort(byUpdated);
             merged[key] = base;
         }
         // Case 2: Objects (Rosters, Schedules)
@@ -3445,8 +3638,11 @@ async function fetchSystemStatus() {
             if(localStorage.hasOwnProperty(key)) storageSize += localStorage[key].length;
         }
 
-        // Dummy query to measure latency accurately
-        await window.supabaseClient.from('app_documents').select('key').limit(1);
+        // Tiny health probe first; fall back for older databases that do not have app_health yet.
+        const healthProbe = await window.supabaseClient.from('app_health').select('id').limit(1);
+        if (healthProbe && healthProbe.error) {
+            await window.supabaseClient.from('app_documents').select('key').limit(1);
+        }
 
         const end = Date.now();
         const latency = end - start;
@@ -3488,7 +3684,13 @@ async function fetchSystemStatus() {
         });
 
         const idleThreshold = (typeof IDLE_THRESHOLD !== 'undefined' && Number.isFinite(IDLE_THRESHOLD)) ? IDLE_THRESHOLD : 60000;
+        const isSignedOutSessionRow = (row) => {
+            const activity = String(row && row.activity || '').toLowerCase();
+            return activity.includes('signed out') || activity.includes('logout');
+        };
+
         sessionUsers.forEach(row => {
+            if (isSignedOutSessionRow(row)) return;
             const name = row.username || row.user;
             const key = toIdentity(name);
             if (!key) return;
@@ -3773,9 +3975,12 @@ async function sendHeartbeat(forceInit = false) {
             window.PRESENCE_CHANNEL.track(payload).catch(()=>{});
         }
         
-        // 2. BACKUP DB WRITE (Frequent enough to keep active monitor live even if Presence tunnel degrades)
+        // 2. BACKUP DB WRITE (kept conservative so many online clients do not flood the DB)
         const lastDbWrite = parseInt(sessionStorage.getItem('last_db_heartbeat') || '0');
-        if ((typeof forceInit !== 'undefined' && forceInit) || Date.now() - lastDbWrite > 15000) {
+        const dbHeartbeatMinInterval = CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'super_admin')
+            ? 30000
+            : 60000;
+        if ((typeof forceInit !== 'undefined' && forceInit) || Date.now() - lastDbWrite > dbHeartbeatMinInterval) {
             sessionStorage.setItem('last_db_heartbeat', Date.now().toString());
             try {
                 await window.supabaseClient.from('sessions').upsert({
@@ -3799,16 +4004,28 @@ async function sendHeartbeat(forceInit = false) {
         }
             
         // 3. Remote Commands
-        const { data: sessionData } = await window.supabaseClient
-            .from('sessions')
-            .select('pending_action')
-            .eq('username', CURRENT_USER.user) // New Schema
-            .single();
-            
-        if (sessionData && sessionData.pending_action) {
-            // Clear command first to prevent loops
-            await window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', CURRENT_USER.user);
-            executePendingSessionAction(sessionData.pending_action);
+        // Realtime sessions updates execute commands immediately. This poll is now
+        // only a conservative fallback so active clients do not query sessions every heartbeat.
+        const lastCommandPoll = parseInt(sessionStorage.getItem('last_session_command_poll') || '0');
+        const realtimeHealthy = window.REALTIME_LAST_STATUS === 'SUBSCRIBED'
+            && Date.now() - (window.REALTIME_LAST_HEALTHY_AT || 0) < 90000;
+        const commandPollDue = (typeof forceInit !== 'undefined' && forceInit)
+            || !realtimeHealthy
+            || Date.now() - lastCommandPoll > 60000;
+
+        if (commandPollDue) {
+            sessionStorage.setItem('last_session_command_poll', Date.now().toString());
+            const { data: sessionData } = await window.supabaseClient
+                .from('sessions')
+                .select('pending_action')
+                .eq('username', CURRENT_USER.user)
+                .single();
+
+            if (sessionData && sessionData.pending_action) {
+                // Clear command first to prevent loops
+                await window.supabaseClient.from('sessions').update({ pending_action: null }).eq('username', CURRENT_USER.user);
+                executePendingSessionAction(sessionData.pending_action);
+            }
         }
     } catch (e) { /* Silent fail */ }
 }
@@ -4027,6 +4244,18 @@ function subscribeToDocKey(docKey, onContent) {
 window.REALTIME_LAST_FULL_FALLBACK_AT = window.REALTIME_LAST_FULL_FALLBACK_AT || 0;
 const REALTIME_FULL_FALLBACK_INTERVAL_MS = 600000;
 
+function isRealtimeFallbackServerOutage(error) {
+    const status = Number(error?.status || error?.code || error?.details?.status || 0);
+    const message = String(error?.message || error?.details || error || '').toLowerCase();
+    return status === 502
+        || status === 503
+        || status === 504
+        || message.includes('service unavailable')
+        || message.includes('schema cache')
+        || message.includes('socket closed')
+        || message.includes('transport failure');
+}
+
 async function runRealtimeFallbackPoll() {
     if (!window.supabaseClient) return;
     if (window.REALTIME_FALLBACK_POLL_IN_FLIGHT) return;
@@ -4041,29 +4270,34 @@ async function runRealtimeFallbackPoll() {
                 .select('*')
                 .limit(limit);
             if (error) throw error;
-            return Array.isArray(data) ? data : [];
+            return { table, rows: Array.isArray(data) ? data : [], outage: false };
         } catch (error) {
             console.warn(`[Realtime Tunnel] Targeted fallback read skipped for ${table}:`, error.message || error);
-            return null;
+            return { table, rows: null, outage: isRealtimeFallbackServerOutage(error) };
         }
     };
 
     try {
-        const [sessionRows, liveSessionRows, vettingRows, vettingRowsV2] = await Promise.all([
-            fetchRows('sessions', 500),
-            fetchRows('live_sessions', 250),
-            fetchRows('vetting_sessions', 150),
-            fetchRows('vetting_sessions_v2', 150)
-        ]);
+        const results = [];
+        let outageReads = 0;
+        for (const target of REALTIME_FALLBACK_TARGETS) {
+            const result = await fetchRows(target.table, target.limit);
+            results.push({ ...target, ...result });
+            if (result.outage) outageReads += 1;
+            if (outageReads >= 2) {
+                console.warn('[Realtime Tunnel] Fallback poll paused early; server is returning outage/schema-cache errors.');
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 120));
+        }
 
-        const targetedResults = [sessionRows, liveSessionRows, vettingRows, vettingRowsV2];
-        const successfulReads = targetedResults.filter(Array.isArray).length;
-        const failedReads = targetedResults.length - successfulReads;
+        const successfulReads = results.filter(result => Array.isArray(result.rows)).length;
+        const failedReads = results.length - successfulReads;
 
-        if (Array.isArray(sessionRows)) sessionRows.forEach(row => handleSessionRealtime({ eventType: 'UPDATE', table: 'sessions', new: row }));
-        if (Array.isArray(liveSessionRows)) liveSessionRows.forEach(row => handleLiveSessionRealtime({ eventType: 'UPDATE', table: 'live_sessions', new: row }));
-        if (Array.isArray(vettingRows)) vettingRows.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions', new: row }));
-        if (Array.isArray(vettingRowsV2)) vettingRowsV2.forEach(row => handleVettingRealtime({ eventType: 'UPDATE', table: 'vetting_sessions_v2', new: row }));
+        results.forEach(result => {
+            if (!Array.isArray(result.rows)) return;
+            result.rows.forEach(row => result.handler({ eventType: 'UPDATE', table: result.table, new: row }));
+        });
 
         if (successfulReads === 0) {
             const nextRate = Math.min(
@@ -4133,7 +4367,7 @@ function startRealtimeSync(options = {}) {
     const fallbackRates = rawFallbackRates[activeTarget]
         ? rawFallbackRates[activeTarget]
         : (typeof rawFallbackRates.admin !== 'undefined' ? rawFallbackRates : (fallbackDefaults[activeTarget] || fallbackDefaults.cloud));
-    const beats = config.heartbeat_rates || { admin: 5000, default: 60000 };
+    const beats = config.heartbeat_rates || { admin: 15000, default: 60000 };
 
     // Default Rates (Trainee/Guest)
     let syncRate = rates.trainee; 
@@ -4293,6 +4527,18 @@ function schedulePresenceReconnect() {
 }
 
 function getRealtimeTableList() {
+    const lowPriorityRealtimeTables = new Set([
+        'audit_logs',
+        'access_logs',
+        'error_reports',
+        'monitor_history',
+        'network_diagnostics',
+        'saved_reports',
+        'insight_reviews',
+        'archived_users',
+        'tl_task_submissions',
+        'nps_responses'
+    ]);
     const tables = new Set([
         'app_documents',
         'monitor_state',
@@ -4305,6 +4551,7 @@ function getRealtimeTableList() {
     ]);
 
     Object.values(ROW_MAP || {}).forEach(table => {
+        if (lowPriorityRealtimeTables.has(table)) return;
         if (table) tables.add(table);
     });
 
@@ -4442,8 +4689,6 @@ function setupRealtimeListeners(options = {}) {
         addBinding('live_bookings', 'trainee', currentUser);
         addBinding('link_requests', 'trainee', currentUser);
         addBinding('exemptions', 'trainee', currentUser);
-        addBinding('monitor_history', 'user_id', currentUser);
-        addBinding('nps_responses', 'user_id', currentUser);
         addBinding('live_sessions');
         addBinding('vetting_sessions');
         addBinding('vetting_sessions_v2');
@@ -5332,8 +5577,12 @@ function handleSessionRealtime(payload) {
     const row = payload.new || payload.old;
     if (row && (row.username || row.user)) {
         const uName = row.username || row.user;
+        const lastSeenTs = row.lastSeen ? new Date(row.lastSeen).getTime() : 0;
+        const inactiveRow = String(row.activity || '').toLowerCase().includes('signed out')
+            || String(row.activity || '').toLowerCase().includes('logout')
+            || (lastSeenTs && Date.now() - lastSeenTs > 180000);
 
-        if (eventType === 'DELETE') {
+        if (eventType === 'DELETE' || inactiveRow) {
             if (window.ACTIVE_USERS_CACHE && window.ACTIVE_USERS_CACHE[uName]) {
                 delete window.ACTIVE_USERS_CACHE[uName];
             }
@@ -5454,7 +5703,7 @@ function refreshSubmissionDrivenUI() {
 
 function handleRowRealtime(payload) {
     if (isTraineeRuntime()) {
-        const traineeTables = new Set(['records', 'submissions', 'live_bookings', 'live_sessions', 'attendance', 'monitor_history', 'link_requests', 'exemptions', 'nps_responses']);
+        const traineeTables = new Set(['records', 'submissions', 'live_bookings', 'live_sessions', 'attendance', 'link_requests', 'exemptions']);
         if (!traineeTables.has(String(payload?.table || ''))) return;
     }
     if (payload.table === 'submissions' && applyGenericRowRealtimePayload(payload)) {
@@ -5746,7 +5995,10 @@ if (typeof module !== 'undefined' && module.exports) {
         validateServerAuthorityBlob,
         writeServerAuthorityBlobToLocal,
         updateSyncDiagnostics,
-        isHighPriorityIncomingPayload
+        isHighPriorityIncomingPayload,
+        getRealtimeTableList,
+        runRealtimeFallbackPoll,
+        isRealtimeFallbackServerOutage
     };
 }
 

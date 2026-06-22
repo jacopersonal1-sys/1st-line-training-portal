@@ -117,14 +117,26 @@ const StudioData = {
         if (!AppContext.supabase) return;
         if (this.state.unsubscribe) this.state.unsubscribe();
 
+        const lowPriorityRealtimeTables = new Set([
+            'audit_logs',
+            'access_logs',
+            'error_reports',
+            'monitor_history',
+            'network_diagnostics',
+            'saved_reports',
+            'insight_reviews',
+            'archived_users',
+            'tl_task_submissions',
+            'nps_responses'
+        ]);
         const watchedTables = new Set(['app_documents']);
         Object.values(this.sourceCatalog)
             .filter(source => source.type === 'row')
+            .filter(source => !lowPriorityRealtimeTables.has(source.table))
             .forEach(source => watchedTables.add(source.table));
 
-        const channel = AppContext.supabase
-            .channel('superadmin_data_studio_live')
-            .on('postgres_changes', { event: '*', schema: 'public' }, payload => {
+        const channel = AppContext.supabase.channel('superadmin_data_studio_live');
+        const routePayload = payload => {
                 const table = payload.table || 'unknown';
                 if (!watchedTables.has(table)) return;
 
@@ -139,8 +151,13 @@ const StudioData = {
                     }
                     if (typeof onUpdate === 'function') onUpdate();
                 }, 250);
-            })
-            .subscribe(status => {
+            };
+
+        watchedTables.forEach(table => {
+            channel.on('postgres_changes', { event: '*', schema: 'public', table }, routePayload);
+        });
+
+        channel.subscribe(status => {
                 this.state.liveConnected = status === 'SUBSCRIBED';
                 if (typeof onUpdate === 'function') onUpdate();
             });

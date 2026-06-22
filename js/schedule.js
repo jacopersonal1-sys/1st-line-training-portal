@@ -32,6 +32,23 @@ function scheduleReadObject(key, fallback = {}) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
 }
 
+async function scheduleUpsertRowTableItems(tableName, items) {
+    if (!window.supabaseClient) return false;
+    const safeItems = (Array.isArray(items) ? items : [items]).filter(item => item && item.id);
+    if (safeItems.length === 0) return true;
+
+    const nowIso = new Date().toISOString();
+    const rows = safeItems.map(item => ({
+        id: item.id,
+        data: item,
+        trainee: item.trainee || item.user || null,
+        updated_at: nowIso
+    }));
+    const { error } = await window.supabaseClient.from(tableName).upsert(rows);
+    if (error) throw error;
+    return true;
+}
+
 const LIVE_BOOKING_TIME_SLOTS = [
     "8:00 AM",
     "9:00 AM",
@@ -2096,6 +2113,8 @@ window.runLiveSessionStaleRecovery = async function() {
     let closedCount = 0;
     let recoveredSubmissionCount = 0;
     let recoveredRecordCount = 0;
+    const changedSubmissions = [];
+    const changedRecords = [];
 
     const findGroupForTrainee = (traineeName) => {
         const normalized = normalizeScheduleText(traineeName);
@@ -2168,8 +2187,10 @@ window.runLiveSessionStaleRecovery = async function() {
 
             if (existingSubIdx > -1) {
                 submissions[existingSubIdx] = { ...submissions[existingSubIdx], ...submissionPayload };
+                changedSubmissions.push(submissions[existingSubIdx]);
             } else {
                 submissions.push(submissionPayload);
+                changedSubmissions.push(submissionPayload);
                 recoveredSubmissionCount++;
             }
 
@@ -2203,8 +2224,10 @@ window.runLiveSessionStaleRecovery = async function() {
 
             if (existingRecordIdx > -1) {
                 records[existingRecordIdx] = { ...records[existingRecordIdx], ...recordPayload };
+                changedRecords.push(records[existingRecordIdx]);
             } else {
                 records.push(recordPayload);
+                changedRecords.push(recordPayload);
                 recoveredRecordCount++;
             }
         }
@@ -2235,7 +2258,20 @@ window.runLiveSessionStaleRecovery = async function() {
     if (typeof emitDataChange === 'function') emitDataChange('liveSessions', 'stale_recovery_cleanup');
 
     if (typeof saveToServer === 'function') {
-        await saveToServer(['liveSessions', 'submissions', 'records'], true);
+        let directSynced = false;
+        try {
+            const submissionsSynced = await scheduleUpsertRowTableItems('submissions', changedSubmissions);
+            const recordsSynced = await scheduleUpsertRowTableItems('records', changedRecords);
+            directSynced = submissionsSynced && recordsSynced;
+        } catch (error) {
+            console.warn('Live stale recovery direct row sync failed:', error);
+        }
+        if (directSynced) {
+            Promise.resolve(saveToServer(['liveSessions', 'submissions', 'records'], false, true))
+                .catch(error => console.warn('Live stale recovery background sync failed:', error));
+        } else {
+            await saveToServer(['liveSessions', 'submissions', 'records'], true);
+        }
     }
 
     if (typeof renderLiveTable === 'function') renderLiveTable();
@@ -2280,6 +2316,8 @@ window.runLiveRecordLinkRepair = async function() {
     let created = 0;
     let updated = 0;
     let bookingUpdates = 0;
+    const changedRecords = [];
+    const changedBookings = [];
 
     liveSubs.forEach(sub => {
         const recordId = `record_${sub.id}`;
@@ -2313,9 +2351,11 @@ window.runLiveRecordLinkRepair = async function() {
 
         if (existingIdx > -1) {
             records[existingIdx] = { ...records[existingIdx], ...payload, id: records[existingIdx].id };
+            changedRecords.push(records[existingIdx]);
             updated++;
         } else {
             records.push(payload);
+            changedRecords.push(payload);
             created++;
         }
 
@@ -2334,6 +2374,7 @@ window.runLiveRecordLinkRepair = async function() {
                 if (changed) {
                     booking.lastModified = nowIso;
                     booking.modifiedBy = CURRENT_USER?.user || 'live_record_repair';
+                    changedBookings.push(booking);
                     bookingUpdates++;
                 }
             }
@@ -2344,7 +2385,20 @@ window.runLiveRecordLinkRepair = async function() {
     localStorage.setItem('liveBookings', JSON.stringify(bookings));
 
     if (typeof saveToServer === 'function') {
-        await saveToServer(['records', 'liveBookings'], true);
+        let directSynced = false;
+        try {
+            const recordsSynced = await scheduleUpsertRowTableItems('records', changedRecords);
+            const bookingsSynced = await scheduleUpsertRowTableItems('live_bookings', changedBookings);
+            directSynced = recordsSynced && bookingsSynced;
+        } catch (error) {
+            console.warn('Live record repair direct row sync failed:', error);
+        }
+        if (directSynced) {
+            Promise.resolve(saveToServer(['records', 'liveBookings'], false, true))
+                .catch(error => console.warn('Live record repair background sync failed:', error));
+        } else {
+            await saveToServer(['records', 'liveBookings'], true);
+        }
     }
 
     if (typeof showToast === 'function') {
@@ -2362,8 +2416,12 @@ window.runLiveBookingAutoRepair = async function() {
     const nowIso = new Date().toISOString();
     const validStatuses = new Set(['Booked', 'Completed', 'Cancelled']);
     let changeCount = 0;
+    const touchedBookingIds = new Set();
 
-    const markChanged = () => { changeCount++; };
+    const markChanged = (booking = null) => {
+        changeCount++;
+        if (booking && booking.id) touchedBookingIds.add(String(booking.id));
+    };
     const cancelForRepair = (booking, reason) => {
         if (!booking || booking.status === 'Cancelled') return;
         booking.status = 'Cancelled';
@@ -2372,23 +2430,23 @@ window.runLiveBookingAutoRepair = async function() {
         booking.cancelledReason = reason;
         booking.lastModified = nowIso;
         booking.modifiedBy = CURRENT_USER?.user || 'system_auto_repair';
-        markChanged();
+        markChanged(booking);
     };
 
     bookings.forEach(booking => {
         if (!booking.id) {
             booking.id = createLiveBookingId();
-            markChanged();
+            markChanged(booking);
         }
         if (!validStatuses.has(booking.status || '')) {
             booking.status = 'Booked';
-            markChanged();
+            markChanged(booking);
         }
         if (!booking.assessmentId) {
             const mapped = catalog.byTitle.get(normalizeScheduleText(booking.assessment));
             if (mapped && mapped.id) {
                 booking.assessmentId = mapped.id;
-                markChanged();
+                markChanged(booking);
             }
         }
         booking.lastModified = booking.lastModified || nowIso;
@@ -2410,7 +2468,7 @@ window.runLiveBookingAutoRepair = async function() {
         group.forEach(item => {
             if (item.__tmpKey !== keeper.__tmpKey) removedKeys.add(item.__tmpKey);
         });
-        markChanged();
+        markChanged(keeper);
     });
     let repaired = bookings.filter(b => !removedKeys.has(b.__tmpKey));
 
@@ -2468,7 +2526,19 @@ window.runLiveBookingAutoRepair = async function() {
     renderLiveTable();
 
     if (typeof saveToServer === 'function') {
-        await saveToServer(['liveBookings'], true);
+        let directSynced = false;
+        const changedBookings = repaired.filter(booking => booking?.id && touchedBookingIds.has(String(booking.id)));
+        try {
+            directSynced = await scheduleUpsertRowTableItems('live_bookings', changedBookings);
+        } catch (error) {
+            console.warn('Live booking auto-repair direct row sync failed:', error);
+        }
+        if (directSynced) {
+            Promise.resolve(saveToServer(['liveBookings'], false, true))
+                .catch(error => console.warn('Live booking auto-repair background sync failed:', error));
+        } else {
+            await saveToServer(['liveBookings'], true);
+        }
     }
 
     if (typeof showToast === 'function') {

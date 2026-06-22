@@ -564,7 +564,7 @@ async function deleteHistorySubmission(id) {
     }
     // Force sync to ensure deletion propagates immediately (fallback to realtime)
     if (typeof saveToServer === 'function') {
-        Promise.resolve(saveToServer(['submissions', 'records'], true)).catch(err => console.warn('Delete sync failed:', err));
+        Promise.resolve(saveToServer(['submissions', 'records'], false, true)).catch(err => console.warn('Delete sync failed:', err));
     }
 
     // FIX: Blur active element to prevent Electron focus loss

@@ -235,11 +235,13 @@
             ));
             if (!hasLinkedRecord) {
                 // Legacy safety: older rows may use non-deterministic record IDs.
+                // Keep this bounded; during server pressure a wide records scan can
+                // delay Vetting completion and add load to the shared sync path.
                 const { data: traineeRecords, error: legacyErr } = await window.supabaseClient
                     .from('records')
                     .select('id, data')
                     .eq('trainee', username)
-                    .limit(5000);
+                    .limit(250);
                 if (legacyErr) throw legacyErr;
                 hasLinkedRecord = Array.isArray(traineeRecords) && traineeRecords.some(r =>
                     r &&

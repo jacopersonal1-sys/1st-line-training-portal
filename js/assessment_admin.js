@@ -770,11 +770,11 @@ async function approveSubmission(subId) {
     const savedRecord = existingIdx > -1 ? recs[existingIdx] : newRecord;
     
     try {
-        if (typeof saveToServer === 'function') {
-            const synced = await saveToServer(['submissions', 'records'], true);
-            if (synced === false) throw new Error('Critical approval sync failed.');
-        }
         await ensureMarkedAssessmentRowsOnServer(sub, savedRecord);
+        if (typeof saveToServer === 'function') {
+            Promise.resolve(saveToServer(['submissions', 'records'], false, true))
+                .catch(error => console.warn('Quick approve background sync failed:', error));
+        }
     } catch (error) {
         console.error("Quick approve sync failed:", error);
         window._isApproving = null;
@@ -1274,11 +1274,11 @@ async function finalizeAdminMarking(subId) {
     const savedRecord = existingIdx > -1 ? records[existingIdx] : newRecord;
 
     try {
-        if (typeof saveToServer === 'function') {
-            const synced = await saveToServer(['submissions', 'records'], true);
-            if (synced === false) throw new Error('Critical marking sync failed.');
-        }
         await ensureMarkedAssessmentRowsOnServer(sub, savedRecord);
+        if (typeof saveToServer === 'function') {
+            Promise.resolve(saveToServer(['submissions', 'records'], false, true))
+                .catch(error => console.warn('Final marking background sync failed:', error));
+        }
     } catch (error) {
         console.error("Final marking sync failed:", error);
         alert("The marking was saved locally, but it could not sync to the server. Please check connection before closing this review.");

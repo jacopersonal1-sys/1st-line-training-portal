@@ -796,7 +796,7 @@ function loadTraineeTests() {
 /**
  * 4. TEST TAKER: UI RENDERING & SUBMISSION
  */
-function openTestTaker(testId, isArenaMode = false, options = {}) {
+async function openTestTaker(testId, isArenaMode = false, options = {}) {
     const launchOptions = (options && typeof options === 'object') ? options : {};
     const popupMode = !!launchOptions.popupMode;
     const manualAssignment = launchOptions.manualAssignment && typeof launchOptions.manualAssignment === 'object' ? launchOptions.manualAssignment : null;
@@ -810,7 +810,7 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
     const test = tests.find(t => t.id == testId);
     if (!test) return;
     const contentStudioContext = normalizeContentStudioContext(launchOptions.contentStudioContext, test) || null;
-    const launchContext = manualAssignmentId
+    let launchContext = manualAssignmentId
         ? {
             ...(contentStudioContext || {}),
             manualAssignmentId,
@@ -921,13 +921,23 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
             existing.status = existing.status === 'completed' ? 'retake_allowed' : existing.status;
             existing.lastModified = new Date().toISOString();
             localStorage.setItem('submissions', JSON.stringify(subs));
-            if (typeof saveToServer === 'function') saveToServer(['submissions'], true, true);
+            ensureSubmissionRowsOnServer(existing)
+                .then(directSynced => {
+                    if (typeof saveToServer === 'function') return saveToServer(['submissions'], directSynced ? false : true, true);
+                    return true;
+                })
+                .catch(error => console.warn('Legacy submission archive sync failed:', error));
         } else if (isArenaMode || isRepeatableQuiz) {
             // Quiz questionnaires are repeatable by design.
             existing.archived = true;
             existing.lastModified = new Date().toISOString();
             localStorage.setItem('submissions', JSON.stringify(subs));
-            if (typeof saveToServer === 'function') saveToServer(['submissions'], true, true);
+            ensureSubmissionRowsOnServer(existing)
+                .then(directSynced => {
+                    if (typeof saveToServer === 'function') return saveToServer(['submissions'], directSynced ? false : true, true);
+                    return true;
+                })
+                .catch(error => console.warn('Repeatable submission archive sync failed:', error));
         } else {
             if(typeof showToast === 'function') showToast("You have already completed this assessment. Please contact your Admin if you require a retake.", "info");
             return;
@@ -948,11 +958,37 @@ function openTestTaker(testId, isArenaMode = false, options = {}) {
         window.TEST_POPUP_RETURN_TAB = '';
     }
 
+    if (window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.claimForAssessment === 'function') {
+        const claim = await window.DeviceAssessmentSessions.claimForAssessment({
+            type: 'test_engine',
+            id: String(test.id || ''),
+            title: test.title || ''
+        });
+        if (claim && claim.required && !claim.ok) return;
+        if (claim && claim.session) {
+            launchContext = { ...(launchContext || {}), deviceSession: claim.session };
+        } else if (launchContext) {
+            launchContext.deviceSession = null;
+        }
+    }
+
     window.CURRENT_TEST = JSON.parse(JSON.stringify(test)); 
     window.CURRENT_TEST_CONTEXT = launchContext;
     if (manualAssignmentId && typeof markManualAssessmentAssignmentStarted === 'function') {
-        markManualAssessmentAssignmentStarted(manualAssignmentId);
-        if (typeof saveToServer === 'function') Promise.resolve(saveToServer(['manual_assessment_assignments'], true, true)).catch(() => {});
+        const assignment = markManualAssessmentAssignmentStarted(manualAssignmentId);
+        if (assignment && typeof syncManualAssessmentAssignmentRowOnServer === 'function') {
+            Promise.resolve(syncManualAssessmentAssignmentRowOnServer(assignment))
+                .then(directSynced => {
+                    if (typeof saveToServer === 'function') return saveToServer(['manual_assessment_assignments'], directSynced ? false : true, true);
+                    return true;
+                })
+                .catch(() => {
+                    if (typeof saveToServer === 'function') return saveToServer(['manual_assessment_assignments'], true, true);
+                    return true;
+                });
+        } else if (typeof saveToServer === 'function') {
+            Promise.resolve(saveToServer(['manual_assessment_assignments'], true, true)).catch(() => {});
+        }
     }
     
     window.CURRENT_TEST.questions.forEach((q, i) => q._originalIndex = i);
@@ -1056,6 +1092,7 @@ function renderTestPaper(containerId = 'takingQuestions') {
                 <span><i class="fas fa-list-ol"></i> ${totalQuestions} Questions</span>
                 <span><i class="fas fa-save"></i> Auto-save enabled</span>
             </div>
+            ${window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.renderContext === 'function' ? window.DeviceAssessmentSessions.renderContext(window.CURRENT_TEST_CONTEXT && window.CURRENT_TEST_CONTEXT.deviceSession) : ''}
         </div>
     `;
 
@@ -1182,7 +1219,8 @@ async function submitTest(forceSubmit = false, options = {}) {
         legacyExisting.lastModified = new Date().toISOString();
         localStorage.setItem('submissions', JSON.stringify(subs));
         if (typeof saveToServer === 'function') {
-            await saveToServer(['submissions'], true);
+            const directSynced = await ensureSubmissionRowsOnServer(legacyExisting);
+            await saveToServer(['submissions'], directSynced ? false : true, true);
         }
     }
     const isRepeatableQuiz = String(window.CURRENT_TEST?.type || '').trim().toLowerCase() === 'quiz';
@@ -1200,7 +1238,8 @@ async function submitTest(forceSubmit = false, options = {}) {
             existing.lastModified = new Date().toISOString();
             localStorage.setItem('submissions', JSON.stringify(subs));
             if (typeof saveToServer === 'function') {
-                await saveToServer(['submissions'], true);
+                const directSynced = await ensureSubmissionRowsOnServer(existing);
+                await saveToServer(['submissions'], directSynced ? false : true, true);
             }
         } else if (!forceSubmit) {
             alert("Error: Active submission already exists. Ask your Admin to click 'Allow Retake' on your previous attempt."); 
@@ -1284,6 +1323,10 @@ async function submitTest(forceSubmit = false, options = {}) {
     localStorage.setItem('submissions', JSON.stringify(subs));
     localSubmissionSaved = true;
     savedSubmissionForVerification = submission;
+    if (window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.markRequiresAttention === 'function' && window.CURRENT_TEST_CONTEXT?.deviceSession) {
+        window.DeviceAssessmentSessions.markRequiresAttention(window.CURRENT_TEST_CONTEXT.deviceSession, submission.id)
+            .catch(error => console.warn('Device assessment session status update failed:', error));
+    }
 
     localStorage.removeItem('draft_assessment');
 
@@ -1347,14 +1390,21 @@ async function submitTest(forceSubmit = false, options = {}) {
     }
 
     if (typeof saveToServer === 'function') {
-        // Final submissions are business-critical, so do not leave them on the debounced queue.
         const saveKeys = submission.manualAssignmentId
             ? ['submissions', 'records', 'manual_assessment_assignments']
             : ['submissions', 'records'];
-        const synced = await saveToServer(saveKeys, true);
-        if (synced === false) throw new Error('Critical submission sync failed.');
+        const directSynced = await ensureSubmissionRowsOnServer(savedSubmissionForVerification, savedRecordForVerification);
+        if (directSynced) {
+            Promise.resolve(saveToServer(saveKeys, false, true))
+                .catch(error => console.warn('Submission background sync failed:', error));
+        } else {
+            // Fallback for older/offline test harnesses and sessions without direct row access.
+            const synced = await saveToServer(saveKeys, true);
+            if (synced === false) throw new Error('Critical submission sync failed.');
+        }
+    } else {
+        await ensureSubmissionRowsOnServer(savedSubmissionForVerification, savedRecordForVerification);
     }
-    await ensureSubmissionRowsOnServer(savedSubmissionForVerification, savedRecordForVerification);
     if (savedSubmissionForVerification && savedSubmissionForVerification.id) {
         markAssessmentSubmissionUploadStatus(savedSubmissionForVerification.id, '', '');
     }

@@ -6559,6 +6559,7 @@ body.study-overlay-active .user-footer {
     padding: 22px;
     background: rgba(0, 0, 0, 0.28);
     backdrop-filter: blur(7px);
+    pointer-events: none;
 }
 .app-busy-overlay.hidden,
 .embedded-program-loading.hidden {
@@ -8203,7 +8204,7 @@ body.theme-one-ui .app-loading-spinner {
 
 .ast-trainee-workspace {
     display: grid;
-    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
     min-height: calc(100vh - 190px);
 }
 
@@ -8268,9 +8269,10 @@ body.theme-one-ui .app-loading-spinner {
 }
 
 .ast-trainee-paper {
-    width: min(100%, 980px);
+    width: min(100%, 1180px);
     margin: 0 auto;
-    padding: 24px;
+    padding: 24px 24px 112px;
+    min-width: 0;
 }
 
 .ast-trainee-question {
@@ -8280,6 +8282,8 @@ body.theme-one-ui .app-loading-spinner {
     border-radius: 8px;
     background: var(--bg-card);
     box-shadow: var(--shadow-card);
+    min-width: 0;
+    scroll-margin-top: 92px;
 }
 
 .ast-trainee-question-head {
@@ -8391,16 +8395,17 @@ body.theme-one-ui .app-loading-spinner {
 .ast-matrix-scroll {
     width: 100%;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 0 0 8px;
+    overscroll-behavior-x: contain;
+    scrollbar-gutter: stable;
 }
 
 .ast-matrix-grid {
     display: grid;
-    grid-template-columns: minmax(130px, 0.8fr) repeat(var(--ast-matrix-cols, 1), minmax(150px, 1fr));
-    min-width: min(100%, calc(130px + (var(--ast-matrix-cols, 1) * 150px)));
+    grid-template-columns: minmax(var(--ast-matrix-row-min, 150px), 0.9fr) repeat(var(--ast-matrix-cols, 1), minmax(var(--ast-matrix-col-min, 96px), 1fr));
+    min-width: max(100%, calc(var(--ast-matrix-row-min, 150px) + (var(--ast-matrix-cols, 1) * var(--ast-matrix-col-min, 96px))));
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    overflow: hidden;
     background: var(--bg-input);
 }
 
@@ -8417,7 +8422,7 @@ body.theme-one-ui .app-loading-spinner {
 .ast-matrix-col-head {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
     background: color-mix(in srgb, var(--bg-card) 82%, var(--bg-input));
 }
 
@@ -8432,7 +8437,11 @@ body.theme-one-ui .app-loading-spinner {
 }
 
 .ast-matrix-row-head {
+    position: sticky;
+    left: 0;
+    z-index: 1;
     background: color-mix(in srgb, var(--bg-card) 72%, var(--bg-input));
+    box-shadow: 1px 0 0 var(--border-color);
 }
 
 .ast-matrix-cell {
@@ -8441,7 +8450,7 @@ body.theme-one-ui .app-loading-spinner {
     justify-content: center;
     gap: 8px;
     min-height: 50px;
-    padding: 10px;
+    padding: 8px;
     text-align: center;
     cursor: pointer;
 }
@@ -8464,11 +8473,12 @@ body.theme-one-ui .app-loading-spinner {
 .ast-trainee-submitbar {
     position: sticky;
     bottom: 0;
+    z-index: 5;
     display: flex;
     justify-content: flex-end;
     gap: 10px;
-    padding: 14px 0 4px;
-    background: linear-gradient(to top, var(--bg-app) 72%, rgba(0, 0, 0, 0));
+    padding: 14px 0 12px;
+    background: linear-gradient(to top, var(--bg-app) 80%, rgba(0, 0, 0, 0));
 }
 
 body.theme-one-ui .assessment-studio-assignment-head,
@@ -8603,7 +8613,8 @@ body.theme-one-ui .ast-matrix-cell {
     }
 
     .ast-trainee-paper {
-        padding: 16px;
+        width: 100%;
+        padding: 16px 12px 112px;
     }
 
     .ast-trainee-question-head,
@@ -8620,6 +8631,32 @@ body.theme-one-ui .ast-matrix-cell {
     .ast-match-list select,
     .ast-rank-row select {
         min-width: 100%;
+    }
+
+    .ast-matrix-grid {
+        grid-template-columns: minmax(128px, 0.9fr) repeat(var(--ast-matrix-cols, 1), minmax(64px, 1fr));
+        min-width: max(100%, calc(128px + (var(--ast-matrix-cols, 1) * 64px)));
+    }
+
+    .ast-matrix-col-head,
+    .ast-matrix-row-head {
+        padding: 9px 8px;
+        font-size: 0.78rem;
+    }
+
+    .ast-matrix-cell {
+        min-height: 46px;
+        padding: 7px;
+    }
+
+    .ast-trainee-submitbar {
+        justify-content: stretch;
+    }
+
+    .ast-trainee-submitbar .btn-secondary,
+    .ast-trainee-submitbar .btn-primary {
+        flex: 1 1 0;
+        min-width: 0;
     }
 
     .manual-assignment-head,

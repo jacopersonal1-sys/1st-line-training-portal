@@ -23,6 +23,19 @@ function gradingReadObject(key) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+async function gradingUpsertRowTableItem(tableName, item) {
+    if (!window.supabaseClient || !item?.id) return false;
+    const row = {
+        id: item.id,
+        data: item,
+        trainee: item.trainee || item.user || null,
+        updated_at: new Date().toISOString()
+    };
+    const { error } = await window.supabaseClient.from(tableName).upsert(row);
+    if (error) throw error;
+    return true;
+}
+
 // --- SECTION 1: MANUAL SCORE CAPTURE (Physical/External) ---
 
 function loadGroupMembers() { 
@@ -593,7 +606,21 @@ async function allowRetake(subId) {
         }
 
         // --- CLOUD SYNC (Instant) ---
-        if(typeof saveToServer === 'function') await saveToServer(['submissions', 'vettingSession'], true);
+        if(typeof saveToServer === 'function') {
+            let directSynced = false;
+            try {
+                directSynced = await gradingUpsertRowTableItem('submissions', sub);
+            } catch (error) {
+                console.warn('Retake submission direct row sync failed:', error);
+            }
+            if (directSynced) {
+                Promise.resolve(saveToServer(['submissions'], false, true))
+                    .catch(error => console.warn('Retake submission background sync failed:', error));
+                await saveToServer(['vettingSession'], true);
+            } else {
+                await saveToServer(['submissions', 'vettingSession'], true);
+            }
+        }
         
         alert("Retake granted.");
         loadTestRecords();
@@ -644,7 +671,7 @@ async function deleteSubmission(id) {
     }
     // Force sync to ensure deletion propagates immediately
     if (typeof saveToServer === 'function') {
-        Promise.resolve(saveToServer(['submissions', 'records'], true)).catch(err => console.warn('Delete sync failed:', err));
+        Promise.resolve(saveToServer(['submissions', 'records'], false, true)).catch(err => console.warn('Delete sync failed:', err));
     }
 
     loadTestRecords();

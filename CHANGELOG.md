@@ -1,5 +1,230 @@
 # Changelog
 
+## 2.7.82 - 2026-06-22
+
+- **Live Assessment Start Hotfix:** Normal Test Engine assessments no longer crash on start when the Device Sessions module is loaded but the selected assessment does not require a physical router session.
+- **Verification:** Added a regression test for starting a standard trainee assessment with Device Sessions available but not required.
+
+> Release target: stable main channel.
+
+## 2.7.81 - 2026-06-22
+
+- **Assessment Studio Hard Save Guard:** Assessment Studio module saves, host fallback saves, and global blob sync now refuse or merge away any upload that would replace non-empty server Question Bucket/generator/grouping/tag data with an empty local authoring cache.
+- **Assessment Studio Database Guard:** Added `ops/assessment_studio_authoring_guard_20260622.sql` so Supabase can preserve recovered authoring arrays even if a stale client attempts an empty-authoring update.
+- **Assessment Studio Recovery Safety:** Recovered authoring rebuilt from submitted snapshots is now protected from stale clients that still have empty local caches.
+- **Verification:** Full Jest suite passed after the hard save guard.
+
+> Release target: stable main channel.
+
+## 2.7.80 - 2026-06-22
+
+- **Assessment Studio Authoring Guard:** Studio, host, global sync, and Schedule Studio merges now preserve local Question Bucket, generator, grouping, and tag data when a newer partial server document only contains submissions.
+- **Assessment Studio Recovery Note:** If a live server document was already overwritten before this build, recover authoring from server backups or submitted `testSnapshot.questions` before running the row backfill; the rebuild keeps existing submissions intact.
+- **Violation Evidence Review:** Evidence signed URL creation retries brief Storage/database timeouts before marking an image unavailable.
+- **Verification:** Full Jest suite passed after the authoring-preservation fix.
+
+> Release target: stable main channel.
+
+## 2.7.79 - 2026-06-22
+
+- **Assessment Studio Row Safety:** Super Admin Data & Logs now has a guided Assessment/Violation row backfill that previews the write plan, copies only missing or older same-state rows, and skips existing newer/completed/reviewed rows instead of overwriting live review data.
+- **Assessment Studio Load Relief:** Assessment Studio submissions and violation reports now have direct exact-row write/read paths for live-critical actions so submit, grading, lock, and review flows do not need to wake the broad document sync path.
+- **Assessment Studio Data Safety:** Studio, host, global sync, and Schedule Studio merges now preserve local Question Bucket, generator, grouping, and tag data when a newer partial server document only contains submissions, preventing authoring data from disappearing while completed/grading rows remain visible.
+- **Violation Evidence Review:** Evidence signed URL creation retries brief Storage/database timeouts before marking an image unavailable.
+- **Device-Limited Assessments:** Admin Tools adds Device Sessions for selected Test Engine or Assessment Studio assessments, allowing only the configured available router sessions to be claimed at runtime and moving completed sessions to Requires Attention for admin release/reset.
+- **Admin Load Relief:** Background Network Diagnostics now stays local-only unless the legacy cloud telemetry flag is explicitly enabled, and Super Admin orphan checks use smaller throttled ID probes for high-volume tables such as attendance.
+- **Verification:** Live lightweight row-table checks confirmed the new Assessment/Violation row tables are empty before backfill and recent legacy record/submission trainee rows have populated trainee indexes; focused row-backfill, device-session, sync, runtime, live-stats, and grading tests passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.78 - 2026-06-19
+
+- **Realtime Outage Relief:** Realtime fallback polling now reads recovery tables one at a time and stops early when Supabase is returning outage/schema-cache errors, preventing repeated parallel `sessions`, `live_sessions`, and vetting table 503 bursts.
+- **Violation Evidence Recovery:** Evidence review now keeps the modal open when an old screenshot object is missing or unsigned, showing the unavailable image slot instead of failing the whole evidence view.
+
+> Release target: stable main channel.
+
+## 2.7.77 - 2026-06-19
+
+- **Violation Evidence Load Relief:** Evidence screenshots now request signed Storage URLs one at a time instead of in parallel, reducing Storage API bursts while admins review violation evidence.
+- **Violation Evidence Cleanup Relief:** Approved evidence cleanup now deletes Storage objects and updates evidence metadata one item at a time with a small delay, reducing `544`/database timeout pressure during batch review.
+
+> Release target: stable main channel.
+
+## 2.7.76 - 2026-06-18
+
+- **Startup Recovery:** Initial cloud sync now gives cached startup priority and stops holding login behind slow Supabase row-table reads.
+- **Navigation Recovery:** High-priority tab refreshes now start cloud sync in the background instead of showing a route loader while PostgREST is timing out.
+- **Assessment Studio Grading:** Opening a grading workspace now renders the grader first and only claims the grading lock after the workspace is mounted, preventing failed opens from leaving stale "You are grading" locks.
+- **Sync Load Relief:** `link_requests` now uses the same smaller row-sync limit and timeout cooldown as the other timeout-prone row tables.
+
+> Release target: stable main channel.
+
+## 2.7.75 - 2026-06-18
+
+- **Sync Load Relief:** Row-table pulls now run with controlled concurrency instead of launching every table request at once, reducing Supabase/PostgREST bursts during login and admin navigation.
+- **Sync Recovery:** Large row tables now use smaller pull limits and apply a short cooldown after Postgres statement timeouts, preventing the app from immediately retrying the same failing `users`, `submissions`, `exemptions`, `insight_reviews`, `archived_users`, `tl_task_submissions`, or `monitor_state` query.
+- **Server Load Relief:** Normal admin navigation no longer runs the broad `records/submissions select id limit 10000` reconciliation scan unless `enable_full_row_reconcile` is explicitly enabled in local storage.
+
+> Release target: stable main channel.
+
+## 2.7.74 - 2026-06-18
+
+- **Super Admin Tools:** The Super Admin DevTools button now uses the preload IPC bridge and can open DevTools in packaged builds.
+
+> Release target: stable main channel.
+
+## 2.7.73 - 2026-06-18
+
+- **Sync Recovery:** `app_documents` pulls now fetch stale document keys one at a time instead of batching multiple JSON documents into one PostgREST request.
+- **Sync Recovery:** A single slow/timed-out document key is now skipped with a warning while the rest of the server pull continues, preventing one 500 on rosters/schedules/tests from leaving the whole app stuck at an old sync timestamp.
+
+> Release target: stable main channel.
+
+## 2.7.72 - 2026-06-18
+
+- **Sync Stability:** `error_reports` is now disabled as a live sync dataset. The app clears local legacy error-report cache, stops collecting runtime reports, and filters the key out of normal save/load queues.
+- **Server Load Relief:** Old `error_reports` database rows can no longer be pulled into normal app sync or uploaded by background runtime error capture.
+
+> Release target: stable main channel.
+
+## 2.7.71 - 2026-06-18
+
+- **Sync Stability:** Runtime error reporting is now local-first only and no longer immediately uploads `error_reports` while Supabase is already slow, preventing timeout reports from creating more timeout-producing sync calls.
+- **Sync Stability:** Normal/non-forced sync defers `error_reports` uploads, and broad local-cache republish no longer includes the timeout-prone diagnostics table.
+- **Diagnostics:** Manual sync retry now uses the tiny `app_health` probe before falling back to `app_documents`.
+
+> Release target: stable main channel.
+
+## 2.7.70 - 2026-06-18
+
+- **Trainee Session Control:** Trainee sessions now auto sign out once per day after 17:30, while still allowing the trainee to sign back in afterward if needed.
+- **Active User Reporting:** Logout/day-end session writes now mark the session row inactive, and the active-user monitor drops signed-out or stale session rows from the live cache.
+- **Diagnostics:** Supabase health checks now prefer the tiny `app_health` table and only fall back to `app_documents` when the health table is unavailable.
+
+> Release target: stable main channel.
+
+## 2.7.69 - 2026-06-18
+
+- **Sync Load Relief:** Current-version admin heartbeat loops now run at a calmer 15-second UI cadence and write DB heartbeat rows no more than every 30 seconds, reducing session-table write pressure while keeping active-user monitoring live.
+- **Assessment Studio Scoring:** Multiple-answer auto marking now only deducts for over-selecting beyond the number of correct answers. Wrong selections within the allowed answer count simply miss that option's credit, so selecting three answers with two correct on a three-correct question scores 2/3.
+- **Feedback Sessions:** Changing a feedback status now preserves the current Feedback Sessions search/filter/date controls after the save refreshes the view.
+- **Assessment Studio Trainee Uploads:** Submit now seals the completed trainee snapshot locally and returns the trainee to My Assessments without trying to upload immediately. The submitted card shows `Upload Needed` with an explicit `Upload Assessment` action, and the existing Supabase-present check still switches to re-upload recovery when the server copy is missing.
+- **Verification:** Focused Assessment Studio grading/runtime tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.68 - 2026-06-18
+
+- **Server Load Relief:** Assessment Studio grading lock heartbeats now run every two minutes with a five-minute lease instead of rewriting the full Studio document every 45 seconds, reducing pressure on the shared `assessment_studio_data` row while still releasing abandoned locks within a short window.
+- **Supabase Operations:** Added `ops/supabase_server_hotspot_diagnostics_20260618.sql` for direct Docker/psql diagnostics, autovacuum tuning, index checks, analyze, and normal `VACUUM ANALYZE` on the hot `app_documents` table.
+- **Server Compose:** Updated the Supabase server compose copy with conservative Postgres memory/checkpoint settings for the 32 GB RAM server.
+
+> Release target: stable main channel.
+
+## 2.7.67 - 2026-06-18
+
+- **Assessment Studio Trainee Uploads:** Failed trainee submissions now enter an automatic background retry queue instead of requiring repeated Re-upload clicks.
+- **Assessment Studio Trainee Uploads:** Re-upload now queues one retry with backoff and shows `Upload Queued` / `Retry Scheduled`, reducing repeated pressure on slow Supabase responses.
+- **Assessment Studio Trainee Uploads:** Queued retries use increasing delays up to two minutes and clear automatically once Supabase confirms the submitted snapshot.
+- **Verification:** Focused Assessment Studio trainee runtime tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.66 - 2026-06-18
+
+- **Assessment Studio Grading:** Admins can now add a per-question marker comment while grading each submitted Assessment Studio question.
+- **Assessment Studio Grading:** Per-question comments are saved as `questionComments` on the completed grading record and survive Assessment Studio reload/sync normalization.
+- **Verification:** Focused Assessment Studio grading tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.65 - 2026-06-18
+
+- **Assessment Studio Grading Locks:** Grading locks now use a short heartbeat lease so abandoned locks clear quickly instead of blocking other admins for 30 minutes.
+- **Assessment Studio Grading Locks:** Active grader workspaces keep their lock alive with a heartbeat, while locks whose heartbeat stops are treated as available.
+- **Assessment Studio Grading Locks:** Current admins can release their own older-session locks when returning to the queue or refreshing.
+- **Verification:** Focused Assessment Studio grading tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.64 - 2026-06-18
+
+- **Assessment Studio Grading Locks:** Opening a submission now proves that the grader workspace actually mounted before keeping the grading lock.
+- **Assessment Studio Grading Locks:** If the grader does not open after a lock claim, the app releases the lock immediately and returns the admin to the queue with a retry message.
+- **Verification:** Focused Assessment Studio grading tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.63 - 2026-06-18
+
+- **Assessment Studio Grading Locks:** Admins can now reclaim their own stranded grading lock from an older app session instead of being blocked by a stale "`name` is grading" badge.
+- **Assessment Studio Grading Locks:** Rows locked by the current admin remain actionable, while rows locked by a different admin still stay protected.
+- **Verification:** Focused Assessment Studio grading tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.62 - 2026-06-18
+
+- **Sync Freeze Guard:** The global Supabase sync overlay is now informational and no longer blocks app navigation or clicks when the server is slow.
+- **Sync Freeze Guard:** Long-running sync overlays now auto-dismiss and warn that sync is continuing in the background instead of trapping the UI.
+- **Verification:** Focused syntax/sync checks and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.61 - 2026-06-18
+
+- **Realtime Load Relief:** Trainee realtime no longer subscribes to heavy `monitor_history` and `nps_responses` row tables.
+- **Super Admin Data Studio:** Data Studio realtime now uses explicit per-table bindings and excludes low-priority diagnostic/history tables instead of listening to the whole public schema.
+- **Verification:** Focused sync/Assessment Studio tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.60 - 2026-06-18
+
+- **Assessment Studio Question Bucket:** Newly saved questions now appear immediately in the visible Question Bucket table and point totals without requiring a manual refresh.
+- **Verification:** Focused Assessment Studio grading tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.59 - 2026-06-18
+
+- **Assessment Studio Question Recovery:** Question Bucket saves now verify that the saved question exists in the Supabase Studio document after upload confirmation.
+- **Assessment Studio Question Recovery:** Bucket rows now show an `Upload Failed` badge and `Re-upload Question` action when a local question is missing, stale, or failed on Supabase.
+- **Assessment Studio Question Recovery:** Re-upload merges the single local bucket question, grouping, and tag metadata back into the shared Studio document without requiring the admin to recreate the question.
+- **Verification:** Focused Assessment Studio grading tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.58 - 2026-06-18
+
+- **Assessment Studio Question Bucket:** Saving a bucket question now commits the question locally and updates the modal/table immediately before waiting for Supabase confirmation, so a slow server no longer leaves admins clicking Save repeatedly.
+- **Assessment Studio Question Metadata:** New grouping/tag selections made while saving a question are folded into the same Studio save instead of triggering separate blocking cloud saves first.
+- **Verification:** Focused Assessment Studio grading tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.57 - 2026-06-18
+
+- **Realtime Load Relief:** Admin realtime subscriptions now keep operational tables such as `app_documents`, sessions, submissions, live sessions, and vetting active while excluding heavy diagnostic/history tables that do not need instant fan-out.
+- **Sync Load Relief:** General server pulls now skip timeout-prone diagnostic/history row tables so login, Assessment Studio, violations, and submission workflows spend less time waiting behind large background scans.
+- **Session Fallback:** Remote command checks still have a REST fallback, but the fallback is throttled when realtime is healthy instead of polling `sessions.pending_action` on every heartbeat.
+- **Assessment Studio Sync:** Embedded Studio saves now avoid the duplicate host cloud write after Supabase already confirmed the update, and legacy row-backed data opens from the row cache instead of stale app document blobs.
+- **Supabase Maintenance:** Added `ops/supabase_realtime_load_relief_20260618.sql` to trim the realtime publication, add `updated_at` indexes, and analyze the tables that were producing statement timeouts.
+- **Verification:** Focused sync tests and the full Jest suite passed before release.
+
+> Release target: stable main channel.
+
+## 2.7.56 - 2026-06-17
+
+- **Assessment Studio Feedback:** Feedback Sessions now persist the selected `None`, `Requested`, or `Received` state onto the actual Assessment Studio submission and host cache.
+- **Trainee Matrix View:** Wide matrix questions now adapt column widths, keep row labels visible while scrolling, and leave enough bottom spacing so the Save Draft / Submit bar does not cover answer rows.
+- **Trainee Runtime:** The question navigator now marks matrix, matching, and multi-answer questions as complete only when the answer is actually complete.
+- **Trainee Runtime:** Saving a draft now correctly captures cleared multi-answer/matching/matrix controls instead of leaving older stored answers behind.
+- **Verification:** Focused Assessment Studio grading, sync, and trainee runtime tests passed.
+
+> Release target: stable main channel.
+
 ## 2.7.52 - 2026-06-17
 
 - **Assessment Studio:** Question Bucket questions can now include an optional picture, either pasted as an image URL or uploaded directly in the question editor.

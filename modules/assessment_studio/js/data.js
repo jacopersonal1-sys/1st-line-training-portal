@@ -41,6 +41,13 @@ const AssessmentStudioData = {
             .replace(/^\n+|\n+$/g, '');
     },
 
+    normalizeFeedbackStatus(value) {
+        const status = String(value || '').trim().toLowerCase();
+        if (status === 'requested') return 'requested';
+        if (status === 'received' || status === 'recieved' || status === 'given') return 'received';
+        return 'none';
+    },
+
     safeParse(raw, fallback) {
         try {
             if (raw === null || raw === undefined || raw === '' || raw === 'undefined' || raw === 'null') return fallback;
@@ -126,13 +133,14 @@ const AssessmentStudioData = {
             assessment: String(s.assessment || snapshot.title || '').trim(),
             phase: String(s.phase || snapshot.phase || 'Assessment').trim(),
             status: isCompleted ? 'completed' : status,
-            feedbackStatus: String(s.feedbackStatus || 'none').trim(),
+            feedbackStatus: this.normalizeFeedbackStatus(s.feedbackStatus),
             testSnapshot: {
                 ...snapshot,
                 questions: Array.isArray(snapshot.questions) ? snapshot.questions.map(q => this.normalizeQuestion(q)) : []
             },
             answers: s.answers && typeof s.answers === 'object' ? s.answers : {},
             questionScores: s.questionScores && typeof s.questionScores === 'object' ? s.questionScores : {},
+            questionComments: s.questionComments && typeof s.questionComments === 'object' ? s.questionComments : {},
             maxPoints: Number.isFinite(maxPoints) && maxPoints > 0 ? Math.round(maxPoints * 10) / 10 : 0,
             earnedPoints: Number.isFinite(earnedPoints) ? Math.round(earnedPoints * 10) / 10 : 0,
             percent: Number.isFinite(Number(s.percent)) ? Number(s.percent) : 0,
@@ -190,7 +198,7 @@ const AssessmentStudioData = {
         return Array.from(map.values());
     },
 
-    mergeStudioItems(remoteItems, localItems, remoteDocTime = 0, localDocTime = 0) {
+    mergeStudioItems(remoteItems, localItems, remoteDocTime = 0, localDocTime = 0, options = {}) {
         const remoteMap = new Map();
         const localMap = new Map();
         const itemTime = (item) => Date.parse(item && (item.updatedAt || item.createdAt) || 0) || 0;
@@ -206,6 +214,9 @@ const AssessmentStudioData = {
 
         indexItems(remoteItems, remoteMap);
         indexItems(localItems, localMap);
+
+        if (options.preserveLocalWhenRemoteEmpty && remoteMap.size === 0 && localMap.size > 0) return Array.from(localMap.values());
+        if (localMap.size === 0 && remoteMap.size > 0) return Array.from(remoteMap.values());
 
         const merged = new Map();
         new Set([...remoteMap.keys(), ...localMap.keys()]).forEach(id => {
@@ -278,17 +289,35 @@ const AssessmentStudioData = {
         if (!remote || !remoteDocTime) return b;
         if (!local || !localDocTime) return a;
 
+        const remoteAuthoringEmpty = ['questionBucket', 'generators', 'groupings', 'tags']
+            .every(field => !Array.isArray(a[field]) || a[field].length === 0);
+
         return this.normalizeStudio({
             ...(remoteDocTime >= localDocTime ? b : a),
             ...(remoteDocTime >= localDocTime ? a : b),
-            questionBucket: this.mergeStudioItems(a.questionBucket, b.questionBucket, remoteDocTime, localDocTime),
-            generators: this.mergeStudioItems(a.generators, b.generators, remoteDocTime, localDocTime),
+            questionBucket: this.mergeStudioItems(a.questionBucket, b.questionBucket, remoteDocTime, localDocTime, { preserveLocalWhenRemoteEmpty: remoteAuthoringEmpty }),
+            generators: this.mergeStudioItems(a.generators, b.generators, remoteDocTime, localDocTime, { preserveLocalWhenRemoteEmpty: remoteAuthoringEmpty }),
             submissions: this.mergeSubmissions(a.submissions, b.submissions),
-            groupings: this.mergeStudioItems(a.groupings, b.groupings, remoteDocTime, localDocTime),
-            tags: this.mergeStudioItems(a.tags, b.tags, remoteDocTime, localDocTime),
+            groupings: this.mergeStudioItems(a.groupings, b.groupings, remoteDocTime, localDocTime, { preserveLocalWhenRemoteEmpty: remoteAuthoringEmpty }),
+            tags: this.mergeStudioItems(a.tags, b.tags, remoteDocTime, localDocTime, { preserveLocalWhenRemoteEmpty: remoteAuthoringEmpty }),
             updatedAt: (localDocTime >= remoteDocTime ? b.updatedAt : a.updatedAt) || new Date().toISOString(),
             updatedBy: (localDocTime >= remoteDocTime ? b.updatedBy : a.updatedBy) || this.editor()
         });
+    },
+
+    authoringCounts(studio) {
+        const source = studio && typeof studio === 'object' ? studio : {};
+        return {
+            questionBucket: Array.isArray(source.questionBucket) ? source.questionBucket.length : 0,
+            generators: Array.isArray(source.generators) ? source.generators.length : 0,
+            groupings: Array.isArray(source.groupings) ? source.groupings.length : 0,
+            tags: Array.isArray(source.tags) ? source.tags.length : 0
+        };
+    },
+
+    hasAuthoring(studio) {
+        const counts = this.authoringCounts(studio);
+        return counts.questionBucket > 0 || counts.generators > 0 || counts.groupings > 0 || counts.tags > 0;
     },
 
     async fetchDocument(key, fallback) {
@@ -307,11 +336,21 @@ const AssessmentStudioData = {
         }
     },
 
+    readLegacyData(key, fallback) {
+        const rowBackedLegacyKeys = new Set(['users', 'records', 'submissions']);
+        const rowMap = (typeof window !== 'undefined' && window.ROW_MAP)
+            || (typeof ROW_MAP !== 'undefined' ? ROW_MAP : null);
+        if (rowBackedLegacyKeys.has(key) || (rowMap && rowMap[key])) {
+            return this.localRead(key, fallback);
+        }
+        return this.fetchDocument(key, fallback);
+    },
+
     async load() {
         await this.loadStudioOnly();
 
         const legacyKeys = ['assessments', 'tests', 'submissions', 'records', 'users', 'rosters'];
-        const values = await Promise.all(legacyKeys.map(key => this.fetchDocument(key, this.localRead(key, key === 'rosters' ? {} : []))));
+        const values = await Promise.all(legacyKeys.map(key => this.readLegacyData(key, this.localRead(key, key === 'rosters' ? {} : []))));
         this.state.legacy = {
             assessments: Array.isArray(values[0]) ? values[0] : [],
             tests: Array.isArray(values[1]) ? values[1] : [],
@@ -326,20 +365,76 @@ const AssessmentStudioData = {
     async loadStudioOnly() {
         const localStudio = this.normalizeStudio(this.localRead(ASSESSMENT_STUDIO_LOCAL_KEY, this.defaultStudio()));
         const remoteStudio = await this.fetchDocument(ASSESSMENT_STUDIO_KEY, localStudio);
-        this.state.studio = this.mergeStudio(remoteStudio, localStudio);
+        let mergedStudio = this.mergeStudio(remoteStudio, localStudio);
+        const rowSubmissions = await this.fetchSubmissionRows();
+        if (rowSubmissions.length) {
+            mergedStudio = this.normalizeStudio({
+                ...mergedStudio,
+                submissions: this.mergeSubmissions(mergedStudio.submissions, rowSubmissions)
+            });
+        }
+        this.state.studio = mergedStudio;
         localStorage.setItem(ASSESSMENT_STUDIO_LOCAL_KEY, JSON.stringify(this.state.studio));
         localStorage.setItem(ASSESSMENT_STUDIO_KEY, JSON.stringify(this.state.studio));
         return this.state.studio;
+    },
+
+    async fetchSubmissionRows() {
+        if (!AppContext.supabase || typeof AppContext.supabase.from !== 'function') return [];
+        try {
+            const result = await AppContext.supabase
+                .from('assessment_studio_submissions')
+                .select('data, updated_at')
+                .limit(5000);
+            if (result && result.error) throw result.error;
+            const rows = Array.isArray(result && result.data) ? result.data : [];
+            return rows
+                .map(row => row && row.data)
+                .filter(item => item && typeof item === 'object')
+                .map(item => this.normalizeSubmission(item));
+        } catch (error) {
+            console.warn('[Assessment Studio] row submission load skipped:', error.message || error);
+            return [];
+        }
+    },
+
+    async syncSubmissionRowOnServer(submission) {
+        if (!AppContext.supabase || typeof AppContext.supabase.from !== 'function' || !submission || !submission.id) return false;
+        const normalized = this.normalizeSubmission(submission);
+        const row = {
+            id: normalized.id,
+            trainee: normalized.trainee || null,
+            assessment: normalized.assessment || null,
+            status: normalized.status || null,
+            data: normalized,
+            updated_at: new Date().toISOString()
+        };
+        const result = await AppContext.supabase
+            .from('assessment_studio_submissions')
+            .upsert(row)
+            .select('updated_at');
+        if (result && result.error) throw result.error;
+        return true;
     },
 
     async saveStudio() {
         let next = this.normalizeStudio(this.state.studio);
         next.updatedAt = new Date().toISOString();
         next.updatedBy = this.editor();
+
+        if (AppContext.supabase && typeof AppContext.supabase.from === 'function') {
+            const remote = await this.fetchDocument(ASSESSMENT_STUDIO_KEY, null);
+            if (this.hasAuthoring(remote) && !this.hasAuthoring(next)) {
+                console.warn('[Assessment Studio] Preserving server authoring data; local save only carried submission data.');
+                next = this.mergeStudio(remote, next);
+                next.updatedAt = new Date().toISOString();
+                next.updatedBy = this.editor();
+            }
+        }
+
         this.state.studio = this.normalizeStudio(next);
         localStorage.setItem(ASSESSMENT_STUDIO_LOCAL_KEY, JSON.stringify(next));
         localStorage.setItem(ASSESSMENT_STUDIO_KEY, JSON.stringify(next));
-        this.notifyHostSave(next);
 
         if (!AppContext.supabase) {
             throw new Error('Assessment Studio could not confirm Supabase connection for this save.');
@@ -354,16 +449,18 @@ const AssessmentStudioData = {
         const confirmedAt = Array.isArray(data) && data[0] && data[0].updated_at ? data[0].updated_at : '';
         if (!confirmedAt) throw new Error('Assessment Studio save was not confirmed by Supabase.');
         localStorage.setItem(`sync_ts_${ASSESSMENT_STUDIO_KEY}`, confirmedAt);
+        this.notifyHostSave(this.state.studio, { cloudConfirmedAt: confirmedAt });
 
         return this.state.studio;
     },
 
-    notifyHostSave(studio) {
+    notifyHostSave(studio, meta = {}) {
         const payload = {
             key: ASSESSMENT_STUDIO_KEY,
             localKey: ASSESSMENT_STUDIO_LOCAL_KEY,
             content: this.normalizeStudio(studio),
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
+            cloudConfirmedAt: meta.cloudConfirmedAt || ''
         };
         try {
             const { ipcRenderer } = require('electron');

@@ -1135,8 +1135,7 @@ ipcMain.on('force-restart', () => {
 
 // IPC Listener for DevTools (Super Admin Only)
 ipcMain.on('open-devtools', () => {
-    if (app.isPackaged) return;
-    if (isMainWindowUsable()) mainWindow.webContents.openDevTools();
+    if (isMainWindowUsable()) mainWindow.webContents.openDevTools({ mode: 'detach' });
 });
 
 // IPC Listener for System Idle Time (Activity Monitor)

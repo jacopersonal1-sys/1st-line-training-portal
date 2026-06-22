@@ -3,6 +3,8 @@
 const AST_TRAINEE_DATA_KEY = 'assessment_studio_data';
 const AST_TRAINEE_LOCAL_KEY = 'assessment_studio_data_local';
 const AST_TRAINEE_UPLOAD_STATUS_KEY = 'assessment_studio_upload_status';
+const AST_TRAINEE_RECOVERY_BASE_DELAY_MS = 15000;
+const AST_TRAINEE_RECOVERY_MAX_DELAY_MS = 120000;
 
 const AST_TRAINEE_TYPES = [
     { key: 'multiple_choice', label: 'Multiple Choice' },
@@ -18,6 +20,7 @@ let AST_ACTIVE_SUBMISSION_SNAPSHOT = null;
 let AST_TRAINEE_PENDING_RENDER = false;
 let AST_TRAINEE_RECOVERY_IN_FLIGHT = false;
 let AST_TRAINEE_VERIFY_IN_FLIGHT = false;
+let AST_TRAINEE_RECOVERY_TIMER = null;
 
 function astTraineeEsc(value) {
     return String(value === undefined || value === null ? '' : value)
@@ -62,6 +65,103 @@ function astTraineeClearUploadStatus(submissionId) {
     if (!map[id]) return;
     delete map[id];
     localStorage.setItem(AST_TRAINEE_UPLOAD_STATUS_KEY, JSON.stringify(map));
+}
+
+function astTraineeRecoveryDelayMs(attempts) {
+    const count = Math.max(Number(attempts) || 1, 1);
+    return Math.min(AST_TRAINEE_RECOVERY_BASE_DELAY_MS * Math.pow(2, count - 1), AST_TRAINEE_RECOVERY_MAX_DELAY_MS);
+}
+
+function astTraineeFormatRetryDelay(ms) {
+    const seconds = Math.max(Math.ceil((Number(ms) || 0) / 1000), 1);
+    if (seconds < 60) return `${seconds}s`;
+    return `${Math.ceil(seconds / 60)}m`;
+}
+
+function astTraineeQueueSubmissionRecovery(submissionId, { immediate = false, silent = true, message = '' } = {}) {
+    const id = String(submissionId || '').trim();
+    if (!id) return false;
+    const current = astTraineeUploadStatusMap()[id] || {};
+    if (String(current.state || '') === 'uploading') return true;
+    const attempts = Math.max(Number(current.attempts) || 0, 0);
+    const delay = immediate ? 0 : astTraineeRecoveryDelayMs(attempts + 1);
+    const nextRetryAt = Date.now() + delay;
+    astTraineeSetUploadStatus(id, {
+        state: 'queued',
+        attempts,
+        nextRetryAt,
+        message: message || (immediate ? 'Upload queued. Retrying now.' : `Upload queued. Next retry in ${astTraineeFormatRetryDelay(delay)}.`)
+    });
+    astTraineeScheduleQueuedRecovery();
+    if (!silent && typeof showToast === 'function') {
+        showToast(immediate ? 'Upload queued. Retrying in the background.' : `Upload queued. Next retry in ${astTraineeFormatRetryDelay(delay)}.`, 'warning');
+    }
+    if (typeof loadTraineeTests === 'function') loadTraineeTests();
+    return true;
+}
+
+function astTraineeScheduleQueuedRecovery() {
+    if (AST_TRAINEE_RECOVERY_TIMER) {
+        clearTimeout(AST_TRAINEE_RECOVERY_TIMER);
+        AST_TRAINEE_RECOVERY_TIMER = null;
+    }
+    const statuses = astTraineeUploadStatusMap();
+    const nextTimes = Object.values(statuses)
+        .filter(status => String(status && status.state || '') === 'queued')
+        .map(status => Number(status.nextRetryAt || 0))
+        .filter(value => value > 0);
+    if (!nextTimes.length) return;
+    const delay = Math.max(Math.min(...nextTimes) - Date.now(), 0);
+    AST_TRAINEE_RECOVERY_TIMER = setTimeout(() => {
+        AST_TRAINEE_RECOVERY_TIMER = null;
+        astTraineeProcessQueuedRecovery();
+    }, delay);
+    if (AST_TRAINEE_RECOVERY_TIMER && typeof AST_TRAINEE_RECOVERY_TIMER.unref === 'function') {
+        AST_TRAINEE_RECOVERY_TIMER.unref();
+    }
+}
+
+async function astTraineeProcessQueuedRecovery() {
+    if (AST_TRAINEE_RECOVERY_IN_FLIGHT) {
+        astTraineeScheduleQueuedRecovery();
+        return false;
+    }
+    const statuses = astTraineeUploadStatusMap();
+    const now = Date.now();
+    const dueIds = Object.entries(statuses)
+        .filter(([, status]) => String(status && status.state || '') === 'queued' && Number(status.nextRetryAt || 0) <= now)
+        .map(([id]) => id);
+    if (!dueIds.length) {
+        astTraineeScheduleQueuedRecovery();
+        return false;
+    }
+
+    let anyRecovered = false;
+    for (const id of dueIds) {
+        const current = astTraineeUploadStatusMap()[id] || {};
+        const attempts = Math.max(Number(current.attempts) || 0, 0) + 1;
+        astTraineeSetUploadStatus(id, {
+            state: 'uploading',
+            attempts,
+            message: `Retrying upload attempt ${attempts}.`
+        });
+        if (typeof loadTraineeTests === 'function') loadTraineeTests();
+        const ok = await recoverLocalAssessmentStudioSubmissionsToServer({ silent: true, submissionId: id, queuedAttempt: true });
+        if (ok) {
+            anyRecovered = true;
+            continue;
+        }
+        const delay = astTraineeRecoveryDelayMs(attempts + 1);
+        astTraineeSetUploadStatus(id, {
+            state: 'queued',
+            attempts,
+            nextRetryAt: Date.now() + delay,
+            message: `Upload still waiting for Supabase. Next retry in ${astTraineeFormatRetryDelay(delay)}.`
+        });
+    }
+    if (typeof loadTraineeTests === 'function') loadTraineeTests();
+    astTraineeScheduleQueuedRecovery();
+    return anyRecovered;
 }
 
 function astTraineeClone(value) {
@@ -539,25 +639,78 @@ function astTraineeGetStore() {
     return astTraineeMergeServerStoreWithLocalDrafts(canonical, local);
 }
 
+async function astTraineeSyncSubmissionRowOnServer(submission) {
+    if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function' || !submission || !submission.id) return false;
+    const normalized = astTraineeNormalizeSubmission(submission);
+    const { error } = await window.supabaseClient
+        .from('assessment_studio_submissions')
+        .upsert({
+            id: normalized.id,
+            trainee: normalized.trainee || null,
+            assessment: normalized.assessment || null,
+            status: normalized.status || null,
+            data: normalized,
+            updated_at: new Date().toISOString()
+        });
+    if (error) throw error;
+    return true;
+}
+
+async function astTraineeFetchSubmissionRowsFromServer() {
+    if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') return [];
+    const trainee = astTraineeCurrentUserName();
+    if (!trainee) return [];
+    try {
+        const query = window.supabaseClient
+            .from('assessment_studio_submissions')
+            .select('data, updated_at')
+            .eq('trainee', trainee);
+        const result = typeof query.limit === 'function' ? await query.limit(1000) : await query;
+        if (result && result.error) throw result.error;
+        const rows = Array.isArray(result && result.data) ? result.data : [];
+        return rows
+            .map(row => row && row.data)
+            .filter(item => item && typeof item === 'object')
+            .map(item => astTraineeNormalizeSubmission(item));
+    } catch (error) {
+        console.warn('[Assessment Studio Trainee] row submission refresh skipped:', error.message || error);
+        return [];
+    }
+}
+
 async function refreshAssessmentStudioTraineeStoreFromServer() {
     if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') return false;
     if (window.__AST_TRAINEE_REFRESHING) return false;
     window.__AST_TRAINEE_REFRESHING = true;
     try {
-        const { data, error } = await window.supabaseClient
-            .from('app_documents')
-            .select('content, updated_at')
-            .eq('key', AST_TRAINEE_DATA_KEY)
-            .maybeSingle();
-        if (error) throw error;
-        if (data && data.content && typeof data.content === 'object') {
-            const remote = astTraineeNormalizeStore(data.content);
+        let remote = astTraineeNormalizeStore(null);
+        let remoteUpdatedAt = '';
+        try {
+            const { data, error } = await window.supabaseClient
+                .from('app_documents')
+                .select('content, updated_at')
+                .eq('key', AST_TRAINEE_DATA_KEY)
+                .maybeSingle();
+            if (error) throw error;
+            remote = astTraineeNormalizeStore(data && data.content && typeof data.content === 'object' ? data.content : null);
+            remoteUpdatedAt = data && data.updated_at || '';
+        } catch (docError) {
+            console.warn('[Assessment Studio Trainee] document refresh skipped:', docError.message || docError);
+        }
+        const rowSubmissions = await astTraineeFetchSubmissionRowsFromServer();
+        if (remote.submissions.length || rowSubmissions.length) {
+            const remoteWithRows = astTraineeNormalizeStore({
+                ...remote,
+                submissions: rowSubmissions.length
+                    ? astTraineeMergeSubmissions(remote.submissions, rowSubmissions)
+                    : remote.submissions
+            });
             const local = astTraineeNormalizeStore(astTraineeParse(localStorage.getItem(AST_TRAINEE_LOCAL_KEY), null));
             const merged = astTraineeMergeServerStoreWithLocalDrafts(
-                { ...remote, updatedAt: remote.updatedAt || data.updated_at || new Date().toISOString() },
+                { ...remoteWithRows, updatedAt: remoteWithRows.updatedAt || remoteUpdatedAt || new Date().toISOString() },
                 local
             );
-            localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(remote));
+            localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(remoteWithRows));
             localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(merged));
             return true;
         }
@@ -592,15 +745,24 @@ async function verifyLocalAssessmentStudioSubmittedUploads({ silent = true } = {
         const localCandidates = local.submissions.filter(sub => astTraineeShouldRecoverLocalSubmission(sub, null));
         if (!localCandidates.length) return false;
 
-        const { data, error } = await window.supabaseClient
-            .from('app_documents')
-            .select('content, updated_at')
-            .eq('key', AST_TRAINEE_DATA_KEY)
-            .maybeSingle();
-        if (error) throw error;
-
-        const remote = astTraineeNormalizeStore(data && data.content && typeof data.content === 'object' ? data.content : null);
+        let remote = astTraineeNormalizeStore(null);
+        try {
+            const { data, error } = await window.supabaseClient
+                .from('app_documents')
+                .select('content, updated_at')
+                .eq('key', AST_TRAINEE_DATA_KEY)
+                .maybeSingle();
+            if (error) throw error;
+            remote = astTraineeNormalizeStore(data && data.content && typeof data.content === 'object' ? data.content : null);
+        } catch (docError) {
+            console.warn('[Assessment Studio Trainee] upload verification document check skipped:', docError.message || docError);
+        }
         const remoteById = new Map(remote.submissions.map(sub => [String(sub.id), sub]));
+        const rowSubmissions = await astTraineeFetchSubmissionRowsFromServer();
+        rowSubmissions.forEach(sub => {
+            if (!sub || !sub.id) return;
+            remoteById.set(String(sub.id), astTraineePickSubmission(remoteById.get(String(sub.id)), sub));
+        });
         let changed = false;
         localCandidates.forEach(sub => {
             const remoteSub = remoteById.get(String(sub.id));
@@ -626,7 +788,7 @@ async function verifyLocalAssessmentStudioSubmittedUploads({ silent = true } = {
     }
 }
 
-async function recoverLocalAssessmentStudioSubmissionsToServer({ silent = true, submissionId = '' } = {}) {
+async function recoverLocalAssessmentStudioSubmissionsToServer({ silent = true, submissionId = '', queuedAttempt = false } = {}) {
     if (AST_TRAINEE_RECOVERY_IN_FLIGHT) return false;
     if (!window.supabaseClient || typeof window.supabaseClient.from !== 'function') return false;
     AST_TRAINEE_RECOVERY_IN_FLIGHT = true;
@@ -637,7 +799,14 @@ async function recoverLocalAssessmentStudioSubmissionsToServer({ silent = true, 
             .filter(sub => !targetId || String(sub.id) === targetId)
             .filter(sub => astTraineeShouldRecoverLocalSubmission(sub, null));
         if (!localCandidates.length) return false;
-        localCandidates.forEach(sub => astTraineeSetUploadStatus(sub.id, { state: 'uploading', message: 'Re-uploading to Supabase.' }));
+        localCandidates.forEach(sub => {
+            const current = astTraineeUploadStatusMap()[String(sub.id)] || {};
+            astTraineeSetUploadStatus(sub.id, {
+                state: 'uploading',
+                attempts: Number(current.attempts || 0),
+                message: queuedAttempt ? 'Background upload retry in progress.' : 'Re-uploading to Supabase.'
+            });
+        });
 
         const { data, error } = await window.supabaseClient
             .from('app_documents')
@@ -652,6 +821,15 @@ async function recoverLocalAssessmentStudioSubmissionsToServer({ silent = true, 
         if (!recoveries.length) {
             localCandidates.forEach(sub => astTraineeClearUploadStatus(sub.id));
             return false;
+        }
+
+        let rowSyncedCount = 0;
+        for (const sub of recoveries) {
+            try {
+                if (await astTraineeSyncSubmissionRowOnServer(sub)) rowSyncedCount++;
+            } catch (rowError) {
+                console.warn('[Assessment Studio Trainee] row submission recovery failed:', rowError);
+            }
         }
 
         recoveries.forEach(sub => {
@@ -671,7 +849,8 @@ async function recoverLocalAssessmentStudioSubmissionsToServer({ silent = true, 
                 updated_at: remote.updatedAt
             })
             .select('updated_at');
-        if (saveError) throw saveError;
+        if (saveError && rowSyncedCount === 0) throw saveError;
+        if (saveError) console.warn('[Assessment Studio Trainee] document recovery failed after row sync:', saveError);
 
         localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(remote));
         localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(astTraineeMergeServerStoreWithLocalDrafts(remote, local)));
@@ -688,10 +867,14 @@ async function recoverLocalAssessmentStudioSubmissionsToServer({ silent = true, 
         local.submissions
             .filter(sub => !targetId || String(sub.id) === targetId)
             .filter(sub => astTraineeShouldRecoverLocalSubmission(sub, null))
-            .forEach(sub => astTraineeSetUploadStatus(sub.id, {
-                state: 'failed',
-                message: error.message || 'Re-upload to Supabase failed.'
-            }));
+            .forEach(sub => {
+                const current = astTraineeUploadStatusMap()[String(sub.id)] || {};
+                astTraineeSetUploadStatus(sub.id, {
+                    state: queuedAttempt ? 'queued' : 'failed',
+                    attempts: Number(current.attempts || 0),
+                    message: error.message || 'Re-upload to Supabase failed.'
+                });
+            });
         if (!silent && typeof showToast === 'function') showToast(error.message || 'Could not recover local Assessment Studio submissions yet.', 'error');
         return false;
     } finally {
@@ -1046,9 +1229,22 @@ async function ensureAssessmentStudioManualAssignmentForCurrentUser(assignmentId
         updatedAt: now
     });
     store.submissions.unshift(submission);
-    if (typeof markManualAssessmentAssignmentStarted === 'function') markManualAssessmentAssignmentStarted(cleanAssignmentId);
+    const startedAssignment = (typeof markManualAssessmentAssignmentStarted === 'function')
+        ? markManualAssessmentAssignmentStarted(cleanAssignmentId)
+        : null;
     await astTraineeSaveStore(store, true);
-    if (typeof saveToServer === 'function') {
+    if (startedAssignment && typeof syncManualAssessmentAssignmentRowOnServer === 'function') {
+        Promise.resolve(syncManualAssessmentAssignmentRowOnServer(startedAssignment))
+            .then(directSynced => {
+                if (typeof saveToServer === 'function') return saveToServer(['manual_assessment_assignments'], directSynced ? false : true, true);
+                return true;
+            })
+            .catch(error => {
+                console.warn('[Assessment Studio Trainee] manual assignment start sync failed:', error);
+                if (typeof saveToServer === 'function') return saveToServer(['manual_assessment_assignments'], true, true);
+                return true;
+            });
+    } else if (typeof saveToServer === 'function') {
         Promise.resolve(saveToServer(['manual_assessment_assignments'], true, true)).catch(error => {
             console.warn('[Assessment Studio Trainee] manual assignment start sync failed:', error);
         });
@@ -1104,6 +1300,8 @@ function renderAssessmentStudioAssignmentsHtml() {
         const uploadState = String(uploadStatus && uploadStatus.state || '').trim();
         const needsUploadRecovery = ['missing', 'failed'].includes(uploadState);
         const isUploadingRecovery = uploadState === 'uploading';
+        const isQueuedRecovery = uploadState === 'queued';
+        const retryWaitMs = Math.max(Number(uploadStatus && uploadStatus.nextRetryAt || 0) - Date.now(), 0);
         const feedbackStatus = String(sub.feedbackStatus || 'none').trim().toLowerCase();
         const isOpen = ['assigned', 'in_progress'].includes(status);
         const statusLabel = status === 'pending_review' ? 'Pending Review' : status === 'completed' ? `Completed (${Math.round(Number(sub.percent || 0))}%)` : status === 'in_progress' ? 'In Progress' : 'Not Started';
@@ -1124,9 +1322,11 @@ function renderAssessmentStudioAssignmentsHtml() {
                     : `<button class="btn-primary btn-sm" onclick="openAssessmentStudioTraineeRuntime('${astTraineeEsc(sub.id)}')">${status === 'in_progress' ? 'Resume' : 'Start'} Studio Test</button>`
                 : '<button class="btn-secondary btn-sm" disabled>Submitted</button>';
         const uploadHtml = needsUploadRecovery
-            ? `<span class="status-badge status-fail"><i class="fas fa-cloud-exclamation"></i> Upload Failed</span><button class="btn-warning btn-sm" onclick="retryAssessmentStudioSubmissionUpload('${astTraineeEsc(sub.id)}')"><i class="fas fa-cloud-arrow-up"></i> Re-upload</button>`
+            ? `<span class="status-badge status-fail"><i class="fas fa-cloud-exclamation"></i> ${uploadState === 'missing' ? 'Upload Needed' : 'Upload Failed'}</span><button class="btn-warning btn-sm" onclick="retryAssessmentStudioSubmissionUpload('${astTraineeEsc(sub.id)}')"><i class="fas fa-cloud-arrow-up"></i> ${uploadState === 'missing' ? 'Upload Assessment' : 'Re-upload'}</button>`
             : isUploadingRecovery
                 ? '<span class="status-badge status-semi"><i class="fas fa-circle-notch fa-spin"></i> Re-uploading</span>'
+                : isQueuedRecovery
+                ? `<span class="status-badge status-semi"><i class="fas fa-clock"></i> Upload Queued${retryWaitMs ? ` (${astTraineeEsc(astTraineeFormatRetryDelay(retryWaitMs))})` : ''}</span><button class="btn-secondary btn-sm" disabled>Retry Scheduled</button>`
                 : '';
         const feedbackHtml = status === 'completed' && feedbackStatus === 'received'
             ? '<button class="btn-secondary btn-sm" disabled><i class="fas fa-check-circle"></i> Feedback Received</button>'
@@ -1171,14 +1371,11 @@ function renderAssessmentStudioAssignmentsHtml() {
 async function retryAssessmentStudioSubmissionUpload(submissionId) {
     const id = String(submissionId || '').trim();
     if (!id) return false;
-    astTraineeSetUploadStatus(id, { state: 'uploading', message: 'Re-uploading to Supabase.' });
-    if (typeof loadTraineeTests === 'function') loadTraineeTests();
-    const ok = await recoverLocalAssessmentStudioSubmissionsToServer({ silent: false, submissionId: id });
-    if (!ok) {
-        astTraineeSetUploadStatus(id, { state: 'failed', message: 'Re-upload did not confirm.' });
-        if (typeof loadTraineeTests === 'function') loadTraineeTests();
-    }
-    return ok;
+    return astTraineeQueueSubmissionRecovery(id, {
+        immediate: true,
+        silent: false,
+        message: 'Manual retry queued. Upload will retry in the background.'
+    });
 }
 
 async function openAssessmentStudioFromSchedule(generatorId, scheduleItem = {}) {
@@ -1191,6 +1388,24 @@ async function openAssessmentStudioFromSchedule(generatorId, scheduleItem = {}) 
         if (!['assigned', 'in_progress'].includes(String(sub.status || ''))) {
             if (typeof showToast === 'function') showToast('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
             return false;
+        }
+        if (!sub.deviceSessionContext && window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.claimForAssessment === 'function') {
+            const claim = await window.DeviceAssessmentSessions.claimForAssessment({
+                type: 'assessment_studio',
+                id: String(sub.generatorId || generatorId || ''),
+                title: sub.assessment || ''
+            });
+            if (claim && claim.required && !claim.ok) return false;
+            if (claim && claim.session) {
+                sub.deviceSessionContext = claim.session;
+                sub.updatedAt = new Date().toISOString();
+                const store = astTraineeGetStore();
+                const idx = store.submissions.findIndex(item => String(item.id) === String(sub.id));
+                if (idx >= 0) {
+                    store.submissions[idx] = astTraineeNormalizeSubmission({ ...store.submissions[idx], deviceSessionContext: claim.session, updatedAt: sub.updatedAt });
+                    await astTraineeSaveStore(store, true);
+                }
+            }
         }
         openAssessmentStudioTraineeRuntime(sub.id);
         return true;
@@ -1212,6 +1427,24 @@ async function openAssessmentStudioFromManualAssignment(assignmentId) {
         if (!['assigned', 'in_progress'].includes(String(sub.status || ''))) {
             if (typeof showToast === 'function') showToast('This Assessment Studio test has already been submitted and cannot be reopened.', 'warning');
             return false;
+        }
+        if (!sub.deviceSessionContext && window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.claimForAssessment === 'function') {
+            const claim = await window.DeviceAssessmentSessions.claimForAssessment({
+                type: 'assessment_studio',
+                id: String(sub.generatorId || ''),
+                title: sub.assessment || ''
+            });
+            if (claim && claim.required && !claim.ok) return false;
+            if (claim && claim.session) {
+                sub.deviceSessionContext = claim.session;
+                sub.updatedAt = new Date().toISOString();
+                const store = astTraineeGetStore();
+                const idx = store.submissions.findIndex(item => String(item.id) === String(sub.id));
+                if (idx >= 0) {
+                    store.submissions[idx] = astTraineeNormalizeSubmission({ ...store.submissions[idx], deviceSessionContext: claim.session, updatedAt: sub.updatedAt });
+                    await astTraineeSaveStore(store, true);
+                }
+            }
         }
         openAssessmentStudioTraineeRuntime(sub.id);
         return true;
@@ -1363,11 +1596,12 @@ function renderAssessmentStudioTraineeRuntime(options = {}) {
                     <span>Assessment Studio</span>
                     <h2>${astTraineeEsc(sub.assessment || 'Generated Assessment')}</h2>
                 </div>
-                <div class="ast-trainee-score">
-                    <strong>${completeness.answered}/${completeness.total}</strong>
-                    <span>answered</span>
-                </div>
-            </header>
+                    <div class="ast-trainee-score">
+                        <strong>${completeness.answered}/${completeness.total}</strong>
+                        <span>answered</span>
+                    </div>
+                </header>
+            ${window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.renderContext === 'function' ? window.DeviceAssessmentSessions.renderContext(sub.deviceSessionContext) : ''}
             <div class="ast-trainee-workspace">
                 <aside class="ast-trainee-sidebar">
                     <div class="ast-trainee-meta">
@@ -1378,7 +1612,7 @@ function renderAssessmentStudioTraineeRuntime(options = {}) {
                     <div class="ast-trainee-progress-list">
                         ${questions.map((q, idx) => {
                             const value = astTraineeAnswerValue(sub, idx);
-                            const done = value !== undefined && value !== null && (typeof value !== 'string' || value.trim() !== '');
+                            const done = astTraineeAnswerIsComplete(q, value);
                             return `<a href="#astq${idx}" class="${done ? 'done' : ''}">Q${idx + 1}<span>${astTraineeEsc(astTraineeTypeLabel(q.type))}</span></a>`;
                         }).join('')}
                     </div>
@@ -1468,8 +1702,11 @@ function renderAssessmentStudioTraineeInput(sub, q, idx, locked) {
     }
     if (q.type === 'matrix') {
         const cols = Array.isArray(q.cols) ? q.cols : [];
+        const colCount = Math.max(cols.length, 1);
+        const matrixColMin = colCount <= 4 ? 132 : colCount <= 6 ? 108 : colCount <= 8 ? 88 : 74;
+        const matrixRowMin = colCount <= 6 ? 170 : 150;
         return `<div class="ast-matrix-scroll" role="region" aria-label="Matrix question ${idx + 1}">
-            <div class="ast-matrix-grid" style="--ast-matrix-cols:${Math.max(cols.length, 1)}">
+            <div class="ast-matrix-grid" style="--ast-matrix-cols:${colCount}; --ast-matrix-col-min:${matrixColMin}px; --ast-matrix-row-min:${matrixRowMin}px">
                 <div class="ast-matrix-corner" aria-hidden="true"></div>
                 ${cols.map(col => `<div class="ast-matrix-col-head">${astTraineeEsc(col)}</div>`).join('')}
                 ${(q.rows || []).map((row, rowIdx) => `
@@ -1535,7 +1772,9 @@ function astTraineeDomValueForQuestion(q, idx) {
     }
     if (q.type === 'multi_select') {
         const checked = Array.from(document.querySelectorAll(`${rootSelector} input[type="checkbox"]:checked`));
-        return checked.length ? checked.map(input => Number(input.value)).filter(value => Number.isFinite(value)).sort((a, b) => a - b) : undefined;
+        const inputs = Array.from(document.querySelectorAll(`${rootSelector} input[type="checkbox"]`));
+        if (!inputs.length) return undefined;
+        return checked.map(input => Number(input.value)).filter(value => Number.isFinite(value)).sort((a, b) => a - b);
     }
     if (q.type === 'matching') {
         const selects = Array.from(document.querySelectorAll(`${rootSelector} .ast-match-row select`));
@@ -1544,7 +1783,7 @@ function astTraineeDomValueForQuestion(q, idx) {
         selects.forEach((select, pairIdx) => {
             if (String(select.value || '').trim()) answer[String(pairIdx)] = select.value;
         });
-        return Object.keys(answer).length ? answer : undefined;
+        return answer;
     }
     if (q.type === 'ranking') {
         const selects = Array.from(document.querySelectorAll(`${rootSelector} .ast-rank-row select`));
@@ -1552,14 +1791,15 @@ function astTraineeDomValueForQuestion(q, idx) {
     }
     if (q.type === 'matrix') {
         const checked = Array.from(document.querySelectorAll(`${rootSelector} .ast-matrix-cell input[type="radio"]:checked`));
-        if (!checked.length) return undefined;
+        const inputs = Array.from(document.querySelectorAll(`${rootSelector} .ast-matrix-cell input[type="radio"]`));
+        if (!inputs.length) return undefined;
         const answer = {};
         checked.forEach(input => {
             const match = String(input.name || '').match(/ast_matrix_\d+_(\d+)/);
             const rowIdx = match ? match[1] : String(Object.keys(answer).length);
             answer[rowIdx] = Number(input.value);
         });
-        return Object.keys(answer).length ? answer : undefined;
+        return answer;
     }
     const textareas = Array.from(document.querySelectorAll(`${rootSelector} textarea`));
     return textareas.length ? String(textareas[0].value || '') : undefined;
@@ -1637,9 +1877,9 @@ function scoreAssessmentStudioQuestion(q, answer) {
         const got = astTraineeChoiceIndexSet(q, Array.isArray(answer) ? answer : []);
         if (!correct.size) return { score: 0, max, manual: false };
         const correctSelected = Array.from(got).filter(v => correct.has(v)).length;
-        const wrongSelected = Array.from(got).filter(v => !correct.has(v)).length;
+        const overSelected = Math.max(0, got.size - correct.size);
         const unit = max / correct.size;
-        const score = Math.max(0, Math.min(max, (correctSelected - wrongSelected) * unit));
+        const score = Math.max(0, Math.min(max, (correctSelected - overSelected) * unit));
         return { score: astTraineeScoreRound(score), max, manual: false };
     }
     if (q.type === 'matching') {
@@ -1703,34 +1943,38 @@ async function submitAssessmentStudioTest() {
     sub.submittedAt = new Date().toISOString();
     sub.updatedAt = sub.submittedAt;
     sub.feedbackStatus = sub.feedbackStatus || 'none';
+    let submittedAssignment = null;
     if (sub.manualAssignmentId && typeof markManualAssessmentAssignmentSubmitted === 'function') {
-        markManualAssessmentAssignmentSubmitted(sub.manualAssignmentId, sub.id);
+        submittedAssignment = markManualAssessmentAssignmentSubmitted(sub.manualAssignmentId, sub.id);
     }
     astTraineeRememberActiveSubmission(sub);
-    try {
-        await astTraineeSaveStore(store, true);
-        if (sub.manualAssignmentId && typeof saveToServer === 'function') {
-            const assignmentOk = await saveToServer(['manual_assessment_assignments'], true, true);
-            if (assignmentOk === false) throw new Error('Manual assignment status sync did not confirm.');
-        }
-        await recoverLocalAssessmentStudioSubmissionsToServer({ silent: true });
-    } catch (error) {
-        console.warn('[Assessment Studio Trainee] submit failed:', error);
-        astTraineeSetUploadStatus(sub.id, {
-            state: 'failed',
-            message: error.message || 'Assessment submission could not be confirmed on Supabase.'
-        });
-        localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(store));
-        localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(astTraineeMergeServerStoreWithLocalDrafts(astTraineeGetStore(), store)));
-        AST_ACTIVE_SUBMISSION_ID = '';
-        astTraineeClearActiveSnapshot();
-        if (typeof showToast === 'function') showToast('Assessment submitted locally, but upload failed. Use Re-upload from My Assessments.', 'error');
-        else alert(error.message || 'Assessment submission could not be confirmed.');
-        if (typeof loadTraineeTests === 'function') loadTraineeTests();
-        if (typeof showTab === 'function') showTab('my-tests');
-        return;
+    localStorage.setItem(AST_TRAINEE_LOCAL_KEY, JSON.stringify(store));
+    localStorage.setItem(AST_TRAINEE_DATA_KEY, JSON.stringify(astTraineeMergeServerStoreWithLocalDrafts(astTraineeGetStore(), store)));
+    astTraineeSetUploadStatus(sub.id, {
+        state: 'missing',
+        attempts: 0,
+        message: 'Submitted locally. Upload Assessment from My Assessments when ready.'
+    });
+    if (window.DeviceAssessmentSessions && typeof window.DeviceAssessmentSessions.markRequiresAttention === 'function' && sub.deviceSessionContext) {
+        window.DeviceAssessmentSessions.markRequiresAttention(sub.deviceSessionContext, sub.id)
+            .catch(error => console.warn('[Assessment Studio Trainee] device session status update failed:', error));
     }
-    if (typeof showToast === 'function') showToast('Assessment submitted to the grading queue.', 'success');
+    if (submittedAssignment && typeof syncManualAssessmentAssignmentRowOnServer === 'function') {
+        try {
+            const directSynced = await syncManualAssessmentAssignmentRowOnServer(submittedAssignment);
+            if (typeof saveToServer === 'function') await saveToServer(['manual_assessment_assignments'], directSynced ? false : true, true);
+        } catch (error) {
+            console.warn('[Assessment Studio Trainee] manual assignment submit marker did not sync immediately:', error);
+            if (typeof saveToServer === 'function') await saveToServer(['manual_assessment_assignments'], true, true);
+        }
+    } else if (sub.manualAssignmentId && typeof saveToServer === 'function') {
+        try {
+            await saveToServer(['manual_assessment_assignments'], true, true);
+        } catch (error) {
+            console.warn('[Assessment Studio Trainee] manual assignment submit marker did not sync immediately:', error);
+        }
+    }
+    if (typeof showToast === 'function') showToast('Assessment submitted locally. Upload it from My Assessments.', 'success');
     AST_ACTIVE_SUBMISSION_ID = '';
     astTraineeClearActiveSnapshot();
     if (typeof loadTraineeTests === 'function') loadTraineeTests();
@@ -1782,6 +2026,10 @@ window.refreshAssessmentStudioTraineeStoreFromServer = refreshAssessmentStudioTr
 window.recoverLocalAssessmentStudioSubmissionsToServer = recoverLocalAssessmentStudioSubmissionsToServer;
 window.verifyLocalAssessmentStudioSubmittedUploads = verifyLocalAssessmentStudioSubmittedUploads;
 window.retryAssessmentStudioSubmissionUpload = retryAssessmentStudioSubmissionUpload;
+window.astTraineeQueueSubmissionRecovery = astTraineeQueueSubmissionRecovery;
+window.astTraineeProcessQueuedRecovery = astTraineeProcessQueuedRecovery;
+window.astTraineeSyncSubmissionRowOnServer = astTraineeSyncSubmissionRowOnServer;
+window.astTraineeFetchSubmissionRowsFromServer = astTraineeFetchSubmissionRowsFromServer;
 
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('focusout', (event) => {

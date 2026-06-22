@@ -59,7 +59,7 @@ describe('E2E: Trainee submit -> save flow', () => {
         expect(subs[0].testId).toBe('T1');
         expect(subs[0].trainee.toLowerCase()).toBe('alice');
         expect(subs[0].status).toBe('completed');
-        expect(calls.some(c => Array.isArray(c.keys) && c.keys.includes('submissions') && c.force === true)).toBe(true);
+        expect(calls.some(c => Array.isArray(c.keys) && c.keys.includes('submissions') && c.force === false && c.silent === true)).toBe(true);
 
     }, 20000);
 
@@ -103,7 +103,7 @@ describe('E2E: Trainee submit -> save flow', () => {
         expect(subs[0].manualAssignmentId).toBe('manual_test_1');
         expect(assignments[0].status).toBe('submitted');
         expect(assignments[0].submissionId).toBe(subs[0].id);
-        expect(calls.some(c => Array.isArray(c.keys) && c.keys.includes('manual_assessment_assignments') && c.force === true)).toBe(true);
+        expect(calls.some(c => Array.isArray(c.keys) && c.keys.includes('manual_assessment_assignments') && c.force === false && c.silent === true)).toBe(true);
     }, 20000);
 
     test('vetting arena enters sync-hold if cloud save fails after local submission', async () => {
@@ -125,6 +125,16 @@ describe('E2E: Trainee submit -> save flow', () => {
         window.saveToServer = jest.fn(async () => { throw new Error('network down'); });
         global.saveToServer = window.saveToServer;
         saveToServer = window.saveToServer;
+        window.supabaseClient = {
+            from: jest.fn(() => ({
+                select: jest.fn(() => ({
+                    eq: jest.fn(() => ({
+                        maybeSingle: jest.fn(async () => ({ data: null, error: { message: 'network down' } }))
+                    }))
+                })),
+                upsert: jest.fn(async () => ({ error: { message: 'network down' } }))
+            }))
+        };
         window.exitArena = jest.fn(async () => true);
         global.exitArena = window.exitArena;
         exitArena = window.exitArena;
@@ -160,6 +170,16 @@ describe('E2E: Trainee submit -> save flow', () => {
         window.saveToServer = jest.fn(async () => true);
         global.saveToServer = window.saveToServer;
         saveToServer = window.saveToServer;
+        window.supabaseClient = {
+            from: jest.fn(() => ({
+                select: jest.fn(() => ({
+                    eq: jest.fn(() => ({
+                        maybeSingle: jest.fn(async () => ({ data: null, error: null }))
+                    }))
+                })),
+                upsert: jest.fn(async () => ({ error: null }))
+            }))
+        };
         window.exitArena = jest.fn(async () => true);
         global.exitArena = window.exitArena;
         exitArena = window.exitArena;
@@ -173,6 +193,6 @@ describe('E2E: Trainee submit -> save flow', () => {
         expect(subs[0].testSnapshot.type).toBe('vetting');
         expect(subs[0].status).toBe('pending');
         expect(records).toHaveLength(0);
-        expect(window.saveToServer).toHaveBeenCalledWith(['submissions', 'records'], true);
+        expect(window.saveToServer).toHaveBeenCalledWith(['submissions', 'records'], false, true);
     }, 20000);
 });

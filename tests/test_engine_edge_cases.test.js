@@ -450,7 +450,7 @@ describe('Test engine edge cases', () => {
         expect(sub.scores).toEqual({ 0: 1, 1: 1.5 });
         expect(sub.score).toBe(83);
         expect(sub.markingAudit[0].action).toBe('Score updated');
-        expect(global.saveToServer).toHaveBeenCalledWith(['submissions', 'records'], true);
+        expect(global.saveToServer).toHaveBeenCalledWith(['submissions', 'records'], false, true);
     });
 
     test('completed legacy scripts without per-question scores cannot be overwritten from reconstructed marks', async () => {
@@ -786,6 +786,59 @@ describe('Test engine edge cases', () => {
         ];
 
         expect(resolveSubmissionLinkedRecord(submission, records)).toBeNull();
+    });
+
+    test('normal trainee assessment start does not crash when device sessions are not required', async () => {
+        const src = fs.readFileSync(path.resolve(__dirname, '../js/assessment_trainee.js'), 'utf8');
+        eval(src);
+
+        global.CURRENT_USER = { user: 'Alice', role: 'trainee' };
+        window.CURRENT_USER = global.CURRENT_USER;
+        window.DeviceAssessmentSessions = {
+            claimForAssessment: jest.fn(async () => ({ required: false, ok: true }))
+        };
+        global.getScheduleStatus = jest.fn(() => 'active');
+        global.isAssessmentDay = jest.fn(() => true);
+        global.checkTimeAccess = jest.fn(() => true);
+        global.renderTestPaper = jest.fn();
+        window.renderTestPaper = global.renderTestPaper;
+        global.document = {
+            querySelector: jest.fn(() => null),
+            getElementById: jest.fn(() => null),
+            createElement: jest.fn(() => ({
+                className: '',
+                innerHTML: '',
+                classList: { add: jest.fn(), remove: jest.fn() },
+                appendChild: jest.fn(),
+                querySelector: jest.fn(() => null),
+                addEventListener: jest.fn()
+            })),
+            body: { appendChild: jest.fn() }
+        };
+        window.document = global.document;
+
+        localStorage.setItem('tests', JSON.stringify([
+            { id: 'test_1', title: 'Standard Assessment', type: 'standard', questions: [{ id: 'q1', text: 'Question?' }] }
+        ]));
+        localStorage.setItem('submissions', JSON.stringify([]));
+        localStorage.setItem('records', JSON.stringify([]));
+        localStorage.setItem('rosters', JSON.stringify({ group_1: ['Alice'] }));
+        localStorage.setItem('schedules', JSON.stringify({
+            schedule_1: {
+                assigned: 'group_1',
+                items: [{ linkedTestId: 'test_1', dateRange: '2026-06-22', dueDate: '2026-06-22', ignoreTime: true }]
+            }
+        }));
+
+        await expect(openTestTaker('test_1')).resolves.toBeUndefined();
+
+        expect(window.DeviceAssessmentSessions.claimForAssessment).toHaveBeenCalledWith({
+            type: 'test_engine',
+            id: 'test_1',
+            title: 'Standard Assessment'
+        });
+        expect(window.CURRENT_TEST_CONTEXT).toBeNull();
+        expect(window.CURRENT_TEST.id).toBe('test_1');
     });
 
     test('special viewer cannot save test builder changes locally or remotely', async () => {

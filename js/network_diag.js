@@ -1614,7 +1614,10 @@ window.NetworkDiag = {
         if (logs.length > 100) logs.shift();
         localStorage.setItem('network_diagnostics', JSON.stringify(logs));
 
-        if (typeof saveToServer === 'function') await saveToServer(['network_diagnostics'], false, true);
+        const cloudTelemetryEnabled = localStorage.getItem('enable_network_diagnostics_cloud') === 'true';
+        if (cloudTelemetryEnabled && typeof saveToServer === 'function') {
+            await saveToServer(['network_diagnostics'], false, true);
+        }
     },
 
     escapeHtml: function(value) {

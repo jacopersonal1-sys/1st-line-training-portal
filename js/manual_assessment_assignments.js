@@ -66,6 +66,19 @@ function setManualAssessmentAssignments(assignments) {
     if (typeof updateNotifications === 'function') updateNotifications();
 }
 
+async function syncManualAssessmentAssignmentRowOnServer(assignment) {
+    if (!window.supabaseClient || !assignment?.id) return false;
+    const row = {
+        id: assignment.id,
+        data: assignment,
+        trainee: assignment.targetTrainee || assignment.trainee || null,
+        updated_at: new Date().toISOString()
+    };
+    const { error } = await window.supabaseClient.from('manual_assessment_assignments').upsert(row);
+    if (error) throw error;
+    return true;
+}
+
 function getManualAssignmentsForTrainee(trainee, type = '') {
     const traineeKey = manualAssignmentIdentity(trainee || manualAssignmentCurrentUserName());
     const typeKey = String(type || '').trim();
@@ -263,7 +276,15 @@ async function pushManualAssessmentAssignment() {
     localStorage.setItem('admin_notifications', JSON.stringify(notifications.slice(0, 250)));
 
     if (typeof saveToServer === 'function') {
-        const ok = await saveToServer([MANUAL_ASSESSMENT_ASSIGNMENTS_KEY, 'admin_notifications'], true, true);
+        let directSynced = false;
+        try {
+            directSynced = await syncManualAssessmentAssignmentRowOnServer(assignment);
+        } catch (error) {
+            console.warn('Manual assignment direct row sync failed:', error);
+        }
+        const ok = directSynced
+            ? await saveToServer(['admin_notifications', MANUAL_ASSESSMENT_ASSIGNMENTS_KEY], false, true)
+            : await saveToServer([MANUAL_ASSESSMENT_ASSIGNMENTS_KEY, 'admin_notifications'], true, true);
         if (ok === false) {
             if (typeof showToast === 'function') showToast('Assignment saved locally, but Supabase did not confirm. Retry sync before relying on it.', 'error');
             return false;
@@ -307,6 +328,7 @@ window.getManualAssignmentsForTrainee = getManualAssignmentsForTrainee;
 window.getManualAssignmentById = getManualAssignmentById;
 window.markManualAssessmentAssignmentStarted = markManualAssessmentAssignmentStarted;
 window.markManualAssessmentAssignmentSubmitted = markManualAssessmentAssignmentSubmitted;
+window.syncManualAssessmentAssignmentRowOnServer = syncManualAssessmentAssignmentRowOnServer;
 window.mountManualAssessmentPushPanel = mountManualAssessmentPushPanel;
 window.pushManualAssessmentAssignment = pushManualAssessmentAssignment;
 window.getCurrentUserManualAssessmentNotifications = getCurrentUserManualAssessmentNotifications;
